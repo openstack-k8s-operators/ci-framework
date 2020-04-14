@@ -1,0 +1,39 @@
+---
+- block:
+  - name: Create tempest-skiplist venv with latest pip, setuptools and pbr
+    pip:
+      virtualenv: "{{ virtualenvs.tempest_skip }}"
+      name: "{{ item }}"
+      state: latest
+    with_items:
+      - pip
+      - setuptools
+      - pbr
+
+  - name: Install tempest-skiplist
+    pip:
+        name: "."
+        virtualenv: "{{ virtualenvs.tempest_skip }}"
+        chdir: "{{ tempest_skip_path }}"
+
+  # TODO(arxcruz) Right now there are yaml files that are not
+  # a valid tempest-skiplist file, so we are using just one for now
+  - name: List all yaml files to be tested
+    shell: ls roles/validate-tempest/vars/*.yml
+    args:
+      chdir: "{{ tempest_skip_path }}"
+    register: yaml_files
+
+  # TODO(arxcruz) Once we get rid of the old yaml files,
+  # use yaml_files.stdout_lines in a with_items
+  - name: Validate tempest-skip yaml files
+    shell:
+      set -ex
+      export PATH=$PATH:/usr/local/sbin:/usr/sbin
+      source {{ virtualenvs.tempest_skip }}/bin/activate
+      tempest-skip validate --file "{{ tempest_skip_path }}/roles/validate-tempest/vars/tempest_skip.yml"
+    args:
+      chdir: "{{ tempest_skip_path }}"
+
+  vars:
+    tempest_skip_path: "{{ zuul.projects['opendev.org/openstack/openstack-tempest-skiplist'].src_dir }}"
