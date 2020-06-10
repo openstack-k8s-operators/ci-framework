@@ -1,15 +1,9 @@
 Install tempest skiplist
 ========================
 
-This role install tempest-siplist in a virtual environment.
+This role install tempest-skiplist.
 
 **Role Variables**
-
-.. zuul:rolevar:: virtualenvs.tempest_skip
-   :type: string
-   :default: ~/.virtualenvs/.tempest_skip
-
-   A path to virtualenv used to install openstack-tempest-skiplist
 
 .. zuul:rolevar:: tempest_skip_path
    :type: string
