@@ -30,32 +30,24 @@ class ListYaml(Lister):
         yaml_file = yaml.safe_load(open(parsed_args.file))
         tests = []
         if len(yaml_file) > 0:
-            for test in yaml_file.get('known_failures', []):
-                will_append_job = False
-                will_append_release = False
-                if parsed_args.job:
-                    will_append_job = parsed_args.job in test.get('jobs', [])
-                if parsed_args.release:
+            tests = yaml_file.get('known_failures', [])
+
+            if parsed_args.job:
+                tests = list(
+                    filter(
+                        lambda d: parsed_args.job in d.get('jobs', []), tests
+                    )
+                )
+
+            if parsed_args.release:
+                new_tests = []
+                for test in tests:
                     for release in test.get('releases', []):
                         if release.get('name') == parsed_args.release:
-                            will_append_release = True
-                            break
-                # First case: no job or release passed
-                if not parsed_args.job and not parsed_args.release:
-                    tests.append(test.get('test'))
-                # Second case: job parsed, but no release
-                if parsed_args.job and not parsed_args.release:
-                    if will_append_job:
-                        tests.append(test.get('test'))
-                # Third case: release passed but no job
-                if not parsed_args.job and parsed_args.release:
-                    if will_append_release:
-                        tests.append(test.get('test'))
-                # Fourth case: release and job passed
-                if parsed_args.job and parsed_args.release:
-                    if will_append_job and will_append_release:
-                        tests.append(test.get('test'))
-        return (('Test name',), ((test,) for test in tests))
+                            new_tests.append(test)
+                tests = new_tests
+
+        return (('Test name',), ((test['test'],) for test in tests))
 
     def get_parser(self, prog_name):
         parser = super(ListYaml, self).get_parser(prog_name)
