@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # Copyright 2020 Red Hat, Inc.
 # All Rights Reserved.
 #
