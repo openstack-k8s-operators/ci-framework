@@ -109,14 +109,17 @@ class TestListYaml(base.TestCase):
     def test_list_yaml_with_job(self):
         self.parser.job = 'job1'
         cmd_result = self.cmd.take_action(self.parser)
-        exptected = [('tempest_skip.tests.test_list_yaml_3',)]
+        exptected = [('tempest_skip.tests.test_list_yaml',),
+                     ('tempest_skip.tests.test_list_yaml_2',),
+                     ('tempest_skip.tests.test_list_yaml_3',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 
     def test_list_yaml_with_job_not_found(self):
         self.parser.job = 'job2'
         cmd_result = self.cmd.take_action(self.parser)
-        exptected = []
+        exptected = [('tempest_skip.tests.test_list_yaml',),
+                     ('tempest_skip.tests.test_list_yaml_2',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 

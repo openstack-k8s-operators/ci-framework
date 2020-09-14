@@ -33,11 +33,8 @@ class ListYaml(Lister):
             tests = yaml_file.get('known_failures', [])
 
             if parsed_args.job:
-                tests = list(
-                    filter(
-                        lambda d: parsed_args.job in d.get('jobs', []), tests
-                    )
-                )
+                self.parsed_job = parsed_args.job
+                tests = list(filter(self._filter_jobs, tests))
 
             if parsed_args.release:
                 new_tests = []
@@ -48,6 +45,13 @@ class ListYaml(Lister):
                 tests = new_tests
 
         return (('Test name',), ((test['test'],) for test in tests))
+
+    def _filter_jobs(self, test):
+        if not test.get('jobs', []):
+            return True
+        if self.parsed_job in test.get('jobs'):
+            return True
+        return False
 
     def get_parser(self, prog_name):
         parser = super(ListYaml, self).get_parser(prog_name)
