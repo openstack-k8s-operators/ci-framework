@@ -30,7 +30,7 @@ class Validate(Command):
             v.Required('test'): str,
             v.Optional('bz'): v.Url(),
             v.Optional('lp'): v.Url(),
-            v.Required('deployment'): v.Any('undercloud', 'overcloud'),
+            v.Required('deployment'): [v.Any('undercloud', 'overcloud')],
             v.Optional('reason'): str,
             v.Optional('releases'): [
                 v.Schema({

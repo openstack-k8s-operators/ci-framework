@@ -55,6 +55,12 @@ options:
       - Release name to be used in the filter. Default is set to 'master'
     required: False
     type: str
+  deployment:
+    description:
+      - Type of deployment, right now is undercloud or overcloud. Default is
+        set to 'overcloud'
+    required: False
+    type: str
 '''
 
 
@@ -64,6 +70,7 @@ EXAMPLES = '''
     yaml_file: /tmp/skipped.yaml
     job: tripleo-ci-centos-8-standalone
     release: master
+    deployment: 'overcloud'
 '''
 
 
@@ -83,7 +90,8 @@ def run_module():
     module_args = dict(
         yaml_file=dict(type='str', required=True),
         job=dict(type='str', required=False, default=None),
-        release=dict(type='str', required=False, default='master')
+        release=dict(type='str', required=False, default='master'),
+        deployment=dict(type='str', required=False, default='overcloud')
     )
 
     result = dict(
@@ -103,6 +111,7 @@ def run_module():
     parser.file = module.params['yaml_file']
     parser.release = module.params['release']
     parser.job = module.params['job']
+    parser.deployment = module.params['deployment']
 
     tests = cmd.take_action(parser)
     skipped_tests = [test[0] for test in tests[1]]

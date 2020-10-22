@@ -42,7 +42,8 @@ class TestValidate(base.TestCase):
               - test: 'tempest_skip.tests.test_validate'
                 bz: 'https://bugzilla.redhat.com/1'
                 lp: 'https://launchpad.net/bugs/1'
-                deployment: 'undercloud'
+                deployment:
+                  - 'undercloud'
                 jobs:
                   - openstack-tempest-skip-job1
                   - openstack-tempest-skip-job2
@@ -73,7 +74,8 @@ class TestValidate(base.TestCase):
               - test: 'tempest_skip.tests.test_validate'
                 bz: 'https://bugzilla.redhat.com/1'
                 lp: 'https://launchpad.net/bugs/1'
-                deployment: 'undercloud'
+                deployment:
+                  - 'undercloud'
                 jobs:
                   - openstack-tempest-skip-job1:
                     option: '1'

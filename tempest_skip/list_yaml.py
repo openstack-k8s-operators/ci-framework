@@ -44,7 +44,18 @@ class ListYaml(Lister):
                             new_tests.append(test)
                 tests = new_tests
 
+            if parsed_args.deployment:
+                self.parsed_deployment = parsed_args.deployment
+                tests = list(filter(self._filter_deployment, tests))
+
         return (('Test name',), ((test['test'],) for test in tests))
+
+    def _filter_deployment(self, test):
+        if not test.get('deployment', []):
+            return True
+        if self.parsed_deployment in test.get('deployment'):
+            return True
+        return False
 
     def _filter_jobs(self, test):
         if not test.get('jobs', []):
@@ -68,4 +79,7 @@ class ListYaml(Lister):
                             help='List the tests to be skipped in the '
                                  'given release'
                             )
+        parser.add_argument('--deployment', dest='deployment',
+                            help='List the tests to be skipped in the '
+                                 'given deployment')
         return parser
