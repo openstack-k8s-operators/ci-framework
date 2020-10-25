@@ -39,21 +39,25 @@ class TestListYaml(base.TestCase):
         self.list_file = """
             known_failures:
               - test: 'tempest_skip.tests.test_list_yaml'
-                deployment: 'overcloud'
+                deployment:
+                  - 'overcloud'
                 releases:
                   - name: 'master'
                     reason: 'It can be removed when bug for OVN is repaired'
                     lp: 'https://bugs.launchpad.net/tripleo/+bug/1832166'
                 jobs: []
               - test: 'tempest_skip.tests.test_list_yaml_2'
-                deployment: 'overcloud'
+                deployment:
+                 - 'overcloud'
                 releases:
                   - name: 'master'
                     reason: 'This test was enabled recently on ovn'
                     lp: 'https://bugs.launchpad.net/tripleo/+bug/1832166'
                 jobs: []
               - test: 'tempest_skip.tests.test_list_yaml_3'
-                deployment: 'overcloud'
+                deployment:
+                  - 'overcloud'
+                  - 'undercloud'
                 releases:
                   - name: 'train'
                     reason: 'Test failing on train release'
@@ -67,6 +71,7 @@ class TestListYaml(base.TestCase):
         self.parser = self.cmd.get_parser(__name__)
         self.parser.file = self.path
         self.parser.release = None
+        self.parser.deployment = None
         self.parser.job = None
 
     def write_yaml_file(self, file_content):
@@ -96,6 +101,32 @@ class TestListYaml(base.TestCase):
         exptected = [('tempest_skip.tests.test_list_yaml_3',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
+
+    def test_list_yaml_with_deployment(self):
+        self.parser.deployment = 'undercloud'
+
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('tempest_skip.tests.test_list_yaml_3',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
+        self.parser.deployment = 'notfound'
+        cmd_result = self.cmd.take_action(self.parser)
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual([], list_tests)
+
+        self.parser.deployment = 'undercloud'
+        self.parser.release = 'master'
+        cmd_result = self.cmd.take_action(self.parser)
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual([], list_tests)
+
+        self.parser.deployment = 'undercloud'
+        self.parser.release = 'train'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('tempest_skip.tests.test_list_yaml_3',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
 
     def test_list_yaml_with_release_not_found(self):
         self.parser.release = 'not-found'
