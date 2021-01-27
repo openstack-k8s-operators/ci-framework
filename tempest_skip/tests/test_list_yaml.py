@@ -13,9 +13,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import tempfile
-
 from cliff.lister import Lister
 from tempest_skip.tests import base
 from tempest_skip.list_yaml import ListYaml
@@ -73,16 +70,6 @@ class TestListYaml(base.TestCase):
         self.parser.release = None
         self.parser.deployment = None
         self.parser.job = None
-
-    def write_yaml_file(self, file_content):
-        fd, path = tempfile.mkstemp()
-        self.addCleanup(os.remove, path)
-
-        yaml_file = os.fdopen(fd, 'w')
-        yaml_file.write(file_content)
-        yaml_file.close()
-
-        return path
 
     def test_list_yaml(self):
         cmd_result = self.cmd.take_action(self.parser)

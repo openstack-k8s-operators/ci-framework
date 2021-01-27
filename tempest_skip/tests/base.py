@@ -13,8 +13,20 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os
+import tempfile
+
 from oslotest import base
 
 
 class TestCase(base.BaseTestCase):
-    pass
+
+    def write_yaml_file(self, file_content):
+        fd, path = tempfile.mkstemp()
+        self.addCleanup(os.remove, path)
+
+        yaml_file = os.fdopen(fd, 'w')
+        yaml_file.write(file_content)
+        yaml_file.close()
+
+        return path
