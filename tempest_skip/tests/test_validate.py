@@ -33,6 +33,64 @@ class TestValidate(base.TestCase):
         self.assertEqual(p.returncode, expected, msg)
         return out, err
 
+
+class TestValidateAllowed(TestValidate):
+    def setUp(self):
+        super(TestValidateAllowed, self).setUp()
+
+    def test_validate_passes(self):
+        fd, path = tempfile.mkstemp()
+        self.addCleanup(os.remove, path)
+
+        valid_yaml = """
+            jobs:
+              - name: 'job1'
+                tests:
+                  - test1
+                  - test2
+                releases:
+                  - master
+              - name: 'job2'
+                tests:
+                  - another.test
+                  - a.different.test
+                releases:
+                  - master
+        """
+        yaml_file = os.fdopen(fd, 'w')
+        yaml_file.write(valid_yaml)
+        yaml_file.close()
+
+        self.assertRunExit(['tempest-skip', 'validate',
+                            '--allowed', '--file', path], 0)
+
+    def test_validate_fails(self):
+        fd, path = tempfile.mkstemp()
+        self.addCleanup(os.remove, path)
+
+        valid_yaml = """
+            jobs:
+              - name: 'job1.will.fail'
+                test:
+                  - test1
+                  - test2
+              - name: 'job2'
+                tests:
+                  - another.test
+                  - a.different.test
+        """
+        yaml_file = os.fdopen(fd, 'w')
+        yaml_file.write(valid_yaml)
+        yaml_file.close()
+
+        self.assertRunExit(['tempest-skip', 'validate',
+                            '--allowed', '--file', path], 1)
+
+
+class TestValidateSkipped(TestValidate):
+    def setUp(self):
+        super(TestValidateSkipped, self).setUp()
+
     def test_validate_passes(self):
         fd, path = tempfile.mkstemp()
         self.addCleanup(os.remove, path)
@@ -63,7 +121,8 @@ class TestValidate(base.TestCase):
         yaml_file.write(valid_yaml)
         yaml_file.close()
 
-        self.assertRunExit(['tempest-skip', 'validate', '--file', path], 0)
+        self.assertRunExit(['tempest-skip', 'validate',
+                            '--skipped', '--file', path], 0)
 
     def test_validate_fails(self):
         fd, path = tempfile.mkstemp()
@@ -95,4 +154,5 @@ class TestValidate(base.TestCase):
         yaml_file.write(valid_yaml)
         yaml_file.close()
 
-        self.assertRunExit(['tempest-skip', 'validate', '--file', path], 1)
+        self.assertRunExit(['tempest-skip', 'validate',
+                            '--skipped', '--file', path], 1)

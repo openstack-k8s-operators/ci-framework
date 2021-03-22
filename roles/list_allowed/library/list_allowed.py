@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from ansible.module_utils.basic import AnsibleModule
-from tempest_skip.list_yaml import ListSkippedYaml
+from tempest_skip.list_allowed import ListAllowedYaml
 
 import sys
 
@@ -28,54 +28,46 @@ ANSIBLE_METADATA = {
 
 DOCUMENTATION = '''
 ---
-module: list_skipped
+module: list_allowed
 author:
   - "Arx Cruz (@arxcruz)
 version_added: '2.9'
 short_description:
-  - Parse skipped tests from tempest
+  - Parse filtered tests from tempest
 notes: []
 requirements:
   - tempest-skip
 options:
   yaml_file:
     description:
-      - Path to a yaml file containing the skipped tests in
+      - Path to a yaml file containing the tests in
         openstack-tempest-skiplist format
     required: True
     type: str
   job:
     description:
-      - Name of the job to be used in the filter. Passing the job it will
-        filter only tests that have the specified job in the jobs list.
+      - Name of the job to be used in the filter.
     required: False
     type: str
-  release:
+  group:
     description:
-      - Release name to be used in the filter. Default is set to 'master'
-    required: False
-    type: str
-  deployment:
-    description:
-      - Type of deployment, right now is undercloud or overcloud. Default is
-        set to 'overcloud'
+      - Group name to be used in the filter. It has more precedence than job
     required: False
     type: str
 '''
 
 
 EXAMPLES = '''
-- name: Get list of skipped tests
-  list_skipped:
-    yaml_file: /tmp/skipped.yaml
+- name: Get list of allowed tests
+  list_allowed:
+    yaml_file: /tmp/allowed.yaml
     job: tripleo-ci-centos-8-standalone
-    release: master
-    deployment: 'overcloud'
+    group: default
 '''
 
 
 RETURN = '''
-skipped_tests:
+allowed_tests:
   description:
     - List of tests filtered
   returned: Always
@@ -90,14 +82,13 @@ def run_module():
     module_args = dict(
         yaml_file=dict(type='str', required=True),
         job=dict(type='str', required=False, default=None),
-        release=dict(type='str', required=False, default='master'),
-        deployment=dict(type='str', required=False, default='overcloud')
+        group=dict(type='str', required=False, default=None)
     )
 
     result = dict(
         changed=True,
         message='',
-        skipped_tests=[]
+        filtered_tests=[]
     )
 
     module = AnsibleModule(
@@ -106,17 +97,19 @@ def run_module():
     if not module.params['yaml_file']:
         module.fail_json(msg="A yaml file must be provided!")
 
-    cmd = ListSkippedYaml(__name__, sys.argv[1:])
+    if not module.params['job'] and not module.params['group']:
+        module.fail_json(msg="You must specify either job or group parameter!")
+
+    cmd = ListAllowedYaml(__name__, sys.argv[1:])
     parser = cmd.get_parser(__name__)
     parser.file = module.params['yaml_file']
-    parser.release = module.params['release']
+    parser.group = module.params['release']
     parser.job = module.params['job']
-    parser.deployment = module.params['deployment']
 
     tests = cmd.take_action(parser)
-    skipped_tests = [test[0] for test in tests[1]]
+    allowed_tests = [test[0] for test in tests[1]]
 
-    result.update({'skipped_tests': skipped_tests})
+    result.update({'allowed_tests': allowed_tests})
     module.exit_json(**result)
 
 
