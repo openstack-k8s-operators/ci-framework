@@ -26,7 +26,7 @@ class Validate(Command):
 
     log = logging.getLogger(__name__)
 
-    validate = v.Schema({
+    validate_skipped = v.Schema({
         'known_failures': [{
             v.Required('test'): str,
             v.Optional('bz'): v.Url(),
@@ -45,10 +45,26 @@ class Validate(Command):
         }]
     })
 
+    validate_allowed = v.Schema({
+        'groups': [{
+            v.Required('name'): str,
+            v.Required('tests'): [str],
+            v.Required('releases'): [str]
+        }],
+        'jobs': [{
+            v.Required('name'): str,
+            v.Required('tests'): [str],
+            v.Required('releases'): [str]
+        }]
+    })
+
     def take_action(self, parsed_args):
         self.log.debug('Running validate command')
         yaml_file = yaml.safe_load(open(parsed_args.filename))
-        self.validate(yaml_file)
+        if parsed_args.skipped:
+            self.validate_skipped(yaml_file)
+        if parsed_args.allowed:
+            self.validate_allowed(yaml_file)
 
     def get_parser(self, prog_name):
         parser = super(Validate, self).get_parser(prog_name)
@@ -56,4 +72,9 @@ class Validate(Command):
                             help='Path to the YAML file to be validate',
                             required=True)
 
+        group = parser.add_mutually_exclusive_group(required=True)
+        group.add_argument('--skipped', dest='skipped', action='store_true',
+                           default=False, help='Validate skipped schema')
+        group.add_argument('--allowed', dest='allowed', action='store_true',
+                           default=False, help='Validate allowed schema')
         return parser

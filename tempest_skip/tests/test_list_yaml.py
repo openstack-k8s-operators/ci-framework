@@ -13,26 +13,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from cliff.lister import Lister
 from tempest_skip.tests import base
-from tempest_skip.list_yaml import ListYaml
+from tempest_skip.list_yaml import ListSkippedYaml
 
 
-class TestListYamlRelease(Lister):
-
-    def get_parser(self, prog_name):
-        parser = super(TestListYamlRelease, self).get_parser(prog_name)
-        return parser
-
-    def take_action(self, parsed_args):
-        tests = ['tempest_skip.tests.test_list_yaml',
-                 'tempest_skip.tests.test_list_yaml_2']
-        return (('Test name', ), ((test,) for test in tests))
-
-
-class TestListYaml(base.TestCase):
+class TestListSkippedYaml(base.TestCase):
     def setUp(self):
-        super(TestListYaml, self).setUp()
+        super(TestListSkippedYaml, self).setUp()
         self.list_file = """
             known_failures:
               - test: 'tempest_skip.tests.test_list_yaml'
@@ -64,7 +51,7 @@ class TestListYaml(base.TestCase):
         """
         self.path = self.write_yaml_file(self.list_file)
 
-        self.cmd = ListYaml(__name__, [])
+        self.cmd = ListSkippedYaml(__name__, [])
         self.parser = self.cmd.get_parser(__name__)
         self.parser.file = self.path
         self.parser.release = None

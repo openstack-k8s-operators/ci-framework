@@ -20,7 +20,10 @@ from cliff.lister import Lister
 import yaml
 
 
-class ListYaml(Lister):
+DEFAULT_TESTS = ['smoke']
+
+
+class ListSkippedYaml(Lister):
     """Command to list the tests to be skipped, using a YAML file, based on
        release and/or job"""
 
@@ -30,6 +33,11 @@ class ListYaml(Lister):
         self.log.debug('Running list_yaml command')
         yaml_file = yaml.safe_load(open(parsed_args.file))
         tests = []
+
+        tests = self._filter_skipped_tests(parsed_args, yaml_file)
+        return (('Test name',), ((test['test'],) for test in tests))
+
+    def _filter_skipped_tests(self, parsed_args, yaml_file):
         if len(yaml_file) > 0:
             tests = yaml_file.get('known_failures', [])
 
@@ -48,8 +56,8 @@ class ListYaml(Lister):
             if parsed_args.deployment:
                 self.parsed_deployment = parsed_args.deployment
                 tests = list(filter(self._filter_deployment, tests))
-
-        return (('Test name',), ((test['test'],) for test in tests))
+            return tests
+        return []
 
     def _filter_deployment(self, test):
         if not test.get('deployment', []):
@@ -66,7 +74,7 @@ class ListYaml(Lister):
         return False
 
     def get_parser(self, prog_name):
-        parser = super(ListYaml, self).get_parser(prog_name)
+        parser = super(ListSkippedYaml, self).get_parser(prog_name)
         parser.add_argument('--file', dest='file',
                             required=True,
                             help='List the tests to be skipped in the '
