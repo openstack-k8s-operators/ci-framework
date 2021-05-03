@@ -82,7 +82,8 @@ def run_module():
     module_args = dict(
         yaml_file=dict(type='str', required=True),
         job=dict(type='str', required=False, default=None),
-        group=dict(type='str', required=False, default=None)
+        group=dict(type='str', required=False, default=None),
+        release=dict(type='str', required=False, default="master")
     )
 
     result = dict(
@@ -103,7 +104,8 @@ def run_module():
     cmd = ListAllowedYaml(__name__, sys.argv[1:])
     parser = cmd.get_parser(__name__)
     parser.file = module.params['yaml_file']
-    parser.group = module.params['release']
+    parser.group = module.params['group']
+    parser.release = module.params['release']
     parser.job = module.params['job']
 
     tests = cmd.take_action(parser)
