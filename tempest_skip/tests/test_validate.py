@@ -110,6 +110,9 @@ class TestValidateSkipped(TestValidate):
                   - name: 'master'
                     lp: 'https://launchpad.net/bugs/1'
                     reason: 'Test with launchpad'
+                    installers:
+                      - 'tripleo'
+                      - 'osp'
                   - name: 'train'
                     bz: 'https://bugzilla.redhat.com/1'
                     reason: 'Test with bugzilla'

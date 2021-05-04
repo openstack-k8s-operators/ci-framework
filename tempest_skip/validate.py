@@ -38,7 +38,8 @@ class Validate(Command):
                     v.Required('name'): str,
                     v.Required(v.SomeOf(
                         validators=[v.Any('lp', 'bz')], min_valid=1)): v.Url(),
-                    v.Required('reason'): str
+                    v.Required('reason'): str,
+                    v.Optional('installers'): [str]
                 })
             ],
             v.Optional('jobs'): [str]

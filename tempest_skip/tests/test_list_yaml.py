@@ -48,6 +48,31 @@ class TestListSkippedYaml(base.TestCase):
                     lp: 'https://bugs.launchpad.net/tripleo/+bug/1832166'
                 jobs:
                   - 'job1'
+              - test: 'tempest_skip.tests.test_list_yaml_4'
+                deployment:
+                  - 'overcloud'
+                releases:
+                  - name: 'train'
+                    reason: 'Test failing on train release'
+                    lp: 'https://bugs.launchpad.net/tripleo/+bug/1832166'
+                    installers:
+                      - 'osp'
+                jobs:
+                  - 'job3'
+              - test: 'tempest_skip.tests.test_list_yaml_5'
+                deployment:
+                  - 'overcloud'
+                releases:
+                  - name: 'train'
+                    reason: 'Test failing on train release'
+                    lp: 'https://bugs.launchpad.net/tripleo/+bug/1832166'
+                    installers:
+                      - 'osp'
+                      - 'tripleo'
+                  - name: 'wallaby'
+                    reason: 'Test failing on train release'
+                    lp: 'https://bugs.launchpad.net/tripleo/+bug/1832166'
+                jobs: []
         """
         self.path = self.write_yaml_file(self.list_file)
 
@@ -57,13 +82,15 @@ class TestListSkippedYaml(base.TestCase):
         self.parser.release = None
         self.parser.deployment = None
         self.parser.job = None
+        self.parser.installer = 'tripleo'
 
     def test_list_yaml(self):
         cmd_result = self.cmd.take_action(self.parser)
 
         exptected = [('tempest_skip.tests.test_list_yaml',),
                      ('tempest_skip.tests.test_list_yaml_2',),
-                     ('tempest_skip.tests.test_list_yaml_3',)]
+                     ('tempest_skip.tests.test_list_yaml_3',),
+                     ('tempest_skip.tests.test_list_yaml_5',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 
@@ -72,7 +99,8 @@ class TestListSkippedYaml(base.TestCase):
         self.parser.job = None
 
         cmd_result = self.cmd.take_action(self.parser)
-        exptected = [('tempest_skip.tests.test_list_yaml_3',)]
+        exptected = [('tempest_skip.tests.test_list_yaml_3',),
+                     ('tempest_skip.tests.test_list_yaml_5',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 
@@ -102,6 +130,35 @@ class TestListSkippedYaml(base.TestCase):
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(expected, list_tests)
 
+    def test_list_yaml_with_installer(self):
+        self.parser.installer = 'osp'
+        self.parser.release = 'master'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('tempest_skip.tests.test_list_yaml',),
+                    ('tempest_skip.tests.test_list_yaml_2',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
+    def test_list_yaml_with_installer_and_deployment(self):
+        self.parser.installer = 'osp'
+        self.parser.deployment = 'overcloud'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('tempest_skip.tests.test_list_yaml',),
+                    ('tempest_skip.tests.test_list_yaml_2',),
+                    ('tempest_skip.tests.test_list_yaml_3',),
+                    ('tempest_skip.tests.test_list_yaml_4',),
+                    ('tempest_skip.tests.test_list_yaml_5',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
+    def test_list_yaml_with_installer_and_invalid_deployment(self):
+        self.parser.installer = 'osp'
+        self.parser.deployment = 'underclouds'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = []
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
     def test_list_yaml_with_release_not_found(self):
         self.parser.release = 'not-found'
         self.parser.job = None
@@ -116,7 +173,8 @@ class TestListSkippedYaml(base.TestCase):
         cmd_result = self.cmd.take_action(self.parser)
         exptected = [('tempest_skip.tests.test_list_yaml',),
                      ('tempest_skip.tests.test_list_yaml_2',),
-                     ('tempest_skip.tests.test_list_yaml_3',)]
+                     ('tempest_skip.tests.test_list_yaml_3',),
+                     ('tempest_skip.tests.test_list_yaml_5',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 
@@ -124,7 +182,8 @@ class TestListSkippedYaml(base.TestCase):
         self.parser.job = 'job2'
         cmd_result = self.cmd.take_action(self.parser)
         exptected = [('tempest_skip.tests.test_list_yaml',),
-                     ('tempest_skip.tests.test_list_yaml_2',)]
+                     ('tempest_skip.tests.test_list_yaml_2',),
+                     ('tempest_skip.tests.test_list_yaml_5',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 
@@ -132,7 +191,8 @@ class TestListSkippedYaml(base.TestCase):
         self.parser.job = 'job1'
         self.parser.release = 'train'
         cmd_result = self.cmd.take_action(self.parser)
-        exptected = [('tempest_skip.tests.test_list_yaml_3',)]
+        exptected = [('tempest_skip.tests.test_list_yaml_3',),
+                     ('tempest_skip.tests.test_list_yaml_5',)]
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(exptected, list_tests)
 
