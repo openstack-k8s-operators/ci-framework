@@ -82,6 +82,37 @@ class TestListYamlAllowed(base.TestCase):
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual(expected, list_tests)
 
+    def test_list_allowed_with_existing_group_and_job(self):
+        self.parser.group = 'group1'
+        self.parser.job = 'job2'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('test4',), ('test5',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
+    def test_list_allowed_with_existing_group_and_no_existing_job(self):
+        self.parser.group = 'group1'
+        self.parser.job = 'jobnoexist'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('test_group_1',), ('test_group_2',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
+    def test_list_allowed_with_no_existing_group_and_no_existing_job(self):
+        self.parser.group = 'groupnoexist'
+        self.parser.job = 'jobnoexist'
+        cmd_result = self.cmd.take_action(self.parser)
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual([], list_tests)
+
+    def test_list_allowed_with_no_existing_group_and_existing_job(self):
+        self.parser.group = 'groupnoexist'
+        self.parser.job = 'job2'
+        cmd_result = self.cmd.take_action(self.parser)
+        list_tests = [test for test in cmd_result[1]]
+        expected = [('test4',), ('test5',)]
+        self.assertEqual(expected, list_tests)
+
     def test_list_allowed_with_no_group(self):
         self.parser.group = 'no-exist'
         cmd_result = self.cmd.take_action(self.parser)
