@@ -61,6 +61,12 @@ options:
         set to 'overcloud'
     required: False
     type: str
+  installer:
+    description:
+      - Type of installer. Right now it's just a string, but in the future
+        might be specific keys
+    required: False
+    type: str
 '''
 
 
@@ -71,6 +77,7 @@ EXAMPLES = '''
     job: tripleo-ci-centos-8-standalone
     release: master
     deployment: 'overcloud'
+    installer: 'tripleo'
 '''
 
 
@@ -91,7 +98,8 @@ def run_module():
         yaml_file=dict(type='str', required=True),
         job=dict(type='str', required=False, default=None),
         release=dict(type='str', required=False, default='master'),
-        deployment=dict(type='str', required=False, default='overcloud')
+        deployment=dict(type='str', required=False, default='overcloud'),
+        installer=dict(type='str', required=False, default='tripleo')
     )
 
     result = dict(
@@ -112,6 +120,7 @@ def run_module():
     parser.release = module.params['release']
     parser.job = module.params['job']
     parser.deployment = module.params['deployment']
+    parser.installer = module.params['installer']
 
     tests = cmd.take_action(parser)
     skipped_tests = [test[0] for test in tests[1]]

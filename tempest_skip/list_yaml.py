@@ -42,36 +42,27 @@ class ListSkippedYaml(Lister):
             tests = yaml_file.get('known_failures', [])
 
             if parsed_args.job:
-                self.parsed_job = parsed_args.job
-                tests = list(filter(self._filter_jobs, tests))
+                tests = [test for test in tests
+                         if (not test.get('jobs', []) or (
+                             parsed_args.job in test.get('jobs')))]
 
             if parsed_args.release:
-                new_tests = []
-                for test in tests:
-                    for release in test.get('releases', []):
-                        if release.get('name') == parsed_args.release:
-                            new_tests.append(test)
-                tests = new_tests
+                tests = [test for test in tests
+                         if [release for release in test.get('releases', [])
+                             if release['name'] == parsed_args.release]]
+
+            tests = [test for test in tests
+                     if [release for release in test.get('releases', [])
+                         if parsed_args.installer in
+                         release.get('installers', ['tripleo', 'osp'])]]
 
             if parsed_args.deployment:
-                self.parsed_deployment = parsed_args.deployment
-                tests = list(filter(self._filter_deployment, tests))
+                tests = [test for test in tests
+                         if (not test.get('deployment', []) or (
+                             parsed_args.deployment in
+                             test.get('deployment')))]
             return tests
         return []
-
-    def _filter_deployment(self, test):
-        if not test.get('deployment', []):
-            return True
-        if self.parsed_deployment in test.get('deployment'):
-            return True
-        return False
-
-    def _filter_jobs(self, test):
-        if not test.get('jobs', []):
-            return True
-        if self.parsed_job in test.get('jobs'):
-            return True
-        return False
 
     def get_parser(self, prog_name):
         parser = super(ListSkippedYaml, self).get_parser(prog_name)
@@ -91,4 +82,9 @@ class ListSkippedYaml(Lister):
         parser.add_argument('--deployment', dest='deployment',
                             help='List the tests to be skipped in the '
                                  'given deployment')
+        parser.add_argument('--installer', dest='installer',
+                            default=None, help='Tests to be skipped for a '
+                                                'particular installer. Use '
+                                                'tripleo for upstream, and osp'
+                                                ' for downstream')
         return parser
