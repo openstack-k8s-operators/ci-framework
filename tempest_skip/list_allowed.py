@@ -42,20 +42,26 @@ class ListAllowedYaml(Lister):
         if len(yaml_file) > 0:
             if parsed_args.group:
                 everything = yaml_file.get('groups', [])
-                tests = list(filter(
+                group_tests = list(filter(
                     lambda x:
                         x.get('name', '') == parsed_args.group, everything))
-                tests = list(filter(
+                group_tests = list(filter(
                     lambda x:
-                        parsed_args.release in x.get('releases', []), tests))
+                        parsed_args.release in x.get('releases', []),
+                        group_tests))
+                if len(group_tests) > 0:
+                    tests = group_tests
             if parsed_args.job:
                 everything = yaml_file.get('jobs', [])
-                tests = list(filter(
+                job_tests = list(filter(
                     lambda x: x.get('name', '') == parsed_args.job,
                     everything))
-                tests = list(filter(
+                job_tests = list(filter(
                     lambda x:
-                        parsed_args.release in x.get('releases', []), tests))
+                        parsed_args.release in x.get('releases', []),
+                        job_tests))
+                if len(job_tests) > 0:
+                    tests = job_tests
         if len(tests) > 0:
             return tests[0].get('tests')
         return []
@@ -67,16 +73,12 @@ class ListAllowedYaml(Lister):
                             help='List the tests to be included in the '
                                  'YAML file'
                             )
-        group = parser.add_mutually_exclusive_group(required=True)
-
-        group.add_argument('--job', dest='job',
-                           help='List the tests to be included in the '
-                                'given job'
-                           )
-        group.add_argument('--group', dest='group',
-                           help='List the tests to be included in the '
-                                'given group'
-                           )
+        parser.add_argument('--job', dest='job',
+                            help='List the tests to be included in the '
+                                 'given job', required=True)
+        parser.add_argument('--group', dest='group',
+                            help='List the tests to be included in the '
+                                 'given group', default='')
         parser.add_argument('--release', dest='release',
                             help='Filter the tests per release',
                             default='master')
