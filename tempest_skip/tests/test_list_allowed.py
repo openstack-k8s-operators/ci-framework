@@ -28,6 +28,12 @@ class TestListYamlAllowed(base.TestCase):
                   - test_group_2
                 releases:
                   - master
+              - name: group2
+                tests:
+                  - test_group_2_1
+                  - test_group_2_2
+                releases:
+                  - all
             jobs:
               - name: job1
                 tests:
@@ -43,6 +49,12 @@ class TestListYamlAllowed(base.TestCase):
                   - test5
                 releases:
                   - master
+              - name: job3
+                tests:
+                  - test6
+                  - test7
+                releases:
+                  - all
         """
 
         self.path = self.write_yaml_file(self.list_file)
@@ -118,6 +130,22 @@ class TestListYamlAllowed(base.TestCase):
         cmd_result = self.cmd.take_action(self.parser)
         list_tests = [test for test in cmd_result[1]]
         self.assertEqual([], list_tests)
+
+    def test_list_allowed_job_with_release_all(self):
+        self.parser.job = 'job3'
+        self.parser.release = 'whatever'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('test6',), ('test7',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
+
+    def test_list_allowed_group_with_release_all(self):
+        self.parser.group = 'group2'
+        self.parser.release = 'whatever'
+        cmd_result = self.cmd.take_action(self.parser)
+        expected = [('test_group_2_1',), ('test_group_2_2',)]
+        list_tests = [test for test in cmd_result[1]]
+        self.assertEqual(expected, list_tests)
 
     def test_list_allowed_with_no_release(self):
         self.parser.release = 'no-exist'

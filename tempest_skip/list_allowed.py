@@ -47,7 +47,8 @@ class ListAllowedYaml(Lister):
                         x.get('name', '') == parsed_args.group, everything))
                 group_tests = list(filter(
                     lambda x:
-                        parsed_args.release in x.get('releases', []),
+                        any(r in ['all', parsed_args.release] for r in x.get(
+                            'releases', [])),
                         group_tests))
                 if len(group_tests) > 0:
                     tests = group_tests
@@ -58,7 +59,8 @@ class ListAllowedYaml(Lister):
                     everything))
                 job_tests = list(filter(
                     lambda x:
-                        parsed_args.release in x.get('releases', []),
+                        any(r in ['all', parsed_args.release] for r in x.get(
+                            'releases', [])),
                         job_tests))
                 if len(job_tests) > 0:
                     tests = job_tests
