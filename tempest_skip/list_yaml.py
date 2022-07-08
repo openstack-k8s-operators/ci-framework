@@ -51,10 +51,11 @@ class ListSkippedYaml(Lister):
                          if [release for release in test.get('releases', [])
                              if release['name'] == parsed_args.release]]
 
-            tests = [test for test in tests
-                     if [release for release in test.get('releases', [])
-                         if parsed_args.installer in
-                         release.get('installers', ['tripleo', 'osp'])]]
+            if parsed_args.installer:
+                tests = [test for test in tests
+                         if [release for release in test.get('releases', [])
+                             if parsed_args.installer in
+                             release.get('installers', ['tripleo', 'osp'])]]
 
             if parsed_args.deployment:
                 tests = [test for test in tests
@@ -83,8 +84,8 @@ class ListSkippedYaml(Lister):
                             help='List the tests to be skipped in the '
                                  'given deployment')
         parser.add_argument('--installer', dest='installer',
-                            default=None, help='Tests to be skipped for a '
-                                                'particular installer. Use '
+                            default='tripleo', help='Tests to be skipped for '
+                                                'a particular installer. Use '
                                                 'tripleo for upstream, and osp'
                                                 ' for downstream')
         return parser
