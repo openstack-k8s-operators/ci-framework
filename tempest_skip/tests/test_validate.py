@@ -14,24 +14,20 @@
 # under the License.
 
 import os
-import subprocess
 import tempfile
 
 from tempest_skip.tests import base
+from tempest_skip.validate import Validate
+from voluptuous.error import MultipleInvalid
 
 
 class TestValidate(base.TestCase):
     def setUp(self):
         super(TestValidate, self).setUp()
-
-    def assertRunExit(self, cmd, expected):
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        out, err = p.communicate()
-        msg = ("Running %s got an unexpected returncode\n"
-               "Stdout: %s\nStderr: %s" % (' '.join(cmd), out, err))
-        self.assertEqual(p.returncode, expected, msg)
-        return out, err
+        self.cmd = Validate(__name__, [])
+        self.parser = self.cmd.get_parser(__name__)
+        self.parser.skipped = False
+        self.parser.allowed = False
 
 
 class TestValidateAllowed(TestValidate):
@@ -61,8 +57,11 @@ class TestValidateAllowed(TestValidate):
         yaml_file.write(valid_yaml)
         yaml_file.close()
 
-        self.assertRunExit(['tempest-skip', 'validate',
-                            '--allowed', '--file', path], 0)
+        self.parser.allowed = True
+        self.parser.filename = path
+        cmd_result = self.cmd.take_action(self.parser)
+
+        self.assertEqual(cmd_result, None)
 
     def test_validate_fails(self):
         fd, path = tempfile.mkstemp()
@@ -83,8 +82,9 @@ class TestValidateAllowed(TestValidate):
         yaml_file.write(valid_yaml)
         yaml_file.close()
 
-        self.assertRunExit(['tempest-skip', 'validate',
-                            '--allowed', '--file', path], 1)
+        self.parser.allowed = True
+        self.parser.filename = path
+        self.assertRaises(MultipleInvalid, self.cmd.take_action, self.parser)
 
 
 class TestValidateSkipped(TestValidate):
@@ -124,8 +124,11 @@ class TestValidateSkipped(TestValidate):
         yaml_file.write(valid_yaml)
         yaml_file.close()
 
-        self.assertRunExit(['tempest-skip', 'validate',
-                            '--skipped', '--file', path], 0)
+        self.parser.skipped = True
+        self.parser.filename = path
+        cmd_result = self.cmd.take_action(self.parser)
+
+        self.assertEqual(cmd_result, None)
 
     def test_validate_fails(self):
         fd, path = tempfile.mkstemp()
@@ -157,5 +160,6 @@ class TestValidateSkipped(TestValidate):
         yaml_file.write(valid_yaml)
         yaml_file.close()
 
-        self.assertRunExit(['tempest-skip', 'validate',
-                            '--skipped', '--file', path], 1)
+        self.parser.skipped = True
+        self.parser.filename = path
+        self.assertRaises(MultipleInvalid, self.cmd.take_action, self.parser)
