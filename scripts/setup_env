@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+## Shell Opts ----------------------------------------------------------------
+set -o pipefail
+set -xeuo
+
+## Vars ----------------------------------------------------------------------
+export PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
+# NOTE(cloudnull): Disable ansible compat check, caters to the case where
+#                  system ansible may be installed.
+export ANSIBLE_SKIP_CONFLICT_CHECK=1
+
+function run_pip {
+    "${HOME}/test-python/bin/pip" install \
+                                  -c "${PROJECT_DIR}ansible-requirements.txt" \
+                                  -r "${PROJECT_DIR}requirements.txt" \
+                                  -r "${PROJECT_DIR}test-requirements.txt" \
+                                  -r "${PROJECT_DIR}molecule-requirements.txt" ${@:-}
+}
+
+## Main ----------------------------------------------------------------------
+# Source distribution information
+source /etc/os-release || source /usr/lib/os-release
+RHT_PKG_MGR=$(command -v dnf || command -v yum)
+PYTHON_EXEC=$(command -v python3 || command -v python)
+
+# Install the requirements we need to run local tests
+command -v gcc || sudo dnf -y install gcc
+VENV_MOD=venv
+case "${ID,,}" in
+    amzn|fedora)
+        ${PYTHON_EXEC} -m venv -h 2>&1>/dev/null || sudo "${RHT_PKG_MGR}" install -y python*-virtualenv
+        ;;
+    rhel|centos)
+        # Virtualenv no longer packaged for RHEL/CentOS 9. We will have to use
+        # system pip to install it.
+        ${PYTHON_EXEC} -m pip -h 2>&1>/dev/null || dnf -y install python*-pip
+        pip3 install virtualenv
+        VENV_MOD=virtualenv
+        ;;
+esac
+
+# Kill all sudo in the current shell
+sudo -k
+
+# Ensure the required ci file is presnet
+mkdir -p ${HOME}/ci/yum.repos.d
+cp /etc/ci/mirror_info.sh ${HOME}/ci || touch ${HOME}/ci/mirror_info.sh
+cp -r /opt/yum.repos.d/* ${HOME}/ci/yum.repos.d || cp -r /etc/yum.repos.d/* ${HOME}/ci/yum.repos.d
+
+# Create a virtual env
+"${PYTHON_EXEC}" -m ${VENV_MOD} --upgrade-deps "${HOME}/test-python"
+
+# Run bindep
+"${HOME}/test-python/bin/pip" install pip setuptools bindep --upgrade
+"${PROJECT_DIR}/scripts/bindep-install"
+
+# Install local requirements
+if [[ -d "${HOME}/.cache/pip/wheels" ]]; then
+    rm -rf "${HOME}/.cache/pip/wheels"
+fi
+run_pip
+
+# NOTE(cloudnull): In some cases ansible will not be installed due to wheel
+#                  building issues, caused by pip. If this happens we
+#                  re-install the packages with the force flag, which will
+#                  ensure everything is rebuilt and installed correctly.
+if [ ! -f "${HOME}/test-python/bin/ansible" ]; then
+    run_pip --force
+fi
+
+# Display list of installed packages with versions (debugging failures)
+"${HOME}/test-python/bin/pip" freeze
