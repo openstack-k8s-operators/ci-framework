@@ -13,16 +13,24 @@ setup_molecule: setup_tests ## Setup molecule environment
 	bash scripts/setup_molecule
 
 .PHONY: molecule
-molecule: setup_molecule ## Run molecule tests
+molecule: setup_molecule molecule_nodeps ## Run molecule tests with dependencies install
+
+.PHONY: molecule_nodeps
+molecule_nodeps: ## Run molecule without installing dependencies
 	for role in ${ROLE_LIST}; do \
 		bash scripts/run-local-test "$$(basename $${role})" ; \
 	done
 
 .PHONY: pre_commit
-pre_commit: setup_tests ## Runs pre-commit tests
+pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependencies install
+
+.PHONY: pre_commit_nodeps
+pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 	${HOME}/test-python/bin/pip3 install pre-commit
 	${HOME}/test-python/bin/pre-commit run
 
-
 .PHONY: tests
-tests: setup_tests pre_commit ## Run all tests
+tests: pre_commit molecule ## Run all tests with dependencies install
+
+.PHONY: tests_nodeps
+tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without installing dependencies
