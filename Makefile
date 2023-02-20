@@ -1,4 +1,5 @@
 ROLE_LIST := ./ci_framework/roles/*
+USE_VENV ?= ${USE_VENV:-yes}
 
 .PHONY: help
 help: ## Display this help.
@@ -26,11 +27,18 @@ pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependen
 
 .PHONY: pre_commit_nodeps
 pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
-	${HOME}/test-python/bin/pip3 install pre-commit
-	${HOME}/test-python/bin/pre-commit run
+	if [ "x$(USE_VENV)" ==  'xyes' ]; then \
+		${HOME}/test-python/bin/pre-commit run ; \
+	else \
+		pre-commit run ; \
+	fi
 
 .PHONY: tests
 tests: pre_commit molecule ## Run all tests with dependencies install
 
 .PHONY: tests_nodeps
 tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without installing dependencies
+
+.PHONY: ci_ctx
+ci_ctx: ## Build CI container with buildah
+	buildah bud -t cfwm:latest -f containerfiles/Containerfile.ci
