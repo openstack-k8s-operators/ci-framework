@@ -1,5 +1,6 @@
 ROLE_LIST := ./ci_framework/roles/*
 USE_VENV ?= ${USE_VENV:-yes}
+BUILD_VENV_CTX := yes
 
 .PHONY: help
 help: ## Display this help.
@@ -19,7 +20,7 @@ molecule: setup_molecule molecule_nodeps ## Run molecule tests with dependencies
 .PHONY: molecule_nodeps
 molecule_nodeps: ## Run molecule without installing dependencies
 	for role in ${ROLE_LIST}; do \
-		bash scripts/run-local-test "$$(basename $${role})" ; \
+		bash scripts/run_molecule "$$(basename $${role})" ; \
 	done
 
 .PHONY: pre_commit
@@ -41,4 +42,22 @@ tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without install
 
 .PHONY: ci_ctx
 ci_ctx: ## Build CI container with buildah
-	buildah bud -t cfwm:latest -f containerfiles/Containerfile.ci
+	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
+		buildah bud -t cfwm:latest -f containerfiles/Containerfile.ci ; \
+	fi
+
+.PHONY: run_ctx_pre_commit
+run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
+	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
+		podman run --rm cfwm:latest make pre_commit ; \
+	else \
+		podman run --rm --security-opt label=disable -v .:/opt/sources cfwm:latest make pre_commit ; \
+	fi
+
+.PHONY: run_ctx_molecule
+run_ctx_molecule: ci_ctx ## Run molecule check in a container
+	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
+		podman run --rm cfwm:latest make molecule ; \
+	else \
+		podman run --rm --security-opt label=disable -v .:/opt/sources cfwm:latest make molecule ; \
+	fi
