@@ -21,20 +21,28 @@ set -o pipefail
 set -xeuo
 
 ## Vars ----------------------------------------------------------------------
-
-export PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
-export ROLE_NAME="${ROLE_NAME:-$1}"
+PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
+ROLE_DIR=$1
 
 # Run local test
-(test -d ${PROJECT_DIR}ci_framework/roles/ || (echo 'No such directory: ${PROJECT_DIR}ci_framework/roles/' && exit 1) ) || exit 1
-(test -d "${PROJECT_DIR}ci_framework/roles/${ROLE_NAME}" || (echo "No such role: ${ROLE_NAME}" && exit 1)) || exit 1
-pushd "${PROJECT_DIR}ci_framework/roles/${ROLE_NAME}"
-case ${USE_VENV:-yes} in
-    'y|yes|true')
-        ${HOME}/test-python/bin/molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" test
-        ;;
-    *)
-        molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" test
-        ;;
-esac
+(test -d ${ROLE_DIR} || (echo 'No such directory: ${ROLE_DIR}' && exit 1) ) || exit 1
+
+pushd "${ROLE_DIR}"
+# Find what roles were modified
+git diff --name-only HEAD^..HEAD .
+local_roledir=$(echo $ROLE_DIR | sed 's|\.\?\./||g')
+for rolepath in $(git diff --name-only HEAD^..HEAD .); do
+    role=$(echo $rolepath|sed "s|${local_roledir}||" | cut -f1 -d /)
+    echo "Running molecule against: ${role}"
+    pushd $role
+    case ${USE_VENV:-yes} in
+        'y|yes|true')
+            ${HOME}/test-python/bin/molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" test
+            ;;
+        *)
+            molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" test
+            ;;
+    esac
+    popd
+done
 popd
