@@ -2,6 +2,37 @@
 
 Still under heavy development - more info coming soon.
 
+## Use Makefile for your own CI
+### Targets of interest
+#### ci_ctx
+That one will build you a container in order to run the checks
+#### run_ctx_pre_commit
+That one will run the pre-commit check in a container.
+#### run_ctx_molecule
+That one will run molecule against the role. Note That, if needed, you can
+pass different parameters:
+```Bash
+$ make run_ctx_molecule BUILD_VENV_CTX=yes MOLECULE_CONFIG=.config/molecule/config_local.yml
+```
+Run molecule in a freshly built container, using the "config_local.yml" file. Note that
+this configuration file is *mandatory* for running molecule from within the container
+#### molecule_nodeps
+```Bash
+$ make molecule_nodeps BUILD_VENV_CTX=no \
+    MOLECULE_CONFIG=.config/molecule/config_local.yml \
+    ROLE_DIR=../my-repo/roles
+```
+This one is a bit more tricky: it means you are in a deployed env (for instance
+a container built using ```make ci_ctx```) with a 3rd-party repository
+available in /opt/my-repo. You can get this by running the following:
+```Bash
+$ podman run --rm -ti --security-opt label=disable \
+    -v .:/opt/sources \
+    -v ../my-repo:/opt/my-repo \
+    cfwm:latest bash
+```
+Then, just run the ```make``` command with the right parameters.
+
 ## Contribute
 ### Add a new Ansible role
 Run the following command to get your new role in:
