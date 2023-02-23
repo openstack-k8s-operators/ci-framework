@@ -23,20 +23,26 @@ set -xeuo
 ## Vars ----------------------------------------------------------------------
 PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
 ROLE_DIR=$1
-
+USE_VENV=${USE_VENV:-yes}
+TEST_ALL_ROLES=${TEST_ALL_ROLES:-no}
 # Run local test
 (test -d ${ROLE_DIR} || (echo 'No such directory: ${ROLE_DIR}' && exit 1) ) || exit 1
 
 pushd "${ROLE_DIR}"
-# Find what roles were modified
-git diff --name-only HEAD^..HEAD .
 local_roledir=$(echo $ROLE_DIR | sed 's|\.\?\./||g')
-for rolepath in $(git diff --name-only HEAD^..HEAD .); do
+
+# Find what roles were modified
+ROLES_LIST=$(git diff --name-only HEAD^..HEAD .)
+if [ ${TEST_ALL_ROLES} == 'yes' ]; then
+    ROLES_LIST=$(ls -1 ${local_roledir})
+fi
+
+for rolepath in ${ROLES_LIST}; do
     role=$(echo $rolepath|sed "s|${local_roledir}||" | cut -f1 -d /)
     echo "Running molecule against: ${role}"
     pushd $role
-    case ${USE_VENV:-yes} in
-        'y|yes|true')
+    case ${USE_VENV} in
+        y|yes|true)
             ${HOME}/test-python/bin/molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" test
             ;;
         *)
