@@ -37,9 +37,9 @@ pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependen
 .PHONY: pre_commit_nodeps
 pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 	if [ "x$(USE_VENV)" ==  'xyes' ]; then \
-		${HOME}/test-python/bin/pre-commit run ; \
+		${HOME}/test-python/bin/pre-commit run --all-files ; \
 	else \
-		pre-commit run ; \
+		pre-commit run --all-files ; \
 	fi
 
 .PHONY: tests
