@@ -3,6 +3,31 @@
 Still under heavy development - more info coming soon.
 
 ## Use Makefile for your own CI
+
+### Container available for Prow
+You can point to our container in your project:
+```YAML
+base_image:
+  cifwm:
+    name: "ci-framework-image"
+    tag: "latest"
+    namespace: "openstack-k8s-operators"
+tests:
+- as: pre-commit
+  commands: |
+    export HOME=/tmp
+    export ANSIBLE_LOCAL_TMP=/tmp
+    export ANSIBLE_REMOTE_TMP=/tmp
+    make -C ../ci-framework pre_commit_nodeps BASEDIR ./
+- as: molecule
+  commands: |
+    export HOME=/tmp
+    export ANSIBLE_LOCAL_TMP=/tmp
+    export ANSIBLE_REMOTE_TMP=/tmp
+    make -C ../ci-framework molecule_nodeps ROLE_DIR=../your-project/
+```
+Please refer to the `make` manpage for more fun!
+
 ### Targets of interest
 #### ci_ctx
 That one will build you a container in order to run the checks
