@@ -59,7 +59,8 @@ tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without install
 .PHONY: ci_ctx
 ci_ctx: ## Build CI container with buildah
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		buildah bud -t cfwm:latest -f containerfiles/Containerfile.ci ; \
+		buildah bud -t localhost/cfwm-build:latest -f containerfiles/Containerfile.ci ; \
+		buildah bud -t localhost/cfwm:latest -f containerfiles/Containerfile.tests ; \
 	fi
 
 .PHONY: run_ctx_pre_commit
