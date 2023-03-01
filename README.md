@@ -3,6 +3,37 @@
 Still under heavy development - more info coming soon.
 
 ## Use Makefile for your own CI
+
+### Container available for Prow
+You can point to our container in your project:
+```YAML
+build_root:
+  cifwm:
+    name: "ci-framework-image"
+    tag: "latest"
+    namespace: "openstack-k8s-operators"
+tests:
+- as: pre-commit
+  from: cifwm
+  clone: true
+  commands: |
+    export HOME=/tmp
+    export ANSIBLE_LOCAL_TMP=/tmp
+    export ANSIBLE_REMOTE_TMP=/tmp
+    make -C ../ci-framework pre_commit_nodeps BASEDIR ./
+- as: molecule
+  from: cifwm
+  clone: true
+  commands: |
+    export HOME=/tmp
+    export ANSIBLE_LOCAL_TMP=/tmp
+    export ANSIBLE_REMOTE_TMP=/tmp
+    make -C ../ci-framework molecule_nodeps ROLE_DIR=../your-project/
+```
+Please refer to the `make` manpage for more fun! Please refer to the
+[openshift CI doc](https://docs.ci.openshift.org/docs/getting-started/examples/#how-do-i-write-a-simple-execute-this-command-in-a-container-test)
+as well as the [ci-operator](https://docs.ci.openshift.org/docs/architecture/ci-operator/) for more details.
+
 ### Targets of interest
 #### ci_ctx
 That one will build you a container in order to run the checks
