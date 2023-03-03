@@ -21,14 +21,6 @@ tests:
     export ANSIBLE_LOCAL_TMP=/tmp
     export ANSIBLE_REMOTE_TMP=/tmp
     make -C ../ci-framework pre_commit_nodeps BASEDIR ./
-- as: molecule
-  from: cifwm
-  clone: true
-  commands: |
-    export HOME=/tmp
-    export ANSIBLE_LOCAL_TMP=/tmp
-    export ANSIBLE_REMOTE_TMP=/tmp
-    make -C ../ci-framework molecule_nodeps ROLE_DIR=../your-project/
 ```
 Please refer to the `make` manpage for more fun! Please refer to the
 [openshift CI doc](https://docs.ci.openshift.org/docs/getting-started/examples/#how-do-i-write-a-simple-execute-this-command-in-a-container-test)
