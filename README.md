@@ -73,6 +73,17 @@ Run ```make help``` to list the available targets. Usually, you'll want to run
 ```make run_ctx_pre_commit``` or ```make run_ctx_molecule``` to run the tests
 in a local container.
 
+## Using the framework
+### deploy-edpm.yml playbook
+This playbook is the entrypoint in order to deploy EDPM on an infrastructure.
+Note that, later on, it won't allow to be launched from within the repository
+directly, but from the [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
+one (there will be some new targets in their Makefile, but we're not there yet)
+
+### cleanup-edpm.yml
+This playbook cleans everything deployed by the framework - from the deployed
+infrastructure to the various artifacts.
+
 
 ## License
 Copyright 2023.
