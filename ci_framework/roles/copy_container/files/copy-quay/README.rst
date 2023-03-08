@@ -10,7 +10,7 @@ The functionality is as follow:
 * Pull it from the source registry
 * If it is a new container, create the repository as public in quay
 * Push it to quay
-* Tag the container with both current-tripleo and build id
+* Tag the container with both current-podified and build id
 
 Building
 --------
