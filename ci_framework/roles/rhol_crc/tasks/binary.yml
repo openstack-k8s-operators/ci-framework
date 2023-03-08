@@ -1,0 +1,47 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create bin directory if it does not exist
+  ansible.builtin.file:
+    path: "{{ cifmw_rhol_crc_binary_folder }}"
+    state: directory
+    mode: "0755"
+
+- name: Create temporary directory for downloading RHOL/CRC
+  ansible.builtin.tempfile:
+    state: directory
+  register: rhol_crc_download_tmp_directory
+
+- name: Download RHOL/CRC with sha256 checksum
+  ansible.builtin.get_url:
+    url: "{{ cifmw_rhol_crc_base_url }}/{{ cifmw_rhol_crc_tarball_name }}"
+    dest: "{{ rhol_crc_download_tmp_directory.path }}/{{ cifmw_rhol_crc_tarball_name }}"
+    checksum: sha256:{{ cifmw_rhol_crc_base_url }}/{{ cifmw_rhol_crc_tarball_checksum_name }}
+
+- name: Unarchive RHOL/CRC binary
+  ansible.builtin.unarchive:
+    src: "{{ rhol_crc_download_tmp_directory.path }}/{{ cifmw_rhol_crc_tarball_name }}"
+    dest: "{{ cifmw_rhol_crc_binary_folder }}"
+    remote_src: no
+    extra_opts:
+      - --strip=1
+      - --no-anchored
+      - crc
+
+- name: Delete temporary directory for downloading RHOL/CRC
+  file:
+    state: absent
+    path: "{{ rhol_crc_download_tmp_directory }}"
