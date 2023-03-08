@@ -25,7 +25,7 @@ func tagCmd(global *globalOptions) *cobra.Command {
         Short: "Tag images",
         RunE: optsTag.run,
     }
-    cmd.Flags().StringVar(&optsTag.tag, "tag", "current-tripleo", "Image tag name")
+    cmd.Flags().StringVar(&optsTag.tag, "tag", "current-podified", "Image tag name")
     cmd.Flags().StringVar(&optsTag.hash, "force-hash", "", "Force an specific hash, overwriting delorean api")
     cmd.Flags().StringVar(&optsTag.htmlOutput, "html", "", "HTML output report file")
     return cmd
