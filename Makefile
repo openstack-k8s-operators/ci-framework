@@ -50,6 +50,13 @@ pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 		pre-commit run --all-files ; \
 	fi
 
+.PHONY: ansible_test
+ansible_test: setup_tests ansible_tests_nodeps ## Runs ansible-test with dependencies install
+
+.PHONY: ansible_test_nodeps
+ansible_test_nodeps: ## Run ansible-test without installing dependencies
+	bash scripts/run_ansible_test
+
 .PHONY: tests
 tests: pre_commit molecule ## Run all tests with dependencies install
 
@@ -85,4 +92,14 @@ run_ctx_molecule: ci_ctx ## Run molecule check in a container
 		podman run --rm -e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
 			--security-opt label=disable -v .:/opt/sources cfwm:latest \
 			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
+	fi
+
+.PHONY: run_ctx_ansible_test
+run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
+	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
+		podman run --rm  cfwm:latest \
+			bash -c "make ansible_test_nodeps" ; \
+	else \
+		podman run --rm --security-opt label=disable -v .:/opt/sources \
+			cfwm:latest bash -c "make ansible_test_nodeps" ; \
 	fi
