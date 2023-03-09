@@ -1,0 +1,91 @@
+# This specific action plugin needs a version of community.general collection
+# providing this patch:
+# https://github.com/ansible-collections/community.general/pull/6160
+# While the "make" command will actually run, it won't be able to generate
+# the needed file.
+from __future__ import (absolute_import, division, print_function)
+__metaclass__ = type
+
+import glob
+import os
+import re
+
+from ansible.plugins.action import ActionBase
+from ansible.errors import AnsibleActionFail
+from ansible.utils.display import Display
+
+ERR_UPDATE_COLLECTION = '''"command" not found in community.general.make.
+Please update collection. The expected reproducer file will NOT be generated!
+'''
+
+
+class OutputException(Exception):
+    def __init__(self, msg, stdout=None, stderr=None):
+        super().__init__(msg)
+        self.msg = msg
+        self.stdout = stdout
+        self.stderr = stderr
+
+    def __str__(self):
+        if not os.path.exists(self.msg):
+            return "%s doesn't exist" % self.msg
+        if not os.path.isdir(self.msg):
+            return "%s isn't a directory" % self.msg
+        if not os.access(self.msg, os.W_OK):
+            return "%s isn't writable" % self.msg
+        return 'Unknown error for %s' % self.msg
+
+
+class ActionModule(ActionBase):
+    def run(self, tmp=None, task_vars=None):
+        super(ActionModule, self).run(tmp, task_vars)
+        module_args = self._task.args.copy()
+
+        # The output_dir is mandatory - at least for now. Later we may
+        # just display a warning stating the script/reproducer won't exist
+        if 'output_dir' not in module_args:
+            raise AnsibleActionFail('output_dir parameter is missing')
+
+        # Remove output_dir param from the params we'll pass down to the
+        # module
+        output_dir = module_args.pop('output_dir')
+
+        # Ensure we're able to write in the output_dir. If this first check
+        # fails, the actual OutputException will do some more tests to check
+        # what is actually wrong with the output_dir (missing, not a directory,
+        # or not writable)
+        if not os.access(output_dir, os.W_OK):
+            raise OutputException(output_dir)
+
+        # Run module only if all conditions are here for file creation
+        mod_ret = self._execute_module(module_name='community.general.make',
+                                       module_args=module_args,
+                                       task_vars=task_vars, tmp=tmp)
+
+        # This isn't needed anymore, let's free some resources
+        del tmp
+
+        # We can only check the "command" availability now, once the module
+        # has been called, unfortunately.
+        # TODO: consider if we can remove this check later
+        if 'command' not in mod_ret:
+            Display().warning(ERR_UPDATE_COLLECTION)
+            return mod_ret
+
+        # Generate file using the community.general.make "command" output value
+        # First get directory content and count files matching the fixed
+        # pattern
+        fnum = len(list(glob.glob('%s/ci_make_*' % output_dir)))
+
+        # Replace non-ASCII and spaces in ansible task name, and lower the
+        # string
+        t_name = re.sub(r'([^\x00-\x7F]|\s)+', '_', self._task._name).lower()
+        fname = 'ci_make_%i_%s.sh' % (fnum, t_name)
+
+        # Write the reproducer script
+        with open(os.path.join(output_dir, fname), 'w') as fh:
+            fh.write('#!/bin/sh\n' + mod_ret['command'] + '\n')
+        os.chmod(os.path.join(output_dir, fname), 0o755)
+
+        # Return original module state
+        return mod_ret

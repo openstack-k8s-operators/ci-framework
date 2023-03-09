@@ -1,0 +1,61 @@
+---
+- name: Create some directories
+  ansible.builtin.file:
+    path: "/tmp/{{ item }}"
+    state: directory
+  loop:
+    - artifacts
+    - project_makefile
+
+- name: Inject dummy Makefile
+  ansible.builtin.copy:
+    dest: /tmp/project_makefile/Makefile
+    content: |
+      .DEFAULT_GOAL := help
+      .RECIPEPREFIX := >
+      FOO_BAR ?= "toto"
+      help:
+      > @echo "This is the help thing showing ${FOO_BAR}"
+
+- name: Run ci_make without any params
+  register: no_params
+  ci_make:
+    chdir: /tmp/project_makefile
+    output_dir: /tmp/artifacts
+
+- name: Inject some non-related file to validate index
+  ansible.builtin.copy:
+    dest: /tmp/artifacts/foobar
+    content: |
+      I'm a useless flag in here
+
+- name: Run ci_make with a param
+  register: with_params
+  ci_make:
+    chdir: /tmp/project_makefile
+    output_dir: /tmp/artifacts
+    params:
+      FOO_BAR: starwars
+
+- name: Ensure we have correct output
+  ansible.builtin.assert:
+    that:
+      - no_params.stdout == 'This is the help thing showing toto'
+      - with_params.stdout == 'This is the help thing showing starwars'
+
+- name: Check generated files
+  block:
+    - name: Gather files
+      register: reproducer_scripts
+      ansible.builtin.stat:
+        path: "/tmp/artifacts/{{ item }}"
+      loop:
+        - 'ci_make_0_run_ci_make_without_any_params.sh'
+        - 'ci_make_1_run_ci_make_with_a_param.sh'
+
+    - name: Assert file status
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists is defined
+          - item.stat.exists
+      loop: "{{ reproducer_scripts.results }}"
