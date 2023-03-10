@@ -1,0 +1,35 @@
+---
+- hosts: primary
+  gather_facts: true
+  tasks:
+    - name: Ensure file is present
+      register: molecule_report
+      ansible.builtin.stat:
+        path: /tmp/report.html
+    - name: Manage molecule report file
+      when:
+        - molecule_report.stat.exists
+      block:
+        - name: Collect logs
+          ansible.builtin.command:
+            chdir: "{{ ansible_user_dir }}/zuul-output/logs"
+            cmd: cp /tmp/report.html .
+
+    - name: Copy files from workspace on node
+      vars:
+        work_dir: "{{ ansible_user_dir }}/workspace"
+      ansible.builtin.include_role:
+        name: fetch-output
+
+    - name: Return artifact to Zuul
+      when:
+        - not skip_report | default(false)
+        - molecule_report.stat.exists
+      zuul_return:
+        data:
+          zuul:
+            artifacts:
+              - name: "Molecule report"
+                url: "report.html"
+                metadata:
+                  type: html_report

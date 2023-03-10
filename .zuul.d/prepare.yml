@@ -1,17 +1,26 @@
 ---
 - hosts: primary
-  gather_facts: false
+  gather_facts: true
   tasks:
+    - name: Debug some content
+      ansible.builtin.debug:
+        var: ansible_user
     - name: Prepare workspace
       ansible.builtin.include_role:
         name: prepare-workspace
+    - name: Create zuul-output directory
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/zuul-output/logs"
+        state: directory
+        mode: 0755
     - name: Install required packages
       become: true
       ansible.builtin.package:
         name:
-          - buildah
           - make
           - podman
-    - name: Build container
-      ansible.builtin.command: |
-        make -C "{{ ansible_user_dir }}/{{ zuul.project.src_dir }}" ci_ctx
+          - python3
+    - name: Install venv
+      community.general.make:
+        chdir: "{{ ansible_user_dir }}/{{ zuul.project.src_dir }}"
+        target: setup_molecule
