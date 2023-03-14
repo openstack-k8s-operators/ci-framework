@@ -7,6 +7,8 @@ BASEDIR ?= ./
 USE_VENV ?= ${USE_VENV:-yes}
 # Build container?
 BUILD_VENV_CTX ?= yes
+# CI container name
+CI_CTX_NAME ?= localhost/cifmw:latest
 # Molecule test configuration file
 MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 # Run molecule against all tests
@@ -67,10 +69,10 @@ tests: pre_commit molecule ## Run all tests with dependencies install
 tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without installing dependencies
 
 .PHONY: ci_ctx
-ci_ctx: ## Build CI container with buildah
+ci_ctx: ## Build CI container with podman
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		buildah bud -t localhost/cfwm-build:latest -f containerfiles/Containerfile.ci ; \
-		buildah bud -t localhost/cfwm:latest -f containerfiles/Containerfile.tests ; \
+		podman build -t localhost/cifmw-build:latest -f containerfiles/Containerfile.ci ; \
+		podman build -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests ; \
 	fi
 
 .PHONY: run_ctx_pre_commit
@@ -78,12 +80,12 @@ run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
 		podman run --rm \
 			-e BASEDIR=$(BASEDIR) \
-			cfwm:latest bash -c "make pre_commit_nodeps BASEDIR=$(BASEDIR)" ; \
+			${CI_CTX_NAME} bash -c "make pre_commit_nodeps BASEDIR=$(BASEDIR)" ; \
 	else \
 		podman run --rm --security-opt label=disable \
 			-v .:/opt/sources \
 			-e BASEDIR=$(BASEDIR) \
-			cfwm:latest bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
+			${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
 	fi
 
 .PHONY: run_ctx_molecule
@@ -93,7 +95,7 @@ run_ctx_molecule: ci_ctx ## Run molecule check in a container
 			-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
 			-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
 			--user root \
-			cfwm:latest \
+			${CI_CTX_NAME} \
 			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
 	else \
 		podman run --rm \
@@ -101,7 +103,7 @@ run_ctx_molecule: ci_ctx ## Run molecule check in a container
 			-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
 			--security-opt label=disable -v .:/opt/sources \
 			--user root \
-			cfwm:latest \
+			${CI_CTX_NAME} \
 			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
 	fi
 
@@ -112,12 +114,12 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 			-e HOME=/tmp \
 			-e ANSIBLE_LOCAL_TMP=/tmp \
 			-e ANSIBLE_REMOTE_TMP=/tmp \
-			cfwm:latest \
+			${CI_CTX_NAME} \
 			bash -c "make ansible_test_nodeps" ; \
 	else \
 		podman run --rm --security-opt label=disable -v .:/opt/sources \
 			-e HOME=/tmp \
 			-e ANSIBLE_LOCAL_TMP=/tmp \
 			-e ANSIBLE_REMOTE_TMP=/tmp \
-			cfwm:latest bash -c "make ansible_test_nodeps" ; \
+			${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ; \
 	fi
