@@ -49,6 +49,7 @@ pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependen
 .PHONY: pre_commit_nodeps
 pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 	pushd $(BASEDIR)
+	git config --global safe.directory '*'
 	if [ "x$(USE_VENV)" ==  'xyes' ]; then \
 		${HOME}/test-python/bin/pre-commit run --all-files ; \
 	else \
@@ -71,8 +72,9 @@ tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without install
 .PHONY: ci_ctx
 ci_ctx: ## Build CI container with podman
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman build -t localhost/cifmw-build:latest -f containerfiles/Containerfile.ci ; \
-		podman build -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests ; \
+		podman image exists localhost/cifmw-build:latest || \
+		podman build -t localhost/cifmw-build:latest -f containerfiles/Containerfile.ci .; \
+		buildah bud -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests .; \
 	fi
 
 .PHONY: run_ctx_pre_commit
@@ -80,11 +82,13 @@ run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
 		podman run --rm \
 			-e BASEDIR=$(BASEDIR) \
+			-e HOME=/tmp \
 			${CI_CTX_NAME} bash -c "make pre_commit_nodeps BASEDIR=$(BASEDIR)" ; \
 	else \
 		podman run --rm --security-opt label=disable \
 			-v .:/opt/sources \
 			-e BASEDIR=$(BASEDIR) \
+			-e HOME=/tmp \
 			${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
 	fi
 
