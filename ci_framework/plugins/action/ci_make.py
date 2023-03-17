@@ -7,6 +7,7 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import glob
+import json
 import os
 import re
 
@@ -69,8 +70,7 @@ class ActionModule(ActionBase):
                                          module_args=module_args,
                                          task_vars=task_vars, tmp=tmp)
         else:
-            command = [k + ': ' + v for k, v in module_args.items()]
-            m_ret = {'command': ' '.join(command)}
+            m_ret = {'command': json.dumps(module_args)}
 
         # This isn't needed anymore, let's free some resources
         del tmp
