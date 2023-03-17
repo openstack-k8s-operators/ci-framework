@@ -12,6 +12,7 @@ import re
 
 from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
+from ansible.module_utils import basic
 from ansible.utils.display import Display
 
 ERR_UPDATE_COLLECTION = '''"command" not found in community.general.make.
@@ -46,6 +47,11 @@ class ActionModule(ActionBase):
         if 'output_dir' not in module_args:
             raise AnsibleActionFail('output_dir parameter is missing')
 
+        # Are we running dry-run?
+        dry_run = False
+        if 'dry_run' in module_args:
+            dry_run = basic.boolean(module_args.pop('dry_run'))
+
         # Remove output_dir param from the params we'll pass down to the
         # module
         output_dir = module_args.pop('output_dir')
@@ -58,9 +64,13 @@ class ActionModule(ActionBase):
             raise OutputException(output_dir)
 
         # Run module only if all conditions are here for file creation
-        mod_ret = self._execute_module(module_name='community.general.make',
-                                       module_args=module_args,
-                                       task_vars=task_vars, tmp=tmp)
+        if not dry_run:
+            m_ret = self._execute_module(module_name='community.general.make',
+                                         module_args=module_args,
+                                         task_vars=task_vars, tmp=tmp)
+        else:
+            command = [k + ': ' + v for k, v in module_args.items()]
+            m_ret = {'command': ' '.join(command)}
 
         # This isn't needed anymore, let's free some resources
         del tmp
@@ -68,9 +78,9 @@ class ActionModule(ActionBase):
         # We can only check the "command" availability now, once the module
         # has been called, unfortunately.
         # TODO: consider if we can remove this check later
-        if 'command' not in mod_ret:
+        if 'command' not in m_ret:
             Display().warning(ERR_UPDATE_COLLECTION)
-            return mod_ret
+            return m_ret
 
         # Generate file using the community.general.make "command" output value
         # First get directory content and count files matching the fixed
@@ -84,8 +94,8 @@ class ActionModule(ActionBase):
 
         # Write the reproducer script
         with open(os.path.join(output_dir, fname), 'w') as fh:
-            fh.write('#!/bin/sh\n' + mod_ret['command'] + '\n')
+            fh.write('#!/bin/sh\n' + m_ret['command'] + '\n')
         os.chmod(os.path.join(output_dir, fname), 0o755)
 
         # Return original module state
-        return mod_ret
+        return m_ret
