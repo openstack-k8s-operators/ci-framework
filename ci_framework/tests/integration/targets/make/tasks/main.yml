@@ -57,5 +57,34 @@
       ansible.builtin.assert:
         that:
           - item.stat.exists is defined
-          - item.stat.exists
+          - item.stat.exists|bool
       loop: "{{ reproducer_scripts.results }}"
+
+- name: Try dry_run parameter
+  ci_make:
+    chdir: /tmp/project_makefile
+    output_dir: /tmp/artifacts
+    dry_run: true
+
+- name: Check dry_run generated file
+  block:
+    - name: Get file state
+      register: dry_run_state
+      ansible.builtin.stat:
+        path: "/tmp/artifacts/ci_make_2_try_dry_run_parameter.sh"
+
+    - name: Ensure dry_run reproducer exists
+      ansible.builtin.assert:
+        that:
+          - dry_run_state.stat.exists is defined
+          - dry_run_state.stat.exists|bool
+
+    - name: Get file content
+      register: dry_run_content
+      ansible.builtin.slurp:
+        path: "/tmp/artifacts/ci_make_2_try_dry_run_parameter.sh"
+
+    - name: Assert file content
+      ansible.builtin.assert:
+        that:
+          - (dry_run_content['content'] | b64decode) == "#!/bin/sh\nchdir: /tmp/project_makefile\n"
