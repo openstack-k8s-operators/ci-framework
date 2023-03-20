@@ -1,0 +1,96 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Extract configs of interest from cifmw_libvirt_manager_configuration
+  ansible.builtin.set_fact:
+    compute_config: "{{ cifmw_libvirt_manager_configuration['vms']['compute'] }}"
+
+- name: Ensure needed directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ compute_config.image_local_dir }}"
+    - "{{ cifmw_libvirt_manager_basedir }}/workload"
+    - "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute"
+
+- name: Compute base image checks
+  block:
+    - name: Check if base image exists
+      ansible.builtin.stat:
+        path: "{{ compute_config.image_local_dir }}/{{ compute_config.disk_file_name }}"
+      register: disk_file_name_status
+
+    - name: Download base image
+      when:
+        - not disk_file_name_status.stat.exists
+      ansible.builtin.get_url:
+        url: "{{ compute_config.image_url }}"
+        dest: "{{ compute_config.image_local_dir }}/{{ compute_config.disk_file_name }}"
+        checksum: "sha256:{{ compute_config.sha256_image_name }}"
+
+- name: Create EDPM compute VMs
+  environment:
+    KUBECONFIG: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    PATH: "{{ cifmw_libvirt_manager_oc }}:${PATH}:/usr/bin"
+    EDPM_COMPUTE_VCPUS: "{{ compute_config.cpus }}"
+    EDPM_COMPUTE_RAM: "{{ compute_config.memory }}"
+    EDPM_COMPUTE_DISK_SIZE: "{{ compute_config.disksize }}"
+    CRC_POOL: "{{ compute_config.image_local_dir }}"
+    DISK_FILEPATH: "{{ cifmw_libvirt_manager_basedir }}/workload/edpm-compute-{{ item }}.qcow2"
+    OUTPUT_DIR: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute" # used by gen-ansibleee-ssh-key.sh
+    OUTPUT_BASEDIR: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute" # used by gen-edpm-compute-node.sh
+  ci_make:
+    dry_run: "{{ cifmw_libvirt_manager_dryrun }}"
+    chdir: "{{ cifmw_libvirt_manager_installyamls }}/devsetup"
+    target: "edpm_compute"
+    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
+    params:
+      EDPM_COMPUTE_SUFFIX: "{{ item }}"
+  with_sequence: start=0 end={{ compute_config.amount - 1 }}
+
+- name: Wait for EDPM computes to be ready
+  when:
+    - not cifmw_libvirt_manager_dryrun|bool
+  block:
+    - name: Catch compute IPs
+      register: edpm_vms_ips
+      ansible.builtin.command:
+        cmd: "virsh -c qemu:///system -q domifaddr --source arp --domain edpm-compute-{{ item }}"
+      with_sequence: start=0 end={{ compute_config.amount - 1 }}
+      until: "'ipv4' in edpm_vms_ips.stdout"
+      retries: 30
+      delay: 5
+
+    - name: Ensure we get SSH
+      ansible.builtin.wait_for:
+        host: "{{ item.stdout.split()[-1].split('/')[0] }}"
+        port: 22
+        timeout: 60
+      loop: "{{ edpm_vms_ips.results }}"
+
+- name: Configure repositories on external computes
+  environment:
+    SSH_KEY: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute/ansibleee-ssh-key-id_rsa"
+    CMDS_FILE: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute/compute_repo-{{ item }}.sh"
+  ci_make:
+    dry_run: "{{ cifmw_libvirt_manager_dryrun }}"
+    chdir: "{{ cifmw_libvirt_manager_installyamls }}/devsetup"
+    target: "edpm_compute_repos"
+    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
+    params:
+      EDPM_COMPUTE_SUFFIX: "{{ item }}"
+  with_sequence: start=0 end={{ compute_config.amount - 1 }}
