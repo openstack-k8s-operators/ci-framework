@@ -79,51 +79,26 @@ ci_ctx: ## Build CI container with podman
 
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
-	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman run --rm \
-			-e BASEDIR=$(BASEDIR) \
-			-e HOME=/tmp \
-			${CI_CTX_NAME} bash -c "make pre_commit_nodeps BASEDIR=$(BASEDIR)" ; \
-	else \
-		podman run --rm --security-opt label=disable \
-			-v .:/opt/sources \
-			-e BASEDIR=$(BASEDIR) \
-			-e HOME=/tmp \
-			${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
-	fi
+	podman run --rm --security-opt label=disable \
+		-v .:/opt/sources \
+		-e BASEDIR=$(BASEDIR) \
+		-e HOME=/tmp \
+		${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
 
 .PHONY: run_ctx_molecule
 run_ctx_molecule: ci_ctx ## Run molecule check in a container
-	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman run --rm \
-			-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
-			-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
-			--user root \
-			${CI_CTX_NAME} \
-			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
-	else \
-		podman run --rm \
-			-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
-			-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
-			--security-opt label=disable -v .:/opt/sources \
-			--user root \
-			${CI_CTX_NAME} \
-			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
-	fi
+	podman run --rm \
+		-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
+		-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
+		--security-opt label=disable -v .:/opt/sources \
+		--user root \
+		${CI_CTX_NAME} \
+		bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
 
 .PHONY: run_ctx_ansible_test
 run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
-	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman run --rm \
-			-e HOME=/tmp \
-			-e ANSIBLE_LOCAL_TMP=/tmp \
-			-e ANSIBLE_REMOTE_TMP=/tmp \
-			${CI_CTX_NAME} \
-			bash -c "make ansible_test_nodeps" ; \
-	else \
-		podman run --rm --security-opt label=disable -v .:/opt/sources \
-			-e HOME=/tmp \
-			-e ANSIBLE_LOCAL_TMP=/tmp \
-			-e ANSIBLE_REMOTE_TMP=/tmp \
-			${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ; \
-	fi
+	podman run --rm --security-opt label=disable -v .:/opt/sources \
+		-e HOME=/tmp \
+		-e ANSIBLE_LOCAL_TMP=/tmp \
+		-e ANSIBLE_REMOTE_TMP=/tmp \
+		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ; \
