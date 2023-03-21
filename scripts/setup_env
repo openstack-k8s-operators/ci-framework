@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Copyright Red Hat, Inc.
 # All Rights Reserved.
 #
@@ -36,10 +36,9 @@ PYTHON_EXEC=$(command -v python3 || command -v python)
 # Install the requirements we need to run local tests
 command -v gcc || sudo dnf -y install gcc
 
-PIP='pip'
+export PATH="${HOME}/test-python/bin/:${PATH}"
 case ${USE_VENV} in
     'y|yes|true')
-        PIP="${HOME}/test-python/bin/pip"
         USE_VENV='yes'
         ${PYTHON_EXEC} -m venv -h 2>&1>/dev/null || sudo "${RHT_PKG_MGR}" install -y python*-virtualenv
         echo
@@ -47,7 +46,7 @@ case ${USE_VENV} in
         echo
         ;;
     'n|no|false')
-        PIP="pip"
+        command -v pip || sudo dnf install -y python3-pip
         USE_VENV='no'
         echo
         echo ### NO VENV - may break your system!
@@ -59,7 +58,7 @@ esac
 sudo -k
 
 function run_pip {
-    "${PIP}" install \
+    pip install \
              -c "${PROJECT_DIR}ansible-requirements.txt" \
              -r "${PROJECT_DIR}requirements.txt" \
              -r "${PROJECT_DIR}test-requirements.txt" \
@@ -73,18 +72,18 @@ cp -r /opt/yum.repos.d/* ${HOME}/ci/yum.repos.d || cp -r /etc/yum.repos.d/* ${HO
 
 if [ ${USE_VENV} == 'yes' ]; then
     # Create a virtual env
-    "${PYTHON_EXEC}" -m venv --upgrade-deps "${HOME}/test-python"
+    "${PYTHON_EXEC}" -m venv "${HOME}/test-python"
     if [[ -d "${HOME}/.cache/pip/wheels" ]]; then
         rm -rf "${HOME}/.cache/pip/wheels"
     fi
 fi
 
 # Run bindep
-"${PIP}" install pip setuptools bindep --upgrade
+pip install pip setuptools bindep --upgrade
 "${PROJECT_DIR}/scripts/bindep-install"
 
 # Install local requirements
 run_pip
 
 # Display list of installed packages with versions (debugging failures)
-"${PIP}" freeze
+pip freeze
