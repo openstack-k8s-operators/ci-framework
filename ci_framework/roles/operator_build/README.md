@@ -60,3 +60,4 @@ you want to build meta-operator too, so the role can properly replace api refere
           - name: "mariadb-operator"
             src: "/home/user/mariadb-operator"
   ```
+
