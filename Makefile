@@ -7,6 +7,8 @@ BASEDIR ?= ./
 USE_VENV ?= ${USE_VENV:-yes}
 # Build container?
 BUILD_VENV_CTX ?= yes
+# CI container name
+CI_CTX_NAME ?= localhost/cifmw:latest
 # Molecule test configuration file
 MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 # Run molecule against all tests
@@ -47,6 +49,7 @@ pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependen
 .PHONY: pre_commit_nodeps
 pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 	pushd $(BASEDIR)
+	git config --global safe.directory '*'
 	if [ "x$(USE_VENV)" ==  'xyes' ]; then \
 		${HOME}/test-python/bin/pre-commit run --all-files ; \
 	else \
@@ -67,57 +70,35 @@ tests: pre_commit molecule ## Run all tests with dependencies install
 tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without installing dependencies
 
 .PHONY: ci_ctx
-ci_ctx: ## Build CI container with buildah
+ci_ctx: ## Build CI container with podman
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		buildah bud -t localhost/cfwm-build:latest -f containerfiles/Containerfile.ci ; \
-		buildah bud -t localhost/cfwm:latest -f containerfiles/Containerfile.tests ; \
+		podman image exists localhost/cifmw-build:latest || \
+		podman build -t localhost/cifmw-build:latest -f containerfiles/Containerfile.ci .; \
+		buildah bud -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests .; \
 	fi
 
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
-	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman run --rm \
-			-e BASEDIR=$(BASEDIR) \
-			cfwm:latest bash -c "make pre_commit_nodeps BASEDIR=$(BASEDIR)" ; \
-	else \
-		podman run --rm --security-opt label=disable \
-			-v .:/opt/sources \
-			-e BASEDIR=$(BASEDIR) \
-			cfwm:latest bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
-	fi
+	podman run --rm --security-opt label=disable \
+		-v .:/opt/sources \
+		-e BASEDIR=$(BASEDIR) \
+		-e HOME=/tmp \
+		${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
 
 .PHONY: run_ctx_molecule
 run_ctx_molecule: ci_ctx ## Run molecule check in a container
-	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman run --rm \
-			-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
-			-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
-			--user root \
-			cfwm:latest \
-			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
-	else \
-		podman run --rm \
-			-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
-			-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
-			--security-opt label=disable -v .:/opt/sources \
-			--user root \
-			cfwm:latest \
-			bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
-	fi
+	podman run --rm \
+		-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
+		-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
+		--security-opt label=disable -v .:/opt/sources \
+		--user root \
+		${CI_CTX_NAME} \
+		bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
 
 .PHONY: run_ctx_ansible_test
 run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
-	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
-		podman run --rm \
-			-e HOME=/tmp \
-			-e ANSIBLE_LOCAL_TMP=/tmp \
-			-e ANSIBLE_REMOTE_TMP=/tmp \
-			cfwm:latest \
-			bash -c "make ansible_test_nodeps" ; \
-	else \
-		podman run --rm --security-opt label=disable -v .:/opt/sources \
-			-e HOME=/tmp \
-			-e ANSIBLE_LOCAL_TMP=/tmp \
-			-e ANSIBLE_REMOTE_TMP=/tmp \
-			cfwm:latest bash -c "make ansible_test_nodeps" ; \
-	fi
+	podman run --rm --security-opt label=disable -v .:/opt/sources \
+		-e HOME=/tmp \
+		-e ANSIBLE_LOCAL_TMP=/tmp \
+		-e ANSIBLE_REMOTE_TMP=/tmp \
+		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ; \

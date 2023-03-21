@@ -1,0 +1,151 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set default api path for {{ operator.name }}
+  ansible.builtin.set_fact:
+    operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/api"
+
+- name: Update the go.mod file in meta operator for provided PR_SHA
+  ansible.builtin.shell: |
+    go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/api@{{ operator.pr_sha }}
+    go mod tidy
+    if [ -d ./apis ]; then
+      pushd ./apis/
+      go mod edit -replace github.com/${ORG}/${BASE_OP}/api=github.com/${REPO_NAME}/api@${API_SHA}
+      go mod tidy
+      popd
+    fi
+  args:
+    chdir: "{{ cifmw_operator_build_meta_src }}"
+  when:
+    - cifmw_operator_build_meta_build
+    - operator.name != cifmw_operator_build_meta_name
+    - operator.pr_owner is defined
+    - operator.pr_sha is defined
+
+- name: Get the {{ operator.name }} latest commit when no PR is provided
+  ansible.builtin.command:
+    cmd: git show-ref --head --hash head
+    chdir: "{{ operator.src }}"
+  register: git_head_out
+  when:
+    - operator.pr_sha is not defined
+
+- name: Set pr_sha to be used as image tag
+  ansible.builtin.set_fact:
+    pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
+
+- name: Update the go.mod file using latest commit if no PR is provided
+  ansible.builtin.shell: |
+    go mod edit -replace {{ operator_api_path }}={{ operator_api_path }}@{{ pr_sha }}
+    go mod tidy
+  args:
+    chdir: "{{ cifmw_operator_build_meta_src }}"
+  when:
+    - cifmw_operator_build_meta_build
+    - operator.name != cifmw_operator_build_meta_name
+    - pr_sha is defined
+    - operator.pr_owner is not defined
+
+- name: Get golang container image
+  containers.podman.podman_image:
+    name: "{{ cifmw_operator_build_golang_ct }}"
+    pull: true
+
+- name: Set operator image names and tags
+  ansible.builtin.set_fact:
+    operator_img_tag: "{{ pr_sha }}"
+    operator_registry_prefix: "{{ cifmw_operator_build_push_registry }}/{{ cifmw_operator_build_push_org }}/{{ operator.name }}"
+    cacheable: true
+
+- name: Create artifact directory
+  ansible.builtin.file:
+    path: /tmp/artifacts
+    state: directory
+
+- name: Call manifests
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: manifests
+
+- name: Call docker-build
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: docker-build
+    params:
+      IMG: "{{ operator_registry_prefix }}:{{ operator_img_tag }}"
+
+- name: Call docker-push
+  when:
+    - cifmw_operator_build_push_ct|bool
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: docker-push
+    params:
+      IMG: "{{ operator_registry_prefix }}:{{ operator_img_tag }}"
+
+- name: Call bundle
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: bundle
+    params:
+      IMG: "{{ operator_registry_prefix }}:{{ operator_img_tag }}"
+
+- name: Call bundle-build
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: bundle-build
+    params:
+      BUNDLE_IMG: "{{ operator_registry_prefix }}-bundle:{{ operator_img_tag }}"
+
+- name: Push bundle image
+  when:
+    - cifmw_operator_build_push_ct|bool
+  containers.podman.podman_image:
+    name: "{{ operator_registry_prefix }}-bundle:{{ operator_img_tag }}"
+    pull: false
+    push: true
+
+- name: Call catalog-build
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: catalog-build
+    params:
+      CATALOG_IMG: "{{ operator_registry_prefix }}-index:{{ operator_img_tag }}"
+      BUNDLE_IMGS: "{{ operator_registry_prefix }}-bundle:{{ operator_img_tag }}"
+
+- name: Call catalog-push
+  when:
+    - cifmw_operator_build_push_ct|bool
+  ci_make:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    target: catalog-push
+    params:
+      CATALOG_IMG: "{{ operator_registry_prefix }}-index:{{ operator_img_tag }}"
