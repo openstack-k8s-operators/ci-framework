@@ -30,3 +30,35 @@ This will output a file in /tmp/artifacts with a specific pattern:
 The INDEX is calculated based on matching `ci_make_*` pattern in that directory.
 The file can then be used as a reproducer or just debug output in order to
 understand what was actually launched using `community.ansible.make` module.
+
+
+## modules/generate_make_env
+Description: Generate a structure embedding all of the environment variables
+we may pass down to the Makefiles and related scripts.
+
+### options:
+* `install_yamls_path`:
+  * description: Full path of the install_yamls makefile.
+  * required: true
+  * type: str
+* `install_yamls_var`:
+  * description: List of exported install_yamls variable
+  * required: true
+  * type: dict
+* `check_var`:
+  * description: Check the environment var exists in the makefile
+  * required: false
+  * type: bool
+
+## modules/generate_make_tasks
+Description: Generate task file per Makefile target.
+
+### options:
+* `install_yamls_path`:
+  * description: Absolute path to install_yamls repository
+  * required: True
+  * type: str
+* `output_directory`:
+  * description: Absolute path to the output directory. It must exists
+  * required: True
+  * type: str
