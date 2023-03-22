@@ -20,7 +20,8 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_binary_folder`: Folder that will be used to store the RHOL/CRC binary. Default: `bin` folder under the `cifmw_rhol_crc_basedir`.
 * `cifmw_rhol_crc_binary`: Path of the RHOL/CRC downloaded binary for executing the commands. Default: `bin/crc` binary file under the `cifmw_rhol_crc_basedir`.
 * `cifmw_rhol_crc_force_cleanup`: In case this variable is `true` it will delete if exists the actual crc instance, domain and linked resources and recreate it with the new configuration. Default: `false`
-
+* `cifmw_rhol_crc_kubeconfig`: Path to crc kubeconfig file. Default to `~/.crc/machines/crc/kubeconfig`
+* `cifmw_rhol_crc_creds`: Add crc creds to bashrc. Default to `False`
 
 ## Cleanup
 
