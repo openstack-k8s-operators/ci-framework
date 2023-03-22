@@ -85,7 +85,7 @@ class ActionModule(ActionBase):
         # Generate file using the community.general.make "command" output value
         # First get directory content and count files matching the fixed
         # pattern
-        fnum = len(list(glob.glob('%s/ci_make_*' % output_dir)))
+        fnum = len(glob.glob('%s/ci_make_*' % output_dir))
 
         # Replace non-ASCII and spaces in ansible task name, and lower the
         # string
