@@ -10,7 +10,7 @@ Used for checking if:
 `become` - Required in:
     - `virsh_checks.yml`: For creating libvirt group if needed and also append user to this group if it's not there.
     - `virtualization_prerequisites.yml`: For enabling VMX/SVM module with modprobe.
-    - `packages_installation.yml`: Install all libvirt dependencies.
+    - `packages.yml`: Install all libvirt dependencies.
     - `polkit_rules.yml`: Add polkit rules under `/etc/`.
 
 ### Parameters
