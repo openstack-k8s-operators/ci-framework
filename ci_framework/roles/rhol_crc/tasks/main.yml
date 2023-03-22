@@ -14,6 +14,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ cifmw_rhol_crc_basedir }}/{{ item }}"
+    state: directory
+  loop:
+    - artifacts
+    - bin
+
 - name: Check RHOL/CRC binary exists
   ansible.builtin.stat:
     path: "{{ cifmw_rhol_crc_binary }}"
@@ -24,6 +32,8 @@
   when: not cifmw_rhol_crc_binary_stat.stat.exists
 
 - name: Get VM domains through Virt
+  environment:
+    VIRSH_DEFAULT_CONNECT_URI: "qemu:///system"
   community.libvirt.virt:
     command: list_vms
   register: vm_domains
@@ -35,19 +45,28 @@
     - "'crc' in vm_domains.list_vms"
     - not cifmw_rhol_crc_force_cleanup|bool
 
-- name: Set RHOL/CRC configuration options
-  ansible.builtin.include_tasks: configuration.yml
-
 - name: Setup sudoers file for sudo commands in RHOL/CRC setup
   ansible.builtin.include_tasks: sudoers_grant.yml
 
-- name: Setup RHOL/CRC
-  ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
-  register: cifmw_rhol_crc_cmd_setup
+- name: Configure RHOL/CRC using install_yamls
+  when:
+    - cifmw_rhol_crc_use_installyamls|bool
+  ansible.builtin.include_tasks: install_yamls.yml
 
-- name: Start RHOL/CRC
-  ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
-  register: cifmw_rhol_crc_cmd_start
+- name: Manually configure RHOL/CRC
+  when:
+    - not cifmw_rhol_crc_use_installyamls|bool
+  block:
+    - name: Set RHOL/CRC configuration options
+      ansible.builtin.include_tasks: configuration.yml
+
+    - name: Setup RHOL/CRC
+      ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
+      register: cifmw_rhol_crc_cmd_setup
+
+    - name: Start RHOL/CRC
+      ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
+      register: cifmw_rhol_crc_cmd_start
 
 - name: Delete sudoers file
   ansible.builtin.include_tasks: sudoers_revoke.yml
