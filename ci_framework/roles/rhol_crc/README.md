@@ -12,7 +12,7 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_installyamls`: Location of install_yamls repository root. Defaults to `../..`.
 * `cifmw_rhol_crc_use_installyamls`: Tell the role to leverage install_yamls `crc` related targets. Defaults to `false`.
 * `cifmw_rhol_crc_dryrun`: Toggle the `ci_make` `dry_run` parameter. Defaults to `false`.
-* `cifmw_rhos_crc_config`: This dictionary is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Default: `{}`
+* `cifmw_rhol_crc_config`: This dictionary is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Default: `{}`
 * `cifmw_rhol_crc_version`: RHOL/CRC binary version we wanna use. Default: `latest`
 * `cifmw_rhol_crc_tarball_name`: RHOL/CRC tarball name depending of the architecture.
 * `cifmw_rhol_crc_tarball_checksum_name`: RHOL/CRC tarball file checksum name. Default: `crc-linux-amd64.tar.xz.sha256`
