@@ -63,6 +63,11 @@ pre_infra:
       source: foo.yml
     - name: My glorious CRD
       type: crd
+      host: https://my.openshift.cluster
+      username: foo
+      password: bar
+      wait_condition:
+        type: pod
       source: /path/to/my/glorious.crd
 ```
 In the above example, the `foo.yml` is located in
