@@ -8,8 +8,8 @@ None
 ### Parameters
 * `cifmw_edpm_deploy_basedir`: Base directory. Defaults to `cifmw_basedir`
 which defaults to `~/ci-framework`.
-* `cifmw_edpm_deploy_installyamls`: install_yamls root location. Since
-ci-framework should be cloned within that other repository, it defaults to `../..`.
+* `cifmw_edpm_deploy_installyamls`: install_yamls root location. Defaults to `cifmw_installyamls_repos`
+which defaults to `../..`
 * `cifmw_edpm_deploy_crd`: Path to the CRD the role will use as a base.
 Defaults to install_yamls CRD.
 * `cifmw_edpm_deploy_inventory`: Path to the generated inventory holding the

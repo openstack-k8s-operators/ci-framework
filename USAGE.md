@@ -24,6 +24,7 @@ The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
 `~/ci-framework`
+* `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
 
 ### Role level parameters
 Please refer to the README located within the various roles.
