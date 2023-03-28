@@ -9,7 +9,8 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 ### Parameters
 
 * `cifmw_rhol_crc_basedir`: Directory where we will have the RHOL/CRC binary and the configuration (e.g. artifacts/.rhol_crc_pull_secret.txt). Default to `cifmw_basedir` which defaults to ~/ci-framework.
-* `cifmw_rhol_crc_installyamls`: Location of install_yamls repository root. Defaults to `../..`.
+* `cifmw_edpm_deploy_installyamls`: install_yamls root location. Defaults to `cifmw_installyamls_repos`
+which defaults to `../..`
 * `cifmw_rhol_crc_use_installyamls`: Tell the role to leverage install_yamls `crc` related targets. Defaults to `false`.
 * `cifmw_rhol_crc_dryrun`: Toggle the `ci_make` `dry_run` parameter. Defaults to `false`.
 * `cifmw_rhol_crc_config`: This dictionary is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Default: `{}`
