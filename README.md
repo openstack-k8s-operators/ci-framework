@@ -8,13 +8,13 @@ Still under heavy development - more info coming soon.
 You can point to our container in your project:
 ```YAML
 build_root:
-  cifwm:
+  cifmw:
     name: "ci-framework-image"
     tag: "latest"
     namespace: "openstack-k8s-operators"
 tests:
 - as: pre-commit
-  from: cifwm
+  from: cifmw
   clone: true
   commands: |
     export HOME=/tmp
