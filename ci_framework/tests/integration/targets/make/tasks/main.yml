@@ -5,6 +5,7 @@
     state: directory
   loop:
     - artifacts
+    - logs
     - project_makefile
 
 - name: Inject dummy Makefile
@@ -20,6 +21,7 @@
 - name: Run ci_make without any params
   register: no_params
   ci_make:
+    target: help
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
 
@@ -32,6 +34,7 @@
 - name: Run ci_make with a param
   register: with_params
   ci_make:
+    target: help
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
     params:
@@ -43,23 +46,6 @@
       - no_params.stdout == 'This is the help thing showing toto'
       - with_params.stdout == 'This is the help thing showing starwars'
 
-- name: Check generated files
-  block:
-    - name: Gather files
-      register: reproducer_scripts
-      ansible.builtin.stat:
-        path: "/tmp/artifacts/{{ item }}"
-      loop:
-        - 'ci_make_0_run_ci_make_without_any_params.sh'
-        - 'ci_make_1_run_ci_make_with_a_param.sh'
-
-    - name: Assert file status
-      ansible.builtin.assert:
-        that:
-          - item.stat.exists is defined
-          - item.stat.exists|bool
-      loop: "{{ reproducer_scripts.results }}"
-
 - name: Try dry_run parameter
   ci_make:
     chdir: /tmp/project_makefile
@@ -68,30 +54,31 @@
       FOO_BAR: startrek
     dry_run: true
 
-- name: Check dry_run generated file
+- name: Check generated files
   block:
-    - name: Get file state
-      register: dry_run_state
-      ansible.builtin.stat:
-        path: "/tmp/artifacts/ci_make_2_try_dry_run_parameter.sh"
-
-    - name: Ensure dry_run reproducer exists
-      ansible.builtin.assert:
-        that:
-          - dry_run_state.stat.exists is defined
-          - dry_run_state.stat.exists|bool
-
-    - name: Get file content
-      register: dry_run_content
-      ansible.builtin.slurp:
-        path: "/tmp/artifacts/ci_make_2_try_dry_run_parameter.sh"
-
-    - name: Decode content
+    - name: Set files attributes
       ansible.builtin.set_fact:
-        dry_run_decode: "{{ dry_run_content['content'] | b64decode }}"
+        files_to_check:
+          "/tmp/artifacts/ci_make_0_run_ci_make_without_any_params.sh":
+            851df380c076eed2e5f40842157b4c72d12638db
+          "/tmp/artifacts/ci_make_1_run_ci_make_with_a_param.sh":
+            59cc6818417dd1ff1f0cced3377eed416cf5f889
+          "/tmp/artifacts/ci_make_2_try_dry_run_parameter.sh":
+            f5d4eb7c8ddcae82b6ecaa6181224efe9399a783
+          "/tmp/logs/ci_make_0_run_ci_make_without_any_params.log":
+            8dcc15e2dd273dda4f7120efc059274bd8d50a89
+          "/tmp/logs/ci_make_1_run_ci_make_with_a_param.log":
+            fa1fd735445ca641270e630a00303b5816bafff3
+    - name: Gather files
+      register: reproducer_scripts
+      ansible.builtin.stat:
+        path: "{{ item.key }}"
+      loop: "{{ files_to_check|dict2items }}"
 
-    - name: Assert file content
+    - name: Assert file status
       ansible.builtin.assert:
         that:
-          - "dry_run_decode == '#!/bin/sh\n{\"chdir\": \"/tmp/project_makefile\", \"params\": {\"FOO_BAR\": \"startrek\"}}\n'"
-        msg: "File content: {{ dry_run_decode }}"
+          - item.stat.exists is defined
+          - item.stat.exists|bool
+          - item.stat.checksum == files_to_check[item.stat.path]
+      loop: "{{ reproducer_scripts.results }}"
