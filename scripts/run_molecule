@@ -27,6 +27,7 @@ USE_VENV=${USE_VENV:-yes}
 MOLECULE_CONFIG=${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 TEST_ALL_ROLES=${TEST_ALL_ROLES:-no}
 TEST_VERBOSITY=${TEST_VERBOSITY:-'--debug'}
+MOLECULE_FAILURES=""
 # Run local test
 (test -d ${ROLE_DIR} || (echo 'No such directory: ${ROLE_DIR}' && exit 1) ) || exit 1
 
@@ -45,14 +46,26 @@ for rolepath in ${ROLES_LIST}; do
     test -d ${role} || continue
     echo "Running molecule against: ${role}"
     pushd $role
-    case ${USE_VENV} in
-        y|yes|true)
-            ${HOME}/test-python/bin/molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" ${TEST_VERBOSITY} test --all
-            ;;
-        *)
-            molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" ${TEST_VERBOSITY} test --all
-            ;;
-    esac
+    MOLECULE_RESULTS=$(\
+        case ${USE_VENV} in
+                y|yes|true)
+                    ${HOME}/test-python/bin/molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" ${TEST_VERBOSITY} test --all
+                    ;;
+                *)
+                    molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" ${TEST_VERBOSITY} test --all
+                    ;;
+        esac ) || true
+        if [[ $MOLECULE_RESULTS =~ failed=[1-9] ]]; then
+            MOLECULE_FAILURES=$MOLECULE_FAILURES"${role}\n"
+        fi
     popd
 done
 popd
+
+if [ ${#MOLECULE_FAILURES} -gt 0 ]; then
+    echo "Molecule tests of following roles have failed"
+    echo "==============================="
+    echo -e $MOLECULE_FAILURES
+    echo "==============================="
+    exit 1
+fi
