@@ -6,29 +6,34 @@
       register: molecule_report
       ansible.builtin.stat:
         path: /tmp/report.html
+
     - name: Manage molecule report file
       when:
         - molecule_report.stat.exists
-      block:
-        - name: Collect logs
-          ansible.builtin.command:
-            chdir: "{{ ansible_user_dir }}/zuul-output/logs"
-            cmd: cp /tmp/report.html .
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/zuul-output/logs"
+        cmd: cp /tmp/report.html .
 
     - name: Check if we get ci-framework basedir
       register: cifmw_state
       ansible.builtin.stat:
         path: "{{ ansible_user_dir }}/ci-framework"
 
-    - name: Copy ci-framework interesting files
+    - name: Collect ci-framework content of interest
       when:
         - cifmw_state.stat.exists | bool
-      ansible.builtin.shell:
-        chdir: "{{ ansible_user_dir }}/zuul-output/logs/"
-        cmd: |
-          mkdir ci-framework; pushd ci-framework
-          cp -ra {{ ansible_user_dir }}/ci-framework/logs . ;
-          cp -ra {{ ansible_user_dir }}/ci-framework/artifacts . ;
+      block:
+        - name: Create ci-framework log directory for zuul
+          ansible.builtin.file:
+            path: "{{ ansible_user_dir }}/zuul-output/logs/ci-framework"
+            state: directory
+
+        - name: Copy ci-framework interesting files
+          ansible.builtin.shell:
+            chdir: "{{ ansible_user_dir }}/zuul-output/logs/ci-framework"
+            cmd: |
+              cp -ra {{ ansible_user_dir }}/ci-framework/logs . ;
+              cp -ra {{ ansible_user_dir }}/ci-framework/artifacts . ;
 
     - name: Get some env related data
       ansible.builtin.shell: |
