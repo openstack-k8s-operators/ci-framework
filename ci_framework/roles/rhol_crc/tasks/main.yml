@@ -23,22 +23,28 @@
     - bin
 
 - name: Get VM domains through Virt
-  environment:
-    VIRSH_DEFAULT_CONNECT_URI: "qemu:///system"
   community.libvirt.virt:
     command: list_vms
+    uri: "qemu:///system"
   register: vm_domains
+
+# The way ansible/jinja2 wants to match a string is horrible - so we must rely
+# on some terrible "if true then true else false" pattern...
+- name: Set VM status
+  ansible.builtin.set_fact:
+    crc_present: >-
+      {%- if 'crc' in vm_domains.list_vms -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
 
 - name: Fail if crc domain is already defined
   ansible.builtin.fail:
     msg: "The crc domain already exist. Set cifmw_rhol_crc_force_cleanup to true to force the cleanup. Interrupting tasks..."
   when:
-    - "'crc' in vm_domains.list_vms"
+    - crc_present|bool
     - not cifmw_rhol_crc_force_cleanup|bool
     - not cifmw_rhol_crc_reuse | bool
 
 - name: Manage RHOL/CRC if not existing
-  when: (cifmw_rhol_crc_force_cleanup|bool) or "'crc' not in vm_domains.list_vms"
+  when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_present|bool
   block:
     - name: Check RHOL/CRC binary exists
       ansible.builtin.stat:
@@ -54,7 +60,7 @@
 
     - name: Clean RHOL/CRC if wanted
       when:
-        - "'crc' in vm_domains.list_vms"
+        - crc_present|bool
         - cifmw_rhol_crc_force_cleanup | bool
       ansible.builtin.include_tasks: cleanup.yml
 
