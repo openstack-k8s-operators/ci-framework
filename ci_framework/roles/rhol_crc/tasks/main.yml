@@ -1,0 +1,92 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ cifmw_rhol_crc_basedir }}/{{ item }}"
+    state: directory
+  loop:
+    - artifacts
+    - bin
+
+- name: Get VM domains through Virt
+  community.libvirt.virt:
+    command: list_vms
+    uri: "qemu:///system"
+  register: vm_domains
+
+# The way ansible/jinja2 wants to match a string is horrible - so we must rely
+# on some terrible "if true then true else false" pattern...
+- name: Set VM status
+  ansible.builtin.set_fact:
+    crc_present: >-
+      {%- if 'crc' in vm_domains.list_vms -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
+
+- name: Fail if crc domain is already defined
+  ansible.builtin.fail:
+    msg: "The crc domain already exist. Set cifmw_rhol_crc_force_cleanup to true to force the cleanup. Interrupting tasks..."
+  when:
+    - crc_present|bool
+    - not cifmw_rhol_crc_force_cleanup|bool
+    - not cifmw_rhol_crc_reuse | bool
+
+- name: Manage RHOL/CRC if not existing
+  when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_present|bool
+  block:
+    - name: Check RHOL/CRC binary exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_rhol_crc_binary }}"
+      register: cifmw_rhol_crc_binary_stat
+
+    - name: Get RHOL/CRC binary if does not exist
+      ansible.builtin.include_tasks: binary.yml
+      when: not cifmw_rhol_crc_binary_stat.stat.exists
+
+    - name: Setup sudoers file for sudo commands in RHOL/CRC setup
+      ansible.builtin.include_tasks: sudoers_grant.yml
+
+    - name: Clean RHOL/CRC if wanted
+      when:
+        - crc_present|bool
+        - cifmw_rhol_crc_force_cleanup | bool
+      ansible.builtin.include_tasks: cleanup.yml
+
+    - name: Configure RHOL/CRC using install_yamls
+      when:
+        - cifmw_rhol_crc_use_installyamls|bool
+      ansible.builtin.include_tasks: install_yamls.yml
+
+    - name: Manually configure RHOL/CRC
+      when:
+        - not cifmw_rhol_crc_use_installyamls|bool
+      block:
+        - name: Set RHOL/CRC configuration options
+          ansible.builtin.include_tasks: configuration.yml
+
+        - name: Setup RHOL/CRC
+          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
+          register: cifmw_rhol_crc_cmd_setup
+
+        - name: Start RHOL/CRC
+          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
+          register: cifmw_rhol_crc_cmd_start
+
+    - name: Delete sudoers file
+      ansible.builtin.include_tasks: sudoers_revoke.yml
+
+- name: Add crc kubeconfig
+  when: cifmw_rhol_crc_creds | bool
+  ansible.builtin.include_tasks: add_crc_creds.yml

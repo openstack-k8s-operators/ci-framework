@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+## Shell Opts ----------------------------------------------------------------
+
+set -o pipefail
+set -xeuo
+
+## Vars ----------------------------------------------------------------------
+PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
+USE_VENV=${USE_VENV:-yes}
+HOME=${HOME:-/tmp}
+
+export HOME=${HOME}
+export ANSIBLE_LOCAL_TMP=${HOME}
+export ANSIBLE_REMOTE_TMP=${HOME}
+
+ansible_test='ansible-test'
+collection_path='/usr/share/ansible/collections/ansible_collections'
+case ${USE_VENV} in
+    y|yes|true):
+        ansible_test="${HOME}/test-python/bin/ansible-test"
+        collection_path="${HOME}.ansible/collections/ansible_collections"
+        ;;
+esac
+
+mkdir -p ${HOME}/code/ansible_collections/cifmw/general
+cp -ra ${PROJECT_DIR}ci_framework/* ${HOME}/code/ansible_collections/cifmw/general/
+ln -s ${collection_path}/* ${HOME}/code/ansible_collections/
+
+pushd ${HOME}/code/ansible_collections/cifmw/general
+${ansible_test} sanity --skip-test action-plugin-docs --color=yes -vv
+if [ -d tests/integration ]; then
+    ${ansible_test} integration --color=yes -vv
+fi
+if [ -d tests/units ]; then
+    ${ansible_test} units --color=yes -vv
+fi

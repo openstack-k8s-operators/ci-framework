@@ -1,0 +1,29 @@
+---
+- name: "Set playbook {{ hook.name }} path"
+  set_fact:
+    playbook_path: >-
+      {%- if hook.source is not ansible.builtin.abs -%}
+      {{ role_path }}/../../hooks/playbooks/{{ hook.source }}
+      {%- else -%}
+      {{ hook.source }}
+      {%- endif -%}
+
+# We cannot call ansible.builtin.import_playbook from within a play,
+# even less from a task. So the way to run a playbook from within a playbook
+# is to call a command. Though we may lose some of the data passed to the
+# "main" play.
+- name: "Run {{ playbook_path }} playbook"
+  register: play_output
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ hook.inventory | default('localhost,') }}
+      -c {{ hook.connection | default('local') }}
+      {{ playbook_path }}
+
+- name: Output play stderr
+  ansible.builtin.debug:
+    var: play_output.stderr
+
+- name: Output play stdout
+  ansible.builtin.debug:
+    var: play_output.stdout

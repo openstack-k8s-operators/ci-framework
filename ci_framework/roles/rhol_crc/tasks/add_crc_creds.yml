@@ -1,0 +1,27 @@
+---
+- name: Make sure kubeconfig file exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_rhol_crc_kubeconfig }}"
+  register: crc_kubeconfig
+
+- name: Add crc kubeconfig to user's bashrc
+  when: crc_kubeconfig.stat.exists
+  block:
+    - name: Add crc creds in the user bashrc file
+      ansible.builtin.blockinfile:
+        dest: ~/.bashrc
+        create: true
+        block: |-
+          eval $(crc oc-env)
+          export KUBECONFIG="{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+
+    - name: Source bashrc and confirm crc login
+      ansible.builtin.shell: |
+        source ~/.bashrc
+        oc whoami
+      register: bashrc_result
+      changed_when: false
+
+    - name: Check bashrc results
+      ansible.builtin.debug:
+        var: bashrc_result.stdout

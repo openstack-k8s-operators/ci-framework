@@ -1,0 +1,31 @@
+---
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ cifmw_repo_setup_basedir }}/{{ item }}"
+    state: directory
+  loop:
+    - tmp
+    - artifacts/repositories
+
+- name: Get repo-setup repository
+  ansible.builtin.git:
+    accept_hostkey: true
+    dest: "{{ cifmw_repo_setup_basedir }}/tmp/repo-setup"
+    repo: "{{ cifmw_repo_setup_src }}"
+
+- name: Initialize python venv and install requirements
+  ansible.builtin.pip:
+    virtualenv: "{{ cifmw_repo_setup_basedir }}/venv"
+    requirements: "{{ cifmw_repo_setup_basedir }}/tmp/repo-setup/requirements.txt"
+    virtualenv_command: "python3 -m venv"
+
+- name: Install repo-setup package
+  ansible.builtin.command:
+    cmd: "{{ cifmw_repo_setup_basedir }}/venv/bin/python setup.py install"
+    chdir: "{{ cifmw_repo_setup_basedir }}/tmp/repo-setup"
+    creates: "{{ cifmw_repo_setup_basedir }}/venv/bin/repo-setup"
+
+- name: Create repository output directory
+  ansible.builtin.file:
+    path: "{{ cifmw_repo_setup_basedir }}/artifacts/repositories"
+    state: directory

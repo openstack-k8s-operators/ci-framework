@@ -1,0 +1,42 @@
+---
+# Configure CRC from install_yamls directly
+- name: Set some facts for later use
+  set_fact:
+    crc_configuration:  "{{ cifmw_rhol_crc_config_defaults | ansible.builtin.combine(cifmw_rhol_crc_config) }}"
+    default_path: "{{ lookup('env', 'PATH', '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin') }}"
+
+- name: Cleanup if needed/wanted
+  when:
+    - "'crc' in vm_domains.list_vms"
+    - cifmw_rhol_crc_force_cleanup|bool
+  environment:
+    PATH: "~/bin:{{ cifmw_rhol_crc_basedir }}/bin:{{ default_path }}"
+  ci_make:
+    dry_run: "{{ cifmw_rhol_crc_dryrun }}"
+    chdir: "{{ cifmw_rhol_crc_installyamls }}/devsetup"
+    target: 'crc_cleanup'
+
+- name: Configure crc
+  environment:
+    PATH: "~/bin:{{ cifmw_rhol_crc_basedir }}/bin:{{ default_path }}"
+    CPUS: "{{ crc_configuration['cpus'] }}"
+    MEMORY: "{{ crc_configuration['memory'] }}"
+    DISK: "{{ crc_configuration['disk-size'] }}"
+  ci_make:
+    dry_run: "{{ cifmw_rhol_crc_dryrun }}"
+    chdir: "{{ cifmw_rhol_crc_installyamls }}/devsetup"
+    target: 'crc'
+    output_dir: "{{ cifmw_rhol_crc_basedir }}/artifacts"
+    params:
+      CRC_URL: "{{ cifmw_rhol_crc_base_url }}/{{ cifmw_rhol_crc_tarball_name }}"
+      KUBEADMIN_PWD: "{{ cifmw_rhol_crc_kubeadmin_pwd }}"
+      PULL_SECRET: "{{ crc_configuration['pull-secret-file'] }}"
+
+- name: Attach default network to CRC
+  environment:
+    PATH: "~/bin:{{ cifmw_rhol_crc_basedir }}/bin:{{ default_path }}"
+  ci_make:
+    dry_run: "{{ cifmw_rhol_crc_dryrun }}"
+    chdir: "{{ cifmw_rhol_crc_installyamls }}/devsetup"
+    target: "crc_attach_default_interface"
+    output_dir: "{{ cifmw_rhol_crc_basedir }}/artifacts"
