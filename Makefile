@@ -24,10 +24,22 @@ ${1}: export MOLECULE_CONFIG=${MOLECULE_CONFIG}
 ${1}: export TEST_ALL_ROLES=${TEST_ALL_ROLES}
 endef
 
+# Macro allowing to check if a variable is defined or not
+check-var-defined = $(if $(strip $($1)),,$(error "$1" is not defined))
+
+##@ General
 .PHONY: help
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+.PHONY: new_role
+new_role: ## Create a new Ansible role - ROLE_NAME parameter is mandatory
+	$(call check-var-defined,ROLE_NAME)
+	ansible-galaxy role init \
+		--role-skeleton _skeleton_role_ \
+		--init-path ci_framework/roles ${ROLE_NAME}
+
+##@ Setup steps
 .PHONY: setup_tests
 setup_tests: ## Setup the environment
 	bash scripts/setup_env
@@ -36,6 +48,14 @@ setup_tests: ## Setup the environment
 setup_molecule: setup_tests ## Setup molecule environment
 	bash scripts/setup_molecule
 
+##@ General testing
+.PHONY: tests
+tests: pre_commit molecule ## Run all tests with dependencies install
+
+.PHONY: tests_nodeps
+tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without installing dependencies
+
+##@ Molecule testing
 .PHONY: molecule
 molecule: setup_molecule molecule_nodeps ## Run molecule tests with dependencies install
 
@@ -43,6 +63,7 @@ molecule: setup_molecule molecule_nodeps ## Run molecule tests with dependencies
 molecule_nodeps: ## Run molecule without installing dependencies
 	bash scripts/run_molecule $(ROLE_DIR)
 
+##@ Pre-commit testing
 .PHONY: pre_commit
 pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependencies install
 
@@ -56,6 +77,7 @@ pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 		pre-commit run --all-files ; \
 	fi
 
+##@ Ansible-test testing
 .PHONY: ansible_test
 ansible_test: setup_tests ansible_tests_nodeps ## Runs ansible-test with dependencies install
 
@@ -63,12 +85,7 @@ ansible_test: setup_tests ansible_tests_nodeps ## Runs ansible-test with depende
 ansible_test_nodeps: ## Run ansible-test without installing dependencies
 	bash scripts/run_ansible_test
 
-.PHONY: tests
-tests: pre_commit molecule ## Run all tests with dependencies install
-
-.PHONY: tests_nodeps
-tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without installing dependencies
-
+##@ Container targets
 .PHONY: ci_ctx
 ci_ctx: ## Build CI container with podman
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
@@ -77,23 +94,30 @@ ci_ctx: ## Build CI container with podman
 		buildah bud -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests .; \
 	fi
 
+.PHONY: run_ctx_all_tests
+run_ctx_all_tests: export BUILD_VENV_CTX=no
+run_ctx_all_tests: export MOLECULE_CONFIG=".config/molecule/config_local.yml"
+run_ctx_all_tests: run_ctx_pre_commit run_ctx_molecule run_ctx_ansible_test ## Run all tests in container
+
+
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
 	podman run --rm --security-opt label=disable \
 		-v .:/opt/sources \
 		-e BASEDIR=$(BASEDIR) \
 		-e HOME=/tmp \
-		${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ; \
+		--user root \
+		${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ;
 
 .PHONY: run_ctx_molecule
 run_ctx_molecule: ci_ctx ## Run molecule check in a container
 	podman run --rm \
-		-e MOLECULE_CONFIG=$(MOLECULE_CONFIG) \
+		-e MOLECULE_CONFIG=${MOLECULE_CONFIG} \
 		-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
 		--security-opt label=disable -v .:/opt/sources \
 		--user root \
 		${CI_CTX_NAME} \
-		bash -c "make molecule_nodeps MOLECULE_CONFIG=$(MOLECULE_CONFIG)" ; \
+		bash -c "make molecule_nodeps MOLECULE_CONFIG=${MOLECULE_CONFIG}" ;
 
 .PHONY: run_ctx_ansible_test
 run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
@@ -101,4 +125,4 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 		-e HOME=/tmp \
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
-		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ; \
+		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ;
