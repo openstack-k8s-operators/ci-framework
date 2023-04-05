@@ -1,0 +1,68 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+# Verify that virtualization extensions are enabled/supported on the host:
+# https://wiki.libvirt.org/No_guest_machines_are_present.html
+- name: Check virtualization extension are enabled/supported
+  block:
+    - name: Get vmx/svm extensions from /proc/cpuinfo
+      ansible.builtin.command: egrep "(vmx|svm)" /proc/cpuinfo
+      register: cpu_flags
+  rescue:
+    - name: Print no virtualization extension enabled error
+      ansible.builtin.fail:
+          msg:
+            - "Virtualization extensions are not enabled."
+            - "For more information check: https://wiki.libvirt.org/No_guest_machines_are_present.html"
+
+# kvm-ok
+- name: Check if KVM is enabled
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: dev_kvm_file_stat
+
+- name: Fail if KVM not enabled
+  ansible.builtin.fail:
+    msg:
+      - "KVM is not enabled."
+      - "Set cifmw_libvirt_manager_enable_virtualization_module to true to enable it during the role execution"
+  when:
+      - not cifmw_libvirt_manager_enable_virtualization_module|bool
+      - not dev_kvm_file_stat.stat.exists
+
+- name: Get if cpu_flags is VMX or SVM
+  block:
+    # # VMX (Virtual Machine Extensions) Intel processor virtualization support
+    - name: Check if VMX virtualization
+      ansible.builtin.set_fact:
+        virtualization_to_enable: "kvm_intel"
+      when: "'vmx' in cpu_flags.stdout"
+    # # SVM (Secure Virtual Machine) AMD processor virtualization support
+    - name: Check if SVM virtualization
+      ansible.builtin.set_fact:
+        virtualization_to_enable: "kvm_amd"
+      when: "'svm' in cpu_flags.stdout"
+
+- name: Enable VMX virtualization
+  community.general.modprobe:
+    name: "{{ virtualization_to_enable }}"
+    state: present
+    persistent: present
+  when:
+    - cifmw_libvirt_manager_enable_virtualization_module|bool
+    - not dev_kvm_file_stat.stat.exists
+  become: true

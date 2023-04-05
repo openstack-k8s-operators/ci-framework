@@ -2,63 +2,90 @@
 - hosts: all
   gather_facts: true
   tasks:
-    - name: Ensure file is present
-      register: molecule_report
-      ansible.builtin.stat:
-        path: /tmp/report.html
-
-    - name: Manage molecule report file
-      when:
-        - molecule_report.stat.exists
-      ansible.builtin.command:
-        chdir: "{{ ansible_user_dir }}/zuul-output/logs"
-        cmd: cp /tmp/report.html .
-
-    - name: Check if we get ci-framework basedir
-      register: cifmw_state
-      ansible.builtin.stat:
-        path: "{{ ansible_user_dir }}/ci-framework"
-
-    - name: Collect ci-framework content of interest
-      when:
-        - cifmw_state.stat.exists | bool
+    - name: Run block
       block:
-        - name: Create ci-framework log directory for zuul
+        - name: Ensure file is present
+          register: molecule_report
+          ansible.builtin.stat:
+            path: /tmp/report.html
+
+        - name: Manage molecule report file
+          when:
+            - molecule_report.stat.exists
+          ansible.builtin.command:
+            chdir: "{{ ansible_user_dir }}/zuul-output/logs"
+            cmd: cp /tmp/report.html .
+
+        - name: Check if we get ci-framework basedir
+          register: cifmw_state
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/ci-framework"
+
+        - name: Collect ci-framework content of interest
+          when:
+            - cifmw_state.stat.exists | bool
+          block:
+            - name: Create ci-framework log directory for zuul
+              ansible.builtin.file:
+                path: "{{ ansible_user_dir }}/zuul-output/logs/ci-framework"
+                state: directory
+
+            - name: Copy ci-framework interesting files
+              ansible.builtin.shell:
+                chdir: "{{ ansible_user_dir }}/zuul-output/logs/ci-framework"
+                cmd: |
+                  cp -ra {{ ansible_user_dir }}/ci-framework/logs . ;
+                  cp -ra {{ ansible_user_dir }}/ci-framework/artifacts . ;
+
+        - name: Get some env related data
+          ansible.builtin.shell:
+            chdir: "{{ ansible_user_dir }}/zuul-output/logs/"
+            cmd: |
+              rpm -qa | sort > ./installed-pkgs.log;
+              python --version > ./python.log;
+              pip3 --version >> ./python.log;
+              ansible --version >> ./python.log;
+              pip3 freeze >> ./python.log;
+              cp {{ ansible_user_dir }}/*.log .;
+
+        - name: Get SELinux related data
+          become: true
+          ignore_errors: true # if the ausearch | grep fails, we don't want to fail.
+          ansible.builtin.shell:
+            chdir: "{{ ansible_user_dir }}/zuul-output/logs/"
+            cmd: |
+              ls -lRZ --hide=venv --hide=repo-setup {{ ansible_user_dir }}/ci-framework > ./selinux-listing.log;
+              ausearch -i | grep denied > ./selinux-denials.log
+
+        - name: Create system configuration directory
           ansible.builtin.file:
-            path: "{{ ansible_user_dir }}/zuul-output/logs/ci-framework"
+            path: "{{ ansible_user_dir }}/zuul-output/logs/system-config/libvirt"
             state: directory
 
-        - name: Copy ci-framework interesting files
+        - name: Get some of the system configurations
+          become: true
           ansible.builtin.shell:
-            chdir: "{{ ansible_user_dir }}/zuul-output/logs/ci-framework"
+            chdir: "{{ ansible_user_dir }}/zuul-output/logs/system-config"
             cmd: |
-              cp -ra {{ ansible_user_dir }}/ci-framework/logs . ;
-              cp -ra {{ ansible_user_dir }}/ci-framework/artifacts . ;
+              cp -r /etc/libvirt/*.conf libvirt/;
+              chown "{{ ansible_user }}" *
 
-    - name: Get some env related data
-      ansible.builtin.shell: |
-        rpm -qa | sort > {{ ansible_user_dir }}/zuul-output/logs/installed-pkgs.log;
-        python --version > {{ ansible_user_dir }}/zuul-output/logs/python.log;
-        pip3 --version >> {{ ansible_user_dir }}/zuul-output/logs/python.log;
-        ansible --version >> {{ ansible_user_dir }}/zuul-output/logs/python.log;
-        pip3 freeze >> {{ ansible_user_dir }}/zuul-output/logs/python.log;
-        cp {{ ansible_user_dir }}/*.log {{ ansible_user_dir }}/zuul-output/logs/;
+      always:
+        - name: Copy files from workspace on node
+          vars:
+            work_dir: "{{ ansible_user_dir }}/workspace"
+          ansible.builtin.include_role:
+            name: fetch-output
 
-    - name: Copy files from workspace on node
-      vars:
-        work_dir: "{{ ansible_user_dir }}/workspace"
-      ansible.builtin.include_role:
-        name: fetch-output
-
-    - name: Return artifact to Zuul
-      when:
-        - not skip_report | default(false)
-        - molecule_report.stat.exists
-      zuul_return:
-        data:
-          zuul:
-            artifacts:
-              - name: "Molecule report"
-                url: "report.html"
-                metadata:
-                  type: html_report
+        - name: Return artifact to Zuul
+          when:
+            - not skip_report | default(false)
+            - molecule_report.stat.exists
+          zuul_return:
+            data:
+              zuul:
+                artifacts:
+                  - name: "Molecule report"
+                    url: "report.html"
+                    metadata:
+                      type: html_report
