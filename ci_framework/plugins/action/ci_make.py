@@ -19,7 +19,12 @@ from ansible.utils.display import Display
 ERR_UPDATE_COLLECTION = '''"command" not found in community.general.make.
 Please update collection. The expected reproducer file will NOT be generated!
 '''
-TMPL_REPRODUCER = "#!/bin/bash\npushd %s\n%s\npopd\n"
+TMPL_REPRODUCER = '''#!/bin/bash
+pushd %(chdir)s
+%(exports)s
+%(cmd)s
+popd
+'''
 
 
 class OutputException(Exception):
@@ -109,11 +114,17 @@ class ActionModule(ActionBase):
             scriptable = False
 
         # Write the reproducer script
+        exports = []
+        if 'environment' in task_vars:
+            exports = ['export ' + k + '=' + v for env in task_vars['environment'] for k, v in env.items()]
         with open(os.path.join(output_dir, fname), 'w') as fh:
             if scriptable:
-                fh.write(TMPL_REPRODUCER % (module_args['chdir'],
-                                            m_ret['command']))
+                data = {'chdir': module_args['chdir'],
+                        'cmd': m_ret['command'],
+                        'exports': '\n'.join(exports)}
+                fh.write(TMPL_REPRODUCER % data)
             else:
+                fh.write(json.dumps(task_vars['environment']))
                 fh.write(m_ret['command'])
         if scriptable:
             os.chmod(os.path.join(output_dir, fname), 0o755)
