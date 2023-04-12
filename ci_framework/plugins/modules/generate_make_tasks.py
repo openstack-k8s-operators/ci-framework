@@ -61,10 +61,10 @@ import os
 MAKE_TMPL = '''---
 - name: Run `make %(target)s`
   ci_make:
-    output_directory: "{{ cifmw_use_install_yamls_basedir }}/artifacts"
+    output_directory: "{{ cifmw_install_yamls_basedir }}/artifacts"
     chdir: "%(chdir)s"
     target: %(target)s
-    dry_run: "{{ cifmw_use_install_yamls_dryrun|bool }}"
+    dry_run: "{{ cifmw_install_yamls_dryrun|bool }}"
   environment: "{{ edpm_env }}"
 '''
 
