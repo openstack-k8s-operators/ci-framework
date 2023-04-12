@@ -126,3 +126,8 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
 		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ;
+
+.PHONY: enable-git-hooks
+enable-git-hooks:
+	git config core.hooksPath "./.githooks"
+	$(warning REMEMBER, YOU MUST HAVE REVIEWED THE CUSTOM HOOKS in .githooks!)
