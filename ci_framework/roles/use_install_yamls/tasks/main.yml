@@ -1,0 +1,50 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create env var if needed
+  when: cifmw_use_install_yamls_vars is defined
+  block:
+    - name: Ensure Output directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_use_install_yamls_out_dir }}"
+        state: directory
+
+    - name: "Get environment structure"
+      generate_make_env:
+        install_yamls_path: "{{ cifmw_use_install_yamls_repo }}/Makefile"
+        install_yamls_var: "{{ cifmw_use_install_yamls_vars }}"
+
+    - name: Show the env structure
+      ansible.builtin.debug:
+        msg: "{{ ansible_facts['edpm_env'] }}"
+
+    - name: "Generate {{ cifmw_use_install_yamls_out_dir }}/{{ cifmw_use_install_yamls_envfile }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_use_install_yamls_out_dir }}/{{ cifmw_use_install_yamls_envfile }}"
+        content: |-
+          {% for k,v in ansible_facts['edpm_env'].items() %}
+          export {{ k }}={{ v }}
+          {% endfor %}
+
+- name: Ensure task output dir exists
+  ansible.builtin.file:
+    path: "{{ cifmw_use_install_yamls_tasks_out }}"
+    state: directory
+
+- name: "Generate make targets"
+  generate_make_tasks:
+    install_yamls_path: "{{ cifmw_use_install_yamls_repo }}"
+    output_directory: "{{ cifmw_use_install_yamls_tasks_out }}"
