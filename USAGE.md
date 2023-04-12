@@ -28,6 +28,14 @@ are shared among multiple roles:
 * `cifmw_use_libvirt`: (Bool) toggle libvirt support
 * `cifmw_use_crc`: (Bool) toggle rhol/crc usage
 
+#### Words of caution
+If you want to output the content in another location than `~/ci-framework`
+(namely set the `cifmw_basedir` to some other location), you will have to update
+the `ansible.cfg`, updating the value of `roles_path` so that it includes
+this new location.
+
+We cannot do this change runtime unfortunately.
+
 ### Role level parameters
 Please refer to the README located within the various roles.
 
