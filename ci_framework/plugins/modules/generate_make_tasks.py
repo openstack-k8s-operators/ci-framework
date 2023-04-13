@@ -77,7 +77,7 @@ MAKE_TMPL = '''---
     target: %(target)s
     dry_run: "{{ make_%(target)s_dryrun|default(false)|bool }}"
     params: "{{ make_%(target)s_params|default(omit) }}"
-  environment: "{{ edpm_env }}"
+  environment: "{{ make_%(target)s_environment }}"
 '''
 
 NO_OUTDIR = 'Directory %s does not exist. Please create it.'

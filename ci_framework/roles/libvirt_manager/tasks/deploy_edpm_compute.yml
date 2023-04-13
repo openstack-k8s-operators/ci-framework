@@ -43,23 +43,20 @@
         checksum: "sha256:{{ compute_config.sha256_image_name }}"
 
 - name: Create EDPM compute VMs
-  environment:
-    KUBECONFIG: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
-    PATH: "{{ cifmw_libvirt_manager_oc }}:${PATH}:/usr/bin"
-    EDPM_COMPUTE_VCPUS: "{{ compute_config.cpus }}"
-    EDPM_COMPUTE_RAM: "{{ compute_config.memory }}"
-    EDPM_COMPUTE_DISK_SIZE: "{{ compute_config.disksize }}"
-    CRC_POOL: "{{ compute_config.image_local_dir }}"
-    DISK_FILEPATH: "{{ cifmw_libvirt_manager_basedir }}/workload/edpm-compute-{{ item }}.qcow2"
-    OUTPUT_DIR: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute" # used by gen-ansibleee-ssh-key.sh
-    OUTPUT_BASEDIR: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute" # used by gen-edpm-compute-node.sh
-  ci_make:
-    dry_run: "{{ cifmw_libvirt_manager_dryrun }}"
-    chdir: "{{ cifmw_libvirt_manager_installyamls }}/devsetup"
-    target: "edpm_compute"
-    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
-    params:
+  vars:
+    make_edpm_compute_dryrun: "{{ cifmw_libvirt_manager_dryrun }}"
+    make_edpm_compute_params:
       EDPM_COMPUTE_SUFFIX: "{{ item }}"
+    make_edpm_compute_env:
+      PATH: "{{ cifmw_libvirt_manager_oc }}:${PATH}:/usr/bin"
+      EDPM_COMPUTE_VCPUS: "{{ compute_config.cpus }}"
+      EDPM_COMPUTE_RAM: "{{ compute_config.memory }}"
+      EDPM_COMPUTE_DISK_SIZE: "{{ compute_config.disksize }}"
+      CRC_POOL: "{{ compute_config.image_local_dir }}"
+      DISK_FILEPATH: "{{ cifmw_libvirt_manager_basedir }}/workload/edpm-compute-{{ item }}.qcow2"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_edpm_compute'
   with_sequence: start=0 end={{ compute_config.amount - 1 }}
 
 - name: Wait for EDPM computes to be ready
@@ -83,14 +80,13 @@
       loop: "{{ edpm_vms_ips.results }}"
 
 - name: Configure repositories on external computes
-  environment:
-    SSH_KEY: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute/ansibleee-ssh-key-id_rsa"
-    CMDS_FILE: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute/compute_repo-{{ item }}.sh"
-  ci_make:
-    dry_run: "{{ cifmw_libvirt_manager_dryrun }}"
-    chdir: "{{ cifmw_libvirt_manager_installyamls }}/devsetup"
-    target: "edpm_compute_repos"
-    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
-    params:
+  vars:
+    make_edpm_compute_repos_dryrun: "{{ cifmw_libvirt_manager_dryrun }}"
+    make_edpm_compute_repos_params:
       EDPM_COMPUTE_SUFFIX: "{{ item }}"
+    make_edpm_compute_repos_env:
+      CMDS_FILE: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute/compute_repo-{{ item }}.sh"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_edpm_compute_repos'
   with_sequence: start=0 end={{ compute_config.amount - 1 }}
