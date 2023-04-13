@@ -1,0 +1,89 @@
+---
+- name: Generate a unique name for the tempest run
+  set_fact:
+    tempest_name: "ansibleee-tempest-run-{{ query('community.general.random_string', upper=false, numbers=false, special=false)[0] }}"
+
+- name: Claim persistence storage to keep results
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    definition:
+      kind: PersistentVolumeClaim
+      apiVersion: v1
+      metadata:
+        name: tempest-results
+        namespace: "{{ osp_namespace }}"
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+            requests:
+                storage: 10G
+        storageClassName: local-storage
+
+- name: Create openshift manifest for the tempest run
+  template:
+    src: tempest_manifest.yaml.j2
+    dest: tempest_manifest.yaml
+
+- name: Apply the tempest manifest
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    src: tempest_manifest.yaml
+
+- name: Wait till the tempest job is done
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config }}"
+    kind: Pod
+    namespace: "{{ osp_namespace }}"
+    label_selectors:
+      - job-name == {{ tempest_name }}
+  register: job_status
+  until: job_status.resources[0].status.phase == "Succeeded"
+  retries: 900
+  delay: 10
+
+- name: Create dummy pod and map persistence storage
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    wait: yes
+    definition:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: dummy-pod
+        namespace: "{{ osp_namespace }}"
+      spec:
+        containers:
+        - name: tmp
+          command:
+          - tail
+          - -f
+          - /dev/null
+          image: registry.access.redhat.com/ubi9
+          volumeMounts:
+          - mountPath: /tempest
+            name: volume
+        volumes:
+        - name: volume
+          persistentVolumeClaim:
+            claimName: tempest-results
+
+- name: Fetch tempest results from dummy pod
+  kubernetes.core.k8s_cp:
+    kubeconfig: "{{ kube_config }}"
+    namespace: "{{ osp_namespace }}"
+    pod: dummy-pod
+    state: from_pod
+    remote_path: /tempest/logs
+    local_path: "{{ save_logs_path }}"
+
+- name: Delete dummy pod
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: absent
+    kind: Pod
+    name: dummy-pod
+    namespace: "{{ osp_namespace }}"

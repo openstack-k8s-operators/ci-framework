@@ -1,0 +1,22 @@
+---
+- name: Get clouds.yaml configuration
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config }}"
+    kind: ConfigMap
+    namespace: "{{ osp_namespace }}"
+    name: openstack-config
+  register: clouds_yaml
+
+- name: Get the OSP admin password
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config }}"
+    kind: Secret
+    namespace: "{{ osp_namespace }}"
+    name: "{{ keystone.resources[0].spec.secret }}"
+  register: osp_secret
+
+- name: Set parameters
+  ansible.builtin.set_fact:
+    clouds_yaml_file: "{{ clouds_yaml.resources[0].data.get('clouds.yaml') | from_yaml }}"
+    cloud_name: "{{ clouds_yaml.resources[0].data.get('OS_CLOUD') }}"
+    osp_admin_password:  "{{ osp_secret.resources[0].data.get('AdminPassword')  | b64decode }}"

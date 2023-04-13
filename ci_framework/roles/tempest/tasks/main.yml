@@ -1,0 +1,71 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+  - name: Run the tempest tests
+    hosts: localhost
+    connection: local
+    vars:
+      osp_namespace: 'openstack'
+      public_network_cidr: '192.168.101.0/24'
+      public_network_dns: '1.1.1.1'
+      public_network_name: 'public'
+    tasks:
+      - name: Check if the OSP has the minimum required configuration
+        block:
+        - name: Ensure the cluster has KeystoneAPI
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ kube_config }}"
+            kind: KeystoneAPI
+            api_version: "keystone.openstack.org/v1beta1"
+            namespace: "{{ osp_namespace }}"
+          register: keystone
+          failed_when: (keystone.resources | length) == 0
+
+        - name: Ensure the cluster has Ansibleee-operator
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ kube_config }}"
+            kind: Subscription
+            name: ansibleee-operator
+            api_version: "operators.coreos.com/v1alpha1"
+            namespace: "{{ osp_namespace }}"
+          register: ansibleee
+
+        - name: Ensure the cluster has NeutronAPI
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ kube_config }}"
+            kind: NeutronAPI
+            api_version: "neutron.openstack.org/v1beta1"
+            namespace: "{{ osp_namespace }}"
+          register: neutron
+
+        - name: Deploy AnsibleEE if it's not available
+          ansible.builtin.include_tasks: ansibleee.yml
+          when: (ansibleee.resources | length) == 0
+
+      - name: Discovery parameters
+        ansible.builtin.include_tasks: discovery_parameters.yml
+
+      - name: Create clouds.yaml
+        ansible.builtin.include_tasks: create_clouds.yml
+
+      - name: Prepare Openstack network
+        ansible.builtin.include_tasks: prepare_cloud.yml
+        when:
+        - neutron.api_found == True
+        - (neutron.resources | length) > 0
+
+      - name: Run tempest
+        ansible.builtin.include_tasks: tempest.yml

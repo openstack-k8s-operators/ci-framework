@@ -1,0 +1,32 @@
+---
+- name: Grab Openstack networks information
+  openstack.cloud.networks_info:
+    cloud: "{{ cloud_name }}"
+    filters:
+      router:external: true
+  register: osp_net_info
+
+- name: Create a dummy public network if there isn't
+  block:
+  - name: Create public network
+    openstack.cloud.network:
+      cloud: "{{ cloud_name }}"
+      state: present
+      name: "{{ public_network_name }}"
+      external: true
+    register: dummy_network
+
+  - name: Create public subnet
+    openstack.cloud.subnet:
+      cloud: "{{ cloud_name }}"
+      state: present
+      network_name: "{{ public_network_name }}"
+      name: "{{ public_network_name + '_subnet' }}"
+      cidr: "{{ public_network_cidr }}"
+      dns_nameservers:
+        - "{{ public_network_dns }}"
+  when: (osp_net_info.networks | length) == 0
+
+- name: Set facts
+  ansible.builtin.set_fact:
+    public_network_id: "{{ ((osp_net_info.networks | length) == 0) | ternary(dummy_network.network.id, osp_net_info.networks[0].id) }}"

@@ -1,0 +1,22 @@
+---
+- name: Add password to the clouds.yaml
+  ansible.builtin.set_fact:
+    clouds_yaml_file: "{{ clouds_yaml_file | combine({'clouds': {cloud_name: {'auth': {'password': osp_admin_password}}}}, recursive=True) }}"
+
+- name: Save clouds.yaml as a file
+  copy:
+    content: "{{ clouds_yaml_file | to_nice_yaml }}"
+    dest: "./clouds.yaml"
+
+- name: Create clouds.yaml ConfigMap
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: openstack-clouds-config-map
+        namespace: "{{ osp_namespace }}"
+      data:
+        clouds.yaml: "{{ clouds_yaml_file | to_nice_yaml }}"

@@ -1,0 +1,84 @@
+apiVersion: ansibleee.openstack.org/v1alpha1
+kind: OpenStackAnsibleEE
+metadata:
+  name: {{ tempest_name }}
+  namespace: {{ osp_namespace }}
+spec:
+  # We can specify either playbook, which will run with default ansible-runner options,
+  # or args, which allows specify the whole command that we want to execute
+  play: |
+    - hosts: localhost
+      connection: local
+      vars:
+        tempest_run: 'yes'
+        tempest_cloud_name: {{ cloud_name }}
+        tempest_cleanup: yes
+        tempest_cleanup_dry_run: no
+
+        tempest_default_role_resources: false
+        tempest_public_net_create: false
+        tempest_private_net_create: false
+        tempest_router_create: false
+        tempest_images_create: true
+        tempest_flavors_create: true
+
+        tempest_use_tempestconf: true
+        tempest_default_role_resources: False
+        tempest_neutron_public_network_id: {{ public_network_id | default('0000-0000-0000-0000') }}
+
+        tempest_install_method: 'distro'
+        tempest_run_stackviz: false
+
+        tempest_log_dir: "/runner/env/logs"
+        tempest_image_dir: "/runner/env/images"
+        tempest_workspace: "/runner/env/workspace"
+        tempest_test_includelist:
+{% for include_test in tempest_includelist.split(',') %}
+        - {{ include_test }}
+{% endfor %}
+{% if tempest_excludelist != '' %}
+        tempest_test_excludelist:
+{% for exclude_test in tempest_excludelist.split(',') %}
+        - {{ exclude_test }}
+{% endfor %}
+{% endif %}
+      tasks:
+        - name: Run tempest
+          import_role:
+            name: os_tempest
+
+        - name: Copy all results to persistent storage
+          copy:
+            src: /runner/env/logs
+            dest: /runner/results
+            backup: true
+            remote_src: yes
+
+  image: "quay.io/rhn_support_sbekkerm/ansibleee-tempest:latest"
+  inventory: |
+    hosts:
+      localhost:
+        ansible_host: 127.0.0.1
+  env:
+    - name: ANSIBLE_SKIP_TAGS
+      value: "tempest-install"
+    - name: ANSIBLE_FORCE_COLOR
+      value: "True"
+    - name: ANSIBLE_SSH_ARGS
+      value: "-C -o ControlMaster=auto -o ControlPersist=80s"
+    - name: ANSIBLE_ENABLE_TASK_DEBUGGER
+      value: "False"
+
+  extraMounts:
+    - volumes:
+        - name: openstack-clouds-config-yaml
+          configMap:
+            name: openstack-clouds-config-map
+        - name: openstack-results
+          persistentVolumeClaim:
+            claimName: tempest-results
+      mounts:
+        - name: openstack-clouds-config-yaml
+          mountPath: /etc/openstack
+        - name: openstack-results
+          mountPath: /runner/results

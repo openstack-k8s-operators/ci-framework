@@ -1,0 +1,51 @@
+---
+- name: Apply OperatorGroup manifest
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    wait: yes
+    definition:
+      apiVersion: operators.coreos.com/v1
+      kind: OperatorGroup
+      metadata:
+        name: openstack
+        namespace: "{{ osp_namespace }}"
+      spec:
+        targetNamespaces:
+        - "{{ osp_namespace }}"
+
+- name: Apply CatalogSource manifest
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    wait: yes
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: CatalogSource
+      metadata:
+        name: ansibleee-operator-index
+        namespace: "{{ osp_namespace }}"
+      spec:
+        image: quay.io/openstack-k8s-operators/openstack-ansibleee-operator-index:latest
+        sourceType: grpc
+
+- name: Apply Subscription manifest
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kube_config }}"
+    state: present
+    wait: yes
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: ansibleee-operator
+        namespace: "{{ osp_namespace }}"
+      spec:
+        name: ansibleee-operator
+        channel: alpha
+        config:
+          env:
+          - name: WATCH_NAMESPACE
+            value: openstack
+        source: ansibleee-operator-index
+        sourceNamespace: "{{ osp_namespace }}"
