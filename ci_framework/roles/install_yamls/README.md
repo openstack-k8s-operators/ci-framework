@@ -17,4 +17,3 @@ It generate the task files under install_yamls role directory.
 * cifmw_install_yamls_out_dir: Install_yamls output directory to store generated output. Defaults to "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework') }}/artifacts"
 * cifmw_install_yamls_vars: A dict containing Makefile overrides.
 * cifmw_install_yamls_repo: Install_yamls repo path. Defaults to  "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
-* cifmw_install_yamls_dryrun: Dry run of install_yaml role. Defaults "True"

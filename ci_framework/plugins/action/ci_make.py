@@ -45,6 +45,21 @@ class OutputException(Exception):
 
 
 class ActionModule(ActionBase):
+    def extract_env(self, task_vars):
+        env_content = task_vars['environment']
+        exports = []
+        if 'environment' not in task_vars:
+            return exports
+
+        for env in env_content:
+            if isinstance(env, str):
+                key = env.replace('{{', '').replace('}}', '').strip()
+                if key in task_vars:
+                    exports.extend(['export ' + k + '=' + v for k, v in task_vars[key].items()])
+            elif isinstance(env, dict):
+                exports.extend(['export ' + k + '=' + v for k, v in env.items()])
+        return exports
+
     def run(self, tmp=None, task_vars=None):
         super(ActionModule, self).run(tmp, task_vars)
         module_args = self._task.args.copy()
@@ -114,9 +129,7 @@ class ActionModule(ActionBase):
             scriptable = False
 
         # Write the reproducer script
-        exports = []
-        if 'environment' in task_vars:
-            exports = ['export ' + k + '=' + v for env in task_vars['environment'] for k, v in env.items()]
+        exports = self.extract_env(task_vars)
         with open(os.path.join(output_dir, fname), 'w') as fh:
             if scriptable:
                 data = {'chdir': module_args['chdir'],
