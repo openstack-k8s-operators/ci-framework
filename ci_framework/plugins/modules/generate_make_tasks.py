@@ -59,12 +59,24 @@ import os
 
 
 MAKE_TMPL = '''---
+- name: Set environment fact
+  ansible.builtin.set_fact:
+    make_%(target)s_environment: "{{ edpm_env | combine(make_%(target)s_env|default({})) }}"
+    cacheable: true
+- name: Debug make_%(target)s_environment
+  ansible.builtin.debug:
+    var: make_%(target)s_environment
+- name: Debug make_%(target)s_params
+  when: make_%(target)s_params is defined
+  ansible.builtin.debug:
+    var: make_%(target)s_params
 - name: Run `make %(target)s`
   ci_make:
-    output_directory: "{{ cifmw_install_yamls_basedir }}/artifacts"
+    output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}/artifacts"
     chdir: "%(chdir)s"
     target: %(target)s
-    dry_run: "{{ cifmw_install_yamls_dryrun|bool }}"
+    dry_run: "{{ make_%(target)s_dryrun|default(false)|bool }}"
+    params: "{{ make_%(target)s_params|default(omit) }}"
   environment: "{{ edpm_env }}"
 '''
 
