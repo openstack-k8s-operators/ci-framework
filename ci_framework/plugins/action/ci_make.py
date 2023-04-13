@@ -55,9 +55,9 @@ class ActionModule(ActionBase):
             if isinstance(env, str):
                 key = env.replace('{{', '').replace('}}', '').strip()
                 if key in task_vars:
-                    exports.extend(['export ' + k + '=' + v for k, v in task_vars[key].items()])
+                    exports.extend([f'export {k}={v}' for k, v in task_vars[key].items()])
             elif isinstance(env, dict):
-                exports.extend(['export ' + k + '=' + v for k, v in env.items()])
+                exports.extend([f'export {k}={v}' for k, v in env.items()])
         return exports
 
     def run(self, tmp=None, task_vars=None):
