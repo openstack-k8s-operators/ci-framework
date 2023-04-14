@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create a temporary file
+  tempfile:
+    state: file
+  register: tempfile
+
+- name: Remove the file at temporary file path.
+  file:
+    path: "{{ tempfile.path }}"
+    state: absent
+
+- name: Fetch publication page
+  get_url:
+    url: "{{ cifmw_discover_latest_image_base_url }}?C=M;O=A"
+    dest: "{{ tempfile.path }}"
+
+- name: Find qcow2 url
+  shell: |
+    sed -n "/qcow2/ s/.*href=\"\({{ cifmw_discover_latest_image_qcow_prefix }}.*.qcow2\)\">.*/\1/p" {{ tempfile.path }} | tail -1
+  register: get_qcow_image_name
+
+- name: Remove the file at temporary file path.
+  file:
+    path: "{{ tempfile.path }}"
+    state: absent
+
+- name: Fetch SHA256SUM file
+  get_url:
+    url: "{{ cifmw_discover_latest_image_base_url }}/{{ get_qcow_image_name.stdout }}.SHA256SUM"
+    dest: "{{ tempfile.path }}"
+
+- name: Find SHA256SUM value
+  command: "awk -F ' = ' '/SHA256/ {print $2}' {{ tempfile.path }}"
+  register: get_sha256_value
+
+- name: Remove the file at temporary file path.
+  file:
+    path: "{{ tempfile.path }}"
+    state: absent
+
+- name: "Set expected facts Image: {{ cifmw_discover_latest_image_base_url }}{{ get_qcow_image_name.stdout }} sha256sum: {{ get_sha256_value.stdout }} "
+  set_fact:
+    cifmw_discovered_image_name: "{{ get_qcow_image_name.stdout }}"
+    cifmw_discovered_image_url: "{{ cifmw_discover_latest_image_base_url }}{{ get_qcow_image_name.stdout }}"
+    cifmw_discovered_sha256: "{{ get_sha256_value.stdout }}"
+    cacheable: true
