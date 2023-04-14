@@ -70,7 +70,7 @@ MAKE_TMPL = '''---
   when: make_%(target)s_params is defined
   ansible.builtin.debug:
     var: make_%(target)s_params
-- name: Run `make %(target)s`
+- name: Run %(target)s
   ci_make:
     output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}/artifacts"
     chdir: "%(chdir)s"
