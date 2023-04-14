@@ -15,6 +15,7 @@ you want to build meta-operator too, so the role can properly replace api refere
 * `cifmw_operator_build_meta_name`: (String) Meta operator's name. Defaults to **openstack-operator**.
 * `cifmw_operator_build_meta_src`: (String) Directory with src code for meta operator. Defaults to **"{{ ansible_user_dir }}/src/github.com/{{ cifmw_operator_build_org }}/{{ cifmw_operator_build_meta_name }}"**
 * `cifmw_operator_build_meta_build`: (Boolean) When set to **true** updates meta-operator's go.mod when build operators and builds meta-operator in the end. Default to **true**.
+* `cifmw_operator_build_meta_image_base`: (String) Name of the service added to be added to meta-operator build. Still limited to a sindle service (and operator). Default to **""**
 
 ## TODO
 * Include PR Owner and PR SHA for meta-operator
