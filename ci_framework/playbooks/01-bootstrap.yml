@@ -1,0 +1,23 @@
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  roles:
+    - name: ci_setup
+    - name: discover_latest_image
+  tasks:
+    - name: get customized parameters
+      ansible.builtin.set_fact:
+        ci_framework_params: >-
+          {{ hostvars[inventory_hostname] | dict2items | selectattr("key", "match", "^cifmw_")|list|items2dict }}
+
+    - name: Create artifacts with custom params
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}/artifacts/custom-params.yml"
+        content: "{{ ci_framework_params | to_nice_yaml }}"
+
+    - name: Run repo_setup
+      ansible.builtin.include_role:
+        name: repo_setup
+
+    - name: Prepare install_yamls make targets
+      ansible.builtin.include_role:
+        name: install_yamls

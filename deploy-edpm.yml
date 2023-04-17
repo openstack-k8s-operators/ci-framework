@@ -6,81 +6,20 @@
 # openstack-k8s-operators/install_yaml repository in order to leverage its
 # own methods.
 
-- hosts: "{{ cifmw_target_host | default('localhost') }}"
-  gather_facts: true
-  roles:
-    - name: ci_setup
-    - name: discover_latest_image
-  tasks:
-    - name: get customized parameters
-      ansible.builtin.set_fact:
-        ci_framework_params: >-
-          {{ hostvars[inventory_hostname] | dict2items | selectattr("key", "match", "^cifmw_")|list|items2dict }}
-
-    - name: Create artifacts with custom params
-      ansible.builtin.copy:
-        dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}/artifacts/custom-params.yml"
-        content: "{{ ci_framework_params | to_nice_yaml }}"
-
-    - name: Run repo_setup
-      ansible.builtin.include_role:
-        name: repo_setup
-
-    - name: Prepare install_yamls make targets
-      ansible.builtin.include_role:
-        name: install_yamls
-
-- name: Run pre_infra hooks
-  vars:
-    hooks: "{{ pre_infra | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
+- name: Bootstrap step
+  ansible.builtin.import_playbook: ci_framework/playbooks/01-bootstrap.yml
 
 - name: Import infra entrypoint playbook
-  ansible.builtin.import_playbook: ci_framework/playbooks/infra-entry.yml
-
-- name: Run post_infra hooks
-  vars:
-    hooks: "{{ post_infra | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
-
-- name: Run pre_package_build hooks
-  vars:
-    hooks: "{{ pre_package_build | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
+  ansible.builtin.import_playbook: ci_framework/playbooks/02-infra.yml
 
 - name: Import package build playbook
-  ansible.builtin.import_playbook: ci_framework/playbooks/build-packages.yml
-
-- name: Run post_package_build hooks
-  vars:
-    hooks: "{{ post_package_build | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
-
-- name: Run pre_container_build hooks
-  vars:
-    hooks: "{{ pre_container_build | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
+  ansible.builtin.import_playbook: ci_framework/playbooks/03-build-packages.yml
 
 - name: Import package build playbook
-  ansible.builtin.import_playbook: ci_framework/playbooks/build-containers.yml
-
-- name: Run post_container_build hooks
-  vars:
-    hooks: "{{ post_container_build | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
-
-- name: Run pre_deploy hooks
-  vars:
-    hooks: "{{ pre_deploy | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
+  ansible.builtin.import_playbook: ci_framework/playbooks/04-build-containers.yml
 
 - name: Import package build playbook
-  ansible.builtin.import_playbook: ci_framework/playbooks/deploy-edpm.yml
-
-- name: Run post_deploy hooks
-  vars:
-    hooks: "{{ post_deploy | default([]) }}"
-  ansible.builtin.import_playbook: ci_framework/playbooks/hooks.yml
+  ansible.builtin.import_playbook: ci_framework/playbooks/06-deploy-edpm.yml
 
 - name: Run log related tasks
-  ansible.builtin.import_playbook: ci_framework/playbooks/logs.yml
+  ansible.builtin.import_playbook: ci_framework/playbooks/99-logs.yml
