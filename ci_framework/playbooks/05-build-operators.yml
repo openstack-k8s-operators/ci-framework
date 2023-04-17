@@ -1,0 +1,23 @@
+- name: Run pre_operator_build hooks
+  vars:
+    hooks: "{{ pre_operator_build | default([]) }}"
+  ansible.builtin.import_playbook: ./hooks.yml
+
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: CRC registry login
+      when:
+        - cifmw_use_crc is defined
+        - cifmw_use_crc | bool
+      ansible.builtin.shell: |
+        oc registry login --insecure=true
+
+    - name: Build operator and meta-operator
+      ansible.builtin.include_role:
+        name: operator_build
+
+- name: Run post_operator_build hooks
+  vars:
+    hooks: "{{ post_operator_build | default([]) }}"
+  ansible.builtin.import_playbook: ./hooks.yml

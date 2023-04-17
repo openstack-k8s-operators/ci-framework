@@ -58,6 +58,6 @@ you want to build meta-operator too, so the role can properly replace api refere
           - name: "mariadb-operator"
             src: "/home/user/mariadb-operator"
             pr_owner:
-          - name: "mariadb-operator"
-            src: "/home/user/mariadb-operator"
+          - name: "keystone-operator"
+            src: "/home/user/keystone-operator"
   ```
