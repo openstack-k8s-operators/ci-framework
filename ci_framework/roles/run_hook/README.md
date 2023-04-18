@@ -13,20 +13,18 @@ play has a great chance of failure.
 ### Hooks expected format
 #### Playbook
 In such a case, the following data can be provided to the hook:
-* `type`: Type of the hook. In this case, set it to `playbook`.
-* `source`: Source of the playbook. If it's a filename, the playbook is
-expected in ci_framwork/hooks/playbooks. It can be an absolute path.
+* `config_file`: Ansible configuration file. Defaults to `ansible_config_file`.
+* `connection`: Refer to the `--connection` option for `ansible-playbook`. Defaults to `local`.
+* `creates`: Refer to the `ansible.builtin.command` "creates" parameter. Defaults to `omit`.
+* `inventory`: Refer to the `--inventory` option for `ansible-playbook`. Defaults to `localhost,`.
 * `name`: Describe the hook.
-* `inventory`: Refer to the `--inventory` option for `ansible-playbook`.
-Defaults to `localhost,`.
-* `connection`: Refer to the `--connection` option for `ansible-playbook`.
-Defaults to `local`.
+* `source`: Source of the playbook. If it's a filename, the playbook is expected in ci_framwork/hooks/playbooks. It can be an absolute path.
+* `type`: Type of the hook. In this case, set it to `playbook`.
 
 #### CRD
 In such a case, the following data can be provided to the hook:
 * `type`: Type of the hook. In this case, set it to `crd`.
-* `source`: Source of the CRD. If it's a filename, the CRD is expected in
-ci_framwork/hooks/crds. It can be an absolute path.
+* `source`: Source of the CRD. If it's a filename, the CRD is expected in ci_framwork/hooks/crds. It can be an absolute path.
 * `host`: Cluster API endpoint. Defaults to `https://api.crc.testing:6443`.
 * `username`: Username for authentication against the cluster. Defaults to `kubeadmin`.
 * `password`: Password for authentication against the cluster. Defaults to `12345678`.
