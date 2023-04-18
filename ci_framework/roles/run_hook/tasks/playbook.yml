@@ -12,18 +12,23 @@
 # even less from a task. So the way to run a playbook from within a playbook
 # is to call a command. Though we may lose some of the data passed to the
 # "main" play.
-- name: "Run {{ playbook_path }} playbook"
-  register: play_output
-  ansible.builtin.command:
-    cmd: >-
-      ansible-playbook -i {{ hook.inventory | default('localhost,') }}
-      -c {{ hook.connection | default('local') }}
-      {{ playbook_path }}
+- name: Ensure we get the logs even in case of failure
+  block:
+    - name: "Run {{ playbook_path }} playbook"
+      register: play_output
+      environment:
+        ANSIBLE_CONFIG: "{{ hook.config_file | default(ansible_config_file) }}"
+      ansible.builtin.command:
+        cmd: >-
+          ansible-playbook -i {{ hook.inventory | default('localhost,') }}
+          -c {{ hook.connection | default('local') }}
+          {{ playbook_path }}
+        create: "{{ hook.creates | default(omit) }}"
+  always:
+    - name: Output play stderr
+      ansible.builtin.debug:
+        var: play_output.stderr_lines
 
-- name: Output play stderr
-  ansible.builtin.debug:
-    var: play_output.stderr
-
-- name: Output play stdout
-  ansible.builtin.debug:
-    var: play_output.stdout
+    - name: Output play stdout
+      ansible.builtin.debug:
+        var: play_output.stdout_lines
