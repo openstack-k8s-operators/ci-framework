@@ -24,18 +24,34 @@
     path: "{{ cifmw_operator_build_basedir }}/logs"
     state: directory
 
+- name: Set meta-operator info
+  when:
+    - cifmw_operator_build_meta_build is true
+  block:
+    - name: Set meta-operator info
+      ansible.builtin.set_fact:
+        meta_operator:
+          - name: "{{ cifmw_operator_build_meta_name }}"
+            src: "{{ cifmw_operator_build_meta_src }}"
+            base_image: "{{ cifmw_operator_build_meta_image_base | default('') }}"
+
+    - name: Meta-operator - Clone operator's code when needed
+      vars:
+        operator: "{{ item }}"
+      ansible.builtin.include_tasks: clone.yml
+      loop: "{{ meta_operator }}"
+
+- name: Clone operator's code when needed
+  vars:
+    operator: "{{ item }}"
+  ansible.builtin.include_tasks: clone.yml
+  loop: "{{ cifmw_operator_build_operators }}"
+
 - name: Building operators list
   vars:
     operator: "{{ item }}"
   ansible.builtin.include_tasks: build.yml
   loop: "{{ cifmw_operator_build_operators }}"
-
-- name: Set meta-operator info
-  ansible.builtin.set_fact:
-    meta_operator:
-      - name: "{{ cifmw_operator_build_meta_name }}"
-        src: "{{ cifmw_operator_build_meta_src }}"
-        base_image: "{{ cifmw_operator_build_meta_image_base | default('') }}"
 
 - name: Building meta operator
   when:
