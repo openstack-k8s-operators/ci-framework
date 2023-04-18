@@ -98,7 +98,7 @@ class ActionModule(ActionBase):
         # Replace non-ASCII and spaces in ansible task name, and lower the
         # string
         t_name = re.sub(r'([^\x00-\x7F]|\s)+', '_', self._task._name).lower()
-        fname = 'ci_make_%i_%s.sh' % (fnum, t_name)
+        fname = f'ci_make_{fnum:03}_{t_name}.sh'
 
         # Run module only if all conditions are here for file creation
         if not dry_run:
@@ -106,7 +106,7 @@ class ActionModule(ActionBase):
                                          module_args=module_args,
                                          task_vars=task_vars, tmp=tmp)
             # Log in plain file
-            log_name = 'ci_make_%i_%s.log' % (fnum, t_name)
+            log_name = f'ci_make_{fnum:03}_{t_name}.log'
             f_log = os.path.join(log_dir, log_name)
             with open(f_log, 'w') as fh:
                 fh.write('### STDOUT\n')
