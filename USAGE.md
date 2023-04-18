@@ -25,6 +25,7 @@ are shared among multiple roles:
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
 `~/ci-framework`
 * `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
+* `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`
 * `cifmw_use_libvirt`: (Bool) toggle libvirt support
 * `cifmw_use_crc`: (Bool) toggle rhol/crc usage
 
