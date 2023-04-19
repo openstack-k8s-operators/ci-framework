@@ -1,0 +1,25 @@
+set +e
+
+cd {{ cifmw_bop_build_repo_dir }}/DLRN
+source {{ cifmw_bop_build_repo_dir }}/dlrn-venv/bin/activate;
+export PKG={{ project_name_mapped.stdout }}
+{% if ansible_distribution|lower  == "redhat" %}
+export REQUESTS_CA_BUNDLE=/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt
+{% endif %}
+
+while true; do
+    dlrn --config-file projects.ini --head-only --package-name $PKG --local \
+        --info-repo {{ cifmw_bop_rdoinfo_repo_name }} --dev;
+    if [ $? -eq 0 ]; then
+        # SUCCESS
+        break;
+    elif [ $? -eq 1 ]; then
+        # FAILED
+        exit 1;
+    elif [ $? -eq 2 ]; then
+        # RETRY
+        continue;
+    fi;
+    # Unexpected DLRN return code
+    exit $?;
+done;

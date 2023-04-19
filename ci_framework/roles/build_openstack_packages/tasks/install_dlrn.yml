@@ -1,0 +1,171 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install epel-release repo
+  become: true
+  ansible.builtin.package:
+    state: present
+    name: epel-release
+  when: ansible_distribution | lower == 'centos'
+
+- name: Install mock
+  become: true
+  ansible.builtin.package:
+    state: present
+    name: mock
+
+- name: Remove epel-repos
+  become: true
+  ansible.builtin.shell: |
+    sudo rm -rf /etc/yum.repos.d/epel*;
+    sudo rpm -e epel-release || true;
+
+- name: Ensure DLRN package dependencies
+  become: true
+  ansible.builtin.package:
+    state: present
+    name: "{{ cifmw_bop_dlrn_deps }}"
+  register: package_ensure_dlrndeps
+  until: package_ensure_dlrndeps is success
+  retries: 3
+  delay: 5
+
+- name: Create mock group
+  become: true
+  ansible.builtin.group:
+    name: mock
+    state: present
+
+- name: Add user to mock group
+  become: true
+  ansible.builtin.user:
+    name: '{{ ansible_user_id }}'
+    groups: mock
+    append: true
+
+- name: Ensure DLRN dir is present
+  ansible.builtin.file:
+    path: '{{ cifmw_bop_build_repo_dir }}/DLRN/'
+    state: directory
+
+- name: Remove data files from previous runs
+  ansible.builtin.shell:
+    rm -rf '{{ cifmw_bop_build_repo_dir }}/DLRN/*'
+  register: result
+  changed_when: result.stdout or result.stderr
+
+- name: Create dlrn-venv
+  ansible.builtin.pip:
+    name: pip
+    virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
+    virtualenv_command: "/usr/bin/python3 -m venv"
+    state: latest
+    extra_args: --upgrade
+
+- name: Install DLRN from source
+  when: cifmw_bop_dlrn_from_source|bool
+  block:
+
+    - name: Fetch DLRN from source
+      ansible.builtin.git:
+        repo: '{{ cifmw_bop_dlrn_repo_url }}'
+        dest: '{{ cifmw_bop_build_repo_dir }}/DLRN'
+        version: 'master'
+      register: _git_clone
+      until: _git_clone is success
+      retries: 3
+      delay: 5
+
+    - name: Install DLRN
+      ansible.builtin.shell: >
+        source {{ cifmw_bop_build_repo_dir }}/dlrn-venv/bin/activate;
+        pip install -r requirements.txt;
+        python3 setup.py install;
+      args:
+        chdir: '{{ cifmw_bop_build_repo_dir }}/DLRN'
+
+- name: Install DLRN from pip
+  when: not cifmw_bop_dlrn_from_source|bool
+  block:
+    - name: Pip install rdopkg
+      ansible.builtin.pip:
+        name: rdopkg
+        virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
+        virtualenv_command: "/usr/bin/python3 -m venv"
+        state: latest
+
+    - name: Pip install DLRN
+      ansible.builtin.pip:
+        name: dlrn
+        virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
+        virtualenv_command: "/usr/bin/python3 -m venv"
+        state: latest
+
+- name: Drop in the templated version of projects.ini
+  template:
+    src: projects.ini.j2
+    dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/projects.ini'
+
+- name: copy the DLRN scripts in the virtualenv to the scripts dir
+  ansible.posix.synchronize:
+    src: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv/share/dlrn/scripts"
+    dest: "{{ cifmw_bop_build_repo_dir }}/DLRN"
+  delegate_to: "{{ inventory_hostname }}"
+
+- name: Fetch local rdoinfo copy
+  ansible.builtin.git:
+    repo: '{{ cifmw_bop_rdoinfo_repo_url }}'
+    dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/{{ cifmw_bop_rdoinfo_repo_name }}'
+    version: 'master'
+  register: _git_clone
+  until: _git_clone is success
+  retries: 3
+  delay: 5
+
+- name: Remove ssh reference from dist-git url
+  ansible.builtin.shell: >
+    sed -i -e "s|osp-distgit: git+ssh|osp-distgit: git|g" packages.yml
+  args:
+    chdir: "{{ bcifmw_bop_uild_repo_dir }}/DLRN/{{ cifmw_bop_rdoinfo_repo_name }}"
+  when: ansible_distribution in ['RedHat']
+
+- name: Append repos in dlrn targets
+  ansible.builtin.shell: >
+    set -o pipefail ;
+    gawk '{ print $0 }; /^# repos$/ { exit }' {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}.cfg
+    > {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+    cat {{ cifmw_bop_yum_repos_dir }}/repo-setup-*.repo >> {{cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+    find {{ cifmw_bop_yum_repos_dir }} -name "delorean*repo" ! -name "delorean*build-deps.repo" -exec cat {} \; -exec echo ""  \;
+    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+    find {{ cifmw_bop_yum_repos_dir }} -name "CentOS-Stream-*repo" -not -name "CentOS-Stream*Extras-common*repo" -exec cat {} \; -exec echo ""  \;
+    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+    find {{ cifmw_bop_yum_repos_dir }} -name "delorean*build-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
+    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+    {% if ansible_distribution in ["RedHat"] and osp_release is defined %}
+    find /etc/yum.repos.d -name "osptrunk-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
+    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+    {% endif %}
+    echo '"""' >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+
+- name: Check loop devices stat
+  ansible.builtin.stat:
+    path: "/dev/loop{{ item }}"
+  register: stat_loop_devices
+  with_sequence: start=0 end=11
+
+- name: Set loop_devices_absent fact
+  ansible.builtin.set_fact:
+    loop_devices_absent: "{{ stat_loop_devices.results|selectattr('stat.exists','equalto',false)|map(attribute='item')|list }}"
