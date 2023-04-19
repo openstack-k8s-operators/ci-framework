@@ -1,0 +1,115 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set RDO release for master openstack release
+  when: cifmw_bop_openstack_release in ['master']
+  ansible.builtin.set_fact:
+    cifmw_bop_rdo_release: "rpm-{{ cifmw_bop_openstack_release }}"
+
+- name: Set RDO release for non-master openstack release
+  when: cifmw_bop_openstack_release not in ['master']
+  ansible.builtin.set_fact:
+    cifmw_bop_rdo_release: "{{ cifmw_bop_openstack_release }}-rdo"
+
+- name: Make sure /usr/share/rhn/RHN-ORG-TRUSTED-SSL-CERT exists (RHEL)
+  ansible.builtin.shell:
+    cmd: |
+      export CERTPATH="/usr/share/rhn/RHN-ORG-TRUSTED-SSL-CERT"
+      export CERTDIR=$(dirname $CERTPATH)
+      [ ! -d $CERTDIR ] && mkdir -p $CERTDIR
+      touch $CERTPATH
+  become: true
+  when: ansible_distribution in ['RedHat']
+
+- name: Override projects.ini settings
+  ansible.builtin.lineinfile:
+    dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/projects.ini'
+    regexp: '{{ item.regexp }}'
+    line: '{{ item.line }}'
+  with_items:
+    - {regexp: 'baseurl=.*', line: 'baseurl={{ cifmw_bop_dlrn_baseurl }}'}
+    - {regexp: 'distro=.*', line: 'distro={{ cifmw_bop_rdo_release }}'}
+    - {regexp: 'source=.*', line: 'source={{ cifmw_bop_openstack_release }}'}
+
+- block:
+    - name: Map project name to DLRN project name
+      register: project_name_mapped
+      ansible.builtin.shell:
+        chdir: '{{ cifmw_bop_build_repo_dir }}/DLRN'
+        cmd: |
+          source '{{ cifmw_bop_build_repo_dir }}/dlrn-venv/bin/activate'
+          set -xeo pipefail
+          # {{ cifmw_bop_rdoinfo_repo_name }}/{{ cifmw_bop_rdoinfo_repo_name.split('info')[0] }}-full.yml will
+          # return rdo-full.yml and for downstream is osp-full.yml.
+          rdopkg findpkg -s '{{ cifmw_bop_openstack_project_path | basename }}' \
+            -i {{ cifmw_bop_rdoinfo_repo_name }}/{{ cifmw_bop_rdoinfo_repo_name.split('info')[0] }}-full.yml | \
+            awk '/^name/{print $2}; {print "findpkg: " $0 > "/dev/stderr"}'
+      changed_when: false
+      failed_when: project_name_mapped.rc != 0 or not project_name_mapped.stdout
+
+  rescue:
+    - ansible.builtin.debug:
+        msg: |
+          WARNING: Got {{ project_name_mapped.rc }} result code trying to build {{ cifmw_bop_openstack_project_path | basename }}
+          --- STDERR ---
+          {{ project_name_mapped.stderr }}
+          --- STDOUT ---
+          {{ project_name_mapped.stdout }}
+
+- when: project_name_mapped is success
+  block:
+    - name: Append project name to package list
+      ansible.builtin.set_fact:
+        artg_rdo_packages: "{{ project_name_mapped.stdout }}"
+
+    - name: Create data directory if doesn't exist yet
+      ansible.builtin.file:
+        path: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/"
+        state: directory
+
+    - name: Check if project {{ project_name_mapped.stdout }} source already exist
+      ansible.builtin.stat:
+        path: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}/.git'
+      register: repo_status
+
+    - name: Clone {{ project_name_mapped.stdout }} source
+      ansible.builtin.git:
+        accept_hostkey: true
+        repo: '{{ cifmw_bop_openstack_project_path }}'
+        dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
+
+    - name: Ensure distgit repo is absent, DLRN takes care of cloning based on config
+      ansible.builtin.file:
+        path: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}_distro"
+        state: absent
+
+    - name: Generate DLRN Script
+      ansible.builtin.template:
+        src: run_dlrn.sh.j2
+        dest: "{{ cifmw_bop_build_repo_dir }}/run_dlrn.sh"
+        mode: 0744
+
+    - name: Print info about building
+      ansible.builtin.debug:
+        msg: "Building change for {{ project_name_mapped.stdout|default('unknown') }}"
+
+    - name: Run DLRN
+      ansible.builtin.shell: >
+        set -o pipefail &&
+        {{ cifmw_bop_build_repo_dir }}/run_dlrn.sh 2>&1 {{ cifmw_bop_timestamper_cmd }} >> {{ cifmw_bop_build_repo_dir }}/dlrn.log
+      args:
+        chdir: '{{ cifmw_bop_build_repo_dir }}'
+      register: repo_built
