@@ -16,32 +16,12 @@ from ansible.errors import AnsibleActionFail
 from ansible.module_utils import basic
 from ansible.utils.display import Display
 
-ERR_UPDATE_COLLECTION = '''"command" not found in community.general.make.
-Please update collection. The expected reproducer file will NOT be generated!
-'''
 TMPL_REPRODUCER = '''#!/bin/bash
 pushd %(chdir)s
 %(exports)s
 %(cmd)s
 popd
 '''
-
-
-class OutputException(Exception):
-    def __init__(self, msg, stdout=None, stderr=None):
-        super().__init__(msg)
-        self.msg = msg
-        self.stdout = stdout
-        self.stderr = stderr
-
-    def __str__(self):
-        if not os.path.exists(self.msg):
-            return "%s doesn't exist" % self.msg
-        if not os.path.isdir(self.msg):
-            return "%s isn't a directory" % self.msg
-        if not os.access(self.msg, os.W_OK):
-            return "%s isn't writable" % self.msg
-        return 'Unknown error for %s' % self.msg
 
 
 class ActionModule(ActionBase):
@@ -75,30 +55,27 @@ class ActionModule(ActionBase):
             dry_run = basic.boolean(module_args.pop('dry_run'))
 
         # Remove output_dir param from the params we'll pass down to the
-        # module
+        # module, and generate log dir path.
         output_dir = module_args.pop('output_dir')
-
         log_dir = os.path.join(output_dir, '../logs')
-
-        # Ensure we're able to write in the output_dir. If this first check
-        # fails, the actual OutputException will do some more tests to check
-        # what is actually wrong with the output_dir (missing, not a directory,
-        # or not writable)
-        if not os.access(output_dir, os.W_OK):
-            raise OutputException(output_dir)
-
-        if not os.access(log_dir, os.W_OK):
-            raise OutputException(log_dir)
 
         # Generate file using the community.general.make "command" output value
         # First get directory content and count files matching the fixed
         # pattern
-        fnum = len(glob.glob('%s/ci_make_*' % output_dir))
+        fnum = len(glob.glob(f'{output_dir}/ci_make_*'))
 
         # Replace non-ASCII and spaces in ansible task name, and lower the
         # string
         t_name = re.sub(r'([^\x00-\x7F]|\s)+', '_', self._task._name).lower()
         fname = f'ci_make_{fnum:03}_{t_name}.sh'
+
+        # Create a new task for file management (log, and reproducer script)
+        # We copy the existing task, remove all of the params, and we'll add
+        # our custom ones when needed.
+        file_task = self._task.copy()
+        for remove in ['output_dir', 'dry_run', 'make', 'target', 'chdir',
+                       'file', 'jobs', 'params']:
+            file_task.args.pop(remove, None)
 
         # Run module only if all conditions are here for file creation
         if not dry_run:
@@ -108,39 +85,62 @@ class ActionModule(ActionBase):
             # Log in plain file
             log_name = f'ci_make_{fnum:03}_{t_name}.log'
             f_log = os.path.join(log_dir, log_name)
-            with open(f_log, 'w') as fh:
-                fh.write('### STDOUT\n')
-                fh.write(m_ret['stdout'])
-                fh.write('\n### STDERR\n')
-                fh.write(m_ret['stderr'])
+            stdout = m_ret['stdout']
+            stderr = m_ret['stderr']
+            log_content = f'### STDOUT\n{stdout}\n### STDERR\n{stderr}'
+            file_task.args.update({
+                'dest': f_log,
+                'content': log_content,
+            })
+            Display().debug(f'Pushing {f_log}')
+
+            cp_log = self._shared_loader_obj.action_loader.get(
+                'ansible.builtin.copy',
+                task=file_task,
+                connection=self._connection,
+                play_context=self._play_context,
+                loader=self._loader,
+                templar=self._templar,
+                shared_loader_obj=self._shared_loader_obj
+            )
+            m_ret.update(cp_log.run(task_vars=task_vars))
         else:
             m_ret = {'command': json.dumps(module_args)}
 
-        # This isn't needed anymore, let's free some resources
-        del tmp
-
         # We can only check the "command" availability now, once the module
         # has been called, unfortunately.
-        # TODO: consider if we can remove this check later
         scriptable = True
         if 'command' not in m_ret:
-            Display().warning(ERR_UPDATE_COLLECTION)
             m_ret['command'] = json.dumps(module_args)
             scriptable = False
 
         # Write the reproducer script
         exports = self.extract_env(task_vars)
-        with open(os.path.join(output_dir, fname), 'w') as fh:
-            if scriptable:
-                data = {'chdir': module_args['chdir'],
-                        'cmd': m_ret['command'],
-                        'exports': '\n'.join(exports)}
-                fh.write(TMPL_REPRODUCER % data)
-            else:
-                fh.write(json.dumps(task_vars['environment']))
-                fh.write(m_ret['command'])
+        s_file = os.path.join(output_dir, fname)
+        copy_args = {'dest': s_file}
         if scriptable:
-            os.chmod(os.path.join(output_dir, fname), 0o755)
+            data = {
+                'chdir': module_args['chdir'],
+                'cmd': m_ret['command'],
+                'exports': '\n'.join(exports)
+            }
+            copy_args['content'] = TMPL_REPRODUCER % data
+            copy_args['mode'] = '0755'
+        else:
+            copy_args['content'] = json.dumps(task_vars['environment']) + m_ret['command']
+
+        file_task.args.update(copy_args)
+        Display().debug(f'Pushing {s_file}')
+        cp_script = self._shared_loader_obj.action_loader.get(
+            'ansible.builtin.copy',
+            task=file_task,
+            connection=self._connection,
+            play_context=self._play_context,
+            loader=self._loader,
+            templar=self._templar,
+            shared_loader_obj=self._shared_loader_obj
+        )
+        m_ret.update(cp_script.run(task_vars=task_vars))
 
         # Return original module state
         return m_ret
