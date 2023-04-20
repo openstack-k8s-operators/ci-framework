@@ -1,0 +1,57 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install Podman package
+  become: true
+  package:
+    name: podman
+    state: present
+
+- name: Deploy the local registry
+  block:
+    - name: 'Deploy the local registry from {{ cifmw_rp_registry_image }}'
+      containers.podman.podman_container:
+        name: registry
+        image: "{{ cifmw_rp_registry_image }}"
+        network: host
+        env:
+          REGISTRY_HTTP_ADDR: "{{ cifmw_rp_registry_ip }}:{{ cifmw_rp_registry_port }}"
+          REGISTRY_LOG_LEVEL: debug
+  rescue:
+    - name: "Deploy the local registry from {{ cifmw_rp_registry_image_fallback }}"
+      containers.podman.podman_container:
+        name: registry
+        image: "{{ cifmw_rp_registry_image_fallback }}"
+        network: host
+        env:
+          REGISTRY_HTTP_ADDR: "{{ cifmw_rp_registry_ip }}:{{ cifmw_rp_registry_port }}"
+          REGISTRY_LOG_LEVEL: debug
+
+# TODO(raukadah): Switch to inet in future
+- name: Open port for local registry
+  become: true
+  ansible.builtin.command: >-
+    nft insert rule ip filter INPUT tcp dport {{ cifmw_rp_registry_port }} counter accept
+  changed_when: true
+
+- name: Add the local registry to unqualified-search-registries
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/containers/registries.conf.d/myregistry.conf
+    content: |-
+      [[registry]]
+      location = "localhost:{{ cifmw_rp_registry_port }}"
+      insecure = true
