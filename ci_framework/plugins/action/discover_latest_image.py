@@ -64,13 +64,6 @@ class ActionModule(ActionBase):
 
         img_prefix = module_args.pop('image_prefix')
 
-        result = {
-            'success': False,
-            'changed': False,
-            'error': '',
-            'data': {},
-        }
-
         # Ensure we return content
         module_args['return_content'] = True
         # Ensure we run locally only
@@ -86,11 +79,8 @@ class ActionModule(ActionBase):
 
         # Start parsing
         parsed = BeautifulSoup(page['content'], 'html.parser')
-        all_links = parsed.find_all('a')
-        extracted = []
-        for link in all_links:
-            if matcher.match(link.get('href')):
-                extracted.append(link.get('href'))
+        all_links = [a_elem.get('href') for a_elem in parsed.find_all('a')]
+        extracted = [link for link in all_links if matcher.match(link)]
 
         latest_image = extracted[-1]
         base_url = module_args['url']
@@ -102,12 +92,15 @@ class ActionModule(ActionBase):
 
         extracted_sha = sha256sum['content'].split('=')[1].strip()
 
-        result['data'] = {
-            'image_name': latest_image,
-            'image_url': f'{base_url}/{latest_image}',
-            'sha256': extracted_sha,
+        result = {
+            'success': True,
+            'changed': True,
+            'error': '',
+            'data': {
+                'image_name': latest_image,
+                'image_url': f'{base_url}/{latest_image}',
+                'sha256': extracted_sha,
+            },
         }
 
-        result["success"] = True
-        result["changed"] = True
         return result
