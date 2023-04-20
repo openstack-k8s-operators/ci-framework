@@ -31,6 +31,39 @@ The INDEX is calculated based on matching `ci_make_*` pattern in that directory.
 The file can then be used as a reproducer or just debug output in order to
 understand what was actually launched using `community.ansible.make` module.
 
+## action_plugins/discover_latest_image
+Allows to discover the latest available qcow2 from a remote page. It's mainly
+wrapped in the discover_latest_image role, but you may call the action
+directly. Beware though, it will NOT export any fact! Please check the example
+bellow for more info about its proper usage.
+
+### options:
+Any of the `ansible.builtin.uri` module is supported.
+
+* `url`:
+  * description: remote URL to the page
+  * required: True
+  * type: str
+* `image_prefix`:
+  * description: Image prefix we want to filter.
+  * required: True
+  * type: str
+
+### Example:
+```YAML
+- name: Get latest CentOS 9 Stream image
+  register: discovered_image
+  discover_latest_image:
+    url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+    image_prefix: "CentOS-Stream-GenericCloud"
+
+- name: Export discovered image facts
+  ansible.builtin.set_fact:
+    cifmw_discovered_image_name: "{{ discovered_image['data']['image_name'] }}"
+    cifmw_discovered_image_url: "{{ discovered_image['data']['image_url'] }}"
+    cifmw_discovered_sha256: "{{ discovered_image['data']['sha256'] }}"
+    cacheable: true
+```
 
 ## modules/generate_make_env
 Description: Generate a structure embedding all of the environment variables
