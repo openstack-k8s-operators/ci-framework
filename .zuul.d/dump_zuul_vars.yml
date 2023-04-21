@@ -1,0 +1,19 @@
+---
+- hosts: controller
+  gather_facts: true
+  tasks:
+    - name: Slurp Zuul inventory
+      ansible.builtin.slurp:
+        path: "{{ zuul.executor.log_root }}/zuul-info/inventory.yaml"
+      register: _inventory_yaml
+      delegate_to: localhost
+
+    - name: Extract inventory
+      ansible.builtin.set_fact:
+        _zuul_vars: "{{ _inventory_yaml['content'] | b64decode | from_yaml }}"
+
+    - name: Create the Zuul inventory file
+      ansible.builtin.copy:
+        mode: 0644
+        content: '{{ _zuul_vars.all.vars | to_nice_yaml }}'
+        dest: '{{ ansible_user_dir }}/{{ zuul.project.src_dir }}/scenarios/centos-9/zuul_inventory.yml'
