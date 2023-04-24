@@ -1,0 +1,33 @@
+---
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Deploy content provider
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook -i localhost,
+          -c local ci/playbooks/content_provider/content_provider.yml
+          -e @scenarios/centos-9/base.yml
+          -e @scenarios/centos-9/content_provider.yml
+          -e @scenarios/centos-9/zuul_inventory.yml
+
+    - name: Discover an IPv4 for provider job
+      ansible.builtin.set_fact:
+        content_provider_ip: >-
+          {{ hostvars[groups.all[0]].ansible_host if hostvars[groups.all[0]].ansible_host
+          is match("[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
+          else hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+
+    - name: Return Zuul Data
+      ansible.builtin.debug:
+        msg: >-
+          Running Content provider registry on
+          {{ content_provider_ip | default('nowhere') }}
+
+    - name: Set up content registry IP address
+      zuul_return:
+        data:
+          zuul:
+            pause: true
+          content_provider_registry_ip: "{{ content_provider_ip | default('nowhere') }}"
