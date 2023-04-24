@@ -32,12 +32,17 @@ check-var-defined = $(if $(strip $($1)),,$(error "$1" is not defined))
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-.PHONY: new_role
-new_role: ## Create a new Ansible role - ROLE_NAME parameter is mandatory
+.PHONY: create_new_role
+create_new_role:
 	$(call check-var-defined,ROLE_NAME)
-	ansible-galaxy role init \
-		--role-skeleton _skeleton_role_ \
-		--init-path ci_framework/roles ${ROLE_NAME}
+	ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ci_framework/roles ${ROLE_NAME}
+
+.PHONY: role_molecule
+role_molecule:
+	bash scripts/create_role_molecule
+
+.PHONY: new_role
+new_role: create_new_role role_molecule ## Create a new Ansible role and related molecule Zuul job - ROLE_NAME parameter is mandatory
 
 ##@ Setup steps
 .PHONY: setup_tests
@@ -69,12 +74,12 @@ pre_commit: setup_tests pre_commit_nodeps ## Runs pre-commit tests with dependen
 
 .PHONY: pre_commit_nodeps
 pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
-	pushd $(BASEDIR)
-	git config --global safe.directory '*'
+	pushd $(BASEDIR); \
+	git config --global safe.directory '*'; \
 	if [ "x$(USE_VENV)" ==  'xyes' ]; then \
-		${HOME}/test-python/bin/pre-commit run --all-files ; \
+		${HOME}/test-python/bin/pre-commit run --all-files; \
 	else \
-		pre-commit run --all-files ; \
+		pre-commit run --all-files; \
 	fi
 
 ##@ Ansible-test testing

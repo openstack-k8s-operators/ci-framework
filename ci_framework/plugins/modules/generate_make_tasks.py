@@ -97,7 +97,7 @@ def main():
     result = {
         'success': False,
         'changed': False,
-        'error': '',
+        'debug': {},
     }
     install_yamls = module.params.get('install_yamls_path')
     output_directory = module.params.get('output_directory')
@@ -111,21 +111,27 @@ def main():
     targets = []
     for makefiles in ['Makefile', 'devsetup/Makefile']:
         makefile_path = os.path.join(install_yamls, makefiles)
+        result['debug'][makefile_path] = []
         if os.path.exists(makefile_path):
             makefile_chdir = os.path.dirname(makefile_path)
-            with open(makefile_path) as f:
-                targets = [line.split('.PHONY:')[1].strip() for line in f.readlines() if '.PHONY:' in line]
+            with open(makefile_path, 'r') as f:
+                targets = [line.split('.PHONY:')[1].strip() for line in f.readlines() if line.startswith('.PHONY:')]
+            result['debug'][makefile_path] = targets
 
             # Ensure we parsed some Makefiles
             if len(targets) == 0:
-                result['error'] = NO_MAKEFILE % install_yamls
-                module.fail_json(msg=result['error'])
+                error = NO_MAKEFILE % install_yamls
+                module.fail_json(msg=error, **result)
 
             # Generate playbooks
             for target in targets:
-                output = f'make_{target}.yaml'
+                output = f'make_{target}.yml'
                 with open(os.path.join(output_directory, output), 'w') as fs:
                     fs.write(MAKE_TMPL % {'target': target, 'chdir': makefile_chdir})
+
+        else:
+            error = NO_MAKEFILE % install_yamls
+            module.fail_json(msg=error, **result)
 
     result["success"] = True
     module.exit_json(**result)
