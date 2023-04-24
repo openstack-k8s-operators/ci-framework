@@ -1,0 +1,72 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ cifmw_pkg_build_basedir }}/{{ item }}"
+    state: directory
+  loop:
+    - volumes/packages/gating_repo
+    - artifacts
+
+- name: Create directories if we have any packages to build
+  when:
+    - cifmw_pkg_build_list is defined
+    - cifmw_pkg_build_list | length > 0
+  block:
+    - name: Ensure per-package build directories exist
+      ansible.builtin.file:
+        path: "{{ cifmw_pkg_build_basedir }}/volumes/packages/{{ pkg.name }}"
+        state: directory
+      loop: "{{ cifmw_pkg_build_list }}"
+      loop_control:
+        loop_var: 'pkg'
+        label: "{{ pkg.name }}"
+
+    - name: Ensure per-package log directories exist
+      ansible.builtin.file:
+        path: "{{ cifmw_pkg_build_basedir }}/logs/build_{{ pkg.name }}"
+        state: directory
+      loop: "{{ cifmw_pkg_build_list }}"
+      loop_control:
+        loop_var: 'pkg'
+        label: "{{ pkg.name }}"
+
+- name: Generate Containerfile.buildpkg
+  register: builder_container_file
+  ansible.builtin.template:
+    dest: "{{ cifmw_pkg_build_basedir }}/artifacts/Containerfile.buildpkg"
+    src: "containerfile.buildpkg.j2"
+    mode: 0644
+
+- name: Build container image
+  containers.podman.podman_image:
+    name: "{{ cifmw_pkg_build_ctx_name }}"
+    force: "{{ builder_container_file is changed }}"
+    tag: "{{ cifmw_pkg_build_ctx_tag }}"
+    push: "{{ cifmw_pkg_build_ctx_push | bool }}"
+    push_args: "{{ cifmw_pkg_build_ctx_push_args | default(omit) }}"
+    auth_file: "{{ cifmw_pkg_build_ctx_authfile | default(omit) }}"
+    state: build
+    path: "{{ role_path }}/../"
+    build:
+      file: "{{ cifmw_pkg_build_basedir }}/artifacts/Containerfile.buildpkg"
+
+- name: Generate playbooks for package build
+  ansible.builtin.template:
+    dest: "{{ cifmw_pkg_build_basedir }}/artifacts/build-packages.yml"
+    src: "pkg_build_play.j2"
+    mode: 0644

@@ -1,0 +1,36 @@
+---
+- name: Generate volume list
+  ansible.builtin.set_fact:
+    build_volumes: |
+      {% for pkg in cifmw_pkg_build_list -%}
+      - "{{ pkg.src|default(cifmw_pkg_build_pkg_basedir ~ '/' ~ pkg.name) }}:/root/src/{{ pkg.name }}:z"
+      - "{{ cifmw_pkg_build_basedir }}/volumes/packages/{{ pkg.name }}:/root/{{ pkg.name }}:z"
+      - "{{ cifmw_pkg_build_basedir }}/logs/build_{{ pkg.name }}:/root/logs:z"
+      {% endfor -%}
+      - "{{ cifmw_pkg_build_basedir }}/volumes/packages/gating_repo:/root/gating_repo:z"
+      - "{{ cifmw_pkg_build_basedir }}/artifacts/repositories:/root/yum.repos.d:z,ro"
+      - "{{ cifmw_pkg_build_basedir }}/artifacts/build-packages.yml:/root/playbook.yml:z,ro"
+
+- name: Build package using container
+  containers.podman.podman_container:
+    name: "{{ pkg.name }}-builder"
+    auto_remove: true
+    detach: false
+    privileged: true
+    log_driver: 'k8s-file'
+    log_level: 'info'
+    log_opt:
+      path: "{{ cifmw_pkg_build_basedir }}/logs/{{ pkg.name }}-builder.log"
+    image: "{{ cifmw_pkg_build_ctx_name }}"
+    volume: "{{ build_volumes | from_yaml }}"
+    security_opt:
+      - "label=disable"
+      - "seccomp=unconfined"
+      - "apparmor=unconfined"
+    env:
+      PROJECT: "{{ pkg.name }}"
+    command: "ansible-playbook -i localhost, -c local playbook.yml"
+  loop: "{{ cifmw_pkg_build_list }}"
+  loop_control:
+    label: "{{ pkg.name }}"
+    loop_var: 'pkg'
