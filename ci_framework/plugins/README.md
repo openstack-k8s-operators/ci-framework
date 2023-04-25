@@ -65,23 +65,15 @@ Any of the `ansible.builtin.uri` module is supported.
     cacheable: true
 ```
 
-## modules/generate_make_env
-Description: Generate a structure embedding all of the environment variables
-we may pass down to the Makefiles and related scripts.
+## modules/get_makefiles_env
+Description: Retrieves a dictionary with all the environment variables
+defined in the Makefiles under the given path.
 
 ### options:
-* `install_yamls_path`:
-  * description: Full path of the install_yamls makefile.
+* `base_path`:
+  * description: The base path on where to start picking Makefiles vars.
   * required: true
   * type: str
-* `install_yamls_var`:
-  * description: List of exported install_yamls variable
-  * required: true
-  * type: dict
-* `check_var`:
-  * description: Check the environment var exists in the makefile
-  * required: false
-  * type: bool
 
 ## modules/generate_make_tasks
 Description: Generate task file per Makefile target.
