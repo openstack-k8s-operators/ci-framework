@@ -33,5 +33,5 @@ None
     - name: Build package
       ansible.builtin.include_role:
         name: "pkg_build"
-        tasks_from: "build"
+        tasks_from: "build.yml"
 ```
