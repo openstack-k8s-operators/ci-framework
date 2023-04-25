@@ -66,28 +66,14 @@
         - ubi-9-baseos
         - ubi-9-codeready-builder
 
-- name: Block for tripleo-repos
-  when:
-    - (ansible_facts['os_family'] | lower) == 'redhat'
-  block:
-    - name: Fetch latest repo version
-      ansible.builtin.uri:
-        url: https://trunk.rdoproject.org/centos{{ ansible_facts['distribution_major_version'] }}/current/delorean.repo
-        return_content: true
-      register: cifmw_packages
-
-    - name: Create default repo file
-      become: true
-      ansible.builtin.copy:
-        content: "{{ cifmw_packages.content }}"
-        dest: /etc/yum.repos.d/delorean.repo
-        mode: 0644
-
-- name: Install tripleo-repos package
-  become: true
-  ansible.builtin.package:
-    name: "python*tripleo-repos"
-    state: present
+- name: Deploy repo-setup
+  vars:
+    cifmw_repo_setup_output: "/etc/yum.repos.d"
+    cifmw_repo_setup_branch: "master"
+    cifmw_repo_setup_promotion: "current-podified"
+    cifmw_repo_setup_opts: "{{ test_deps_setup_ceph | ternary('ceph', '', omit) }}"
+  ansible.builtin.include_role:
+    name: "repo_setup"
 
 - name: Tripleo setup block
   become: true
@@ -95,11 +81,6 @@
     - (ansible_facts['os_family'] | lower) == 'redhat'
     - test_deps_setup_cifmw | bool
   block:
-    - name: Create tripleo repos
-      ansible.builtin.command: tripleo-repos -d ubi9 \
-        {{ test_deps_setup_stream | ternary('--stream', '--no-stream', omit) }} \
-        -b master current-tripleo {{ test_deps_setup_ceph | ternary('ceph', '', omit) }}
-
     - name: Look for redhat-release rpm
       ansible.builtin.command: "rpm -qe redhat-release"
       register: rpm_found
