@@ -60,12 +60,8 @@ Then, just run the ```make``` command with the right parameters.
 ### Add a new Ansible role
 Run the following command to get your new role in:
 ```Bash
-$ ansible-galaxy role init \
-    --init-path ci_framework/roles \
-    --role-skeleton _skeleton_role_ \
-    YOUR_ROLE_NAME
+$ make new_role ROLENAME=wonderful_role
 ```
-
 
 ### Run tests
 #### Makefile
@@ -79,6 +75,13 @@ This playbook is the entrypoint in order to deploy EDPM on an infrastructure.
 Note that, later on, it won't allow to be launched from within the repository
 directly, but from the [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
 one (there will be some new targets in their Makefile, but we're not there yet)
+
+```Bash
+$ ansible-playbook \
+    deploy-edpm.yml \
+    -e @scenarios/centos-9/base.yml \
+    -e @scenarios/centos-9/install_yamls
+```
 
 ### cleanup-edpm.yml
 This playbook cleans everything deployed by the framework - from the deployed
