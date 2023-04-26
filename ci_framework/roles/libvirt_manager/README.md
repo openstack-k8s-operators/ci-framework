@@ -23,3 +23,4 @@ Used for checking if:
 * `cifmw_libvirt_manager_crc_pool`: CRC pool machin location. Defaults to `cifmw_crc_pool` which defaults to `~/.crc/machines/crc`.
 * `cifmw_libvirt_manager_installyamls`: install_yamls repository location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`
 * `cifmw_libvirt_manager_dryrun`: Toggle ci_make `dry_run` parameter. Defaults to `false`.
+* `cifmw_libvirt_manager_compute_amount`: State the amount of computes you want. Defaults to `1`.
