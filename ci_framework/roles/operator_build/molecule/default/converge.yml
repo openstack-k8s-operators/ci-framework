@@ -20,6 +20,8 @@
   vars:
     cifmw_operator_build_dryrun: true
     cifmw_operator_build_push_ct: false
+    cifmw_operator_build_push_registry: "anything.io"
+    cifmw_operator_build_push_org: "molecule"
   tasks:
     - name: Build keystone-operator
       include_role:
@@ -29,22 +31,20 @@
         cifmw_operator_build_operators:
           - name: "keystone-operator"
             src: "{{ ansible_user_dir }}/keystone-operator"
+          - name: "openstack-operator"
+            src: "{{ ansible_user_dir }}/openstack-operator"
 
-    - name: Ensure that role output dict contains the expected values
-      ansible.builtin.assert:
-        that:
-          # Check the explicit build operator
-          - cifmw_operator_build_output['operators']['keystone-operator']['commit_hash'] is defined
-          - cifmw_operator_build_output['operators']['keystone-operator']['image'] is defined
-          - cifmw_operator_build_output['operators']['keystone-operator']['image_bundle'] is defined
-          - cifmw_operator_build_output['operators']['keystone-operator']['image_storage_bundle'] is defined
-          - cifmw_operator_build_output['operators']['keystone-operator']['image_catalog'] is defined
-          # Check the meta operator build output
-          - cifmw_operator_build_output['operators']['openstack-operator']['commit_hash'] is defined
-          - cifmw_operator_build_output['operators']['openstack-operator']['image'] is defined
-          - cifmw_operator_build_output['operators']['openstack-operator']['image_bundle'] is defined
-          - cifmw_operator_build_output['operators']['openstack-operator']['image_storage_bundle'] is defined
-          - cifmw_operator_build_output['operators']['openstack-operator']['image_catalog'] is defined
+    - name: Validate operator_build outputs
+      vars:
+        operator: "{{ item }}"
+        push_registry: "{{ cifmw_operator_build_push_registry }}"
+        push_org: "{{ cifmw_operator_build_push_org }}"
+      ansible.builtin.include_tasks: validate_outputs.yml
+      loop:
+        - name: "keystone-operator"
+          src: "{{ ansible_user_dir }}/keystone-operator"
+        - name: "openstack-operator"
+          src: "{{ ansible_user_dir }}/openstack-operator"
 
     - name: Build mariadb-operator from Zuul job
       include_role:
@@ -52,7 +52,6 @@
       vars:
         cifmw_operator_build_meta_build: false
         cifmw_operator_build_operators:
-          # to be replaced with zuul info
           - name: "mariadb-operator"
             src: "{{ ansible_user_dir }}/mariadb-operator"
         zuul:
@@ -67,3 +66,14 @@
                 name: openstack-k8s-operators/mariadb-operator
                 short_name: mariadb-operator
                 src_dir: src/github.com/openstack-k8s-operators/mariadb-operator
+
+    - name: Validate operator_build outputs
+      vars:
+        operator: "{{ item }}"
+        push_registry: "{{ cifmw_operator_build_push_registry }}"
+        push_org: "{{ cifmw_operator_build_push_org }}"
+      ansible.builtin.include_tasks: validate_outputs.yml
+      loop:
+        - name: "mariadb-operator"
+          src: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/mariadb-operator"
+          pr_sha: "912229102d02c43cead640ad9bf863e090444ab6"
