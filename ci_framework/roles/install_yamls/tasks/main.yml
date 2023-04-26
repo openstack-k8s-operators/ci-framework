@@ -14,6 +14,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+
+- name: "Get environment structure"
+  register: get_makefiles_env_output
+  get_makefiles_env:
+    base_path: "{{ cifmw_install_yamls_repo }}"
+
 - name: Create env var if needed
   when: cifmw_install_yamls_vars is defined
   block:
@@ -22,20 +28,39 @@
         path: "{{ cifmw_install_yamls_out_dir }}"
         state: directory
 
-    - name: "Get environment structure"
-      generate_make_env:
-        install_yamls_path: "{{ cifmw_install_yamls_repo }}/Makefile"
-        install_yamls_var: "{{ cifmw_install_yamls_vars }}"
+    - name: Set environment override edpm_env fact
+      ansible.builtin.set_fact:
+        edpm_env: >-
+          {{
+            cifmw_install_yamls_vars.keys() |
+            map('upper') |
+            zip(cifmw_install_yamls_vars.values()) |
+            items2dict(key_name=0, value_name=1)
+          }}
+        cacheable: true
 
     - name: Show the env structure
       ansible.builtin.debug:
-        msg: "{{ ansible_facts['edpm_env'] }}"
+        var: edpm_env
+
+    - name: Ensure user cifmw_install_yamls_vars contains existing Makefile variables
+      ansible.builtin.assert:
+        that: >-
+         edpm_env.keys() |
+         difference(
+          get_makefiles_env_output.makefiles_values.keys() | list +
+          cifmw_install_yamls_whitelisted_vars | default([])
+          ) | length == 0
+        msg: >-
+          cifmw_install_yamls_vars contains a variable that is not defined in
+          install_yamls Makefile nor cifmw_install_yamls_whitelisted_vars
+        quiet: true
 
     - name: "Generate {{ cifmw_install_yamls_out_dir }}/{{ cifmw_install_yamls_envfile }}"
       ansible.builtin.copy:
         dest: "{{ cifmw_install_yamls_out_dir }}/{{ cifmw_install_yamls_envfile }}"
         content: |-
-          {% for k,v in ansible_facts['edpm_env'].items() %}
+          {% for k,v in edpm_env.items() %}
           export {{ k }}={{ v }}
           {% endfor %}
 
@@ -45,6 +70,10 @@
   ansible.builtin.set_fact:
     edpm_env: {}
     cacheable: true
+
+- name: Set install_yamls default values
+  ansible.builtin.set_fact:
+    cifmw_install_yamls_defaults: "{{ get_makefiles_env_output.makefiles_values  | combine(edpm_env) }}"
 
 - name: Ensure task output dir exists
   ansible.builtin.file:
