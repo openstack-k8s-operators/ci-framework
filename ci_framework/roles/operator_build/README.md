@@ -19,10 +19,8 @@ you want to build meta-operator too, so the role can properly replace api refere
 * `cifmw_operator_build_meta_image_base`: (String) Name of the service added to be added to meta-operator build. Still limited to a sindle service (and operator). Default to **""**
 
 ## TODO
-* Include PR Owner and PR SHA for meta-operator
-* Include tasks to get PR Owner and PR SHA info from **zuul** dict.
 * Include tasks to get PR Owner and PR SHA info from **Prow** environment.
-* Add molecule tests.
+* Support build in dev environment (build with gowork without GitHub)
 
 ## Examples
 ### 1 - Building mariadb-operator checked-out from a PR and meta-operator

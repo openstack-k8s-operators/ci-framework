@@ -14,52 +14,66 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Ensure output directory exists
+- name: Ensure mandatory directories exist
   ansible.builtin.file:
-    path: "{{ cifmw_operator_build_basedir }}/artifacts"
+    path: "{{ cifmw_operator_build_basedir }}/{{ item }}"
     state: directory
+  with_items:
+    - artifacts
+    - logs
 
-- name: Ensure log directory ecists
-  ansible.builtin.file:
-    path: "{{ cifmw_operator_build_basedir }}/logs"
-    state: directory
+- name: Populate operators list with zuul info
+  when:
+    - zuul is defined
+  vars:
+    item: "{{ item }}"
+  ansible.builtin.include_tasks: zuul_info.yml
+  loop: "{{ zuul['items'] }}"
 
-- name: Set meta-operator info
+- name: Merge lists of operators
+  ansible.builtin.set_fact:
+    operators_list: "{{ [cifmw_operator_build_operators, zuul_info_operators | default([])] \
+                    | community.general.lists_mergeby('name') }}"
+
+- name: Get meta_operator src dir from operators_list
+  ansible.builtin.set_fact:
+    cifmw_operator_build_meta_src: "{{ (operators_list \
+                                   | selectattr('name', 'eq', cifmw_operator_build_meta_name) | map(attribute='src') \
+                                   | first ) | default(cifmw_operator_build_meta_src, true) }}"
+
+- name: Adds meta-operator to the list
   when:
     - cifmw_operator_build_meta_build is true
-  block:
-    - name: Set meta-operator info
-      ansible.builtin.set_fact:
-        meta_operator:
-          - name: "{{ cifmw_operator_build_meta_name }}"
-            src: "{{ cifmw_operator_build_meta_src }}"
-            base_image: "{{ cifmw_operator_build_meta_image_base | default('') }}"
+  vars:
+    meta_operator_info:
+      - name: "{{ cifmw_operator_build_meta_name }}"
+        src: "{{ cifmw_operator_build_meta_src }}"
+  ansible.builtin.set_fact:
+    operators_list: "{{ [operators_list, meta_operator_info] \
+                    | community.general.lists_mergeby('name') }}"
 
-    - name: Meta-operator - Clone operator's code when needed
-      vars:
-        operator: "{{ item }}"
-      ansible.builtin.include_tasks: clone.yml
-      loop: "{{ meta_operator }}"
-
-- name: Clone operator's code when needed
+- name: Clone operator's code when src dir is empty
   vars:
     operator: "{{ item }}"
   ansible.builtin.include_tasks: clone.yml
-  loop: "{{ cifmw_operator_build_operators }}"
+  loop: "{{ operators_list }}"
 
-- name: Building operators list
+- name: Building operators
+  when:
+    - "item.name != cifmw_operator_build_meta_name"
   vars:
     operator: "{{ item }}"
   ansible.builtin.include_tasks: build.yml
-  loop: "{{ cifmw_operator_build_operators }}"
+  loop: "{{ operators_list }}"
 
 - name: Building meta operator
   when:
     - cifmw_operator_build_meta_build is true
+    - "item.name == cifmw_operator_build_meta_name"
   vars:
     operator: "{{ item }}"
   ansible.builtin.include_tasks: build.yml
-  loop: "{{ meta_operator }}"
+  loop: "{{ operators_list }}"
 
 - name: Gather role output
   ansible.builtin.copy:
