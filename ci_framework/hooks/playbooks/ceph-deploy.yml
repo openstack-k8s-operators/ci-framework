@@ -1,0 +1,46 @@
+# Following those notes: https://github.com/fultonj/zed/tree/main/edpm
+- hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    # Load the custom parameters we set in the main play. That way, we will
+    # get access to the needed cifmw_make_ceph_environment parameter
+    - name: Load all of our cifmw variables
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_basedir }}/artifacts/custom-params.yml"
+
+    - name: Debug cifmw_make_ceph_environment
+      when:
+        - cifmw_make_ceph_environment is defined
+      ansible.builtin.debug:
+        var: cifmw_make_ceph_environment
+
+    # Since the hook injects the ansible.cfg in the ansible-playbook command,
+    # we therefore should know where to look for the install_yamls_makes role.
+    # For the records, this role is generated in the 01-bootstrap.yml playbook
+    # by leveraging the install_yamls role and related modules, especially
+    # the generate_make_tasks.
+    # And we can pass down the cifmw_make_ceph_environment set in the
+    # environment of the main play. If we don't have anything for that param,
+    # let's default to an empty hash.
+    - name: Run make_ceph
+      vars:
+        make_ceph_environment: "{{ cifmw_make_ceph_environment | default({}) }}"
+      ansible.builtin.include_role:
+        role: install_yamls_makes
+        tasks_from: "make_ceph.yml"
+
+    - name: Get ceph uuid
+      register: generated_uuid
+      ansible.builtin.command:
+        cmd: oc get secret ceph-conf-files -o json
+
+    # That file is known by the main play - the run_hook/playbook task will
+    # check for its availability after the hook is finished, and load it using
+    # the ansible.builtin.include_vars call. This will then expose the new
+    # cifmw_ceph_uuid parameter into the main play, allowing to consume it
+    # in further steps.
+    - name: Extract and push ceph_uuid
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+        content: |-
+          cifmw_ceph_uuid: {{ generated_uuid.stdout | from_json | json_query('data."ceph.conf"') }}
