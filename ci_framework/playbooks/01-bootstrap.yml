@@ -1,8 +1,5 @@
 - hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: true
-  roles:
-    - name: ci_setup
-    - name: discover_latest_image
   tasks:
     - name: Set custom cifmw PATH reusable fact
       when:
@@ -11,7 +8,23 @@
         cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
         cacheable: true
 
-    - name: get customized parameters
+    - name: Run repo_setup
+      ansible.builtin.include_role:
+        name: repo_setup
+
+    - name: Prepare install_yamls make targets
+      ansible.builtin.include_role:
+        name: install_yamls
+
+    - name: Run ci_setup role
+      ansible.builtin.include_role:
+        role: ci_setup
+
+    - name: Get latest image for future reference
+      ansible.builtin.include_role:
+        role: discover_latest_image
+
+    - name: Get customized parameters
       ansible.builtin.set_fact:
         ci_framework_params: >-
           {{ hostvars[inventory_hostname] | dict2items | selectattr("key", "match", "^cifmw_")|list|items2dict }}
@@ -20,11 +33,3 @@
       ansible.builtin.copy:
         dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}/artifacts/custom-params.yml"
         content: "{{ ci_framework_params | to_nice_yaml }}"
-
-    - name: Run repo_setup
-      ansible.builtin.include_role:
-        name: repo_setup
-
-    - name: Prepare install_yamls make targets
-      ansible.builtin.include_role:
-        name: install_yamls
