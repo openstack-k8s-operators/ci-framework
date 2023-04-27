@@ -1,0 +1,42 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: "{{ operator.name }} - Get commit hash from src repo"
+  ansible.builtin.command:
+    cmd: "git rev-parse HEAD"
+    chdir: "{{ operator.src }}"
+  register: operator_hash
+
+- name: "{{ operator.name }} - Expected commit hash and registry"
+  ansible.builtin.set_fact:
+    op_tag: "{{ operator.pr_sha | default(operator_hash.stdout | trim) }}"
+    op_registry_prefix: "{{ push_registry }}/{{ push_org }}/{{ operator.name }}"
+
+- name: "{{ operator.name }} - Expected images"
+  ansible.builtin.set_fact:
+    op_img: "{{ op_registry_prefix }}:{{ op_tag }}"
+    op_img_bundle: "{{ op_registry_prefix }}-bundle:{{ op_tag }}"
+    op_img_storage_bundle: "{{ op_registry_prefix }}-storage-bundle:{{ op_tag }}"
+    op_img_catalog: "{{ op_registry_prefix }}-index:{{ op_tag }}"
+
+- name: "{{ operator.name }} - Ensure that role output dict contains the expected values"
+  ansible.builtin.assert:
+    that:
+      - cifmw_operator_build_output['operators'][operator.name]['commit_hash'] == op_tag
+      - cifmw_operator_build_output['operators'][operator.name]['image'] == op_img
+      - cifmw_operator_build_output['operators'][operator.name]['image_bundle'] == op_img_bundle
+      - cifmw_operator_build_output['operators'][operator.name]['image_storage_bundle'] == op_img_storage_bundle
+      - cifmw_operator_build_output['operators'][operator.name]['image_catalog'] == op_img_catalog
