@@ -20,6 +20,18 @@ In such a case, the following data can be provided to the hook:
 * `name`: Describe the hook.
 * `source`: Source of the playbook. If it's a filename, the playbook is expected in ci_framwork/hooks/playbooks. It can be an absolute path.
 * `type`: Type of the hook. In this case, set it to `playbook`.
+* `extra_vars`: Dictionary listing the extra variables you want to pass down
+
+##### Example
+```YAML
+pre_deploy:
+    - name: My hook
+      source: ceph-deploy.yml
+      type: playbook
+      extra_vars:
+        UUID: <some generated UUID>
+```
+
 
 #### CRD
 In such a case, the following data can be provided to the hook:

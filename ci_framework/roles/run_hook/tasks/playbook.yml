@@ -7,6 +7,34 @@
       {%- else -%}
       {{ hook.source }}
       {%- endif -%}
+    extra_vars: >-
+      {%- if hook.extra_vars is defined and hook.extra_vars|length > 0 -%}
+      {% for key,value in hook.extra_vars.items() -%}
+      {%- if key == 'file' %}
+      -e "@{{ value }}"
+      {%- else %}
+      -e "{{ key }}={{ value }}"
+      {%- endif %}
+      {%- endfor %}
+      {%- endif %}
+
+- name: Debug extra_vars
+  when:
+    - hook.extra_vars is defined
+  ansible.builtin.debug:
+    var: hook.extra_vars
+
+- name: Ensure file exists
+  block:
+    - name: Get file stat
+      register: playbook_stat
+      ansible.builtin.stat:
+        path: "{{ playbook_path }}"
+    - name: Fail if playbook doesn't exist
+      when:
+        - not playbook_stat.stat.exists
+      ansible.builtin.fail:
+        msg: "Playbook {{ playbook_path }} doesn't seem to exist."
 
 # We cannot call ansible.builtin.import_playbook from within a play,
 # even less from a task. So the way to run a playbook from within a playbook
@@ -22,9 +50,14 @@
         cmd: >-
           ansible-playbook -i {{ hook.inventory | default('localhost,') }}
           -c {{ hook.connection | default('local') }}
+          {{ extra_vars }}
           {{ playbook_path }}
         create: "{{ hook.creates | default(omit) }}"
   always:
+    - name: Output hook command
+      ansible.builtin.debug:
+        var: play_output.cmd
+
     - name: Output play stderr
       ansible.builtin.debug:
         var: play_output.stderr_lines
