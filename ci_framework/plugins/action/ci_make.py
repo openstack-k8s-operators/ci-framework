@@ -33,9 +33,23 @@ class ActionModule(ActionBase):
 
         for env in env_content:
             if isinstance(env, str):
+                # Lazy way to check the environment. We may need to iterate on that
+                # one, especially if we set actual default() that need to be used.
+                # Issue is, at this point the environment isn't "interpreted" in
+                # Ansible, meaning we end with raw content. So if we pass this:
+                # make_ceph_environment: "{{ foo | default('bar') }}" we end with
+                # that string, and not the result...
                 key = env.replace('{{', '').replace('}}', '').strip()
                 if key in task_vars:
-                    exports.extend([f'export {k}={v}' for k, v in task_vars[key].items()])
+                    try:
+                        exports.extend([f'export {k}={v}' for k, v in task_vars[key].items()])
+                    except AttributeError:
+                        env_data = task_vars[key]
+                        Display().warning((
+                            'An error occurred while extracting environment value.'
+                            f'The orginal data: {env} was transformed to {key}.'
+                            f'The extracted value is: {env_data}'
+                        ))
             elif isinstance(env, dict):
                 exports.extend([f'export {k}={v}' for k, v in env.items()])
         return exports
