@@ -14,13 +14,34 @@ play has a great chance of failure.
 #### Playbook
 In such a case, the following data can be provided to the hook:
 * `config_file`: Ansible configuration file. Defaults to `ansible_config_file`.
-* `connection`: Refer to the `--connection` option for `ansible-playbook`. Defaults to `local`.
 * `creates`: Refer to the `ansible.builtin.command` "creates" parameter. Defaults to `omit`.
-* `inventory`: Refer to the `--inventory` option for `ansible-playbook`. Defaults to `localhost,`.
+* `inventory`: Refer to the `--inventory` option for `ansible-playbook`. Defaults to `inventory_file`.
 * `name`: Describe the hook.
 * `source`: Source of the playbook. If it's a filename, the playbook is expected in ci_framwork/hooks/playbooks. It can be an absolute path.
 * `type`: Type of the hook. In this case, set it to `playbook`.
 * `extra_vars`: Dictionary listing the extra variables you want to pass down
+
+##### Hook callback
+A hook may generate new parameters that will be fed into the main play. In order
+to do so, the hook playbook has to create a YAML file as follow:
+```YAML
+- name: Feed generated content to main play
+  ansible.builtin.copy:
+    dest: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+    content: |
+      foo: bar
+      star: {{ my_favorit }}
+```
+The location and name are fixed. Both `cifmw_basedir`, `step` and `hook_name` are passed
+down to the hook playbook. Note that the value of `cifmw_basedir` will default
+to `~/ci-framework` if you don't pass it.
+
+In the same way, hooks may be able to consume data from a previous hook by loading
+the generated fil using `ansible.builtin.include_vars`, using the mentioned path.
+
+Note that `step` is fixed in the main playbooks, and are following the name of
+the various hook "timing" (`pre_infra`, `post_infra`, etc). The `hook_name` is
+a cleaned version of the `name` parameter you pass down in the hook description.
 
 ##### Example
 ```YAML

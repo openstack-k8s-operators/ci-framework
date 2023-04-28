@@ -1,6 +1,8 @@
 ---
 - name: "Set playbook {{ hook.name }} path"
   set_fact:
+    cifmw_basedir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}"
+    hook_name: "{{ hook.name | regex_replace('([^\x00-\x7F]|\\s|`)+', '_') |lower }}"
     playbook_path: >-
       {%- if hook.source is not ansible.builtin.abs -%}
       {{ role_path }}/../../hooks/playbooks/{{ hook.source }}
@@ -48,11 +50,26 @@
         ANSIBLE_CONFIG: "{{ hook.config_file | default(ansible_config_file) }}"
       ansible.builtin.command:
         cmd: >-
-          ansible-playbook -i {{ hook.inventory | default('localhost,') }}
-          -c {{ hook.connection | default('local') }}
+          ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
           {{ extra_vars }}
+          -e "cifmw_basedir={{ cifmw_basedir }}"
+          -e "step={{ step }}"
+          -e "hook_name={{ hook_name }}"
           {{ playbook_path }}
         create: "{{ hook.creates | default(omit) }}"
+
+    - name: Load generated content if any
+      block:
+        - name: Check if we have a file
+          register: hook_callback
+          ansible.builtin.stat:
+            path: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+        - name: Load generated content in main playbook
+          when:
+            hook_callback.stat.exists
+          ansible.builtin.include_vars:
+            file: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+
   always:
     - name: Output hook command
       ansible.builtin.debug:
