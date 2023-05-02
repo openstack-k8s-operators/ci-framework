@@ -1,0 +1,49 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Execute all as root
+  become: true
+  block:
+    - name: Ensure target directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_install_ca_trust_dir }}"
+        state: directory
+
+    - name: Install custom CA bundle from inline
+      register: ca_inline
+      when:
+        - cifmw_install_ca_bundle_inline is defined
+        - cifmw_install_ca_bundle_inline != ''
+      ansible.builtin.copy:
+        dest: "{{ cifmw_install_ca_trust_dir }}/cifmw_inline_ca_bundle.crt"
+        content: "{{ cifmw_install_ca_bundle_inline }}"
+        mode: 0644
+
+    - name: Install custom CA bundle from file
+      register: ca_bundle
+      when:
+        - cifmw_install_ca_bundle_src is defined
+        - cifmw_install_ca_bundle_src != ''
+      ansible.builtin.copy:
+        dest: "{{ cifmw_install_ca_trust_dir }}/{{ cifmw_install_ca_bundle_src | basename }}"
+        src: "{{ cifmw_install_ca_bundle_src }}"
+        mode: 0644
+
+    - name: Update ca bundle
+      when:
+        - (ca_bundle is defined and ca_bundle is changed) or (ca_inline is defined and ca_inline is changed)
+      ansible.builtin.command:
+        cmd: update-ca-trust
