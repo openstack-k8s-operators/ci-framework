@@ -1,0 +1,20 @@
+---
+- hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Perform CRC login
+      ansible.builtin.include_role:
+        name: rhol_crc
+        tasks_from: add_crc_creds.yml
+
+    - name: Patch rabbitmq resources for lower resource consumption
+      ansible.builtin.shell: |
+        crname=$(oc get openstackcontrolplane -o name)
+        oc patch ${crname} --type json -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} \
+          -p='[{"op": "replace", "path": "/spec/rabbitmq/templates/rabbitmq/resources/requests/cpu", "value": 500m}]'
+        oc patch ${crname} --type json -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} \
+          -p='[{"op": "replace", "path": "/spec/rabbitmq/templates/rabbitmq/resources/requests/memory", "value": 500Mi}]'
+        oc patch ${crname} --type json -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} \
+          -p='[{"op": "replace", "path": "/spec/rabbitmq/templates/rabbitmq-cell1/resources/requests/cpu", "value": 500m}]'
+        oc patch ${crname} --type json -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} \
+          -p='[{"op": "replace", "path": "/spec/rabbitmq/templates/rabbitmq-cell1/resources/requests/memory", "value": 500Mi}]'

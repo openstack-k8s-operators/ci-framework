@@ -1,0 +1,40 @@
+---
+ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+cifmw_install_yamls_vars:
+  KUBECONFIG: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+  OUTPUT_DIR: "{{ cifmw_basedir }}/artifacts/edpm_compute" # used by gen-ansibleee-ssh-key.sh
+  OUTPUT_BASEDIR: "{{ cifmw_basedir }}/artifacts/edpm_compute" # used by gen-edpm-compute-node.sh
+  SSH_KEY: "{{ cifmw_basedir }}/artifacts/edpm_compute/ansibleee-ssh-key-id_rsa"
+
+# edpm_deploy role vars
+cifmw_edpm_deploy_run_validation: true
+# edpm_prepare role vars
+cifmw_edpm_prepare_skip_crc_storage_creation: true
+cifmw_edpm_prepare_skip_openstack_operator: true
+cifmw_edpm_prepare_make_openstack_deploy_env:
+  OUT: "{{ cifmw_installyamls_repos }}/out"
+  STORAGE_CLASS: crc-csi-hostpath-provisioner
+cifmw_edpm_prepare_intall_yamls_output_dir: "{{ cifmw_installyamls_repos }}/out"
+cifmw_operator_build_meta_name: "openstack-operator"
+edpm_env:
+  STORAGE_CLASS: crc-csi-hostpath-provisioner
+  OUT: "{{ cifmw_installyamls_repos }}/out"
+
+# edpm_deploy role vars
+cifmw_edpm_deploy_manifests_dir: "{{ cifmw_installyamls_repos }}/out"
+deploy_edpm: true
+
+pre_deploy:
+  - name: Disable openstack marketplace
+    type: playbook
+    source: disable_os_marketplace.yml
+
+post_ctlplane_deploy:
+  - name: Tune rabbitmq resources
+    type: playbook
+    source: rabbitmq_tuning.yml
+
+  - name: Restart Nova Schedular
+    type: playbook
+    source: restart_nova_scheduler.yml
