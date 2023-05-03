@@ -1,5 +1,7 @@
 # CI-Framework
 
+[![CodeQL](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml/badge.svg)](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml)
+
 Still under heavy development - more info coming soon.
 
 ## Use Makefile for your own CI
