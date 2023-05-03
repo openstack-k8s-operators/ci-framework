@@ -1,0 +1,66 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Claims a cluster from a the provided pool
+-
+  name: Claim an OpenShift Cluster
+  hosts: localhost
+  vars:
+    claim_name: "{{ cifw_hive_cluster_claimName }}"
+    cluster_pool: "{{ cifw_hive_cluster_clusterPoolName }}"
+    rtn_kube: "{{ cifw_hive_cluster_kubePath }}"
+    life_time: "{{ cifw_hive_cluster_lifetime | default(false) }}"
+
+  tasks:
+    - name: Creating the cluster claim
+      ansible.builtin.include_tasks:
+        file: tasks/oc-apply.yml
+      vars:
+        desc: "cluster-claim"
+        destFile: "cluster_claim.yml"
+        oc_cli: "{{ oc_cmd }}"
+        templateFile: "templates/claim.yml.j2"
+        workingDir: "{{ oc_cli_space.path }}"
+        endTime: "{{ life_time }}"
+    - name: Post OCP cluster claim initialization
+      block:
+        - name: Wait for the claim to be successful
+          ansible.builtin.shell:
+            cmd: "{{ oc_cmd }} wait --for=condition=Pending=False clusterclaim/{{ claim_name }} --timeout 59m"
+          async: 3600
+          poll: 30
+        - name: Gathering the namespace of created cluster claim
+          ansible.builtin.shell:
+            cmd: "{{ oc_cmd }} get clusterclaim {{ claim_name }} -o jsonpath='{ .spec.namespace }'"
+          register: ns
+        - name: Gather the kube config reference
+          ansible.builtin.shell:
+            cmd: "{{ oc_cmd }} get clusterdeployment -n {{ ns.stdout }} {{ ns.stdout }} -o jsonpath='{ .spec.clusterMetadata.adminKubeconfigSecretRef.name }' "
+          register: kube_ref
+        - name: Extracting the kubeconfig to {{ rtn_kube }}
+          ansible.builtin.shell:
+            cmd: "{{ oc_cmd }} extract -n {{ ns.stdout }} secret/{{ kube_ref.stdout }} --to={{ rtn_kube }} --confirm"
+      rescue:
+        - name: Describe the cluster claim
+          ansible.builtin.command:
+            cmd: "{{ oc_cmd }} describe clusterclaim {{ claim_name }}"
+          register: result
+        - name: Logging of cluster claim events
+          ansible.builtin.debug:
+            msg: "{{ result.stdout }}"
+        - name: Claim removal on event of failure / timeout
+          ansible.builtin.command:
+            cmd: "{{ oc_cmd }} delete clusterclaim {{ claim_name }}"
