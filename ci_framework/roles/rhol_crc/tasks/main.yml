@@ -24,7 +24,7 @@
 
 - name: Get VM domains through Virt
   community.libvirt.virt:
-    command: list_vms
+    command: info
     uri: "qemu:///system"
   register: vm_domains
 
@@ -33,7 +33,9 @@
 - name: Set VM status
   ansible.builtin.set_fact:
     crc_present: >-
-      {%- if 'crc' in vm_domains.list_vms -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
+      {%- if 'crc' in vm_domains -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
+    crc_running: >-
+      {%- if 'crc' in vm_domains and vm_domains.crc.state == 'running' -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
 
 - name: Fail if crc domain is already defined
   ansible.builtin.fail:
@@ -43,47 +45,61 @@
     - not cifmw_rhol_crc_force_cleanup|bool
     - not cifmw_rhol_crc_reuse | bool
 
-- name: Manage RHOL/CRC if not existing
-  when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_present|bool
+- name: Clean/deploy CRC
   block:
-    - name: Check RHOL/CRC binary exists
-      ansible.builtin.stat:
-        path: "{{ cifmw_rhol_crc_binary }}"
-      register: cifmw_rhol_crc_binary_stat
-
-    - name: Get RHOL/CRC binary if does not exist
-      ansible.builtin.include_tasks: binary.yml
-      when: not cifmw_rhol_crc_binary_stat.stat.exists
-
-    - name: Setup sudoers file for sudo commands in RHOL/CRC setup
-      ansible.builtin.include_tasks: sudoers_grant.yml
-
-    - name: Clean RHOL/CRC if wanted
-      when:
-        - crc_present|bool
-        - cifmw_rhol_crc_force_cleanup | bool
-      ansible.builtin.include_tasks: cleanup.yml
-
-    - name: Configure RHOL/CRC using install_yamls
-      when:
-        - cifmw_rhol_crc_use_installyamls|bool
-      ansible.builtin.include_tasks: install_yamls.yml
-
-    - name: Manually configure RHOL/CRC
-      when:
-        - not cifmw_rhol_crc_use_installyamls|bool
+    - name: Retrieve RHOL/CRC if not existing
+      when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_present|bool
       block:
-        - name: Set RHOL/CRC configuration options
-          ansible.builtin.include_tasks: configuration.yml
+        - name: Check RHOL/CRC binary exists
+          ansible.builtin.stat:
+            path: "{{ cifmw_rhol_crc_binary }}"
+          register: cifmw_rhol_crc_binary_stat
 
-        - name: Setup RHOL/CRC
-          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
-          register: cifmw_rhol_crc_cmd_setup
+        - name: Get RHOL/CRC binary if does not exist
+          ansible.builtin.include_tasks: binary.yml
+          when: not cifmw_rhol_crc_binary_stat.stat.exists
 
-        - name: Start RHOL/CRC
-          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
-          register: cifmw_rhol_crc_cmd_start
+        - name: Setup sudoers file for sudo commands in RHOL/CRC setup
+          ansible.builtin.include_tasks: sudoers_grant.yml
 
+        - name: Clean RHOL/CRC if wanted
+          when:
+            - crc_present|bool
+            - cifmw_rhol_crc_force_cleanup | bool
+          ansible.builtin.include_tasks: cleanup.yml
+
+    - name: Configure and start RHOL/CRC
+      when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_running|bool
+      block:
+        - name: Configure RHOL/CRC using install_yamls
+          when: cifmw_rhol_crc_use_installyamls|bool
+          ansible.builtin.include_tasks: install_yamls.yml
+
+        - name: Manually configure RHOL/CRC
+          when: not cifmw_rhol_crc_use_installyamls|bool
+          block:
+            - name: Set RHOL/CRC configuration options
+              ansible.builtin.include_tasks: configuration.yml
+
+            - name: Setup RHOL/CRC
+              ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
+              register: cifmw_rhol_crc_cmd_setup
+
+            - name: Start RHOL/CRC
+              ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
+              register: cifmw_rhol_crc_cmd_start
+
+    - name: Attach default network to CRC
+      when: cifmw_rhol_crc_use_installyamls|bool
+      vars:
+        make_crc_attach_default_interface_dryrun: "{{ cifmw_rhol_crc_dryrun }}"
+        make_crc_attach_default_interface_env:
+          PATH: "{{ cifmw_path }}"
+      ansible.builtin.include_role:
+        name: "install_yamls_makes"
+        tasks_from: "make_crc_attach_default_interface.yml"
+
+  always:
     - name: Delete sudoers file
       ansible.builtin.include_tasks: sudoers_revoke.yml
 
