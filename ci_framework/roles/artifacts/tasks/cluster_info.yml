@@ -1,0 +1,43 @@
+---
+- name: Check for oc command
+  ansible.builtin.command: which oc
+  environment:
+    PATH: "{{ cifmw_path }}"
+  register: oc_installed
+  ignore_errors: true
+
+- name: Collect data from cluster
+  when: oc_installed.rc == 0
+  block:
+    - name: Create logs/edpm directory
+      ansible.builtin.file:
+        path: "{{ cifmw_artifacts_basedir }}/logs/edpm"
+        state: directory
+
+    - name: Collect data from openshift cluster
+      changed_when: true
+      ignore_errors: true
+      ansible.builtin.shell: |
+        oc get {{ item }} > {{ cifmw_artifacts_basedir }}/logs/edpm/{{ item }}.log
+      loop:
+        - pods
+        - secrets
+        - pv
+        - events
+        - routes
+        - all
+
+    - name: Dump the logs of all pods
+      ansible.builtin.shell: |
+        all_pods=$(oc get pods -o name)
+        mkdir pod
+        for pod in $all_pods; do
+          echo $pod
+          oc logs $pod > ${pod}-logs.txt
+          oc get -o yaml $pod > ${pod}.yaml
+          oc describe $pod > ${pod}-describe.txt
+        done
+      args:
+        chdir: "{{ cifmw_artifacts_basedir }}/logs/edpm"
+      changed_when: true
+      ignore_errors: true

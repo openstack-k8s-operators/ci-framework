@@ -61,6 +61,7 @@ Allowed parameter names are:
 * `post_container_build`: after building container images
 * `pre_deploy`: before deploying EDPM
 * `post_deploy`: after deploying EDPM
+* `post_ctlplane_deploy`: after Control Plane deployment
 * `pre_tests`: before running tests
 * `post_tests`: after running tests
 * `pre_reporting`: before running reporting
