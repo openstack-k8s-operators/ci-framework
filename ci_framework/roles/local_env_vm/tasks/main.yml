@@ -1,0 +1,144 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create image directory
+  ansible.builtin.file:
+    path: "{{ cifmw_local_env_vm_basedir }}/images"
+    state: directory
+
+- name: Debug
+  ansible.builtin.debug:
+    msg: "{{ cifmw_local_env_vm_basedir }}/images/{{ cifmw_discovered_image_name }}"
+
+- name: Manage image
+  block:
+    - name: Check image availability
+      register: base_img
+      ansible.builtin.stat:
+        path: "{{ cifmw_local_env_vm_basedir }}/images/{{ cifmw_discovered_image_name }}"
+
+    - name: Fetch image
+      when:
+        - not base_img.stat.exists
+      register: dload_img
+      ansible.builtin.get_url:
+        url: "{{ cifmw_discovered_image_url }}"
+        dest: "{{ cifmw_local_env_vm_basedir }}/images/{{ cifmw_discovered_image_name }}"
+        checksum: "sha256:{{ cifmw_discovered_sha256 }}"
+      until:
+        - dload_img.status_code is defined
+        - dload_img.status_code == 200
+      retries: 2
+      delay: 5
+
+- name: Set some facts for easier usage
+  ansible.builtin.set_fact:
+    cifmw_backing_img: "{{ cifmw_local_env_vm_basedir }}/images/{{ cifmw_discovered_image_name }}"
+    cifmw_work_img: "{{ cifmw_local_env_vm_basedir }}/images/cifmw-vm.qcow2"
+    cifmw_vm_name: "cifmw-vm"
+
+- name: Generate firstboot script as an artifact
+  ansible.builtin.copy:
+    dest: "{{ cifmw_local_env_vm_basedir }}/artifacts/firstboot.sh"
+    src: "firstboot.sh"
+    mode: 0755
+
+- name: Create image layer
+  register: create_layer
+  ansible.builtin.command:
+    creates: "{{ cifmw_work_img }}"
+    cmd: >-
+      qemu-img create -o backing_file={{ cifmw_backing_img }},backing_fmt=qcow2
+      -f qcow2 {{ cifmw_work_img }} {{ cifmw_local_env_vm_space }}
+
+- name: Prepare the workload image
+  when:
+    - create_layer is changed
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: >-
+      virt-sysprep -a {{ cifmw_work_img }} --network --update --selinux-relabel
+      --ssh-inject "root:file:{{ ansible_user_dir }}/.ssh/authorized_keys"
+      --root-password "password:{{ cifmw_local_env_vm_root_passwd }}"
+      --firstboot "{{ cifmw_local_env_vm_basedir }}/artifacts/firstboot.sh"
+      --copy-in "{{ cifmw_local_env_vm_pullsecret }}:/root/"
+      --install vim,git,tmux,libvirt,libvirt-client,libvirt,libvirt-daemon-kvm,virt-install,qemu-kvm,make,bash-completion,guestfs-tools,libguestfs,python3-pip 2>&1 > {{ cifmw_local_env_vm_basedir }}/logs/virt-syspre.log
+
+- name: Change access rights on layered image
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_work_img }}"
+    mode: 0664
+    group: qemu
+
+- name: Create VM based on the workload image
+  ansible.builtin.command:
+    cmd: >-
+      virt-install --import
+      --connect qemu:///system
+      --name "{{ cifmw_vm_name }}"
+      --memory "{{ cifmw_local_env_vm_memory }}"
+      --vcpus "{{ cifmw_local_env_vm_cpu }}"
+      --cpu host
+      --os-variant=centos-stream9
+      --graphics {{ cifmw_local_env_vm_graphics }}
+      --noautoconsole
+      --network="{{ cifmw_local_env_vm_network }}"
+      --disk "{{ cifmw_work_img }}"
+
+- name: Get local_vm IP
+  register: local_env_vm_ip
+  ansible.builtin.command:
+    cmd: "virsh -c qemu:///system -q domifaddr --source arp --domain {{ cifmw_vm_name }}"
+  until: "'ipv4' in local_env_vm_ip.stdout"
+  retries: 30
+  delay: 5
+
+- name: Set VM ip as a fact for later use
+  ansible.builtin.set_fact:
+    cifmw_local_vm_ip: "{{ local_env_vm_ip.stdout.split()[-1].split('/')[0] }}"
+    cacheable: true
+
+- name: Ensure we get SSH
+  ansible.builtin.wait_for:
+    host: "{{ cifmw_local_vm_ip }}"
+    port: 22
+    timeout: 60
+
+- name: Inject ssh configuration for lab access
+  ansible.builtin.blockinfile:
+    create: true
+    mode: 0600
+    path: "{{ ansible_user_dir }}/.ssh/config"
+    marker: "## {mark} {{ cifmw_vm_name }}"
+    block: |
+      Host {{ cifmw_local_vm_ip }} {{ cifmw_vm_name }}
+        Hostname {{ cifmw_local_vm_ip }}
+        User zuul
+        StrictHostKeyChecking no
+        UserKnownHostsFile /dev/null
+
+# role_path = ./ci_framework/role/local_env_vm
+# We can't use |dirname, because it doesn't work like shell dirname...
+- name: Copy requested content to the local_env VM
+  ansible.posix.synchronize:
+    dest: "{{ cifmw_local_vm_ip }}:/home/zuul/src/ci-framework"
+    src: "{{ role_path }}/../../../"
+
+- name: Execute a script on the local_env VM
+  ansible.builtin.command:
+    cmd: |
+      ssh {{ cifmw_local_vm_ip }} /home/zuul/src/ci-framework/scripts/local_env_vm_prepare

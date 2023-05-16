@@ -1,0 +1,58 @@
+---
+# Playbook allowing to deploy a local VM with nested virtualization. This will
+# then be used as the "base" host in order to run CRC + computes from within it,
+# while keeping the host clean.
+
+- name: Bootstrap host with needed bits
+  hosts: "{{ cifmw_lab_host | default('localhost') }}"
+  vars:
+    cifmw_discover_latest_image_base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images"
+  pre_tasks:
+    - name: Ensure we have .ssh/authorized_keys file
+      block:
+        - name: check authorized_keys status
+          register: ssh_authorized
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/.ssh/authorized_keys"
+        - name: Fail if file is absent
+          when:
+            - not ssh_authorized.stat.exists
+          fail:
+            msg: >
+              Missing file: {{ ansible_user_dir }}/.ssh/authorized_keys.
+              Please create it with your ssh public key(s) and re-run!
+
+    - name: Ensure we have the needed support
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: virtualization_prerequisites
+  tasks:
+    - name: Get directories and base packages
+      ansible.builtin.include_role:
+        name: ci_setup
+
+    - name: Get latest image for future reference
+      ansible.builtin.include_role:
+        role: discover_latest_image
+
+    - name: Install libvirt packages and dependencies
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: packages
+
+    - name: Ensure libvirt service is running and user accesses
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: virsh_checks.yml
+
+    - name: Create VM and start it
+      ansible.builtin.include_role:
+        name: local_env_vm
+
+    - name: Display some data for later usage
+      ansible.builtin.debug:
+        msg: |-
+          You may connect to your lab instance using *ssh cifmw-vm*.
+          Further steps you may want to follow *on the VM*:
+            cd src/ci-framework
+            ansible-playbook deploy-edpm.yml -e @scenarios/centos-9/local-env.yml
