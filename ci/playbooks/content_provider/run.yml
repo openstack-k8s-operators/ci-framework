@@ -11,13 +11,20 @@
           -e @scenarios/centos-9/base.yml
           -e @scenarios/centos-9/content_provider.yml
           -e @scenarios/centos-9/zuul_inventory.yml
+          -e "cifmw_rp_registry_ip={{ cifmw_rp_registry_ip }}"
 
-    - name: Discover an IPv4 for provider job
+    - name: Include inner ansible vars file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_artifacts_basedir }}/artifacts/ansible-vars.yml"
+      register: inner_ansible
+
+    - name: Get inner ansible vars
       ansible.builtin.set_fact:
-        content_provider_ip: >-
-          {{ hostvars[groups.all[0]].ansible_host if hostvars[groups.all[0]].ansible_host
-          is match("[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
-          else hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+        inner_ansible_vars: "{{ inner_ansible.content | b64decode | from_yaml }}"
+
+    - name: Set content provider
+      ansible.builtin.set_fact:
+        content_provider_ip: "{{ cifmw_rp_registry_ip }} "
 
     - name: Return Zuul Data
       ansible.builtin.debug:
@@ -31,3 +38,4 @@
           zuul:
             pause: true
           content_provider_registry_ip: "{{ content_provider_ip | default('nowhere') }}"
+          cifmw_operator_build_output: "{{ inner_ansible_vars.cifmw_operator_build_output }}"
