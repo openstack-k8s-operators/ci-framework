@@ -19,15 +19,21 @@
   name: Claim an OpenShift Cluster
   hosts: localhost
   vars:
-    claim_name: "{{ cifmw_hive_claimName }}"
-    cluster_pool: "{{ cifmw_hive_clusterPoolName }}"
-    rtn_kube: "{{ cifmw_hive_kubePath }}"
+    claim_name: "{{ cifmw_hive_openstack_claim_name }}"
+    cluster_pool: "{{ cifmw_hive_openstack_pool_name }}"
+    rtn_kube: "{{ cifmw_hive_kubeconfig }}"
     life_time: "{{ cifmw_hive_lifetime | default(false) }}"
+    namespace: "{{ cifmw_hive_namespace }}"
 
   tasks:
+    - name: Setting oc_cmd variable
+        ansible.builtin.set_fact:
+          oc_cmd: "oc --kubeconfig {{ cifmw_hive_kubeconfig }}"
+        when: cifmw_hive_kubeconfig is defined
+
     - name: Check if ClusterPool exists
       ansible.builtin.shell:
-        cmd: "{{ oc_cmd }} get ClusterPool {{ cluster_pool }}"
+        cmd: "{{ oc_cmd }} get ClusterPool {{ cluster_pool }} -n {{ namespace }}"
 
     - name: Creating the cluster claim
       ansible.builtin.include_tasks:
@@ -38,7 +44,7 @@
         oc_cli: "{{ oc_cmd }}"
         templateFile: "templates/claim.yml.j2"
         workingDir: "{{ oc_cli_space.path }}"
-        endTime: "{{ life_time }}"
+        endTime: "{{ cifmw_hive_life_time }}"
     - name: Post OCP cluster claim initialization
       block:
         - name: Wait for the claim to be successful
