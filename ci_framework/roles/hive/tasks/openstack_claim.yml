@@ -15,17 +15,15 @@
 # under the License.
 
 # Claims a cluster from a the provided pool
--
-  name: Claim an OpenShift Cluster
-  hosts: localhost
+- name: Claim an OpenShift Cluster
   vars:
     claim_name: "{{ cifmw_hive_openstack_claim_name }}"
     cluster_pool: "{{ cifmw_hive_openstack_pool_name }}"
-    rtn_kube: "{{ cifmw_hive_kubePath }}"
+    rtn_kube: "{{ cifmw_hive_artifacts_dir }}"
     life_time: "{{ cifmw_hive_lifetime | default(false) }}"
     namespace: "{{ cifmw_hive_namespace }}"
 
-  tasks:
+  block:
     - name: Check if ClusterPool exists
       ansible.builtin.shell:
         cmd: "{{ cifmw_hive_oc_cmd }} get ClusterPool {{ cluster_pool }} -n {{ namespace }}"
@@ -38,13 +36,12 @@
         destFile: "cluster_claim.yml"
         oc_cli: "{{ cifmw_hive_oc_cmd }}"
         templateFile: "templates/claim.yml.j2"
-        workingDir: "{{ oc_cli_space.path }}"
-        endTime: "{{ cifmw_hive_cluster_life_time }}"
+        endTime: "{{ cifmw_hive_openstack_claim_life_time }}"
     - name: Post OCP cluster claim initialization
       block:
         - name: Wait for the claim to be successful
           ansible.builtin.shell:
-            cmd: "{{ cifmw_hive_oc_cmd }} wait --for=condition=Pending=False clusterclaim/{{ claim_name }} --timeout {{ cifmw_hive_cluster_claim_timeout }}"
+            cmd: "{{ cifmw_hive_oc_cmd }} wait --for=condition=Pending=False clusterclaim/{{ claim_name }} --timeout {{ cifmw_hive_openstack_claim_timeout }}"
           async: 3600
           poll: 30
         - name: Gathering the namespace of created cluster claim
