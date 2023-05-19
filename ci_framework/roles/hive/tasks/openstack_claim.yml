@@ -21,19 +21,14 @@
   vars:
     claim_name: "{{ cifmw_hive_openstack_claim_name }}"
     cluster_pool: "{{ cifmw_hive_openstack_pool_name }}"
-    rtn_kube: "{{ cifmw_hive_kubeconfig }}"
+    rtn_kube: "{{ cifmw_hive_kubePath }}"
     life_time: "{{ cifmw_hive_lifetime | default(false) }}"
     namespace: "{{ cifmw_hive_namespace }}"
 
   tasks:
-    - name: Setting oc_cmd variable
-        ansible.builtin.set_fact:
-          oc_cmd: "oc --kubeconfig {{ cifmw_hive_kubeconfig }}"
-        when: cifmw_hive_kubeconfig is defined
-
     - name: Check if ClusterPool exists
       ansible.builtin.shell:
-        cmd: "{{ oc_cmd }} get ClusterPool {{ cluster_pool }} -n {{ namespace }}"
+        cmd: "{{ cifmw_hive_oc_cmd }} get ClusterPool {{ cluster_pool }} -n {{ namespace }}"
 
     - name: Creating the cluster claim
       ansible.builtin.include_tasks:
@@ -41,36 +36,36 @@
       vars:
         desc: "cluster-claim"
         destFile: "cluster_claim.yml"
-        oc_cli: "{{ oc_cmd }}"
+        oc_cli: "{{ cifmw_hive_oc_cmd }}"
         templateFile: "templates/claim.yml.j2"
         workingDir: "{{ oc_cli_space.path }}"
-        endTime: "{{ cifmw_hive_life_time }}"
+        endTime: "{{ cifmw_hive_cluster_life_time }}"
     - name: Post OCP cluster claim initialization
       block:
         - name: Wait for the claim to be successful
           ansible.builtin.shell:
-            cmd: "{{ oc_cmd }} wait --for=condition=Pending=False clusterclaim/{{ claim_name }} --timeout 59m"
+            cmd: "{{ cifmw_hive_oc_cmd }} wait --for=condition=Pending=False clusterclaim/{{ claim_name }} --timeout {{ cifmw_hive_cluster_claim_timeout }}"
           async: 3600
           poll: 30
         - name: Gathering the namespace of created cluster claim
           ansible.builtin.shell:
-            cmd: "{{ oc_cmd }} get clusterclaim {{ claim_name }} -o jsonpath='{ .spec.namespace }'"
+            cmd: "{{ cifmw_hive_oc_cmd }} get clusterclaim {{ claim_name }} -o jsonpath='{ .spec.namespace }'"
           register: ns
         - name: Gather the kube config reference
           ansible.builtin.shell:
-            cmd: "{{ oc_cmd }} get clusterdeployment -n {{ ns.stdout }} {{ ns.stdout }} -o jsonpath='{ .spec.clusterMetadata.adminKubeconfigSecretRef.name }' "
+            cmd: "{{ cifmw_hive_oc_cmd }} get clusterdeployment -n {{ ns.stdout }} {{ ns.stdout }} -o jsonpath='{ .spec.clusterMetadata.adminKubeconfigSecretRef.name }' "
           register: kube_ref
         - name: Extracting the kubeconfig to {{ rtn_kube }}
           ansible.builtin.shell:
-            cmd: "{{ oc_cmd }} extract -n {{ ns.stdout }} secret/{{ kube_ref.stdout }} --to={{ rtn_kube }} --confirm"
+            cmd: "{{ cifmw_hive_oc_cmd }} extract -n {{ ns.stdout }} secret/{{ kube_ref.stdout }} --to={{ rtn_kube }} --confirm"
       rescue:
         - name: Describe the cluster claim
           ansible.builtin.command:
-            cmd: "{{ oc_cmd }} describe clusterclaim {{ claim_name }}"
+            cmd: "{{ cifmw_hive_oc_cmd }} describe clusterclaim {{ claim_name }}"
           register: result
         - name: Logging of cluster claim events
           ansible.builtin.debug:
             msg: "{{ result.stdout }}"
         - name: Claim removal on event of failure / timeout
           ansible.builtin.command:
-            cmd: "{{ oc_cmd }} delete clusterclaim {{ claim_name }}"
+            cmd: "{{ cifmw_hive_oc_cmd }} delete clusterclaim {{ claim_name }}"
