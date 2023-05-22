@@ -147,3 +147,15 @@ local_env_create: ## Create a virtualized lab on your local machine. Nested virt
 	else \
 		ansible-playbook -i localhost, -c local dev-local-env.yml ${LOCAL_ENV_OPTS}; \
 	fi
+
+VIRTENV_FOLDER_NAME = virtdocs
+##@ Generate documentation
+.PHONY: docs
+docs: ## Create documentation under docs/build/html
+	cd docs && \
+	python -m venv $(VIRTENV_FOLDER_NAME) && \
+	. virtdocs/bin/activate && \
+	pip install -r doc-requirements.txt && \
+	cd source && \
+	make html && \
+	rm -rf $(VIRTENV_FOLDER_NAME)
