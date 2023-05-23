@@ -13,6 +13,8 @@ CI_CTX_NAME ?= localhost/cifmw:latest
 MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 # Run molecule against all tests
 TEST_ALL_ROLES ?= ${TEST_ALL_ROLES:-no}
+# Ansible options for the local_env_vm target
+LOCAL_ENV_OPTS ?= ""
 
 # target vars for generic operator install info 1: target name , 2: operator name
 define vars
@@ -136,3 +138,12 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 enable-git-hooks:
 	git config core.hooksPath "./.githooks"
 	$(warning REMEMBER, YOU MUST HAVE REVIEWED THE CUSTOM HOOKS in .githooks!)
+
+##@ Developper environments
+.PHONY: local_env_create
+local_env_create: ## Create a virtualized lab on your local machine. Nested virt MUST be supported by your system. Use LOCAL_ENV_OPTS param to pass options to ansible-playbook
+	if [ "x${LOCAL_ENV_OPTS}" == "x" ]; then \
+		ansible-playbook -i localhost, -c local dev-local-env.yml; \
+	else \
+		ansible-playbook -i localhost, -c local dev-local-env.yml ${LOCAL_ENV_OPTS}; \
+	fi
