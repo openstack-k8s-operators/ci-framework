@@ -1,20 +1,9 @@
-- name: Prepare storage in CRC
-  vars:
-    make_crc_storage_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
-  when:
-    - cifmw_use_crc is defined
-    - cifmw_use_crc | bool
-    - not cifmw_edpm_prepare_skip_crc_storage_creation | bool
-  ansible.builtin.include_role:
-    name: 'install_yamls_makes'
-    tasks_from: 'make_crc_storage'
-
 - name: Set install_yamls Makefile environment variables
   vars:
     operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
   ansible.builtin.set_fact:
     cifmw_edpm_prepare_common_env:
-      OUT: "{{ cifmw_edpm_prepare_manifests_dir }}"
+      PATH: "{{ cifmw_path }}"
     cifmw_edpm_prepare_make_openstack_env: |
       {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
       OPENSTACK_IMG: {{ operators_build_output[cifmw_operator_build_meta_name].image_catalog }}
@@ -26,6 +15,18 @@
       OPENSTACK_REPO: {{ operators_build_output[cifmw_operator_build_meta_name].git_src_dir }}
       {% endif %}
     cifmw_edpm_prepare_operators_build_output: "{{ operators_build_output }}"
+
+- name: Prepare storage in CRC
+  vars:
+    make_crc_storage_env: "{{ cifmw_edpm_prepare_common_env }}"
+    make_crc_storage_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+  when:
+    - cifmw_use_crc is defined
+    - cifmw_use_crc | bool
+    - not cifmw_edpm_prepare_skip_crc_storage_creation | bool
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_crc_storage'
 
 - name: Get internal OpenShift registry route
   ansible.builtin.command:
