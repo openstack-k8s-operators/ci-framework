@@ -1,20 +1,20 @@
-## Role: install_ca
+# install_ca
 It may happen we need to deploy custom CA on the host soon enough
 
 In such case, we want to deploy it as soon as possible, since it may affect
 our capabilities to access remote package repositories, among possible targets.
 
-### Privilege escalation
+## Privilege escalation
 - Gain write access in the standard PKI location for custom CA
 - Gain access to update the CA trust ring
 
-### Parameters
+## Parameters
 * `cifmw_install_ca_bundle_inline`: (String) Inline representation of the CA bundle we want to inject.
 * `cifmw_install_ca_bundle_src`: (String) Path to the CA bundle we want to inject.
-* `cifmw_install_ca_trust_dir`: (String) Directory where we put custom CA. Must be known by the update-ca-trust command. Defaults to ` /etc/pki/ca-trust/source/anchors/`.
+* `cifmw_install_ca_trust_dir`: (String) Directory where we put custom CA. Must be known by the update-ca-trust command. Defaults to `/etc/pki/ca-trust/source/anchors/`.
 * `cifmw_install_ca_update_cmd`: (String) Command to run in order to update the CA trust ring. Defaults to `update-ca-trust`.
 
-### Example
+## Examples
 ```YAML
 - name: Inject Red Hat downstream CA bundle
   vars:
