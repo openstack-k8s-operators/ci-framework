@@ -29,6 +29,13 @@ Welcome to the documentation for Ci-Framework. This documentation is designed to
    contributing.md
    readme.md
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Available roles
+   :glob:
+
+   Roles/*
+
 Indices and tables
 ==================
 

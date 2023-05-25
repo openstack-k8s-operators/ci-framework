@@ -5,7 +5,7 @@ Thank you for your interest in that project, and for taking time to contribute!
 ## Create a new role
 Run the following command to get your new role ready:
 ```Bash
-$ ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ci_framework/roles ROLENAME
+$ make create_new_role ROLE_NAME=my_wonderful_role
 ```
 
 ### Documentation

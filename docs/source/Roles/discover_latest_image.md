@@ -1,0 +1,1 @@
+../../../ci_framework/roles/discover_latest_image/README.md

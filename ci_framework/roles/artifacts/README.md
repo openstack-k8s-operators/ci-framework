@@ -1,15 +1,14 @@
-## Role: artifacts
+# artifacts
 This role allow to gather data from the environment. It will then output files
 in the defined base directory.
 
-### Privilege escalation
+## Privilege escalation
 None - writes happen only in the user home.
 
-### Parameters
-* `cifmw_artifacts_basedir`: Base directory. Defaults to `cifmw_basedir` which
-defaults to `~/ci-framework`.
+## Parameters
+* `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework`.
 
-### Usage
+## Examples
 Usually we'll import the role as-is at the very start of the playbook, and
 import the tasks from `packages.yml` at the very end:
 ```YAML
