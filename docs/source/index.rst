@@ -4,30 +4,39 @@
 ci-framework
 ============
 
-Welcome to the documentation for Ci-Framework. This documentation is designed to help you get up and running with our project as quickly and smoothly as possible. We'll walk you through everything from setting up your development environment to understanding our code structure and contributing to the project.
+Welcome to the documentation for Ci-Framework. This documentation is designed
+to help you get up and running with our project as quickly and smoothly as
+possible. We'll walk you through everything from setting up your development
+environment to understanding our code structure and contributing to the
+project.
 
 .. toctree::
    :maxdepth: 1
    :caption: Quickstart
+   :glob:
 
-   requirements.md
-   quickstart.md
-   psi.md
-
+   Quickstart/*
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Structure
+   :maxdepth: 1
+   :caption: Usage
+   :glob:
 
-   artifacts.md
-   structure.md
+   Usage/*
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
+   :caption: Internals
+   :glob:
+
+   Internals/*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Development
+   :glob:
 
-   contributing.md
-   readme.md
+   Development/*
 
 .. toctree::
    :maxdepth: 1
@@ -35,6 +44,12 @@ Welcome to the documentation for Ci-Framework. This documentation is designed to
    :glob:
 
    Roles/*
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Available plugins
+
+   plugins_readme.md
 
 Indices and tables
 ==================

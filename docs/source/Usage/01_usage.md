@@ -1,15 +1,6 @@
-# CI Framework - Usage guide
-## Purpose
-The purpose of this repository is to provide a unified tool for various uses,
-from dev testing to CI infra.
-
-## Workflow integration
-In the end, the main entrypoint will be from within the
-[install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
-repository, with new Makefile targets.
-
-The Framework will then leverage install_yamls content and generate the needed
-bits in order to deploy EDPM on the selected infrastructure.
+# Usage guide
+The Framework leverages [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
+content and generate the needed bits in order to deploy EDPM on the selected infrastructure.
 
 The Framework will also ensure we're able to reproduce the exact same run we
 got in CI with a series of artifacts one may download locally, and re-run.
@@ -86,7 +77,7 @@ pre_infra:
       source: /path/to/my/glorious.crd
 ```
 In the above example, the `foo.yml` is located in
-[ci_framework/hooks/playbooks](ci_framework/hooks/playbooks) while
+[ci_framework/hooks/playbooks](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/hooks/playbooks) while
 `glorious.crd` is located in some external path.
 
 Also, the list order is important: the hook will first load the playbook,

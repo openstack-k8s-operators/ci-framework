@@ -1,6 +1,4 @@
-# Custom ansible plugins and modules
-
-## action_plugins/ci_make
+# action_plugins/ci_make
 This wraps `community.general.make` module, mostly. It requires an additional
 parameter, `output_dir`, in order to output the `make` generated command.
 It also adds a new optional parameter, `dry_run`, allowing to NOT run
@@ -31,13 +29,13 @@ The INDEX is calculated based on matching `ci_make_*` pattern in that directory.
 The file can then be used as a reproducer or just debug output in order to
 understand what was actually launched using `community.ansible.make` module.
 
-## action_plugins/discover_latest_image
+# action_plugins/discover_latest_image
 Allows to discover the latest available qcow2 from a remote page. It's mainly
 wrapped in the discover_latest_image role, but you may call the action
 directly. Beware though, it will NOT export any fact! Please check the example
 bellow for more info about its proper usage.
 
-### options:
+## options:
 Any of the `ansible.builtin.uri` module is supported.
 
 * `url`:
@@ -49,7 +47,7 @@ Any of the `ansible.builtin.uri` module is supported.
   * required: True
   * type: str
 
-### Example:
+## Example:
 ```YAML
 - name: Get latest CentOS 9 Stream image
   register: discovered_image
@@ -65,20 +63,20 @@ Any of the `ansible.builtin.uri` module is supported.
     cacheable: true
 ```
 
-## modules/get_makefiles_env
+# modules/get_makefiles_env
 Description: Retrieves a dictionary with all the environment variables
 defined in the Makefiles under the given path.
 
-### options:
+## options:
 * `base_path`:
   * description: The base path on where to start picking Makefiles vars.
   * required: true
   * type: str
 
-## modules/generate_make_tasks
+# modules/generate_make_tasks
 Description: Generate task file per Makefile target.
 
-### options:
+## options:
 * `install_yamls_path`:
   * description: Absolute path to install_yamls repository
   * required: True
