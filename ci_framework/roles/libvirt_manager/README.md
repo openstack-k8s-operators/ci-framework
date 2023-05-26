@@ -23,3 +23,4 @@ Used for checking if:
 * `cifmw_libvirt_manager_installyamls`: (String) install_yamls repository location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`
 * `cifmw_libvirt_manager_dryrun`: (Boolean) Toggle ci_make `dry_run` parameter. Defaults to `false`.
 * `cifmw_libvirt_manager_compute_amount`: (Integer) State the amount of computes you want. Defaults to `1`.
+* `cifmw_libvirt_manager_skip_edpm_compute_repos`: (Boolean) Intentionally skips the configuration of repos on EDPM compute nodes. Defaults to `False`.
