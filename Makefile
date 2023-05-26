@@ -40,7 +40,7 @@ create_new_role:
 	ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ci_framework/roles ${ROLE_NAME}
 
 .PHONY: role_molecule
-role_molecule:
+role_molecule: ## Regenerate the molecule jobs configuration
 	bash scripts/create_role_molecule
 
 .PHONY: new_role
