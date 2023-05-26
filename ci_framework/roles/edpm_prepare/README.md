@@ -11,3 +11,4 @@ This role doesn't need privilege scalation.
 * `cifmw_edpm_prepare_skip_crc_storage_creation`: (Boolean) Intentionally skips the deployment of the CRC storage related resources. Defaults to `False`.
 * `cifmw_edpm_prepare_skip_openstack_operator:`: (Boolean) Intentionally skips the deployment of the OpenStack metaoperator. Defaults to `False`.
 * `cifmw_edpm_prepare_wait_subscription_retries`: (Integer) Number of retries, with 5 seconds delays, waiting for the OpenStack subscription to come up. Defaults to `5`.
+* `cifmw_edpm_prepare_crc_attach_default_interface`: (Boolean) Skips crc_attach_default_interface. Defaults to `true`.
