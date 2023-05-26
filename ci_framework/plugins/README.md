@@ -17,7 +17,7 @@ Example:
         state: directory
     - name: Run pre-commit tests
       ci_make:
-        chdir: "~/code/github.com/ci-framework"
+        chdir: "~/code/github.com/ci-framework-data"
         output_dir: /tmp/artifacts
         target: pre_commit
         params:

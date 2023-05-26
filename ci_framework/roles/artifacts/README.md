@@ -6,7 +6,7 @@ in the defined base directory.
 None - writes happen only in the user home.
 
 ## Parameters
-* `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework`.
+* `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 
 ## Examples
 Usually we'll import the role as-is at the very start of the playbook, and

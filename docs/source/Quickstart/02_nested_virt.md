@@ -74,7 +74,7 @@ cd /home/zuul/src/ci-framework
 Run the ansible command
 
 ```Bash
-ansible-playbook -e @/home/zuul/src/ci-framework/scenarios/centos-9/local-env.yml deploy-edpm.yml
+ansible-playbook -e @scenarios/centos-9/local-env.yml deploy-edpm.yml
 ```
 
 ℹ️ You may want to discover other existing scenarios in the `/scenarios` location.
@@ -85,15 +85,15 @@ Running the following commands will clean up the provisionned VM:
 ```Bash
 virsh -c qemu:///system destroy cifmw-vm
 virsh -c qemu:///system undefine cifmw-vm
-rm -rf ~/ci-framework
+rm -rf ~/ci-framework-data
 ```
 
 ## I want some details
 
 The `make` target will call `ansible-playbook` against the dev-local-env.yml playbook. This playbook will then:
-- create some directories located in `~/ci-framework`
-- generate an ephemeral SSH keypair in `~/ci-framework/artifacts` and allow it in the VM
-- fetch the latest CentOS Stream 9 image and store it in `~/ci-framework/images`
-- create a layered image based upon that CS9 image, and store i in `~/ci-framework/images`
+- create some directories located in `~/ci-framework-data`
+- generate an ephemeral SSH keypair in `~/ci-framework-data/artifacts` and allow it in the VM
+- fetch the latest CentOS Stream 9 image and store it in `~/ci-framework-data/images`
+- create a layered image based upon that CS9 image, and store i in `~/ci-framework-data/images`
 - bootstrap the VM, installing some softwares, configuring services and all
 - inject a block in your `~/.ssh/config` file for an easy access

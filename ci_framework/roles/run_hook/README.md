@@ -34,7 +34,7 @@ to do so, the hook playbook has to create a YAML file as follow:
 ```
 The location and name are fixed. Both `cifmw_basedir`, `step` and `hook_name` are passed
 down to the hook playbook. Note that the value of `cifmw_basedir` will default
-to `~/ci-framework` if you don't pass it.
+to `~/ci-framework-data` if you don't pass it.
 
 In the same way, hooks may be able to consume data from a previous hook by loading
 the generated fil using `ansible.builtin.include_vars`, using the mentioned path.

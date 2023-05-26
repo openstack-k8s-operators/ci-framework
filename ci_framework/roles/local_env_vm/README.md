@@ -11,7 +11,7 @@ this role creates).
 None.
 
 ## Parameters
-* `cifmw_local_env_vm_basedir`: (String) Base directory. Defaults to `{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework') }}`.
+* `cifmw_local_env_vm_basedir`: (String) Base directory. Defaults to `{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}`.
 * `cifmw_local_env_vm_pullsecret`: (String) Location of the pull-secret file. Defaults to `{{ ansible_user_dir }}/pull-secret`.
 * `cifmw_local_env_vm_space`: (String) Disk space allocated to the VM. Defaults to `120G`.
 * `cifmw_local_env_vm_memory`: (Integer) Allocated memory. Defaults to `22572`.

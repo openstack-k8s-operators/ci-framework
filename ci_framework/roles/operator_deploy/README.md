@@ -5,7 +5,7 @@ Deploy only selected operator(s) on OpenShift
 None
 
 ## Parameters
-* `cifmw_operator_deploy_basedir`: (String) Directory where we will have the RHOL/CRC binary and the configuration (e.g. `artifacts/.rhol_crc_pull_secret.txt`). Default to `cifmw_basedir` which defaults to `~/ci-framework`.
+* `cifmw_operator_deploy_basedir`: (String) Directory where we will have the RHOL/CRC binary and the configuration (e.g. `artifacts/.rhol_crc_pull_secret.txt`). Default to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_operator_deploy_installyamls`: (String) `install_yamls` root location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`.
 * `cifmw_operator_deploy_list`: (List) List of the operators to deploy. It must match a proper target in install_yamls Makefile.
 

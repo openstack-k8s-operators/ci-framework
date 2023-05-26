@@ -6,7 +6,7 @@ registry, and then run one container per package to build.
 None
 
 ## Parameters
-* `cifmw_pkg_build_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which  defaults to `~/ci-framework`.
+* `cifmw_pkg_build_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which  defaults to `~/ci-framework-data`.
 * `cifmw_pkg_build_ctx_name`: (String) Container full name. Defaults to `localhost/cifmw-buildpkgs`.
 * `cifmw_pkg_build_ctx_tag`: (String) Container tag. Defaults to `latest`.
 * `cifmw_pkg_build_ctx_push`: (Boolean) Whether the container has to be pushed to some remote registry. Defaults to `false`.

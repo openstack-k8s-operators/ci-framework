@@ -4,7 +4,7 @@ When building an operator from a Pull Request, it is mandatory to provide the PR
 you want to build meta-operator too, so the role can properly replace api references in meta-operator.
 
 ## Parameters
-* `cifmw_operator_build_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework`.
+* `cifmw_operator_build_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_operator_build_dryrun`: (Boolean) Toggle `ci_make` `dry_run` flag. Defaults to `False`.
 * `cifmw_operator_build_golang_ct`: (String) Reference to the golang container. Defaults to `docker.io/library/golang:1.19`.
 * `cifmw_operator_build_golang_alt_ct`: (String) Reference to an alternative golang container. Defaults to `quay.io/projectquay/golang:1.19`.

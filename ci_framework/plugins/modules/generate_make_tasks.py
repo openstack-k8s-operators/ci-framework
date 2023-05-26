@@ -72,7 +72,7 @@ MAKE_TMPL = '''---
     var: make_%(target)s_params
 - name: Run %(target)s
   ci_make:
-    output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework') }}/artifacts"
+    output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
     chdir: "%(chdir)s"
     target: %(target)s
     dry_run: "{{ make_%(target)s_dryrun|default(false)|bool }}"
