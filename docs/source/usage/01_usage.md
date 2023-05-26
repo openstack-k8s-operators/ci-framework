@@ -58,6 +58,8 @@ Allowed parameter names are:
 * `post_ctlplane_deploy`: after Control Plane deployment
 * `pre_tests`: before running tests
 * `post_tests`: after running tests
+* `pre_admin_setup`: before admin setup
+* `post_admin_setup`: before admin setup
 * `pre_reporting`: before running reporting
 * `post_reporting`: after running reporting
 
