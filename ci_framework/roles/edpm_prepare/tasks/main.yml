@@ -101,6 +101,23 @@
           --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
           --for=jsonpath='{.status.phase}'=Complete --timeout=20m
 
+    # TODO(pablintino): rework that part in order to use an Assert
+    # this means mostly: push this to a new task file, and retry to include_tasks
+    # The new task file may use some block/rescue in order to properly display the failure if any
+    - name: Make sure all Openstack operators are deployed
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: >-
+        set -o pipefail && oc get csv -l operators.coreos.com/openstack-operator.openstack
+        --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+        --no-headers=true | grep -i "succeeded"
+      register: operator_status
+      until: operator_status.rc == 0
+      changed_when: false
+      retries: "{{ cifmw_edpm_prepare_wait_subscription_retries }}"
+      delay: 30
+
 - name: Install OpenStack service
   vars:
     make_openstack_deploy_env: "{{ cifmw_edpm_prepare_common_env |
