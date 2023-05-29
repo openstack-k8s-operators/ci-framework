@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+##----------------------------------------------------------------------------
+## Shell Opts ----------------------------------------------------------------
+##----------------------------------------------------------------------------
+set -o pipefail
+
+##----------------------------------------------------------------------------
+# Define the ANSI color codes ------------------------------------------------
+##----------------------------------------------------------------------------
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+##----------------------------------------------------------------------------
+## Functions -----------------------------------------------------------------
+##----------------------------------------------------------------------------
+
+# this function works in case of long running command  with verbous mode
+progress_indicator(){
+  local aux_file=$1 # warning: file content is mutable
+  local command=$2  # long running command
+
+  touch "$aux_file"  # create the auxiliary file if it doesn't exist
+  truncate -s 0 "$aux_file"  # delete content (if existing)
+
+  previous_size=$(stat -c %s "$aux_file")
+
+  # run the long running command in the background
+  eval $command &> "$aux_file" &
+  background_pid=$!
+
+  while kill -0 "$background_pid" >/dev/null 2>&1; do
+    current_size=$(stat -c %s "$aux_file")
+    if [[ $current_size -gt $previous_size ]]; then
+      echo -n "#"  # print "#" if the file size has increased
+      previous_size=$current_size  # update previous size
+    fi
+    sleep 1  # wait for 1 second before checking again
+  done
+}
+
+# long_running_command=(find / -exec ls -ld '{}' \; -exec sleep 1 \;)
+# long_running_command="${long_running_command[@]}"
+# progress_indicator "$aux_file" "$long_running_command"
+
+# this function builds an a step based interactive option menu
+# returns:
+#    1 to indicate that Quit option was selected
+#    0 otherwize
+interactive_cmd_assembly() {
+  local options_list=$1
+  local step=$2
+
+  # Split the into an array of options
+  IFS=$'\n' read -rd '' -a options <<< "$options_list"
+
+  # Add the "Quit" option
+  options+=("Quit")
+
+  # Create the interactive menu
+  PS3="Select "$step": "
+  select opt in "${options[@]}"
+  do
+    case $opt in
+      "Quit")
+        return 1
+        ;;
+      *)
+        echo "You selected: $opt"
+
+        # choose flavor
+        if [[ $step == "flavor" ]]; then
+          read -r flavor _ <<< "$opt"
+          echo "Result: "$flavor
+        fi
+
+        # choose Centos image
+        if [[ $step == "image" ]]; then
+          read -r image _ <<< "$opt"
+          echo "Result: "$image
+        fi
+
+        return 0
+        ;;
+    esac
+  done
+}
+
+
+check_ssh_reachable() {
+    local ssh_port=22
+    nc -z -w 2 $instance_ip $ssh_port
+    return $?
+}
+
+wait_for_sshd(){
+  # Set the maximum number of retries
+  local max_retries=30
+
+  # Set the delay between retries (in seconds)
+  local retry_delay=5
+
+  # Loop to check SSH reachability
+  retry_count=0
+  while ! check_ssh_reachable; do
+      retry_count=$((retry_count+1))
+      if [ $retry_count -gt $max_retries ]; then
+          echo "${RED}SSH is not reachable after $max_retries retries${NC}"
+          exit 1
+      fi
+      echo "SSH is not reachable. Retrying in $retry_delay seconds..."
+      sleep $retry_delay
+  done
+
+}
+
+
+##----------------------------------------------------------------------------
+## entry point----------------------------------------------------------------
+##----------------------------------------------------------------------------
+
+# Enable autocompletioni and readline functionality only
+# when the script is executed in an interactive shell
+if [[ $- == *i* ]]; then
+    bind "set completion-ignore-case on"
+    bind "TAB: menu-complete"
+fi
+
+# Check if the path argument is provided
+if [ -z "$1" ]; then
+    echo "Please provide a path to your openrc file."
+    read -e -p "Enter a path: " -i "~/" path
+else
+    path="$1"
+fi
+
+# Expand the path, including the tilde (~) character
+eval "expanded_path=$path"
+
+# source OS_ env variables from the openrc file
+source $expanded_path
+
+# Recommended requirements
+cpu_cores=12
+ram_capacity=32768 #MiB
+disk_capacity=100 #GiB
+
+
+##----------------------------------------------------------------------------
+# Capture flavors as an output of the command addressing recommended
+# requirements and build a menu
+echo -e "${BLUE}Selecting an instance flavor${NC}"
+flavors=$(openstack flavor list -c Name -c RAM -c Disk -c VCPUs -f value | \
+          awk -v cpu_cores=$cpu_cores \
+              -v ram_capacity="$ram_capacity" \
+              -v disk_capacity=$disk_capacity \
+              '$2>ram_capacity && $3>disk_capacity && $4>cpu_cores')
+output=$(interactive_cmd_assembly "$flavors" "flavor")
+if [ $? == 1 ]; then
+  echo "Exiting..."
+  exit 0
+fi
+flavor_name=$(echo "$output" | grep "Result:" | awk '{print $2}')
+
+
+##----------------------------------------------------------------------------
+# Capture Centos images as an output of the command and build a menu
+echo -e "${BLUE}Selecting an instance image${NC}"
+aux_file="auxilary.txt"
+long_running_command="openstack image list -vvv"
+progress_indicator "$aux_file" "$long_running_command"
+
+echo "" # jump to the next line
+pattern="ID[[:space:]]*|[[:space:]]*Name[[:space:]]*|[[:space:]]*Status"
+output=$(sed -n "/$pattern/,\$p" "$aux_file" | grep -i centos | awk '{ print $4; }')
+images=$(echo "$output" | tail -n +1)  #  everything after the pattern
+output=$(interactive_cmd_assembly "$images" "image")
+image_name=$(echo "$output" | grep "Result:" | awk '{print $2}')
+
+##----------------------------------------------------------------------------
+# Select less congested network
+echo -e "${BLUE}Choosing the less congested network${NC}"
+long_running_command="openstack network list --external -c Name -f value | \
+                      xargs -r -n1 openstack ip availability show -f json"
+progress_indicator "$aux_file" "$long_running_command"
+echo "" # jump to the next line
+network_name=$(cat $aux_file |  \
+               jq -r '.id as $network_id | .subnet_ip_availability[] | select(.ip_version == 4) | "\(.total_ips - .used_ips) \($network_id)"' |  \
+               sort -nr | head -n1 |  awk ' {{print  $NF}}' | xargs -n1 openstack network show  -c name -f value)
+
+##----------------------------------------------------------------------------
+# Importing publik key to the cloud
+echo -e "${BLUE}Handling key pair import${NC}"
+pubkey_path=~/.ssh/id_rsa.pub
+keypair_name="$(whoami)"-edpm-key
+
+# Check if the public key file exists
+if [[ ! -f $pubkey_path ]]; then
+    echo "Error: Public key file not found at $pubkey_path"
+    echo "Please generate one and start over."
+    exit 1
+fi
+
+# Check if the key pair name already exists
+existing_keypair=$(openstack keypair show -f value -c name $keypair_name 2>/dev/null)
+if [[ -n $existing_keypair ]]; then
+    echo -e "${RED}Warning: Key pair with the name $keypair_name already exists${NC}"
+else
+  # Import the key pair
+  openstack keypair create --public-key $pubkey_path $keypair_name
+fi
+
+
+##----------------------------------------------------------------------------
+# Create a vm with values selected peviously
+instanse_name="e2e-edpm-deployment"
+echo -e "${BLUE}Creating $instanse_name instance${NC}"
+output=$(openstack server create --flavor $flavor_name --image $image_name \
+                   --key-name $keypair_name --network $network_name \
+                   --security-group default $instanse_name)
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to create an instance${NC}"
+    exit 1
+fi
+instance_id=$(echo "$output" | awk '/ id / {print $4}')
+
+##----------------------------------------------------------------------------
+# Wait until instance is ACTIVE and print log-in command
+start_time=$(date +%s)
+
+echo -e "${BLUE}Waiting for instance to become ACTIVE${NC}"
+
+# Loop until the instance status becomes ACTIVE or timeout occurs
+while :
+do
+    # Get the current status
+    status=$(openstack server show $instance_id -f value -c status)
+
+    if [[ $status == "ACTIVE" ]]; then
+      # Instance is active, get the IP address and print it
+      instance_ip=$(openstack server show $instance_id -f json -c addresses | \
+           jq -r --arg netname "$network_name" '.addresses | to_entries[] | select(.key == $netname) | .value[0]')
+      echo "" # jump to the next line
+      break
+    fi
+
+    # Check if more than 2 minutes have passed
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+
+    if ((elapsed_time > 120)); then
+        echo "Error: Timeout occurred while waiting for instance to become ACTIVE."
+        exit 1
+    fi
+
+    echo -n "#" # progress indicator
+    sleep 1
+done
+
+
+##----------------------------------------------------------------------------
+# Commands to execute on the instance
+echo -e "${BLUE}Istalling packages required for ci-framework${NC}"
+
+# "ACTIVE" status does not necessarily indicate that sshd is running
+wait_for_sshd
+
+ssh_cmd="ssh -v -o StrictHostKeyChecking=no -t cloud-user@$instance_ip -i $pubkey_path"
+
+commands=(
+    "${ssh_cmd} eval 'sudo dnf -y groupinstall \"Development Tools\"'"
+    "${ssh_cmd} eval 'sudo dnf -y install qemu-img qemu-kvm libguestfs libguestfs-tools-c wget pip'"
+    "${ssh_cmd} eval 'python3 -m pip install --user ansible jmespath beautifulsoup4'"
+)
+
+# Iterate over the commands and execute the progress_indicator function
+installed_all_packages=true
+for cmd in "${commands[@]}"; do
+   $cmd # or use "progress_indicator "aux_file" "$cmd"" to hide the output
+
+   if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to perform $cmd${NC}"
+    installed_all_packages=false
+  fi
+done
+
+##----------------------------------------------------------------------------
+# How to connect to the instance
+if [[ $installed_all_packages == true ]]; then
+  echo -e "${BLUE}Congrats! The instance is ready:${NC}"
+else
+  echo -e "${RED}Install packages manulally:${NC}"
+fi
+echo "  ssh cloud-user@$instance_ip -i $pubkey_path"
