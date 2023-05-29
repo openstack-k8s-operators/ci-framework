@@ -153,6 +153,7 @@ VIRTENV_FOLDER_NAME = virtdocs
 .PHONY: docs
 docs: ## Create documentation under docs/build/html
 	cd docs && \
+		rm -rf source/_build; \
 	python -m venv $(VIRTENV_FOLDER_NAME) && \
 	. virtdocs/bin/activate && \
 	pip install -r doc-requirements.txt && \
