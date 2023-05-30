@@ -5,7 +5,7 @@ Please explain the role purpose.
 `become` may be set to true if you're deploying the repositories for the system.
 
 ## Parameters
-* `cifmw_repo_setup_basedir`: (String) Installation base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework`.
+* `cifmw_repo_setup_basedir`: (String) Installation base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_repo_setup_promotion`: (String) Promotion line you want to deploy. Defaults to `current-podified`.
 * `cifmw_repo_setup_branch`: (String) Branch/release you want to deploy. Defaults to `zed`.
 * `cifmw_repo_setup_dlrn_uri`: (String) DLRN base URI. Defaults to `https://trunk.rdoproject.org/`.

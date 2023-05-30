@@ -14,7 +14,7 @@ Used for checking if:
     - `polkit_rules.yml`: Add polkit rules under `/etc/`.
 
 ## Parameters
-* `cifmw_libvirt_manager_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework`.
+* `cifmw_libvirt_manager_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_libvirt_manager_enable_virtualization_module`: (Boolean) If `true` it will enable the virtualization module in case it's not already and if the hosts allow it. Defaults to `false`.
 * `cifmw_libvirt_manager_user`: (String) User used for libvirt. Default: the one in the environment variable `USER`.
 * `cifmw_libvirt_manager_images_url`: (String) Location basedir for the image URI. Defaults to `https://cloud.centos.org/centos/9-stream/x86_64/images`.

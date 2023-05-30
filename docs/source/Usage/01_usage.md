@@ -14,7 +14,7 @@ There are two levels of parameters we may provide:
 The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
-`~/ci-framework`
+`~/ci-framework-data`
 * `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
 * `cifmw_manifests`: Directory where k8s related manifests will be places. Defaults to
 `{{ cifmw_basedir }}/manifests`
@@ -24,7 +24,7 @@ are shared among multiple roles:
 * `cifmw_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
 
 #### Words of caution
-If you want to output the content in another location than `~/ci-framework`
+If you want to output the content in another location than `~/ci-framework-data`
 (namely set the `cifmw_basedir` to some other location), you will have to update
 the `ansible.cfg`, updating the value of `roles_path` so that it includes
 this new location.

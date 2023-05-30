@@ -8,7 +8,7 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 
 ## Parameters
 
-* `cifmw_rhol_crc_basedir`: (String) Directory where we will have the RHOL/CRC binary and the configuration (e.g. `artifacts/.rhol_crc_pull_secret.txt`). Default to `cifmw_basedir` which defaults to `~/ci-framework`.
+* `cifmw_rhol_crc_basedir`: (String) Directory where we will have the RHOL/CRC binary and the configuration (e.g. `artifacts/.rhol_crc_pull_secret.txt`). Default to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_edpm_deploy_installyamls`: (String) install_yamls root location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`.
 * `cifmw_rhol_crc_use_installyamls`: (Boolean) Tell the role to leverage install_yamls `crc` related targets. Defaults to `False`.
 * `cifmw_rhol_crc_dryrun`: (Boolean) Toggle the `ci_make` `dry_run` parameter. Defaults to `False`.
