@@ -5,11 +5,15 @@ some better speed and easier access to the resources.
 This is why the Framework is also able to consume your own hardware directly,
 starting the CRC and Compute(s) VM directly on your hypervisor.
 
+Make sure your test user has proper sudo access and
+access to libvirtd. Verify you have `git` and `make` installed.
+
 ## Prepare your environment
 In order to do so, some steps should be done beforehand.
 
 ### 1. Get the project and its dependencies
 ```Bash
+$ cd $HOME
 $ git clone https://github.com/openstack-k8s-operators/install_yamls
 $ cd install_yamls/devsetup
 $ make cifmw_prepare
@@ -57,11 +61,29 @@ pre_infra:
 about 30G of RAM, 10 Cores and 120G of disk space. It's more than the minimal
 requirements.
 
-### 4. Run the playbook
+### 4. Place a pull secret in place
+
+Get the pull secret from `https://cloud.redhat.com/openshift/create/local`
+and place it to `$HOME/pull-secret`.
+
+### 5. Run the playbook
 ```Bash
-$ ansible-playbook deploy-edpm -e @~/my-env.yml
+$ ansible-playbook deploy-edpm.yml -e @~/my-env.yml
 ```
 
-### 5. Go grab some coffee
+### 6. Go grab some coffee
 ... and you should get a ready to test EDPM deploy, with one compute VM and
 the CRC one.
+
+### Cleanup
+
+Check is the roles_path points in `install_yamls/devsetup/ci-framework/ansible.cfg`
+points to the right `cifmw_basedir` in case you are using custom config.
+
+```
+cd $HOME/install_yamls/devsetup/ci-framework
+ansible-playbook cleanup-edpm.yml -e @~/my-env.yml
+cd ..
+make crc_cleanup edpm_compute_cleanup
+rm -rf ~/ci-framework-data
+```
