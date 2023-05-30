@@ -85,6 +85,47 @@ Description: Generate task file per Makefile target.
   * required: True
   * type: str
 
+# modules/tempest_list_allowed
+Description: Generate list of tests to be executed by tempest
+
+## options:
+* `yaml_file`:
+  * description: Path to a yaml file containing the tests
+  * required: True
+  * type: str
+* `job`:
+  * description: Name of the job to be used in the filter.
+  * required: False
+  * type: str
+* `groups`:
+  * description: List of groups to be used in the filter.
+  * required: False
+  * type: list
+* `release`
+  * description: Release version
+  * type: str
+  * default: master
+
+# modules/tempest_list_skipped
+Description: Generate list of tests to be skipped by tempest
+
+## options:
+
+* `yaml_file`:
+  * description: Path to a yaml file containing the tests
+  * required: True
+  * type: str
+* `jobs`:
+  * description: List of the jobs to be used in the filter.
+  * required: False
+  * type: list
+* `release`:
+  * description: Release name to be used in the filter. Default is 'master'
+  * required: False
+  * type: str
+  * default: master
+
+
 ## Calling generated tasks
 In order to benefit of the generated role and tasks, you have to ensure ansible
 knows about the role location. By default, it will be in
