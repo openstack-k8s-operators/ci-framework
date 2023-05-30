@@ -21,7 +21,7 @@ are shared among multiple roles:
 * `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`
 * `cifmw_use_libvirt`: (Bool) toggle libvirt support
 * `cifmw_use_crc`: (Bool) toggle rhol/crc usage
-* `cifmw_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
+* `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
 
 #### Words of caution
 If you want to output the content in another location than `~/ci-framework-data`
