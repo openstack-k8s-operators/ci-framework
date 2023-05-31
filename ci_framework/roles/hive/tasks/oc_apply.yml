@@ -15,24 +15,19 @@
 # under the License.
 
 # Renders the template and then applies the resource.
-#
-# Required variables are
-#
-#  desc            -> description of the task
-#  tempalteFile    -> the resource template to be rendered
-#  cifmw_hive_artifacts_dir      -> Location to use for storing run artifacts
-#  destFile        -> the name of file to be used after rendation
-#  oc_cli	   -> absolute path to OC CLI
--
-  name: Rendering the {{ desc }}
+
+- name: Rendering the {{ desc }}
   ansible.builtin.template:
     src: "{{ templateFile }}"
     dest: "{{ cifmw_hive_artifacts_dir }}/{{ destFile }}"
     mode: 0644
--
-  name: Applying the resource provided in {{ destFile }}
+
+- name: Applying the resource provided in {{ destFile }}
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default(cifmw_hive_kubeconfig) }}"
   ansible.builtin.command:
-    cmd: "{{ oc_cli }} apply -f {{ cifmw_hive_artifacts_dir }}/{{ destFile }}"
+    cmd: "oc apply -f {{ cifmw_hive_artifacts_dir }}/{{ destFile }}"
   register: apply_result
   changed_when: ('stdout' in apply_result) and ('unchanged' not in apply_result.stdout)
   failed_when: ( apply_result.rc | int ) > 1
+  check_mode: "{{ cifmw_hive_dry_run | default(omit) }}"

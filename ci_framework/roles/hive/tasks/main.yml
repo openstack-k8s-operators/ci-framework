@@ -16,21 +16,15 @@
 
 # Fails if the oc client is lesser than 4
 
-- name: Setting cifmw_hive_oc_cmd variable
-  ansible.builtin.set_fact:
-    cifmw_hive_oc_cmd: "oc --kubeconfig {{ cifmw_hive_kubeconfig }}"
-  when: cifmw_hive_kubeconfig is defined
-
 - name: Ensuring the supported version of oc is present
   environment:
-    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ kubeconfig | default(cifmw_hive_kubeconfig) }}"
   ansible.builtin.shell:
-    cmd: "{{ cifmw_hive_oc_cmd }} version -o json | jq -r .releaseClientVersion | cut -d '.' -f 1"
+    cmd: "oc version -o json | jq -r .releaseClientVersion | cut -d '.' -f 1"
   register: oc_version_result
   changed_when: false
-  failed_when: ( oc_version_result.stderr | length > 0 ) or
-                 ( oc_version_result.stdout | int ) < 4
-
+  failed_when: ( oc_version_result.stderr | length > 0 ) or ( oc_version_result.stdout | int ) < 4
+  check_mode: "{{ cifmw_hive_dry_run | default(omit) }}"
 
 - name: Ensure hive output directory exists
   ansible.builtin.file:
@@ -42,4 +36,3 @@
   when:
     - cifmw_hive_platform is defined
     - cifmw_hive_action is defined
-
