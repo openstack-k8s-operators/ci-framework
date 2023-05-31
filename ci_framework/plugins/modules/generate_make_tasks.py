@@ -71,6 +71,10 @@ MAKE_TMPL = '''---
   ansible.builtin.debug:
     var: make_%(target)s_params
 - name: Run %(target)s
+  retries: "{{ make_%(target)s_retries | default(omit) }}"
+  delay: "{{ make_%(target)s_delay | default(omit) }}"
+  until: "{{ make_%(target)s_until | default(true) }}"
+  register: "make_%(target)s_status"
   ci_make:
     output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
     chdir: "%(chdir)s"
