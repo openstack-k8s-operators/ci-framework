@@ -11,6 +11,9 @@ access to libvirtd. Verify you have `git` and `make` installed.
 ## Prepare your environment
 In order to do so, some steps should be done beforehand.
 
+### 0. Ensure you meet the requirements
+Please check [this page](./01_requirements.md) first.
+
 ### 1. Get the project and its dependencies
 ```Bash
 $ cd $HOME
@@ -63,7 +66,7 @@ requirements.
 
 ### 4. Place a pull secret in place
 
-Get the pull secret from `https://cloud.redhat.com/openshift/create/local`
+Get the pull secret from https://cloud.redhat.com/openshift/create/local
 and place it to `$HOME/pull-secret`.
 
 ### 5. Run the playbook
