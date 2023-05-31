@@ -7,6 +7,9 @@ In this section, you will learn how to set up your local development environment
 
 ## Pre-setup
 
+### Meet the requirements
+Please check [this page](./01_requirements.md) first.
+
 ### Nested virtualization support
 Ensure you have nested virtualization support on your hardware. You can follow [this documentation](https://docs.fedoraproject.org/en-US/quick-docs/using-nested-virtualization-in-kvm/).
 
