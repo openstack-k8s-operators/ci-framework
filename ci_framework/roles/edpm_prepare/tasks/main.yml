@@ -26,12 +26,16 @@
     tasks_from: 'make_crc_storage'
 
 - name: Get internal OpenShift registry route
+  environment:
+    PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: "oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}'"
   register: cifmw_edpm_prepare_registry_default_route
   ignore_errors: true
 
 - name: Allow image internal OpenShift registry image pulling
+  environment:
+    PATH: "{{ cifmw_path }}"
   ansible.builtin.shell:
     cmd: >
       oc policy add-role-to-user system:image-puller system:anonymous -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} &&
@@ -63,8 +67,11 @@
       tasks_from: 'make_openstack'
 
 - name: Wait for OpenStack control plane to be installed
+  when: not cifmw_edpm_prepare_dry_run
   block:
     - name: Wait for OpenStack subscription creation
+      environment:
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: oc get sub openstack-operator --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }} -o=jsonpath='{.status.installplan.name}'
       until: cifmw_edpm_prepare_wait_installplan_out.rc == 0 and cifmw_edpm_prepare_wait_installplan_out.stdout != ""
@@ -73,11 +80,12 @@
       delay: 10
 
     - name: Wait for OpenStack operator to get installed
+      environment:
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >
           oc wait InstallPlan {{ cifmw_edpm_prepare_wait_installplan_out.stdout }}
           --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }} --for=jsonpath='{.status.phase}'=Complete --timeout=20m
-  when: not cifmw_edpm_prepare_dry_run
 
 - name: Install OpenStack service
   vars:
@@ -89,6 +97,7 @@
     tasks_from: 'make_openstack_deploy'
 
 - name: Wait for OpenStack control plane to be installed
+  when: not cifmw_edpm_prepare_dry_run
   block:
     - name: Find the OpenStack CR manifest
       ansible.builtin.find:
@@ -109,10 +118,11 @@
       register: cifmw_edpm_prepare_ctrlplane_cr_slurp
 
     - name: Wait for OpenStack controlplane to be deployed
+      environment:
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
           oc wait OpenStackControlPlane {{ (cifmw_edpm_prepare_ctrlplane_cr_slurp['content'] | b64decode | from_yaml).metadata.name }}
           --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --for=condition=ready
           --timeout=30m
-  when: not cifmw_edpm_prepare_dry_run
