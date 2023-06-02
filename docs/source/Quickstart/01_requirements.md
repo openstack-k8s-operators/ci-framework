@@ -22,11 +22,12 @@ Your used must have full `sudo` access in order to:
 * push specific configurations linked to CRC
 
 While we try to keep the footprint low on the system, packages are needed, and
-some 3rd-party software require accesses, such as CRC.
+some 3rd-party software requires access, such as CRC.
 
-The best way to get that is to push this content to `/etc/suders.d/USERNAME`:
+The best way to achieve that access is to add the following content to a
+`/etc/sudoers.d/USERNAME` file using `visudo`:
 ```
-USERNAME ALL=(ALL) ALL
+USERNAME          ALL=(ALL)       NOPASSWD: ALL
 ```
 Of course, replace `USERNAME` by your user.
 
