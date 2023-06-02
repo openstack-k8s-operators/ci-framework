@@ -14,10 +14,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
 - name: Converge
   hosts: all
   vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
     cifmw_install_yamls_defaults:
       NAMESPACE: openstack
       DATAPLANE_RUNNER_IMG: foo
@@ -26,32 +26,70 @@
     - name: Default include
       ansible.builtin.import_role:
         name: ci_setup
+
     - name: Check directory creation
       block:
         - name: Stat directory
           register: dir_stat
           ansible.builtin.stat:
             path: "{{ ansible_user_dir }}/ci-framework-data/volumes"
+
         - name: Debug
           debug:
             msg: "{{ ansible_user_dir }}/ci-framework-data/volumes"
+
         - name: Validate directory state
           ansible.builtin.assert:
             that:
               - dir_stat.stat.isdir is defined
               - dir_stat.stat.isdir
+
+    - name: Verify openshift client
+      block:
+        - name: Get oc stat informaiton
+          register: oc_stat
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/bin/oc"
+
+        - name: Verify the oc stat information
+          ansible.builtin.assert:
+            that:
+              - oc_stat.stat.exists is defined
+              - oc_stat.stat.exists | bool
+
+        - name: Verify openshift client version
+          register: oc_ver
+          environment:
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command:
+            cmd: "oc version -o yaml"
+
+        - name: Debug - oc version output
+          ansible.builtin.debug:
+            msg: "{{ oc_ver.stdout }}"
+
+        - name: Compare the expected version
+          vars:
+            oc_ver_dict: "{{ oc_ver.stdout | from_yaml }}"
+            oc_major_version: "{{ oc_ver_dict.releaseClientVersion | split('.') | first }}"
+          ansible.builtin.assert:
+            that:
+              - oc_major_version | int >= 4
+
     - name: Clean up directories
       vars:
         directory_state: absent
       ansible.builtin.import_role:
         name: ci_setup
         tasks_from: cleanup.yml
+
     - name: Check directory removal
       block:
         - name: Stat directory
           register: dir_stat
           ansible.builtin.stat:
             path: "{{ ansible_user_dir }}/ci-framework-data/volumes"
+
         - name: Validate directory state
           ansible.builtin.assert:
             that:
