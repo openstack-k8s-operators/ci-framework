@@ -8,3 +8,34 @@
   ansible.builtin.package:
     name: "{{ cifmw_ci_setup_packages }}"
     state: latest
+
+- name: Install openshift client
+  block:
+    - name: Gather version of openshift client if it exists
+      register: oc_version
+      environment:
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: "oc version -o yaml"
+
+    - name: Check if version of openshift client is supported
+      vars:
+        oc_version_data: "{{ oc_version.stdout | from_yaml }}"
+        oc_major_version: "{{ oc_version_data.releaseClientVersion | split('.') | first }}"
+      ansible.builtin.assert:
+        that:
+          - oc_major_version | int >= cifmw_ci_setup_openshift_minimum_version
+  rescue:
+    - name: Ensure openshift client install path is present
+      ansible.builtin.file:
+        path: "{{ cifmw_ci_setup_openshift_client_install_path }}"
+        state: directory
+        mode: 0755
+
+    - name: Install openshift cient
+      ansible.builtin.unarchive:
+        src: "{{ cifmw_ci_setup_openshift_client_download_uri }}/{{ cifmw_ci_setup_openshift_client_version }}/openshift-client-linux.tar.gz"
+        dest: "{{ cifmw_ci_setup_openshift_client_install_path }}"
+        remote_src: true
+        mode: 0755
+        creates: "{{ cifmw_ci_setup_openshift_client_install_path }}/oc"
