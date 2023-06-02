@@ -14,9 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Extract configs of interest from cifmw_libvirt_manager_configuration
+- name: Set compute config and common environment facts
   ansible.builtin.set_fact:
     compute_config: "{{ cifmw_libvirt_manager_configuration['vms']['compute'] }}"
+    cifmw_libvirt_manager_common_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path }) }}"
+    cacheable: true
 
 - name: Ensure needed directories exist
   ansible.builtin.file:
@@ -51,13 +53,16 @@
     make_edpm_compute_dryrun: "{{ cifmw_libvirt_manager_dryrun }}"
     make_edpm_compute_params:
       EDPM_COMPUTE_SUFFIX: "{{ item }}"
-    make_edpm_compute_env:
-      PATH: "{{ cifmw_path }}"
-      EDPM_COMPUTE_VCPUS: "{{ compute_config.cpus }}"
-      EDPM_COMPUTE_RAM: "{{ compute_config.memory }}"
-      EDPM_COMPUTE_DISK_SIZE: "{{ compute_config.disksize }}"
-      CRC_POOL: "{{ compute_config.image_local_dir }}"
-      DISK_FILEPATH: "{{ cifmw_libvirt_manager_basedir }}/workload/edpm-compute-{{ item }}.qcow2"
+    make_edpm_compute_env: >-
+      {{ cifmw_libvirt_manager_common_env |
+        combine({
+          'EDPM_COMPUTE_VCPUS': compute_config.cpus,
+          'EDPM_COMPUTE_RAM': compute_config.memory,
+          'EDPM_COMPUTE_DISK_SIZE': compute_config.disksize,
+          'CRC_POOL': compute_config.image_local_dir,
+          'DISK_FILEPATH': cifmw_libvirt_manager_basedir + "/workload/edpm-compute-" + item + ".qcow2"
+        })
+      }}
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_compute.yml'
@@ -89,8 +94,12 @@
     make_edpm_compute_repos_dryrun: "{{ cifmw_libvirt_manager_dryrun }}"
     make_edpm_compute_repos_params:
       EDPM_COMPUTE_SUFFIX: "{{ item }}"
-    make_edpm_compute_repos_env:
-      CMDS_FILE: "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute/compute_repo-{{ item }}.sh"
+    make_edpm_compute_repos_env: >-
+      {{ cifmw_libvirt_manager_common_env |
+        combine({
+          'CMDS_FILE': cifmw_libvirt_manager_basedir + "/artifacts/edpm_compute/compute_repo-" + item + ".sh"
+        })
+      }}
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_compute_repos.yml'

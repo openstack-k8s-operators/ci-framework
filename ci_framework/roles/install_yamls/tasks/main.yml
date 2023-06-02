@@ -25,11 +25,15 @@
     - "{{ cifmw_install_yamls_tasks_out }}"
 
 - name: "Get environment structure"
+  tags:
+    - always
   register: get_makefiles_env_output
   get_makefiles_env:
     base_path: "{{ cifmw_install_yamls_repo }}"
 
 - name: Create env var if needed
+  tags:
+    - always
   when: cifmw_install_yamls_vars is defined
   block:
     - name: Ensure Output directory exists
@@ -37,9 +41,9 @@
         path: "{{ cifmw_install_yamls_out_dir }}"
         state: directory
 
-    - name: Set environment override edpm_env fact
+    - name: Set environment override cifmw_install_yamls_environment fact
       ansible.builtin.set_fact:
-        edpm_env: >-
+        cifmw_install_yamls_environment: >-
           {{
             cifmw_install_yamls_vars.keys() |
             map('upper') |
@@ -52,7 +56,7 @@
     - name: Ensure user cifmw_install_yamls_vars contains existing Makefile variables
       ansible.builtin.assert:
         that: >-
-         edpm_env.keys() |
+         cifmw_install_yamls_environment.keys() |
          difference(
           get_makefiles_env_output.makefiles_values.keys() | list +
           cifmw_install_yamls_whitelisted_vars | default([])
@@ -66,33 +70,43 @@
       ansible.builtin.copy:
         dest: "{{ cifmw_install_yamls_out_dir }}/{{ cifmw_install_yamls_envfile }}"
         content: |-
-          {% for k,v in edpm_env.items() %}
+          {% for k,v in cifmw_install_yamls_environment.items() %}
           export {{ k }}={{ v }}
           {% endfor %}
 
 - name: Export empty dict in case we don't provide environment overrides
+  tags:
+    - always
   when:
     - cifmw_install_yamls_vars is not defined
   ansible.builtin.set_fact:
-    edpm_env:
+    cifmw_install_yamls_environment:
       OUT: "{{ cifmw_install_yamls_manifests_dir }}"
     cacheable: true
 
 - name: Set install_yamls default values
+  tags:
+    - always
   ansible.builtin.set_fact:
-    cifmw_install_yamls_defaults: "{{ get_makefiles_env_output.makefiles_values  | combine(edpm_env) }}"
+    cifmw_install_yamls_defaults: "{{ get_makefiles_env_output.makefiles_values  | combine(cifmw_install_yamls_environment) }}"
     cacheable: true
 
 - name: Show the env structure
+  tags:
+    - always
   ansible.builtin.debug:
-    var: edpm_env
+    var: cifmw_install_yamls_environment
 
 - name: "Generate make targets"
+  tags:
+    - always
   register: cifmw_generate_makes
   generate_make_tasks:
     install_yamls_path: "{{ cifmw_install_yamls_repo }}"
     output_directory: "{{ cifmw_install_yamls_tasks_out }}"
 
 - name: Debug generate_make module
+  tags:
+    - always
   ansible.builtin.debug:
     var: cifmw_generate_makes
