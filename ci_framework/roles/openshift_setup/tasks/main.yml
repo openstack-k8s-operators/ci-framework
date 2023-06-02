@@ -27,9 +27,38 @@
 
 - name: Create required namespaces
   kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_setup_kubeconfig | default(cifmw_kubeconfig) }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
     name: "{{ item }}"
     kind: Namespace
     state: present
   with_items: "{{ cifmw_openshift_setup_namespaces }}"
   when: not cifmw_openshift_setup_dry_run
+
+- name: Setup podman access to internal registry
+  when: cifmw_openshift_token is defined
+  vars:
+    ansible_callback_diy_runner_on_skipped_msg: |
+      skipping: [{{ inventory_hostname }}]
+      msg: Podman registry setup skipped cause login is no token based.
+    ansible_callback_diy_runner_on_skipped_msg_color: green
+  block:
+  - name: Get internal OpenShift registry route
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+      api_key: "{{ cifmw_openshift_token | default(omit)}}"
+      context: "{{ cifmw_openshift_context | default(omit)}}"
+      kind: Route
+      name: default-route
+      namespace: openshift-image-registry
+    register: cifmw_openshift_setup_registry_default_route
+
+  - name: Login into OpenShift internal registry
+    when: cifmw_openshift_setup_registry_default_route.resources | length > 0
+    ansible.builtin.command:
+      cmd: >-
+        podman login
+        -u {{ cifmw_openshift_user }}
+        -p {{ cifmw_openshift_token }}
+        {{ cifmw_openshift_setup_registry_default_route.resources[0].spec.host }}

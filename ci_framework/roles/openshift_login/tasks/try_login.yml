@@ -1,0 +1,79 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Try get OpenShift access token
+  when:
+    - not cifmw_openshift_login_cert_login
+    - not cifmw_openshift_login_force_refresh
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc whoami -t"
+  register: cifmw_openshift_login_whoami_out
+  ignore_errors: true
+
+- name: Fetch OpenShift token
+  when: >-
+    (cifmw_openshift_login_whoami_out.skipped | default(false)) or
+    cifmw_openshift_login_whoami_out.rc != 0 or not
+    cifmw_openshift_login_whoami_out.stdout
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc login
+      {%- if cifmw_openshift_login_user is defined %}
+      -u {{ cifmw_openshift_login_user }}
+      {%- endif %}
+      {%- if cifmw_openshift_login_password is defined %}
+      -p {{ cifmw_openshift_login_password }}
+      {%- endif %}
+      {%- if cifmw_openshift_login_skip_tls_verify|bool %}
+      --insecure-skip-tls-verify=true
+      {%- endif %}
+      {%- if cifmw_openshift_login_api is defined %}
+      {{ cifmw_openshift_login_api }}
+      {%- endif %}
+  register: cifmw_openshift_login_login_out
+
+- name: Ensure kubeconfig is provided
+  ansible.builtin.assert:
+    that: cifmw_openshift_login_kubeconfig != ""
+
+- name: Fetch new OpenShift access token
+  when:
+    - not cifmw_openshift_login_cert_login
+    - not (cifmw_openshift_login_login_out.skipped | default(false))
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc whoami -t"
+  register: cifmw_openshift_login_new_token_out
+
+- name: Set new OpenShift token
+  when: >-
+    (not cifmw_openshift_login_whoami_out.skipped | default(false)) or
+    (not cifmw_openshift_login_new_token_out.skipped | default(false))
+  ansible.builtin.set_fact:
+    cifmw_openshift_login_token: >-
+      {{
+        (not cifmw_openshift_login_new_token_out.skipped | default(false)) |
+        ternary(cifmw_openshift_login_new_token_out.stdout, cifmw_openshift_login_whoami_out.stdout)
+      }}
+    cacheable: true
