@@ -24,7 +24,6 @@
       ansible.builtin.shell: |
         oc get {{ item }} > {{ cifmw_artifacts_basedir }}/logs/edpm/{{ item }}.log
       loop:
-        - pods
         - secrets
         - pv
         - events
@@ -39,19 +38,19 @@
 
     - name: Dump the logs of all pods
       ansible.builtin.shell: |
-        operator_pods=$(oc get pods -o name -n openstack-operators)
-        openstack_pods=$(oc get pods -o name -n openstack)
-        all_pods="$operator_pods $openstack_pods"
+        oc get pods -o name -n openstack-operators > operator_pods.txt
+        oc get pods -o name -n openstack > openstack_pods.txt
         # This is implicitly relying on the fact that the pod name is
         # prefixed with "pod/" so that the redirect places the logs
         # in the correct pod directory. That is why we do not cd after
         # creating the directory.
         mkdir pod
-        for pod in ${all_pods}; do
-          echo ${pod}
-          oc logs ${pod} > ${pod}-logs.txt
-          oc get -o yaml ${pod} > ${pod}.yaml
-          oc describe ${pod} > ${pod}-describe.txt
+        for ns in openstack-operators openstack; do
+          for pod in $(oc get pods -n $ns); do
+            oc logs ${pod} -n ${ns} > ${pod}-logs.txt
+            oc get -o yaml ${pod} -n ${ns} > ${pod}.yaml
+            oc describe ${pod} -n ${ns} > ${pod}-describe.txt
+          done
         done
         # so we rename the directory after populating it
         # to "pods" to consistently use plural names for
