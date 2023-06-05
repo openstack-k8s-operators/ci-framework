@@ -33,31 +33,43 @@
     - not cifmw_edpm_deploy_dryrun | bool
   block:
     - name: Get info about dataplane node
+      environment:
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.shell: |
-        oc get openstackdataplane
-        oc get openstackdataplanerole
-        oc get openstackdataplanenode
-        oc get pods | grep edpm
+        oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+        oc get openstackdataplanerole -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+        oc get openstackdataplanenode -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+        oc get pods -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | grep edpm
       ignore_errors: true
 
     - name: Get nova-edpm-compute-0-deploy-nova pod name
       register: edpm_pod
+      environment:
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.shell:
-        cmd: oc get pods -o name | grep -m1  nova-edpm-compute-0-deploy-nova
+        cmd: oc get pods -o name -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | grep -m1  nova-edpm-compute-0-deploy-nova
       until: edpm_pod.rc == 0
       retries: "{{ cifmw_edpm_deploy_retries }}"
       delay: 50
 
     - name: Wait for nova-edpm-compute-0-deploy-nova pod to finish
       register: deploy_status
-      ansible.builtin.command: "oc wait --timeout=0 --for=jsonpath='{.status.phase}'=Succeeded {{ edpm_pod.stdout |trim }}"
+      environment:
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: "oc wait -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} --timeout=0 --for=jsonpath='{.status.phase}'=Succeeded {{ edpm_pod.stdout |trim }}"
       until: deploy_status.rc == 0
       retries: "{{ cifmw_edpm_deploy_retries }}"
       delay: 20
 
 - name: Get the logs of EDPM Deploy
-  ansible.builtin.shell:
-    for POD in $(oc get pods -o name | egrep "dataplane-deployment-|nova-edpm-compute"); do echo $POD; oc logs $POD; done
+  environment:
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: |
+    for POD in $(oc get pods -o name -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | egrep "dataplane-deployment-|nova-edpm-compute");
+    do
+      echo $POD;
+      oc logs -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} $POD;
+    done
   register: edpm_logs
   when:
     - deploy_status is defined
