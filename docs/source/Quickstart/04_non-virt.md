@@ -66,8 +66,8 @@ requirements.
 
 ### 4. Place a pull secret in place
 
-Get the pull secret from https://cloud.redhat.com/openshift/create/local
-and place it to `$HOME/pull-secret`.
+Get the pull secret from [here](https://cloud.redhat.com/openshift/create/local)
+and save it in `$HOME/pull-secret`.
 
 ### 5. Run the playbook
 ```Bash
@@ -80,8 +80,8 @@ the CRC one.
 
 ### Cleanup
 
-Check is the roles_path points in `install_yamls/devsetup/ci-framework/ansible.cfg`
-points to the right `cifmw_basedir` in case you are using custom config.
+Check if the `roles_path` in `install_yamls/devsetup/ci-framework/ansible.cfg`
+points to the right `cifmw_basedir`, in case you are using a custom config.
 
 ```
 cd $HOME/install_yamls/devsetup/ci-framework
