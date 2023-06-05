@@ -26,6 +26,14 @@ project.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Cookbooks
+   :glob:
+
+   Cookbooks/*
+
+
+.. toctree::
+   :maxdepth: 1
    :caption: Internals
    :glob:
 
