@@ -1,11 +1,22 @@
 ---
-# Base job for openstack crc based job
+# Base job for crc based job
 - job:
-    name: cifmw-base-crc-openstack
+    name: cifmw-base-crc
     nodeset: centos-9-crc-3xl
     timeout: 10800
     abstract: true
     parent: base-simple-crc
+    vars:
+      crc_parameters: "--memory 21000 --disk-size 120 --cpus 8"
+      pre_pull_images:
+        - registry.redhat.io/rhosp-rhel9/openstack-rabbitmq:17.0
+
+# Base job for openstack based job containing ci-framework bits
+- job:
+    name: cifmw-base-crc-openstack
+    parent: cifmw-base-crc
+    timeout: 10800
+    abstract: true
     irrelevant-files:
       - .*/*.md
     required-projects:
@@ -17,40 +28,26 @@
       - openstack-k8s-operators/repo-setup
     roles:
       - zuul: github.com/openstack-k8s-operators/ci-framework
+    pre-run:
+      - ci/playbooks/e2e-prepare.yml
+      - ci/playbooks/dump_zuul_vars.yml
+    post-run:
+      - ci/playbooks/e2e-collect-logs.yml
+      - ci/playbooks/collect-logs.yml
     vars:
-      crc_parameters: "--memory 21000 --disk-size 120 --cpus 8"
-      pre_pull_images:
-        - registry.redhat.io/rhosp-rhel9/openstack-rabbitmq:17.0
+      zuul_log_collection: true
 
 # EDPM job with single node
 - job:
     name: cifmw-crc-podified-edpm-deployment
     parent: cifmw-base-crc-openstack
-    run:
-      - ci/playbooks/e2e-prepare.yml
-      - ci/playbooks/dump_zuul_vars.yml
-      - ci/playbooks/edpm/run.yml
-    post-run:
-      - ci/playbooks/e2e-collect-logs.yml
-      - ci/playbooks/collect-logs.yml
-    vars:
-      # This should be set here since is associated with parent job (base-crc) and not the scenario
-      cifmw_openshift_kubeconfig: "/home/zuul/.crc/machines/crc/kubeconfig"
-      zuul_log_collection: true
+    run: ci/playbooks/edpm/run.yml
 
 # Bmaas job with CRC and two bmaas compute nodes.
 - job:
     name: cifmw-crc-podified-edpm-baremetal
     parent: cifmw-base-crc-openstack
-    run:
-      - ci/playbooks/e2e-prepare.yml
-      - ci/playbooks/dump_zuul_vars.yml
-      - ci/playbooks/edpm_baremetal_deployment/run.yml
-    post-run:
-      - ci/playbooks/e2e-collect-logs.yml
-      - ci/playbooks/collect-logs.yml
-    vars:
-      zuul_log_collection: true
+    run: ci/playbooks/edpm_baremetal_deployment/run.yml
 
 # Install Yamls specific job
 - job:
