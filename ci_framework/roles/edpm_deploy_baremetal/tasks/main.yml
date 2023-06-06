@@ -1,0 +1,128 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set install_yamls Makefile environment variables
+  vars:
+    operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
+  ansible.builtin.set_fact:
+    cifmw_edpm_deploy_baremetal_common_env:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      PATH: "{{ cifmw_path }}"
+    cifmw_edpm_deploy_baremetal_make_openstack_env: |
+      {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
+      OPENSTACK_IMG: {{ operators_build_output[cifmw_operator_build_meta_name].image_catalog }}
+      OPENSTACK_BRANCH: ""
+      GIT_CLONE_OPTS: "-l"
+      OPENSTACK_REPO: {{ operators_build_output[cifmw_operator_build_meta_name].git_src_dir }}
+      {% endif %}
+    cifmw_edpm_deploy_baremetal_operators_build_output: "{{ operators_build_output }}"
+
+- name: Install OpenStack operator
+  vars:
+    make_edpm_compute_baremetal_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
+      combine(cifmw_edpm_deploy_baremetal_make_openstack_env | from_yaml)}}"
+    make_edpm_compute_baremetal_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_edpm_compute_baremetal'
+
+- name: Wait for OpenStack Provision Server pod to be created
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get po -l osp-provisionserver/name=edpm-compute-provisionserver
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} -o name
+  register: cifmw_edpm_deploy_baremetal_provisionserver_pod_output
+  retries: "{{ cifmw_edpm_deploy_baremetal_wait_provisionserver_retries }}"
+  delay: 10
+  until: cifmw_edpm_deploy_baremetal_provisionserver_pod_output.stdout != ''
+
+- name: Wait for OpenStack Provision Server deployment to be available
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait deployment edpm-compute-provisionserver-openstackprovisionserver
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      --for condition=Available
+      --timeout={{ cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins }}m
+
+- name: Get list of baremetal nodes
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get baremetalhost
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      -o=jsonpath='{.items[*].metadata.name}'
+  register: cifmw_edpm_deploy_baremetal_bmh_output
+
+- name: Wait for baremetal nodes to reach 'provisioned' state
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait bmh {{ item }}
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      --for=jsonpath='{.status.provisioning.state}'=provisioned
+      --timeout={{ cifmw_edpm_deploy_baremetal_wait_bmh_timeout_mins }}m
+
+  loop: "{{ cifmw_edpm_deploy_baremetal_bmh_output.stdout.split() }}"
+
+- name: Register the list of compute nodes
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: oc get bmh -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+  register: compute_nodes_output
+
+- name: Print the list of compute nodes
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  ansible.builtin.debug:
+    var: compute_nodes_output.stdout_lines
+
+- name: Patch OpenStackDataPlane
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc patch openstackdataplane openstack-edpm
+      --type=merge -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      -p '{"spec":{"deployStrategy":{"deploy":true}}}'
+
+- name: Wait for OpenStackDataPlane to be Ready
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait --timeout={{ cifmw_edpm_deploy_baremetal_wait_dataplane_timeout_mins }}m
+      --for=condition=Ready openstackdataplane openstack-edpm
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}

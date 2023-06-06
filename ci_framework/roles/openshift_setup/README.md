@@ -6,6 +6,5 @@ Prepares the target OpenShift cluster to be used by further steps:
 No privilege escalation needed.
 
 ## Parameters
-* `cifmw_openshift_setup_kubeconfig`: (String) Path to the kubeconfig file. Defaults to `cifmw_kubeconfig`.
 * `cifmw_openshift_setup_dry_run`: (Boolean) Skips resources creation. Defaults to `false`.
 * `cifmw_openshift_setup_create_namespaces`: (Strings) Namespaces to create beforehand. Defaults to `[]`.

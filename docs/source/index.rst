@@ -15,35 +15,43 @@ project.
    :caption: Quickstart
    :glob:
 
-   Quickstart/*
+   quickstart/*
 
 .. toctree::
    :maxdepth: 1
    :caption: Usage
    :glob:
 
-   Usage/*
+   usage/*
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Cookbooks
+   :glob:
+
+   cookbooks/*
+
 
 .. toctree::
    :maxdepth: 1
    :caption: Internals
    :glob:
 
-   Internals/*
+   internals/*
 
 .. toctree::
    :maxdepth: 1
    :caption: Development
    :glob:
 
-   Development/*
+   development/*
 
 .. toctree::
    :maxdepth: 1
    :caption: Available roles
    :glob:
 
-   Roles/*
+   roles/*
 
 .. toctree::
    :maxdepth: 1

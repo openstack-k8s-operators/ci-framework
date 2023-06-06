@@ -14,9 +14,12 @@ This role is currently written for Centos.
 
 ## Examples
 
-### 1. Sample playbook to call the role
 ```YAML
 - name: Discover latest CentOS qcow2 image
-    include_role:
+  ansible.builtin.include_role:
     name: discover-latest-image
+
+- name: Output discovered data
+  ansible.builtin.debug:
+    msg: "{{ cifmw_discovered_image_name }} - {{ cifmw_discovered_image_url }}"
 ```

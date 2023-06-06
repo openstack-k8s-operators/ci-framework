@@ -15,13 +15,15 @@ The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
 `~/ci-framework-data`
+* `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes
+provisioned with bmaas vs pre-provisioned VM.
 * `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
 * `cifmw_manifests`: Directory where k8s related manifests will be places. Defaults to
 `{{ cifmw_basedir }}/manifests`
 * `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`
 * `cifmw_use_libvirt`: (Bool) toggle libvirt support
 * `cifmw_use_crc`: (Bool) toggle rhol/crc usage
-* `cifmw_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
+* `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
 
 #### Words of caution
 If you want to output the content in another location than `~/ci-framework-data`
@@ -86,3 +88,11 @@ then the CRD.
 
 Note that you really should avoid pointing to external resources, in order to
 ensure everything is available for job reproducer.
+
+## Ansible tags
+In order to allow user to run only a subset of tasks while still consuming the
+entry playbook, the Framework exposes tags one may leverage with either `--tags`
+or `--skip-tags`:
+
+* `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
+* `packages`: Run all package installation tasks associated to the options you set.

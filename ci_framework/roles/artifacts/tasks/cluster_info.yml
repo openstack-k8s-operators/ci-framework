@@ -1,4 +1,8 @@
 ---
+# Note if any of the tasks fail, we will still try to collect the data
+# from the cluster. This is because we want to collect as much data as
+# possible, even if the cluster is not in a good state so we use
+# ignore_errors: true.
 - name: Check for oc command
   ansible.builtin.command: which oc
   environment:
@@ -20,23 +24,54 @@
       ansible.builtin.shell: |
         oc get {{ item }} > {{ cifmw_artifacts_basedir }}/logs/edpm/{{ item }}.log
       loop:
-        - pods
         - secrets
         - pv
         - events
         - routes
         - all
 
+    - name: Collect install plan related datas
+      changed_when: true
+      ignore_errors: true
+      ansible.builtin.shell: |
+        oc describe installplan -n openstack-operators > {{ cifmw_artifacts_basedir }}/logs/edpm/install_plan.log
+
     - name: Dump the logs of all pods
       ansible.builtin.shell: |
-        all_pods=$(oc get pods -o name)
+        oc get pods -o name -n openstack-operators > operator_pods.txt
+        oc get pods -o name -n openstack > openstack_pods.txt
+        # This is implicitly relying on the fact that the pod name is
+        # prefixed with "pod/" so that the redirect places the logs
+        # in the correct pod directory. That is why we do not cd after
+        # creating the directory.
         mkdir pod
-        for pod in $all_pods; do
-          echo $pod
-          oc logs $pod > ${pod}-logs.txt
-          oc get -o yaml $pod > ${pod}.yaml
-          oc describe $pod > ${pod}-describe.txt
+        for ns in openstack-operators openstack; do
+          for pod in $(oc get pods -o name -n ${ns}); do
+            oc logs ${pod} -n ${ns} > ${pod}-logs.txt
+            oc get -o yaml ${pod} -n ${ns} > ${pod}.yaml
+            oc describe ${pod} -n ${ns} > ${pod}-describe.txt
+          done
         done
+        # so we rename the directory after populating it
+        # to "pods" to consistently use plural names for
+        # collected resources.
+        mv pod pods
+      args:
+        chdir: "{{ cifmw_artifacts_basedir }}/logs/edpm"
+      changed_when: true
+      ignore_errors: true
+
+    - name: Dump all openstack CRs
+      ansible.builtin.shell: |
+        mkdir crs
+        pushd crs
+          all_crds=$(oc get crd | awk '/openstack/ { print $1}' | awk -F '.' '{print $1}')
+          for cr in ${all_crds}; do
+            echo ${crd}
+            oc get -o yaml ${cr} > ${cr}.yaml
+            oc describe ${cr} > ${cr}-describe.txt
+          done
+        popd
       args:
         chdir: "{{ cifmw_artifacts_basedir }}/logs/edpm"
       changed_when: true

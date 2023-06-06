@@ -1,57 +1,71 @@
 ---
-# Base job for openstack crc based job
+# Base job for crc based job
 - job:
-    name: cifmw-base-crc-openstack
+    name: cifmw-base-crc
     nodeset: centos-9-crc-3xl
     timeout: 10800
     abstract: true
-    parent: base-crc
+    parent: base-simple-crc
+    vars:
+      crc_parameters: "--memory 21000 --disk-size 120 --cpus 8"
+      pre_pull_images:
+        - registry.redhat.io/rhosp-rhel9/openstack-rabbitmq:17.0
+
+# Base job for openstack based job containing ci-framework bits
+- job:
+    name: cifmw-base-crc-openstack
+    parent: cifmw-base-crc
+    timeout: 10800
+    abstract: true
     irrelevant-files:
       - .*/*.md
     required-projects:
+      - openstack-k8s-operators/ci-framework
+      - openstack-k8s-operators/dataplane-operator
       - openstack-k8s-operators/install_yamls
+      - openstack-k8s-operators/openstack-baremetal-operator
       - openstack-k8s-operators/openstack-operator
-      - github.com/openstack-k8s-operators/ci-framework
-      - github.com/openstack-k8s-operators/repo-setup
+      - openstack-k8s-operators/repo-setup
     roles:
       - zuul: github.com/openstack-k8s-operators/ci-framework
+    pre-run:
+      - ci/playbooks/e2e-prepare.yml
+      - ci/playbooks/dump_zuul_vars.yml
+    post-run:
+      - ci/playbooks/e2e-collect-logs.yml
+      - ci/playbooks/collect-logs.yml
     vars:
-      crc_parameters: "--memory 20000 --disk-size 120 --cpus 6"
-      pre_pull_images:
-        - registry.redhat.io/rhosp-rhel9/openstack-rabbitmq:17.0
+      zuul_log_collection: true
 
 # EDPM job with single node
 - job:
     name: cifmw-crc-podified-edpm-deployment
     parent: cifmw-base-crc-openstack
-    pre-run:
-      - ci/playbooks/edpm/pre.yml
-    run:
-      - ci/playbooks/e2e-prepare.yml
-      - ci/playbooks/dump_zuul_vars.yml
-      - ci/playbooks/edpm/run.yml
-    post-run:
-      - ci/playbooks/edpm/post.yml
-      - ci/playbooks/collect-logs.yml
-    vars:
-      network_isolation: true
-      crc_attach_default_interface: true
-      bmo_setup: false
-      # This should be set here since is associated with parent job (base-crc) and not the scenario
-      cifmw_kubeconfig: "/home/zuul-worker/.crc/machines/crc/kubeconfig"
+    run: ci/playbooks/edpm/run.yml
+
+# Bmaas job with CRC and two bmaas compute nodes.
+- job:
+    name: cifmw-crc-podified-edpm-baremetal
+    parent: cifmw-base-crc-openstack
+    run: ci/playbooks/edpm_baremetal_deployment/run.yml
 
 # Install Yamls specific job
 - job:
     name: ci-framework-crc-podified-edpm-deployment
     parent: cifmw-crc-podified-edpm-deployment
     files:
+      - ^ci_framework/playbooks/*
       - ^ci_framework/roles/edpm_prepare/(?!meta|README).*
       - ^ci_framework/roles/edpm_deploy/(?!meta|README).*
       - ^deploy-edpm.yml
       - ^scenarios/centos-9/edpm_ci.yml
-    vars:
-      cifmw_operator_build_output:
-          operators:
-              openstack-operator:
-                  git_src_dir: /home/zuul-worker/src/github.com/openstack-k8s-operators/openstack-operator
-                  image_catalog: quay.io/openstack-k8s-operators/openstack-operator-index:latest
+
+- job:
+    name: ci-framework-crc-podified-edpm-baremetal
+    parent: cifmw-crc-podified-edpm-baremetal
+    files:
+      - ^ci_framework/playbooks/*
+      - ^ci_framework/roles/edpm_deploy_baremetal/(?!meta|README).*
+      - ^ci/playbooks/edpm_baremetal_deployment/run.yml
+      - ^deploy-edpm.yml
+      - ^scenarios/centos-9/edpm_baremetal_deployment_ci.yml

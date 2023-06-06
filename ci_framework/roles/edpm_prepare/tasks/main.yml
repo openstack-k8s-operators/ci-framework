@@ -1,9 +1,28 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 - name: Set install_yamls Makefile environment variables
+  tags:
+    - always
   vars:
     operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
   ansible.builtin.set_fact:
     cifmw_edpm_prepare_common_env:
       PATH: "{{ cifmw_path }}"
+      KUBECONFIG : "{{ cifmw_openshift_kubeconfig }}"
     cifmw_edpm_prepare_make_openstack_env: |
       {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
       OPENSTACK_IMG: {{ operators_build_output[cifmw_operator_build_meta_name].image_catalog }}
@@ -17,29 +36,48 @@
     cifmw_edpm_prepare_operators_build_output: "{{ operators_build_output }}"
 
 - name: Prepare storage in CRC
+  when:
+    - not cifmw_edpm_prepare_skip_crc_storage_creation | bool
   vars:
     make_crc_storage_env: "{{ cifmw_edpm_prepare_common_env }}"
     make_crc_storage_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
-  when: not cifmw_edpm_prepare_skip_crc_storage_creation | bool
+    make_crc_storage_retries: 10
+    make_crc_storage_delay: 2
+    make_crc_storage_until: "make_crc_storage_status is not failed"
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_crc_storage'
 
+- name: Attach default network to CRC
+  when:
+    - cifmw_edpm_prepare_crc_attach_default_interface | default ('true') | bool
+  ansible.builtin.include_role:
+    name: "install_yamls_makes"
+    tasks_from: "make_crc_attach_default_interface.yml"
+
 - name: Get internal OpenShift registry route
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: "oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}'"
   register: cifmw_edpm_prepare_registry_default_route
   ignore_errors: true
 
 - name: Allow image internal OpenShift registry image pulling
-  ansible.builtin.shell:
-    cmd: >
-      oc policy add-role-to-user system:image-puller system:anonymous -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} &&
-      oc policy add-role-to-user system:image-puller system:unauthenticated -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
   when:
     - cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in cifmw_edpm_prepare_operators_build_output
     - cifmw_edpm_prepare_operators_build_output[cifmw_operator_build_meta_name].image_catalog.split('/')[0] == cifmw_edpm_prepare_registry_default_route.stdout
     - cifmw_edpm_prepare_registry_default_route is succeeded
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: >
+      oc policy add-role-to-user system:image-puller system:anonymous -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} &&
+      oc policy add-role-to-user system:image-puller system:unauthenticated -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} &&
+      oc policy add-role-to-user system:image-puller system:anonymous -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} &&
+      oc policy add-role-to-user system:image-puller system:unauthenticated -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
 
 - name: Prepare inputs
   vars:
@@ -51,33 +89,43 @@
 
 # TODO: Prepare a proper operator list that dictates what operators to deploy instead of relaying on a simple flag
 - name: OpenStack meta-operator installation
-  when: not cifmw_edpm_prepare_skip_openstack_operator
-  block:
-  - name: Install OpenStack operator
-    vars:
-      make_openstack_env: "{{ cifmw_edpm_prepare_common_env |
-        combine(cifmw_edpm_prepare_make_openstack_env | from_yaml)}}"
-      make_openstack_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
-    ansible.builtin.include_role:
-      name: 'install_yamls_makes'
-      tasks_from: 'make_openstack'
+  when:
+    - not cifmw_edpm_prepare_skip_openstack_operator
+  vars:
+    make_openstack_env: "{{ cifmw_edpm_prepare_common_env |
+      combine(cifmw_edpm_prepare_make_openstack_env | from_yaml)}}"
+    make_openstack_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack'
 
 - name: Wait for OpenStack control plane to be installed
+  when:
+    - not cifmw_edpm_prepare_dry_run
   block:
     - name: Wait for OpenStack subscription creation
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
-        cmd: oc get sub openstack-operator --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }} -o=jsonpath='{.status.installplan.name}'
+        cmd: >-
+          oc get sub openstack-operator
+          --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          -o=jsonpath='{.status.installplan.name}'
       until: cifmw_edpm_prepare_wait_installplan_out.rc == 0 and cifmw_edpm_prepare_wait_installplan_out.stdout != ""
       register: cifmw_edpm_prepare_wait_installplan_out
       retries: "{{ cifmw_edpm_prepare_wait_subscription_retries }}"
       delay: 10
 
     - name: Wait for OpenStack operator to get installed
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
-        cmd: >
+        cmd: >-
           oc wait InstallPlan {{ cifmw_edpm_prepare_wait_installplan_out.stdout }}
-          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }} --for=jsonpath='{.status.phase}'=Complete --timeout=20m
-  when: not cifmw_edpm_prepare_dry_run
+          --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          --for=jsonpath='{.status.phase}'=Complete --timeout=20m
 
 - name: Install OpenStack service
   vars:
@@ -89,6 +137,8 @@
     tasks_from: 'make_openstack_deploy'
 
 - name: Wait for OpenStack control plane to be installed
+  when:
+    - not cifmw_edpm_prepare_dry_run
   block:
     - name: Find the OpenStack CR manifest
       ansible.builtin.find:
@@ -109,10 +159,12 @@
       register: cifmw_edpm_prepare_ctrlplane_cr_slurp
 
     - name: Wait for OpenStack controlplane to be deployed
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
           oc wait OpenStackControlPlane {{ (cifmw_edpm_prepare_ctrlplane_cr_slurp['content'] | b64decode | from_yaml).metadata.name }}
           --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --for=condition=ready
           --timeout=30m
-  when: not cifmw_edpm_prepare_dry_run

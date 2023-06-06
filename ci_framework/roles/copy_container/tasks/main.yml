@@ -1,70 +1,90 @@
 ---
 - name: Install HyperScale repository (btrfs-progs requirement)
+  when:
+    - ansible_distribution == 'CentOS'
+    - ansible_distribution_version >= '9'
   become: true
+  tags:
+    - bootstrap
+    - packages
   ansible.builtin.dnf:
     name:
       - centos-release-hyperscale-experimental
-  when: ansible_distribution == 'CentOS' and ansible_distribution_version >= '9'
 
 - name: Install required packages
-  package:
+  become: true
+  tags:
+    - bootstrap
+    - packages
+  ansible.builtin.package:
     name:
       - device-mapper-devel
       - gpgme-devel
       - btrfs-progs-devel
       - golang
-  become: true
 
 - name: Create temporary directory
-  tempfile:
+  register: temporary_copy_container_dir
+  ansible.builtin.tempfile:
     state: directory
     suffix: copy-container
-  register: temporary_copy_container_dir
 
 - name: Copy go files to temporary directory
-  copy:
+  ansible.builtincopy:
     src: copy-quay/
     dest: "{{ temporary_copy_container_dir.path }}"
 
 - name: Build the copy-container
-  command:
+  register: go_build
+  ansible.builtin.command:
     cmd: go build
     chdir: "{{ temporary_copy_container_dir.path }}"
-  register: go_build
   changed_when: false
 
 - name: Copy binary to /usr/local/bin (CentOS 8)
-  copy:
+  when:
+    - go_build.rc == 0
+    - ansible_distribution == 'CentOS'
+    - ansible_distribution_version < '9'
+  become: true
+  ansible.builtin.copy:
     src: "{{ temporary_copy_container_dir.path }}/copy-quay"
     dest: /usr/local/bin
     mode: '0755'
-  become: true
-  when: go_build.rc == 0 and ansible_distribution == 'CentOS' and ansible_distribution_version < '9'
 
 - name: Copy binary to /usr/local/bin (CentOS 9)
+  when:
+    - go_build.rc == 0
+    - ansible_distribution == 'CentOS'
+    - ansible_distribution_version >= '9'
   become: true
-  copy:
+  ansible.builtin.copy:
     src: "{{ temporary_copy_container_dir.path }}/copy-quay"
     dest: /usr/local/bin
     mode: '0755'
     remote_src: true
-  when: go_build.rc == 0 and ansible_distribution == 'CentOS' and ansible_distribution_version >= '9'
 
 - name: Delete temporary directory
-  file:
+  ansible.builtin.file:
     path: "{{ temporary_copy_container_dir.path }}"
     state: absent
 
 - name: Install cron jobs (CentOS 8)
-  include_tasks: cron.yml
-  # become: true
-  when: enable_cron|default(true)|bool and ansible_distribution == 'CentOS' and ansible_distribution_version < '9'
+  when:
+    - enable_cron|default(true)|bool
+    - ansible_distribution == 'CentOS'
+    - ansible_distribution_version < '9'
+  ansible.builtin.include_tasks: cron.yml
 
-- become: true
-  when: enable_cron_c9|default(true)|bool and ansible_distribution == 'CentOS' and ansible_distribution_version >= '9'
+- name: Configure cronjobs
+  become: true
+  when:
+    - enable_cron_c9|default(true)|bool
+    - ansible_distribution == 'CentOS'
+    - ansible_distribution_version >= '9'
   block:
   - name: Create cron job to copy containers
-    cron:
+    ansible.builtin.cron:
       name: 'Copy containers'
       minute: 0
       hour: '*/2'
@@ -73,7 +93,7 @@
         bash /opt/stack/ci-config/ci-scripts/copy-containers/copy-quay.sh
 
   - name: Create cron job to tag containers
-    cron:
+    ansible.builtin.cron:
       name: 'Tag containers'
       minute: 0
       hour: '*/2'
@@ -82,7 +102,7 @@
         bash /opt/stack/ci-config/ci-scripts/copy-containers/tag-quay.sh
 
   - name: Create cron job to copy containers to rdo registry
-    cron:
+    ansible.builtin.cron:
       name: 'Copy containers to rdo'
       minute: 0
       hour: '*/12'

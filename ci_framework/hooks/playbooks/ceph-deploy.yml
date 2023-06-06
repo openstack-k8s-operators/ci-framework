@@ -24,13 +24,22 @@
     # let's default to an empty hash.
     - name: Run make_ceph
       vars:
-        make_ceph_environment: "{{ cifmw_make_ceph_environment | default({}) }}"
+        make_ceph_environment: >-
+          {{ cifmw_make_ceph_environment | default({}) |
+              combine({
+                'KUBECONFIG': cifmw_openshift_kubeconfig,
+                'PATH': cifmw_path
+              })
+          }}
       ansible.builtin.include_role:
         role: install_yamls_makes
         tasks_from: "make_ceph.yml"
 
     - name: Get ceph uuid
       register: generated_uuid
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: oc get secret ceph-conf-files -o json
 
