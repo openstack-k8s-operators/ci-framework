@@ -96,3 +96,17 @@ or `--skip-tags`:
 
 * `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
 * `packages`: Run all package installation tasks associated to the options you set.
+
+For instance, if you want to bootstrap a hypervisor, and reuse it over and
+over, you'll run the following commands:
+```Bash
+$ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
+$ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
+```
+
+Running the commande twice, with `--tags` and `--skip-tags` as only difference,
+will ensure your environment has the needed directories, packages and
+configurations with the first run, while skip all of those tasks in the
+following runs. That way, you will save time and resources.
+
+More tags may show up according to the needs.
