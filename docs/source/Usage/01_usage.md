@@ -88,3 +88,11 @@ then the CRD.
 
 Note that you really should avoid pointing to external resources, in order to
 ensure everything is available for job reproducer.
+
+## Ansible tags
+In order to allow user to run only a subset of tasks while still consuming the
+entry playbook, the Framework exposes tags one may leverage with either `--tags`
+or `--skip-tags`:
+
+* `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
+* `packages`: Run all package installation tasks associated to the options you set.
