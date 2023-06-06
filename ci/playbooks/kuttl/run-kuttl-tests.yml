@@ -5,10 +5,32 @@
   loop: "{{ commands_before_kuttl_run }}"
   ignore_errors: true
 
+- name: Setup storage in CRC
+  when:
+    - not cifmw_kuttle_skip_crc_storage_creation | default(false) | bool
+  vars:
+    make_crc_storage_retries: 10
+    make_crc_storage_delay: 2
+    make_crc_storage_until: "make_crc_storage_status is not failed"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_crc_storage'
+
 - name: 'Run make_{{ operator }}_kuttl'
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_{{ operator }}_kuttl.yml'
+
+- name: Cleanup storage in CRC
+  when:
+    - not cifmw_kuttle_skip_crc_storage_creation | default(false) | bool
+  vars:
+    make_crc_storage_retries: 10
+    make_crc_storage_delay: 2
+    make_crc_storage_until: "make_crc_storage_cleanup_status is not failed"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_crc_storage_cleanup'
 
 - name: 'Get resource status after {{ operator }}_kuttl run'
   ansible.builtin.shell: |
