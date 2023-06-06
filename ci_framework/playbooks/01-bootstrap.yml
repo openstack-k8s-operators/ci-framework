@@ -3,6 +3,8 @@
   gather_facts: true
   tasks:
     - name: Set custom cifmw PATH reusable fact
+      tags:
+        - always
       when:
         - cifmw_path is not defined
       ansible.builtin.set_fact:
@@ -10,31 +12,47 @@
         cacheable: true
 
     - name: Install custom CAs as soon as possible
+      tags:
+        - bootstrap
+        - packages
       ansible.builtin.import_role:
         name: install_ca
 
     - name: Run repo_setup
+      tags:
+        - bootstrap
+        - packages
       ansible.builtin.import_role:
         name: repo_setup
 
     - name: Prepare install_yamls make targets
+      tags:
+        - bootstrap
       ansible.builtin.import_role:
         name: install_yamls
 
     - name: Run ci_setup role
+      tags:
+        - bootstrap
       ansible.builtin.import_role:
         role: ci_setup
 
     - name: Get latest image for future reference
+      tags:
+        - bootstrap
       ansible.builtin.import_role:
         role: discover_latest_image
 
     - name: Get customized parameters
+      tags:
+        - always
       ansible.builtin.set_fact:
         ci_framework_params: >-
           {{ hostvars[inventory_hostname] | dict2items | selectattr("key", "match", "^cifmw_")|list|items2dict }}
 
     - name: Create artifacts with custom params
+      tags:
+        - always
       ansible.builtin.copy:
         dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/custom-params.yml"
         content: "{{ ci_framework_params | to_nice_yaml }}"
