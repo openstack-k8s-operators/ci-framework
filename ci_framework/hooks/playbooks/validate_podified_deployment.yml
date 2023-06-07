@@ -1,0 +1,24 @@
+---
+- hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Make sure Nova api service is up and running
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: |
+        oc get pods -n {{ openstack_namespace }} --selector service=nova-api -o jsonpath={.items[*].status.phase}
+      register: nova_service
+      until: nova_service.stdout == "Running"
+      changed_when: false
+      retries: 100
+      delay: 50
+
+    - name: List compute and network resources
+      when: podified_validation | default ('false') | bool
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: |
+        oc rsh -n {{ openstack_namespace }} openstackclient openstack compute service list;
+        oc rsh -n {{ openstack_namespace }} openstackclient openstack network agent list;
