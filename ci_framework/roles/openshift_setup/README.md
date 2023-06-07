@@ -8,3 +8,4 @@ No privilege escalation needed.
 ## Parameters
 * `cifmw_openshift_setup_dry_run`: (Boolean) Skips resources creation. Defaults to `false`.
 * `cifmw_openshift_setup_create_namespaces`: (Strings) Namespaces to create beforehand. Defaults to `[]`.
+* `cifmw_openshift_setup_registry_tls_enable`: (Boolean) Enable tls_verify with openshift registy login. Defaults to `false`.
