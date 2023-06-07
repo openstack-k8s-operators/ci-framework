@@ -1,8 +1,26 @@
 ---
+# cifmw base job
+- job:
+    name: cifmw-end-to-end-base
+    nodeset: centos-9-crc-xxl
+    parent: base-simple-crc
+    vars:
+      crc_parameters: "--memory 20000 --disk-size 120 --cpus 6"
+      zuul_log_collection: true
+    pre-run:
+      - ci/playbooks/e2e-prepare.yml
+      - ci/playbooks/dump_zuul_vars.yml
+    post-run:
+      - ci/playbooks/e2e-collect-logs.yml
+      - ci/playbooks/collect-logs.yml
+    required-projects:
+      - github.com/openstack-k8s-operators/install_yamls
+    timeout: 5400
+
 # Run the "big" end-to-end with builds only if we edit build related roles.
 - job:
     name: cifmw-end-to-end
-    nodeset: centos-9-crc-xxl
+    parent: cifmw-end-to-end-base
     files:
       - ^ci_framework/roles/.*_build/(?!meta|README).*
       - ^ci_framework/roles/build.*/(?!meta|README).*
@@ -11,29 +29,17 @@
     irrelevant-files:
       - ^.*/*.md
       - ^ci/templates
-    parent: base-simple-crc
     vars:
-      crc_parameters: "--memory 20000 --disk-size 120 --cpus 6"
-      zuul_log_collection: true
       cifmw_extras:
         - '@scenarios/centos-9/ci-build.yml'
-    pre-run: ci/playbooks/e2e-prepare.yml
-    run:
-      - ci/playbooks/dump_zuul_vars.yml
-      - ci/playbooks/e2e-run.yml
-    post-run:
-      - ci/playbooks/e2e-collect-logs.yml
-      - ci/playbooks/collect-logs.yml
-    required-projects:
-      - github.com/openstack-k8s-operators/install_yamls
-    timeout: 5400
+    run: ci/playbooks/e2e-run.yml
 
 # Run the "nobuild" for any other change. It's smaller and faster.
 # Note: this job also leverage the "--tags" and "--skip-tags" in order to
 # ensure such runs are consistent.
 - job:
     name: cifmw-end-to-end-nobuild-tagged
-    nodeset: centos-9-crc-xxl
+    parent: cifmw-end-to-end-base
     irrelevant-files:
       - ^ci_framework/roles/.*_build
       - ^ci_framework/roles/build.*
@@ -43,20 +49,7 @@
       - ^.*/*.md
       - ^OWNERS
       - ^.github
-    vars:
-      crc_parameters: "--memory 20000 --disk-size 120 --cpus 6"
-      zuul_log_collection: true
-    parent: base-simple-crc
-    pre-run: ci/playbooks/e2e-prepare.yml
-    run:
-      - ci/playbooks/dump_zuul_vars.yml
-      - ci/playbooks/e2e-run.yml
-    post-run:
-      - ci/playbooks/e2e-collect-logs.yml
-      - ci/playbooks/collect-logs.yml
-    required-projects:
-      - github.com/openstack-k8s-operators/install_yamls
-    timeout: 5400
+    run: ci/playbooks/e2e-run.yml
 
 # Run the dev workflow if we edit specific role(s)
 - job:
