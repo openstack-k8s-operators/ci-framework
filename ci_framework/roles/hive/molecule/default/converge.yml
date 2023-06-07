@@ -14,25 +14,30 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
 - name: Converge
   hosts: all
+
   vars:
-    cifmw_hive_dry_run: true
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_hive_artifacts_dir: "{{ ansible_user_dir }}/ci-framework-data"
     cifmw_hive_kubeconfig: test_path
     cifmw_hive_platform: openstack
-    cifmw_hive_action: claim_cluster
-    cifmw_hive_openstack_pool_name: test-pool
     cifmw_hive_namespace: test-namespace
-    claim_name: test-claim-by-molecule
-    cifmw_hive_openstack_claim_name: test-claim
-    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-  roles:
-    - role: "hive"
+    cifmw_hive_dry_run: true
 
   tasks:
-    - name: Ensure claim file is properly created
+    - name: Testing cluster_claim functionality.
+      vars:
+        cifmw_hive_action: claim_cluster
+        cifmw_hive_openstack_pool_name: test-pool
+        claim_name: test-claim-by-molecule
+        cifmw_hive_openstack_claim_name: test-claim
       block:
+        - name: Including the hive role
+          ansible.builtin.include_role:
+            name: hive
+
         - name: Gather template file
           register: template_file
           ansible.builtin.stat:
@@ -42,3 +47,81 @@
           ansible.builtin.assert:
             that:
               - template_file.stat.exists
+
+    - name: Testing baremetal provider
+      block:
+        - name: Create an empty file for testing
+          ansible.builtin.file:
+            path: "{{ cifmw_hive_artifacts_dir }}/fake_kubeconfig"
+            state: touch
+            mode: 0644
+
+        - name: Testing requirements - root ed25519 ssh key
+          register: root_ed25519_key
+          community.crypto.openssh_keypair:
+            path: "{{ cifmw_hive_artifacts_dir }}/id_ed25519_root"
+            type: ed25519
+
+        - name: Including the role with right values
+          vars:
+            cifmw_hive_platform: baremetal
+            cifmw_hive_action: deploy_cluster
+            cifmw_opn_host: 127.0.10.10
+            cifmw_opn_user: kni
+            cifmw_opn_user_ssh_key: "{{ root_ed25519_key }}"
+            cifmw_opn_host_ssh_key: "ssh - some-known-hosts-key"
+            cifmw_opn_bootstrap_boot_mac: "aa:ff:ee"
+            cifmw_opn_external_bridge_name: "baremetal"
+            cifmw_opn_prov_bridge_name: "provisioning"
+            cifmw_hive_namespace: "unittest"
+            cifmw_hive_kubeconfig: "{{ cifmw_hive_artifacts_dir }}/fake_kubeconfig"
+            cifmw_hive_baremetal:
+              cluster_name: "unittest-01"
+              install_config: "foo_bm_install_config.yml"
+              ocp_image: "registry.foo/openshift-release/ocp-fake:latest"
+              ssh_key: "{{ root_ed25519_key.public_key }}"
+          ansible.builtin.include_role:
+            role: hive
+
+        - name: Gathering the file informaiton that is expected to be generated
+          register: stat_results
+          ansible.builtin.stat:
+            path: "{{ cifmw_hive_artifacts_dir }}/{{ item }}"
+          loop:
+            - "ocp_image.yml"
+            - "ocp_ssh_private_key.yml"
+            - "bm_install_config.yml"
+            - "bm_deploy_config.yml"
+
+        - name: Verify the file stat
+          ansible.builtin.assert:
+            that:
+              - item.stat.exists is defined
+              - item.stat.exists
+          loop: "{{ stat_results.results }}"
+
+        - name: Verify the host access secret
+          vars:
+            data: '{{ lookup("file", "{{ cifmw_hive_artifacts_dir }}/ocp_ssh_private_key.yml") | from_yaml }}'
+          ansible.builtin.assert:
+            that:
+              - data.metadata.name == "unittest-01-ssh-pvt-key"
+
+        - name: Verify the install config
+          vars:
+            data: '{{ lookup("file", "{{ cifmw_hive_artifacts_dir }}/bm_install_config.yml") | from_yaml }}'
+          ansible.builtin.assert:
+            that:
+              - data.kind == "Secret"
+              - "'baseDomain: foo.bar' in data['stringData']['install-config.yaml']"
+              - "'apiVIPs:' in data['stringData']['install-config.yaml']"
+
+        - name: Verify the deploy definition
+          vars:
+            data: '{{ lookup("file", "{{ cifmw_hive_artifacts_dir }}/bm_deploy_config.yml") | from_yaml }}'
+          ansible.builtin.assert:
+            that:
+              - data.kind == "ClusterDeployment"
+              - data.metadata.name == "unittest-01"
+              - data.spec.platform.baremetal.libvirtSSHPrivateKeySecretRef.name == "unittest-01-ssh-pvt-key"
+              - data.spec.provisioning.sshKnownHosts | length == 1
