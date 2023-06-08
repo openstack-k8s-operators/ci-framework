@@ -1,0 +1,78 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create the artifacts directory
+  tags:
+    - bootstrap
+  ansible.builtin.file:
+    path: "{{ cifmw_opn_artifacts_dir }}"
+    state: directory
+  delegate_to: localhost
+
+- name: Add users
+  tags:
+    - bootstrap
+  ansible.builtin.import_tasks:
+    file: add_user.yml
+
+- name: Install required packages for the installer
+  tags:
+    - packages
+    - bootstrap
+  ansible.builtin.import_tasks:
+    file: install_packages.yml
+
+- name: Check network settings are inline with installer requirement
+  tags:
+    - bootstrap
+  ansible.builtin.import_tasks:
+    file: add_bridges.yml
+
+- name: Check required virtualization networks
+  tags:
+    - bootstrap
+  ansible.builtin.include_tasks:
+    file: add_virtual_network.yml
+  loop:
+    - "{{ cifmw_opn_external_bridge_name }}"
+    - "{{ cifmw_opn_prov_bridge_name }}"
+
+- name: Cache the MAC addresses
+  tags:
+    - bootstrap
+  ansible.builtin.set_fact:
+    cifmw_opn_bootstrap_boot_mac: "{{ '52:54:00' | community.general.random_mac }}"
+    cacheable: true
+
+- name: Read host SSH fingerprint
+  ansible.builtin.slurp:
+    src: '/etc/ssh/ssh_host_ecdsa_key.pub'
+  register: ssh_fp
+
+- name: Set the role output parameters
+  ansible.builtin.set_fact:
+    cifmw_opn_host_ssh_key: "{{ ssh_fp['content'] | b64decode | trim }}"
+    cifmw_opn_user: "{{ cifmw_opn_user }}"
+    cifmw_opn_external_bridge_name: "{{ cifmw_opn_external_bridge_name }}"
+    cacheable: true
+
+- name: Cache provisioning bridge name
+  when:
+    - cifmw_opn_use_provisioning_network is defined
+    - cifmw_opn_use_provisioning_network | bool
+  ansible.builtin.set_fact:
+    cifmw_opn_prov_bridge_name: "{{ cifmw_opn_prov_bridge_name }}"
+    cacheable: true

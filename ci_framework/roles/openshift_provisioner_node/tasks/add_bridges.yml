@@ -1,0 +1,64 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create the external network connection
+  tags:
+    - bootstrap
+  become: true
+  community.general.nmcli:
+    type: bridge
+    conn_name: "{{ cifmw_opn_external_bridge_name }}"
+    stp: false
+    state: present
+
+- name: Verify external network interface is defined
+  tags:
+    - bootstrap
+  when:
+    - cifmw_opn_external_network_iface is undefined
+    - not cifmw_opn_dry_run | bool
+  ansible.builtin.fail:
+    msg: "cifmw_opn_external_network_iface is not defined"
+
+- name: Add iface to the external network connection
+  tags:
+    - bootstrap
+  when: not cifmw_opn_dry_run | bool
+  become: true
+  ansible.builtin.script:
+    cmd: files/add_bridge_port.sh "{{ cifmw_opn_external_bridge_name }}" "{{ cifmw_opn_external_network_iface }}"
+
+- name: Provisioning network configuration
+  tags:
+    - bootstrap
+  when:
+    - cifmw_opn_use_provisioning_network is defined
+    - cifmw_opn_use_provisioning_network | bool
+    - cifmw_opn_prov_network_iface is defined
+  block:
+    - name: Create the provisioning network connection
+      become: true
+      community.general.nmcli:
+        type: bridge
+        conn_name: "{{ cifmw_opn_prov_bridge_name }}"
+        ip4: "{{ cifmw_opn_prov_bridge_ipv4 }}"
+        stp: false
+        state: present
+
+    - name: Add iface to the provisioning network connection
+      become: true
+      ansible.builtin.script:
+        cmd: files/add_bridge_port.sh "{{ cifmw_opn_prov_bridge_name }}" "{{ cifmw_opn_prov_network_iface }}"
