@@ -1,0 +1,32 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: "Rendering the {{ desc }}"
+  ansible.builtin.template:
+    src: "{{ template_file }}"
+    dest: "{{ cifmw_hive_artifacts_dir }}/{{ dest_file }}"
+    mode: 0644
+
+- name: "Applying the resource provided in {{ dest_file }}"
+  when: not cifmw_hive_dry_run | bool
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_hive_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_hive_artifacts_dir }}/{{ dest_file }}"
+  register: apply_result
+  changed_when: ('stdout' in apply_result) and ('unchanged' not in apply_result.stdout)
+  failed_when: ( apply_result.rc | int ) > 1
