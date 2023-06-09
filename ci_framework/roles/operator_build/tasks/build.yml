@@ -89,9 +89,7 @@
   ansible.builtin.set_fact:
     operator_img: "{{ operator_registry_prefix }}:{{ operator_tag }}"
     operator_img_bundle: "{{ operator_registry_prefix }}-bundle:{{ operator_tag }}"
-    operator_img_storage_bundle: "{{ operator_registry_prefix }}-storage-bundle:{{ operator_tag }}"
     operator_img_catalog: "{{ operator_registry_prefix }}-index:{{ operator_tag }}"
-    operator_bundles: "{{ cifmw_operator_build_extra_bundles | default([]) }}"
     cacheable: true
 
 - name: "{{ operator.name }} - Set operator build output"
@@ -102,7 +100,6 @@
           'git_src_dir': operator.src,
           'image': operator_img,
           'image_bundle': operator_img_bundle,
-          'image_storage_bundle': operator_img_storage_bundle,
           'image_catalog': operator_img_catalog,
         }}}, recursive=True)}}
 
@@ -151,32 +148,6 @@
       IMAGEBASE: "{{ operator.image_base | default('') }}"
       LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default ('') }}"
 
-- name: "{{ operator.name }} - Builds storage-bundle for meta-operator"
-  when:
-    - operator.name == cifmw_operator_build_meta_name
-  block:
-    - name: Call dep-bundle-build-push for meta-operator only
-      register: dep_bundle_build_push_result
-      until: dep_bundle_build_push_result.failed is false
-      retries: 5
-      delay: 10
-      ci_make:
-        dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
-        chdir: "{{ operator.src }}"
-        output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
-        target: dep-bundle-build-push
-        params:
-          IMG: "{{ operator_img }}"
-          BUNDLE_STORAGE_IMG: "{{ operator_img_storage_bundle }}"
-          IMAGENAMESPACE: "{{ cifmw_operator_build_push_org }}"
-          IMAGEREGISTRY: "{{ cifmw_operator_build_push_registry }}"
-          IMAGEBASE: "{{ operator.image_base | default('') }}"
-          LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default ('') }}"
-
-    - name: Add bundle to bundle list
-      set_fact:
-        operator_bundles: "{{ operator_bundles + [operator_img_storage_bundle] }}"
-
 - name: "{{ operator.name }} - Call bundle-build"
   ci_make:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
@@ -186,15 +157,10 @@
     params:
       IMG: "{{ operator_img }}"
       BUNDLE_IMG: "{{ operator_img_bundle }}"
-      BUNDLE_STORAGE_IMG: "{{ operator_img_storage_bundle }}"
       IMAGENAMESPACE: "{{ cifmw_operator_build_push_org }}"
       IMAGEREGISTRY: "{{ cifmw_operator_build_push_registry }}"
       IMAGEBASE: "{{ operator.image_base | default('') }}"
       LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default ('') }}"
-
-- name: "{{ operator.name }} - Add bundle to bundle list"
-  set_fact:
-    operator_bundles: "{{ operator_bundles + [operator_img_bundle] }}"
 
 - name: "{{ operator.name }} - Push bundle image"
   when:
@@ -216,7 +182,7 @@
     target: catalog-build
     params:
       CATALOG_IMG: "{{ operator_img_catalog }}"
-      BUNDLE_IMGS: "{{ operator_bundles | join(',')}}"
+      BUNDLE_IMG: "{{ operator_img_bundle }}"
 
 - name: "{{ operator.name }} - Call catalog-push"
   when:
