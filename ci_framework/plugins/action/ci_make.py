@@ -1,7 +1,5 @@
-# This specific action plugin needs a version of community.general collection
-# providing this patch:
-# https://github.com/ansible-collections/community.general/pull/6160
-# While the "make" command will actually run, it won't be able to generate
+# Requires `community.general` collection v6.5.0 or higher.
+# Otherwise the "make" command will actually run, it won't be able to generate
 # the needed file.
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
