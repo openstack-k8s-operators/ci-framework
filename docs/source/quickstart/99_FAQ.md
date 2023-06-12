@@ -9,11 +9,11 @@ the playbook doesn't reload your environment, mostly because we're using the `lo
 In order to solve this issue, please logout and re-login your account.
 
 ### Spice graphics are not supported with this QEMU
-This graphic driver/feature isn't supported on CentOS Stream 9. In order to work around this issue, please pass
+This graphic driver/feature isn't supported on CentOS Stream 9. In case you would like to use it with Fedora,
 the following to the initial `make` command:
 ```Bash
-make local_env_create LOCAL_ENV_OPTS="-K -e cifmw_local_env_vm_graphics=none"
+make local_env_create LOCAL_ENV_OPTS="-K -e cifmw_local_env_vm_graphics=spice"
 ```
 
-The important part here is the `-e cifmw_local_env_vm_graphics=none` - it will instruct virsh to start the VM
+In case you do not need graphics at all `-e cifmw_local_env_vm_graphics=none` - it will instruct virsh to start the VM
 without any graphics. This will NOT prevent `virsh -c qemu:///system console` accesses.
