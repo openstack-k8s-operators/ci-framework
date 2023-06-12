@@ -18,4 +18,4 @@ None.
 * `cifmw_local_env_vm_cpu`: (Integer) Allocated CPU. Defaults to `6`.
 * `cifmw_local_env_vm_root_passwd`: (String) Root password on the virtual machine. Defaults to `fooBar`.
 * `cifmw_local_env_vm_network`: (String) Virtual network used by the VM. Defaults to `network=default`.
-* `cifmw_local_env_vm_graphics`: (String) Graphic mode. Please refer to the `--graphics` accepted values. Defaults to `spice`.
+* `cifmw_local_env_vm_graphics`: (String) Graphic mode. Please refer to the `--graphics` accepted values. Defaults to `vnc`.
