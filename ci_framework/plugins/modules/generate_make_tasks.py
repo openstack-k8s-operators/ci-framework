@@ -59,13 +59,10 @@ import os
 
 
 MAKE_TMPL = '''---
-- name: Set environment fact
-  ansible.builtin.set_fact:
-    make_%(target)s_environment: "{{ edpm_env | combine(make_%(target)s_env|default({})) }}"
-    cacheable: true
-- name: Debug make_%(target)s_environment
+- name: Debug make_%(target)s_env
+  when: make_%(target)s_env is defined
   ansible.builtin.debug:
-    var: make_%(target)s_environment
+    var: make_%(target)s_env
 - name: Debug make_%(target)s_params
   when: make_%(target)s_params is defined
   ansible.builtin.debug:
@@ -81,7 +78,7 @@ MAKE_TMPL = '''---
     target: %(target)s
     dry_run: "{{ make_%(target)s_dryrun|default(false)|bool }}"
     params: "{{ make_%(target)s_params|default(omit) }}"
-  environment: "{{ make_%(target)s_environment }}"
+  environment: "{{ make_%(target)s_env | default({}) }}"
 '''
 
 NO_OUTDIR = 'Directory %s does not exist. Please create it.'
