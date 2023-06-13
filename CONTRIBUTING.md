@@ -8,6 +8,35 @@ Run the following command to get your new role ready:
 $ make create_new_role ROLE_NAME=my_wonderful_role
 ```
 
+### Consuming install_yamls varibles
+CI Framework sets a couple of facts that are useful enough to mention, the
+`cifmw_install_yamls_vars`, that contains all the install_yamls variables
+that should be passed to any instal_yaml target, and the `cifmw_install_yamls_default`,
+that contains the default values of every possible parameter of the install_yamls
+Makefiles.
+
+Here is an example, based on a common use-case, on how to use those variables
+```YAML
+- name: Deploy EDPM
+  vars:
+    make_edpm_deploy_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path }) }}"
+    make_edpm_deploy_dryrun: "{{ cifmw_edpm_deploy_dryrun | bool }}"
+  ansible.builtin.import_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_edpm_deploy'
+```
+
+```YAML
+# Fetch openstackdataplane resources from the default namespace declared in install_yamls
+# Makefile. If the NAMESPACE has been overidden by cifmw_install_yamls_vars this variable
+# already points to the overriden value.
+- name: Get info about dataplane node
+  environment:
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: |
+    oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+```
+
 ### Documentation
 A new role must get proper documentation. Please edit the README.md located in
 the role directory in order to explain its use and details the exposed parameters.
