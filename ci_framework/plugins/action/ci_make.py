@@ -126,7 +126,7 @@ class ActionModule(ActionBase):
 
         data = {
             'chdir': module_args['chdir'],
-            'cmd': m_ret['command'],
+            'cmd': m_ret.get('command', json.dumps(module_args)),
             'exports': '\n'.join(exports)
         }
         copy_args['content'] = TMPL_REPRODUCER % data
