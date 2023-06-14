@@ -2,21 +2,31 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: true
   tasks:
-    - name: Set custom cifmw PATH reusable fact
-      tags:
-        - always
+    - name: Ensure cifmw_basedir param is set
       when:
-        - cifmw_path is not defined
+        - cifmw_basedir is not defined
       ansible.builtin.set_fact:
-        cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-        cacheable: true
+        cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
 
-    - name: Load parameters files
-      tags:
-        - always
-      ansible.builtin.include_vars:
-        dir: "{{ cifmw_basedir }}/artifacts/parameters"
-      ignore_errors: yes
+    - name: Try to load parameters files
+      block:
+        - name: Check directory availabilty
+          register: param_dir
+          ansible.builtin.stat:
+            path: "{{ cifmw_basedir }}/artifacts/parameters"
+
+        - name: Load parameters files
+          when:
+            - param_dir.stat.exists | bool
+          ansible.builtin.include_vars:
+            dir: "{{ cifmw_basedir }}/artifacts/parameters"
+      always:
+        - name: Set custom cifmw PATH reusable fact
+          when:
+            - cifmw_path is not defined
+          ansible.builtin.set_fact:
+            cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+            cacheable: true
 
     - name: Generate artifacts
       ansible.builtin.import_role:
