@@ -49,8 +49,48 @@
     cifmw_openshift_login_api: "{{ cifmw_openshift_login_api_out.stdout }}"
     cifmw_openshift_login_context: "{{ cifmw_openshift_login_context_out.stdout }}"
     cifmw_openshift_login_user: "{{ cifmw_openshift_login_user_out.stdout }}"
+    cifmw_openshift_kubeconfig: "{{ cifmw_openshift_login_kubeconfig }}"
     cifmw_openshift_api: "{{ cifmw_openshift_login_api_out.stdout }}"
     cifmw_openshift_context: "{{ cifmw_openshift_login_context_out.stdout }}"
     cifmw_openshift_user: "{{ cifmw_openshift_login_user_out.stdout }}"
     cifmw_openshift_token: "{{ cifmw_openshift_login_token | default(omit) }}"
+    cifmw_install_yamls_environment: >-
+      {{  cifmw_install_yamls_environment |
+          combine({'KUBECONFIG': cifmw_openshift_login_kubeconfig})
+      }}
     cacheable: true
+
+- name: Create the openshift_login parameters file
+  tags:
+    - always
+  vars:
+    cifmw_openshift_login_params_content: |
+      cifmw_openshift_kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+      cifmw_openshift_api: "{{ cifmw_openshift_api }}"
+      cifmw_openshift_context: "{{ cifmw_openshift_context }}"
+      cifmw_openshift_user: "{{ cifmw_openshift_user }}"
+      {% if cifmw_openshift_token is defined %}
+      cifmw_openshift_token: "{{ cifmw_openshift_token  }}"
+      {% endif %}
+  ansible.builtin.copy:
+    dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters/openshift-login-params.yml"
+    content: "{{ cifmw_openshift_login_params_content | from_yaml | to_nice_yaml }}"
+
+- name: Read the install yamls parameters file
+  ansible.builtin.slurp:
+    path: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters/install-yamls-params.yml"
+  register: cifmw_openshift_login_install_yamls_artifacts_slurp
+
+- name: Append the KUBECONFIG to the install yamls parameters
+  ansible.builtin.copy:
+    content: >-
+      {{
+        cifmw_openshift_login_install_yamls_artifacts_slurp['content'] | b64decode | from_yaml |
+        combine(
+          {
+            'cifmw_install_yamls_environment': {
+              'KUBECONFIG': cifmw_openshift_login_kubeconfig
+            }
+          }, recursive=true) | to_nice_yaml
+      }}
+    dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters/install-yamls-params.yml"
