@@ -1,0 +1,43 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install edpm-image-builder
+  ansible.builtin.import_tasks: install.yml
+
+- name: Find latest image name
+  when:
+    - cifmw_discovered_image_url is not defined
+    - not cifmw_edpm_build_images_dry_run
+  ansible.builtin.import_role:
+    name: discover_latest_image
+
+- name: Download TripleO source image
+  when:
+    - not cifmw_edpm_build_images_dry_run
+  ansible.builtin.get_url:
+    url: "{{ cifmw_discovered_image_url }}"
+    dest: "{{ cifmw_edpm_build_images_basedir }}"
+    timeout: 20
+  register: result
+  until: result is success
+  retries: 60
+  delay: 10
+
+- name: Run edpm-image-builder
+  ansible.builtin.import_tasks: run.yml
+
+- name: Package build images inside container image
+  ansible.builtin.import_tasks: package.yml
