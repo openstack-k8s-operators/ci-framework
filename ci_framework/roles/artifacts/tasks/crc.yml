@@ -1,0 +1,26 @@
+---
+# Get logs from CRC VM. We also get its XML.
+- name: Extract crc XML to find its disk
+  register: crc_xml
+  ansible.builtin.command:
+    cmd: virsh -c qemu:///system dumpxml crc
+
+- name: Output XML into a file
+  ansible.builtin.copy:
+    dest: "{{ cifmw_artifacts_basedir }}/artifacts/crc-vm.xml"
+    content: "{{ crc_xml.stdout }}"
+
+- name: Create crc logs directory
+  ansible.builtin.file:
+    path: "{{ cifmw_artifacts_basedir }}/logs/crc"
+    state: directory
+
+- name: Extract crc logs from VM
+  environment:
+    LIBGUESTFS_BACKEND: direct
+    LIBVIRT_DEFAULT_URI: "qemu:///system"
+  ansible.builtin.command:
+    cmd: >-
+      guestfish -d crc -r run :
+      mount /dev/sda4 / :
+      copy-out /ostree/deploy/rhcos/var/log/pods {{ cifmw_artifacts_basedir }}/logs/crc/
