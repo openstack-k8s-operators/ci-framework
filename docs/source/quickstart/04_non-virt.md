@@ -64,6 +64,9 @@ pre_infra:
 about 30G of RAM, 10 Cores and 120G of disk space. It's more than the minimal
 requirements.
 
+Use `cifmw_rhol_post_crc_config` list to specify any additional post-configuration
+commands for CRC.
+
 ### 4. Place a pull secret in place
 
 Get the pull secret from [here](https://cloud.redhat.com/openshift/create/local)
