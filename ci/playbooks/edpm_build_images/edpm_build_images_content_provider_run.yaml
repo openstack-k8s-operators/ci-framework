@@ -1,0 +1,47 @@
+---
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Build edpm images
+      environment:
+        ANSIBLE_CONFIG: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg"
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook ci/playbooks/edpm_build_images/edpm_build_images_content_provider.yaml
+          -e @scenarios/centos-9/base.yml
+          {%- if cifmw_extras is defined %}
+          {%-   for extra_vars in cifmw_extras %}
+          -e "{{   extra_vars }}"
+          {%-   endfor %}
+          {%- endif %}
+          -e @scenarios/centos-9/zuul_inventory.yml
+          -e @scenarios/centos-9/edpm_build_images_content_provider.yml
+          -e "cifmw_rp_registry_ip={{ cifmw_rp_registry_ip }}"
+
+    - name: Include inner ansible vars file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_artifacts_basedir }}/artifacts/ansible-vars.yml"
+      register: inner_ansible
+
+    - name: Get inner ansible vars
+      ansible.builtin.set_fact:
+        inner_ansible_vars: "{{ inner_ansible.content | b64decode | from_yaml }}"
+
+    - name: Set content provider
+      ansible.builtin.set_fact:
+        content_provider_ip: "{{ cifmw_rp_registry_ip }}"
+
+    - name: Return Zuul Data
+      ansible.builtin.debug:
+        msg: >-
+          Running Content provider registry on
+          {{ content_provider_ip | default('nowhere') }}
+
+    - name: Set up content registry IP address
+      zuul_return:
+        data:
+          zuul:
+            pause: true
+          content_provider_registry_ip: "{{ content_provider_ip | default('nowhere') }}"
+          cifmw_build_images_output: "{{ inner_ansible_vars.cifmw_build_images_output }}"
