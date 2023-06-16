@@ -4,8 +4,7 @@ parameter, `output_dir`, in order to output the `make` generated command.
 It also adds a new optional parameter, `dry_run`, allowing to NOT run
 `community.general.make` module, but get a file with the passed parameters.
 
-It requires a pull-request to merge in the community.general collection:
-https://github.com/ansible-collections/community.general/pull/6160
+Requires `community.general` collection v6.5.0 or higher.
 
 Example:
 ```YAML

@@ -1,7 +1,5 @@
-# This specific action plugin needs a version of community.general collection
-# providing this patch:
-# https://github.com/ansible-collections/community.general/pull/6160
-# While the "make" command will actually run, it won't be able to generate
+# Requires `community.general` collection v6.5.0 or higher.
+# Otherwise the "make" command will actually run, it won't be able to generate
 # the needed file.
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
@@ -121,27 +119,18 @@ class ActionModule(ActionBase):
         else:
             m_ret = {'command': json.dumps(module_args)}
 
-        # We can only check the "command" availability now, once the module
-        # has been called, unfortunately.
-        scriptable = True
-        if 'command' not in m_ret:
-            m_ret['command'] = json.dumps(module_args)
-            scriptable = False
-
         # Write the reproducer script
         exports = self.extract_env(task_vars)
         s_file = os.path.join(output_dir, fname)
         copy_args = {'dest': s_file}
-        if scriptable:
-            data = {
-                'chdir': module_args['chdir'],
-                'cmd': m_ret['command'],
-                'exports': '\n'.join(exports)
-            }
-            copy_args['content'] = TMPL_REPRODUCER % data
-            copy_args['mode'] = '0755'
-        else:
-            copy_args['content'] = json.dumps(task_vars['environment']) + m_ret['command']
+
+        data = {
+            'chdir': module_args['chdir'],
+            'cmd': m_ret.get('command', json.dumps(module_args)),
+            'exports': '\n'.join(exports)
+        }
+        copy_args['content'] = TMPL_REPRODUCER % data
+        copy_args['mode'] = '0755'
 
         file_task.args.update(copy_args)
         Display().debug(f'Pushing {s_file}')

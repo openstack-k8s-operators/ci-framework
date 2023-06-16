@@ -20,9 +20,7 @@
   vars:
     operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
   ansible.builtin.set_fact:
-    cifmw_edpm_prepare_common_env:
-      PATH: "{{ cifmw_path }}"
-      KUBECONFIG : "{{ cifmw_openshift_kubeconfig }}"
+    cifmw_edpm_prepare_common_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path}) }}"
     cifmw_edpm_prepare_make_openstack_env: |
       {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
       OPENSTACK_IMG: {{ operators_build_output[cifmw_operator_build_meta_name].image_catalog }}
@@ -54,30 +52,6 @@
   ansible.builtin.include_role:
     name: "install_yamls_makes"
     tasks_from: "make_crc_attach_default_interface.yml"
-
-- name: Get internal OpenShift registry route
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: "oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}'"
-  register: cifmw_edpm_prepare_registry_default_route
-  ignore_errors: true
-
-- name: Allow image internal OpenShift registry image pulling
-  when:
-    - cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in cifmw_edpm_prepare_operators_build_output
-    - cifmw_edpm_prepare_operators_build_output[cifmw_operator_build_meta_name].image_catalog.split('/')[0] == cifmw_edpm_prepare_registry_default_route.stdout
-    - cifmw_edpm_prepare_registry_default_route is succeeded
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.shell:
-    cmd: >
-      oc policy add-role-to-user system:image-puller system:anonymous -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} &&
-      oc policy add-role-to-user system:image-puller system:unauthenticated -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} &&
-      oc policy add-role-to-user system:image-puller system:anonymous -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} &&
-      oc policy add-role-to-user system:image-puller system:unauthenticated -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
 
 - name: Prepare inputs
   vars:
@@ -160,7 +134,7 @@
 
     - name: Wait for OpenStack controlplane to be deployed
       environment:
-        KUBECONFIG: "{{ cifmw_openshift_login_kubeconfig }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-

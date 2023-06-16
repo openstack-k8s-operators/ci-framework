@@ -2,11 +2,6 @@
 - hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
   tasks:
-    # Load the custom parameters we set in the main play. That way, we will
-    # get access to the needed cifmw_make_ceph_environment parameter
-    - name: Load all of our cifmw variables
-      ansible.builtin.include_vars:
-        file: "{{ cifmw_basedir }}/artifacts/custom-params.yml"
 
     - name: Debug cifmw_make_ceph_environment
       when:
@@ -24,12 +19,13 @@
     # let's default to an empty hash.
     - name: Run make_ceph
       vars:
-        make_ceph_environment: >-
-          {{ cifmw_make_ceph_environment | default({}) |
-              combine({
-                'KUBECONFIG': cifmw_openshift_kubeconfig,
-                'PATH': cifmw_path
-              })
+        make_ceph_env: >-
+          {{
+          cifmw_install_yamls_environment |
+          combine(
+            cifmw_make_ceph_environment | default({}) |
+            combine({ 'PATH': cifmw_path })
+          )
           }}
       ansible.builtin.include_role:
         role: install_yamls_makes
