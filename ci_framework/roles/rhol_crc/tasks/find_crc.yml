@@ -1,0 +1,23 @@
+---
+- name: Catch potential error
+  block:
+    - name: Get VM domains through Virt
+      community.libvirt.virt:
+        command: info
+        uri: "qemu:///system"
+      register: vm_domains
+  rescue:
+    - name: No libvirt support
+      ansible.builtin.set_fact:
+        vm_domains:
+          empty: 'No libvirt link could be found'
+
+# The way ansible/jinja2 wants to match a string is horrible - so we must rely
+# on some terrible "if true then true else false" pattern...
+- name: Set VM status
+  ansible.builtin.set_fact:
+    cacheable: true
+    crc_present: >-
+      {%- if 'crc' in vm_domains -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
+    crc_running: >-
+      {%- if 'crc' in vm_domains and vm_domains.crc.state == 'running' -%}{{ true }}{%- else -%}{{ false }}{%- endif -%}
