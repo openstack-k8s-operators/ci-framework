@@ -1,3 +1,31 @@
+- name: pre-debug oc get clouds_yaml or keystone commands
+  failed_when: false
+  register: debug_oc_get
+  shell:
+    cmd: |
+      set -x
+
+      eval $(${HOME}/ci-framework-data/bin/crc oc-env)
+      export KUBECONFIG="${HOME}/.crc/machines/crc/kubeconfig"
+
+      ons_clouds_yaml=$(oc get configmap -n openstack openstack-config -o 'jsonpath={.data.clouds\.yaml}')
+      ons_secret=$(oc get secret -n openstack openstack-config-secret -o 'jsonpath={.data.secure\.yaml}')
+
+      KEYSCT=$(oc get keystoneapi keystone -o 'jsonpath={ .spec.secret }')
+      KEYSEL=$(oc get keystoneapi keystone -o 'jsonpath={ .spec.passwordSelectors.admin }')
+      if [[ -n "$KEYSCT" && -n "$KEYSEL" ]]; then
+        tempest_secret=$(oc get -n openstack secret osp-secret -o "jsonpath={ .data.${KEYSEL} }" | base64 -d)
+      fi
+
+      tempest_endpoint=$(oc get keystoneapi keystone -o 'jsonpath={ .status.apiEndpoint.public }')
+
+      if [[ -z "$ons_clouds_yaml" || -z "$ons_secret" || -z "$tempest_secret" || -z "$tempest_endpoint" ]]; then
+        echo "ERROR: something is missing"
+      fi
+- name: print debug output
+  debug:
+    var: debug_oc_get
+
 - name: get openstack admin credentials from k8s
   vars:
       k8s_kubeconfig: "{{ cifmw_os_net_setup_kudeconfig_location | default(cifmw_install_yamls_vars.KUBECONFIG) | default(ansible_user_dir + '/.crc/machines/crc/kubeconfig') }}"
@@ -11,6 +39,9 @@
       namespace: openstack
       name: openstack-config
     register: clouds_yaml
+    until: "clouds_yaml.resources[0].data['clouds.yaml'] | default('') | length > 0"
+    retries: 60
+    delay: 10
 
   - name: Get the OSP admin password
     kubernetes.core.k8s_info:
@@ -20,6 +51,9 @@
       namespace: openstack
       name: openstack-config-secret
     register: osp_secret
+    until: "osp_secret | length > 0"
+    retries: 60
+    delay: 10
 
 - name: Construct auth param for openstack
   block:
@@ -36,9 +70,19 @@
         clouds.yaml: {{ clouds_yaml }}
         osp_secret: {{ osp_secret }}
 
-- openstack.cloud.networks_info:
-    auth: "{{ openstack_auth }}"
-  register: net_info
+- name: Acquire info about existing openstack networks
+  block:
+  - openstack.cloud.networks_info:
+      auth: "{{ openstack_auth }}"
+    register: net_info
+    until: "net_info is not failed"
+    retries: 60
+    delay: 10
+  rescue:
+  - fail:
+      msg: |
+        Failed to retrieve network info
+        net_info: {{ net_info }}
 
 - name: Process network list element
   ansible.builtin.include_tasks:
