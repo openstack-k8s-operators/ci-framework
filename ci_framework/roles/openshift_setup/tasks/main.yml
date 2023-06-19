@@ -37,6 +37,7 @@
   when: not cifmw_openshift_setup_dry_run
 
 - name: Get internal OpenShift registry route
+  when: not cifmw_openshift_setup_skip_internal_registry | bool
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -46,21 +47,10 @@
     namespace: openshift-image-registry
   register: cifmw_openshift_setup_registry_default_route
 
-- name: Login into OpenShift internal registry
-  when:
-    - cifmw_openshift_token is defined
-    - not cifmw_openshift_setup_skip_internal_registry_login
-    - cifmw_openshift_setup_registry_default_route.resources | default([]) | length > 0
-  ansible.builtin.command:
-    cmd: >-
-      podman login
-      -u {{ cifmw_openshift_user }}
-      -p {{ cifmw_openshift_token }}
-      {{ cifmw_openshift_setup_registry_default_route.resources[0].spec.host }}
-
 - name: Allow anonymous image-pulls in CRC registry for targeted namespaces
   with_items: "{{ cifmw_openshift_setup_namespaces }}"
   when:
+    - not cifmw_openshift_setup_skip_internal_registry | bool
     - not cifmw_openshift_setup_dry_run
     - (cifmw_openshift_setup_registry_default_route.resources | default([]) | length > 0)
   kubernetes.core.k8s:
@@ -82,3 +72,37 @@
       roleRef:
         kind: ClusterRole
         name: system:image-puller
+
+- name: Podman login into OpenShift registry
+  when:
+    - cifmw_openshift_token is defined
+    - not cifmw_openshift_setup_skip_internal_registry | bool
+    - cifmw_openshift_setup_registry_default_route.resources | length > 0
+  block:
+
+  - name: Wait for the image registry to be ready
+    kubernetes.core.k8s_info:
+      kind: Deployment
+      name: image-registry
+      namespace: openshift-image-registry
+      wait: true
+      wait_sleep: 10
+      wait_timeout: 600
+      wait_condition:
+        type: Available
+        status: "True"
+
+  - name: Login into OpenShift internal registry
+    ansible.builtin.command:
+      cmd: >-
+        podman login
+        -u {{ cifmw_openshift_user }}
+        -p {{ cifmw_openshift_token }}
+        {%- if cifmw_openshift_setup_skip_internal_registry_tls_verify|bool %}
+        --tls-verify=false
+        {%- endif %}
+        {{ cifmw_openshift_setup_registry_default_route.resources[0].spec.host }}
+    retries: 10
+    delay: 30
+    register: cifmw_openshift_setup_podman_login_stdout
+    until: cifmw_openshift_setup_podman_login_stdout.rc == 0
