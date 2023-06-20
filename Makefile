@@ -86,7 +86,7 @@ pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 
 ##@ Ansible-test testing
 .PHONY: ansible_test
-ansible_test: setup_tests ansible_tests_nodeps ## Runs ansible-test with dependencies install
+ansible_test: setup_tests ansible_test_nodeps ## Runs ansible-test with dependencies install
 
 .PHONY: ansible_test_nodeps
 ansible_test_nodeps: ## Run ansible-test without installing dependencies
