@@ -24,8 +24,8 @@ provisioned with bmaas vs pre-provisioned VM.
 * `cifmw_use_libvirt`: (Bool) toggle libvirt support
 * `cifmw_use_crc`: (Bool) toggle rhol/crc usage
 * `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
-* `cifmw_use_hive`: This enables support for Hive. Defaults to false.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
+* `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
 
 #### Words of caution
 If you want to output the content in another location than `~/ci-framework-data`

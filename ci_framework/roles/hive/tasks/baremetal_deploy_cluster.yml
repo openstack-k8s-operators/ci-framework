@@ -1,0 +1,112 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get variables and set defaults only for unit testing.
+  ansible.builtin.set_fact:
+    cifmw_hive_bm_libvirt_user: "{{ hostvars[cifmw_opn_host]['cifmw_opn_user'] | default(cifmw_opn_user) }}"
+    cifmw_hive_bm_host_key: "{{ hostvars[cifmw_opn_host]['cifmw_opn_user_ssh_key'] | default(cifmw_opn_user_ssh_key) }}"
+    cifmw_hive_bm_host_ssh_print: "{{ hostvars[cifmw_opn_host]['cifmw_opn_host_ssh_key'] | default(cifmw_opn_host_ssh_key) }}"
+    cifmw_hive_bm_bootstrap_boot_mac: "{{ hostvars[cifmw_opn_host]['cifmw_opn_bootstrap_boot_mac'] | default(cifmw_opn_bootstrap_boot_mac) }}"
+    cifmw_hive_bm_provisioning_bridge_name: "{{ hostvars[cifmw_opn_host]['cifmw_opn_prov_bridge_name'] | default(cifmw_opn_prov_bridge_name) | default(omit) }}"
+    cifmw_hive_bm_external_bridge_name: "{{ hostvars[cifmw_opn_host]['cifmw_opn_external_bridge_name'] | default(cifmw_opn_external_bridge_name) }}"
+
+- name: Create a secret resource for provisioner node access
+  vars:
+    desc: "Provisioner SSH private key secret"
+    template_file: templates/private_key.yml.j2
+    dest_file: ocp_ssh_private_key.yml
+    secret_name: "{{ cifmw_hive_baremetal.cluster_name }}-ssh-pvt-key"
+    secret: "{{ lookup('file', cifmw_hive_bm_host_key.filename) }}"
+  ansible.builtin.include_tasks:
+    file: oc_apply.yml
+
+- name: Load baremetal install config
+  ansible.builtin.include_vars:
+    file: "{{ cifmw_hive_baremetal.install_config }}"
+    name: bm_install_config
+
+- name: Add dynamic values into the bm install config
+  ansible.builtin.set_fact:
+    bm_install_config: "{{ bm_install_config | combine(item, recursive=true) }}"
+  loop:
+    - {'metadata': {'name': "{{ cifmw_hive_baremetal.cluster_name }}" }}
+    - {'platform': {'baremetal': {'libvirtURI': "qemu+ssh://{{ cifmw_hive_bm_libvirt_user }}@{{ cifmw_opn_host }}/system" }}}
+    - {'platform': {'baremetal': {'externalMACAddress': "{{ cifmw_hive_bm_bootstrap_boot_mac }}" }}}
+    - {'platform': {'baremetal': {'externalBridge': "{{ cifmw_hive_bm_external_bridge_name }}" }}}
+
+- name: Add provisioning bridge name to install config
+  when:
+    - cifmw_hive_bm_provisioning_bridge_name is defined
+    - cifmw_hive_bm_provisioning_bridge_name | length > 0
+  vars:
+    prov_bridge_name: {'platform': {'baremetal': {'provisioningBridge': "{{ cifmw_hive_bm_provisioning_bridge_name }}" }}}
+  ansible.builtin.set_fact:
+    bm_install_config: "{{ bm_install_config | combine(prov_bridge_name, recursive=true) }}"
+
+- name: Gather the base domain of the OCP cluster
+  ansible.builtin.set_fact:
+    cifmw_hive_ocp_base_domain: "{{ bm_install_config.baseDomain }}"
+
+- name: Create a secret resource holding baremetal install config
+  vars:
+    desc: "install config secret"
+    template_file: templates/bm_install_config.yml.j2
+    dest_file: bm_install_config.yml
+    secret_name: "{{ cifmw_hive_baremetal.cluster_name }}-install-config"
+    install_config_yml: "{{ bm_install_config | to_nice_yaml(indent=2) }}"
+  ansible.builtin.include_tasks:
+    file: oc_apply.yml
+
+- name: Create a cluster image set resource
+  vars:
+    desc: "ocp cluster image"
+    template_file: templates/ocp_image.yml.j2
+    dest_file: ocp_image.yml
+    image_name: "{{ cifmw_hive_baremetal.cluster_name }}"
+    image_uri: "{{ cifmw_hive_baremetal.ocp_image }}"
+  ansible.builtin.include_tasks:
+    file: oc_apply.yml
+
+- name: Initiate OCP deployment on baremetal
+  vars:
+    desc: "OCP cluster deployment"
+    template_file: templates/bm_deploy_config.yml.j2
+    dest_file: bm_deploy_config.yml
+    known_host_entry: "{{ cifmw_opn_host }} {{ cifmw_hive_bm_host_ssh_print | trim }}"
+  ansible.builtin.include_tasks:
+    file: oc_apply.yml
+
+- name: Wait until OCP cluster is deployed and configured
+  when: not cifmw_hive_dry_run | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_hive_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: "oc get clusterdeployment {{ cifmw_hive_baremetal.cluster_name }} -o jsonpath='{ .status.conditions }' "
+  register: cd_results
+  until: >
+    cd_results.rc != 0 or
+    cd_results.stdout | from_json | selectattr('status', '==', 'True') | selectattr('type', 'in', ['Provisioned', 'ProvisionStopped']) | length >= 1
+  retries: 360
+  delay: 30
+  failed_when: >
+    cd_results.stdout | from_json | selectattr('status', '==', 'True') | selectattr('type', '==', 'ProvisionStopped') | length >= 1 or
+    cd_results.rc != 0
+
+- name: Gather and set OCP access information
+  when: not cifmw_hive_dry_run | bool
+  ansible.builtin.include_tasks:
+    file: baremetal_gather_access.yml
