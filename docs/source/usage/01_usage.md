@@ -23,7 +23,11 @@ provisioned with bmaas vs pre-provisioned VM.
 * `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`
 * `cifmw_use_libvirt`: (Bool) toggle libvirt support
 * `cifmw_use_crc`: (Bool) toggle rhol/crc usage
-* `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided.
+* `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided. If provided will be the kubeconfig to use and update after login.
+* `cifmw_openshift_api`: (String) Path to the kubeconfig file. If provided will be the API to authenticate against.
+* `cifmw_openshift_user`: (String) Login user. If provided, the user that logins.
+* `cifmw_openshift_provided_token`: (String) Initial login token. If provided, that token will be used to authenticate into OpenShift.
+* `cifmw_openshift_password`: (String) Login password. If provided is the password used for login in.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
 
