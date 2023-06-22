@@ -1,0 +1,65 @@
+---
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Deploy content provider registry
+      ansible.builtin.include_role:
+        name: registry_deploy
+
+    - name: Call repo setup
+      ansible.builtin.import_role:
+        name: repo_setup
+      vars:
+       cifmw_repo_setup_output: "/etc/yum.repos.d/"
+
+    - name: Get latest commit when no PR is provided
+      ansible.builtin.command:
+        cmd: git show-ref --head --hash head
+      args:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-image-builder"
+      register: git_head_out
+
+    - name: Set pr_sha to be used as image tag
+      ansible.builtin.set_fact:
+        pr_sha: "{{ git_head_out.stdout | trim }}"
+        cacheable: true
+
+    - name: Build edpm and ipa images
+      ansible.builtin.include_role:
+        name: edpm_build_images
+      vars:
+        cifmw_edpm_build_images_tag: "{{ pr_sha }}"
+
+    - name: Push edpm-hardened-uefi image to registry
+      containers.podman.podman_image:
+        name: "{{ item }}"
+        push_args:
+          dest: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001"
+        tag: "{{ pr_sha }}"
+        push: yes
+      loop:
+        - edpm-hardened-uefi
+        - ironic-python-agent
+
+    - name: Set build images output
+      ansible.builtin.set_fact:
+        cifmw_build_images_output:
+          images:
+            edpm-hardened-uefi:
+              image: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001/edpm-hardened-uefi:{{ pr_sha }}"
+            ironic-python-agent:
+              image: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001/ironic-python-agent:{{ pr_sha }}"
+        cacheable: true
+
+    - name: Get the containers list from container registry
+      ansible.builtin.command: "curl -X GET {{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
+      register: cp_imgs
+
+    - name: Add the container list to file
+      ansible.builtin.copy:
+        mode: 0644
+        content: "{{ cp_imgs.stdout }}"
+        dest: "{{ ansible_user_dir }}/ci-framework-data/logs/local_registry.log"
+
+- name: Run log related tasks
+  ansible.builtin.import_playbook: "{{ cifmw_project_root }}/ci_framework/playbooks/99-logs.yml"
