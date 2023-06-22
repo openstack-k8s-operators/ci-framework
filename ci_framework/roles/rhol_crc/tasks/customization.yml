@@ -1,0 +1,68 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create target crc customization directory
+  ansible.builtin.file:
+    path: "{{ cifmw_rhol_crc_customizations_path }}"
+    state: directory
+
+- name: Build crc customization manifest
+  ansible.builtin.set_fact:
+    cifmw_rhol_crc_customizations_to_apply: |
+      {{ cifmw_rhol_crc_custom_definitions | default('') }}
+      {{ lookup('file', role_path ~ '/files/customizations/patches.yml')}}
+    cacheable: true
+
+- name: Copy ci-framework crc customization file to target
+  ansible.builtin.copy:
+    content: "{{ cifmw_rhol_crc_customizations_to_apply }}"
+    dest: "{{ cifmw_rhol_crc_customizations_path }}/patches.yml"
+
+- name: Apply customizations
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_rhol_crc_kubeconfig }}"
+    state: patched
+    definition: "{{ cifmw_rhol_crc_customizations_to_apply | from_yaml_all }}"
+
+- name: Wait for crc to stabilize
+  environment:
+    KUBECONFIG: "{{ cifmw_rhol_crc_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  register: rhol_crc_wait_customization_cmd_out
+  ansible.builtin.command:
+    cmd: >-
+      oc wait pods
+      --all
+      --all-namespaces
+      --for=condition=ready
+      --timeout=5m
+      --selector=app!=pruner
+      --field-selector=metadata.namespace!=openshift-operator-lifecycle-manager,metadata.namespace!=openshift-marketplace
+  until: rhol_crc_wait_customization_cmd_out.rc == 0
+  retries: 5
+  delay: 10
+
+- name: Wait until livez probe is passing
+  ansible.builtin.uri:
+    url: 'https://api.crc.testing:6443/livez'
+    return_content: yes
+    validate_certs: no
+    status_code:
+      - 200
+  until: rhol_crc_livez_probe_output.status == 200
+  retries: 20
+  delay: 20
+  register: rhol_crc_livez_probe_output

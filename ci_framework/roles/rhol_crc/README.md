@@ -23,7 +23,7 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_reuse`: (Boolean) In case RHOL/CRC is detected, just reuse it. Defaults to `True`
 * `cifmw_rhol_crc_kubeconfig`: (String) Path to crc kubeconfig file. Defaults to `~/.crc/machines/crc/kubeconfig`.
 * `cifmw_rhol_crc_creds`: (Boolean) Add crc creds to bashrc. Defaults to `False`.
-
+* `cifmw_rhol_crc_post_customize`: (Boolean) Apply custom definitions after crc started. Defaults to `True`.
 ## Cleanup
 
 You may call the `cleanup.yml` role in order to delete the `crc` instance and all the associated configuration like networking, volume, virsh domain, etc.
