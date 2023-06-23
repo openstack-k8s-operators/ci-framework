@@ -1,0 +1,90 @@
+---
+- name: Create needed directories
+  ansible.builtin.file:
+    path: "/tmp/{{ item }}"
+    state: directory
+  loop:
+    - artifacts
+    - logs
+
+- name: Run simple no failing script
+  register: out_ok
+  environment:
+    TEST_VAR: "test-value"
+  ci_script:
+    output_dir: /tmp/artifacts
+    script: |
+      mkdir -p /tmp/test/target
+      printf "$TEST_VAR" > /tmp/test/target/echo_out.txt
+      printf "$TEST_VAR"
+
+- name: Run simple failing script
+  register: out_fail
+  environment:
+    TEST_VAR: "test-value"
+  ci_script:
+    output_dir: /tmp/artifacts
+    script: |
+      printf "I am about to fail" >&2
+      exit 123
+  ignore_errors: true
+
+- name: Ensure we have correct output
+  ansible.builtin.assert:
+    that:
+      - out_ok.stdout == 'test-value'
+      - out_ok.rc == 0
+      - not out_ok.failed | bool
+      - out_fail.stdout == "I am about to fail"
+      - out_fail.rc == 123
+      - out_fail.failed | bool
+
+- name: Run with global debug enabled
+  vars:
+    cifmw_debug: true
+  ci_script:
+    output_dir: /tmp/artifacts
+    script: |
+      printf "Debug 1"
+
+- name: Run with action debug enabled
+  vars:
+    cifmw_ci_script_debug: true
+  ci_script:
+    output_dir: /tmp/artifacts
+    script: |
+      printf "Debug 2"
+
+- name: Set files attributes
+  ansible.builtin.set_fact:
+    files_to_check:
+      "/tmp/artifacts/ci_script_000_run_simple_no_failing_script.sh":
+        b454d38a084c6de122b581aa0be4ace54487c7a7
+      "/tmp/artifacts/ci_script_001_run_simple_failing_script.sh":
+        3ca225f289b0b2ac65a67746b4c6b4074b59d812
+      "/tmp/artifacts/ci_script_002_run_with_global_debug_enabled.sh":
+        f6dc07798b3c7cde4979f0edcee1f424352b2aa0
+      "/tmp/artifacts/ci_script_003_run_with_action_debug_enabled.sh":
+        b14ce2d01a05c348772f4e27ec7cdc53633c5f61
+      "/tmp/logs/ci_script_000_run_simple_no_failing_script.log":
+        1382103331d56fa62a3f0b12388aad5cdb36389d
+      "/tmp/logs/ci_script_001_run_simple_failing_script.log":
+        67dd35c6c747cc9614633e32694fe9eb5e4a53d1
+      "/tmp/logs/ci_script_002_run_with_global_debug_enabled.log":
+        b76a03852f2d614a63af5bc6ac3e9d61a113a34b
+      "/tmp/logs/ci_script_003_run_with_action_debug_enabled.log":
+        bb7199b9b6842f10081dc307e0fe4cf9d0ef340a
+
+- name: Gather files
+  register: target_scripts_and_logs
+  ansible.builtin.stat:
+    path: "{{ item.key }}"
+  loop: "{{ files_to_check|dict2items }}"
+
+- name: Assert file status
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists is defined
+      - item.stat.exists|bool
+      - item.stat.checksum == files_to_check[item.stat.path]
+  loop: "{{ target_scripts_and_logs.results }}"
