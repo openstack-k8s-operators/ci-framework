@@ -11,6 +11,7 @@ Many login scenarios are allowed by passing or ommiting the following variables:
     and will create the kubeconfig in the default location `~/.kube/config`.
 - `cifmw_openshift_login_api`: The OpenShift API endpoint. If not given the role will extract it from the kubeconfig.
 - `cifmw_openshift_login_user` and `cifmw_openshift_login_password`: User/password for password based logins.
+- `cifmw_openshift_login_provided_token`: Token only based logins.
 
 After successful login, the following variables will hold all the needed information to perform call to the cluster:
 * `cifmw_openshift_login_api` and `cifmw_openshift_api`: OpenShift API endpoint.
@@ -26,6 +27,7 @@ No privilege escalation needed.
 * `cifmw_openshift_login_kubeconfig`: (String) Optional. Path to the kubeconfig file. Defaults to `cifmw_openshift_kubeconfig` and `~/.kube/config` as last instance.
 * `cifmw_openshift_login_api`: (String) Optional. Path to the kubeconfig file. Defaults to `cifmw_openshift_api` and to the real API endpoint after login.
 * `cifmw_openshift_login_user`: (String) Optional. Login user. If provided, the user that logins. Defaults to `cifmw_openshift_user` and to the logged in user after login.
+* `cifmw_openshift_login_provided_token`: (String) Optional. Initial login token. If provided, that token will be used to authenticate into OpenShift. Defaults to `cifmw_openshift_provided_token`.
 * `cifmw_openshift_login_password`: (String) Optional. Login password. If provided is the password used for login in. Defaults to `cifmw_openshift_password`.
 * `cifmw_openshift_login_force_refresh`: (Boolean) Disallow reusing already existing token. Defaults to `false`.
 * `cifmw_openshift_login_retries`: (Integer) Number of attempts to retry the login action if it fails. Defaults to `10`.
@@ -71,4 +73,15 @@ No privilege escalation needed.
       vars:
         # X509 key in the kubeconfig client data
         cifmw_openshift_login_kubeconfig: "/home/zuul/.crc/machines/crc/kubeconfig"
+```
+
+### 4 - Token based login
+```yaml
+- hosts: all
+  tasks:
+    - name: Log in with token
+      include_role:
+        name: openshift_login
+      vars:
+        cifmw_openshift_login_provided_token: "sha256~Abcdefghij..."
 ```
