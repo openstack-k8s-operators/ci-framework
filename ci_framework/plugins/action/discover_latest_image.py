@@ -2,6 +2,9 @@
 # Apache License Version 2.0 (see LICENSE)
 
 from __future__ import (absolute_import, division, print_function)
+import re
+from ansible.plugins.action import ActionBase
+from ansible.errors import AnsibleError
 __metaclass__ = type
 
 DOCUMENTATION = r'''
@@ -21,8 +24,9 @@ EXAMPLES = r'''
 - name: Get latest CentOS 9 Stream image
   register: discovered_images
   discover_latest_image:
-    base_url: "https://cloud.centos.org/centos/{{ ansible_distribution_major_version }}-stream/x86_64/images/"
+    base_url: "https://cloud.centos.org/centos/{{ ansible_distribution_major_version }}-stream/x86_64/images"
     image_prefix: "CentOS-Stream-GenericCloud-"
+    images_file: "CHECKSUM"
 '''
 
 RETURN = r'''
@@ -37,69 +41,80 @@ data:
     returned: always
 '''
 
-from ansible.errors import AnsibleError
-from ansible.plugins.action import ActionBase
-from ansible.module_utils.basic import missing_required_lib
-
-import re
-
-try:
-    from bs4 import BeautifulSoup
-except ImportError as imp_exc:
-    BS4_IMPORT = imp_exc
-else:
-    BS4_IMPORT = None
-
 
 class ActionModule(ActionBase):
-    def run(self, tmp=None, task_vars=None):
-        super(ActionModule, self).run(tmp, task_vars)
-        module_args = self._task.args.copy()
 
-        if BS4_IMPORT:
-            raise AnsibleError(missing_required_lib('beautifulsoup4'))
+    IMAGES_FILES = [
+        # e.g: https://cloud.centos.org/centos/9-stream/x86_64/images/CHECKSUM
+        'CHECKSUM',
+        'SHA256SUM',
+        'SHA1SUM',
+        'MD5SUM',
+    ]
+
+    def run(self, tmp=None, task_vars=None):
+        super().run(tmp, task_vars)
+
+        module_args = self._task.args.copy()
 
         if 'image_prefix' not in module_args:
             raise AnsibleError('"image_prefix" parameter is mandatory')
 
         img_prefix = module_args.pop('image_prefix')
 
+        images_files = self.IMAGES_FILES.copy()
+        if 'images_file' in module_args:
+            images_files.insert(0, module_args.pop('images_file'))
+
         # Ensure we return content
         module_args['return_content'] = True
         # Ensure we run locally only
         task_vars['delegate_to'] = 'localhost'
 
-        page = self._execute_module(module_name="ansible.builtin.uri",
-                                    module_args=module_args,
-                                    task_vars=task_vars,
-                                    tmp=tmp)
+        base_image_url = module_args['url']
 
-        # Prepare matcher
-        matcher = re.compile(rf'{img_prefix}.*\.qcow2$')
+        qcow2_image_pattern = re.compile(
+            fr"(SHA256|SHA1|MD5) \(.*?({re.escape(img_prefix)}.*?\.qcow2)\)")
 
-        # Start parsing
-        parsed = BeautifulSoup(page['content'], 'html.parser')
-        all_links = [a_elem.get('href') for a_elem in parsed.find_all('a')]
-        extracted = [link for link in all_links if matcher.match(link)]
+        image_list = None
+        for image_file in images_files:
+            module_args['url'] = f"{base_image_url}/{image_file}"
 
-        latest_image = extracted[-1]
-        base_url = module_args['url']
-        module_args['url'] = f'{base_url}/{latest_image}.SHA256SUM'
-        sha256sum = self._execute_module(module_name='ansible.builtin.uri',
-                                         module_args=module_args,
-                                         task_vars=task_vars,
-                                         tmp=tmp)
+            page = self._execute_module(module_name="ansible.builtin.uri",
+                                        module_args=module_args,
+                                        task_vars=task_vars,
+                                        tmp=tmp)
 
-        extracted_sha = sha256sum['content'].split('=')[1].strip()
+            if 'failed' not in page:
+                image_list = list(
+                    filter(qcow2_image_pattern.match, page['content'].split('\n')))
+                break
+        else:
+            raise AnsibleError(
+                "Error fetching the information from all checksum files.")
+
+        if not image_list:
+            raise AnsibleError(
+                f"The image with the following prefix {img_prefix} can't be determinated.")
+
+        last_image = image_list[-1]
+
+        image_name_hash_pattern = re.compile(
+            r'(SHA256|SHA1|MD5) \((.*?)\) = (.*)')
+        image_name_sha_match = image_name_hash_pattern.search(last_image)
+        hash_algorithm = image_name_sha_match.group(1)
+        image_name = image_name_sha_match.group(2)
+        image_hash = image_name_sha_match.group(3)
 
         result = {
             'success': True,
             'changed': True,
             'error': '',
             'data': {
-                'image_name': latest_image,
-                'image_url': f'{base_url}/{latest_image}',
-                'sha256': extracted_sha,
+                'image_name': image_name,
+                'image_url': f"{base_image_url}/{image_name}",
+                'hash': image_hash,
+                'hash_algorithm': hash_algorithm.lower()
             },
         }
 
