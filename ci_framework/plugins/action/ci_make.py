@@ -14,6 +14,125 @@ from ansible.errors import AnsibleActionFail
 from ansible.module_utils import basic
 from ansible.utils.display import Display
 
+
+DOCUMENTATION = r'''
+---
+action: ci_make
+
+short_description:
+
+description:
+- This moduel mostly wraps `community.general.make` and `ansible.builtin.copy`.
+- It requires an additional parameter, `output_dir`, in order to output the `make` generated command.
+- It also adds a new optional parameter, `dry_run`,
+- allowing to NOT run `community.general.make` module, but get a file with the passed parameters.
+
+options: Same as `community.general.make` except for output_dir and dry_run.
+'''
+
+EXAMPLES = r'''
+- name: Run pre-commit tests
+    ci_make:
+    chdir: "~/code/github.com/ci-framework-data"
+    output_dir: /tmp/artifacts
+    target: pre_commit
+    params:
+        USE_VENV: no
+'''
+
+RETURN = r'''
+chdir:
+  description:
+    - The value of the module parameter I(chdir).
+  type: str
+  returned: success
+command:
+  description:
+    - The command built and executed by the module.
+  type: str
+  returned: success
+file:
+  description:
+    - The value of the module parameter I(file).
+  type: str
+  returned: success
+jobs:
+  description:
+    - The value of the module parameter I(jobs).
+  type: int
+  returned: success
+params:
+  description:
+    - The value of the module parameter I(params).
+  type: dict
+  returned: success
+target:
+  description:
+    - The value of the module parameter I(target).
+  type: str
+  returned: success
+dest:
+    description: Destination file/path.
+    returned: success
+    type: str
+    sample: /path/to/file.txt
+src:
+    description: Source file used for the copy on the target machine.
+    returned: changed
+    type: str
+    sample: /home/httpd/.ansible/tmp/ansible-tmp-1423796390.97-147729857856000/source
+md5sum:
+    description: MD5 checksum of the file after running copy.
+    returned: when supported
+    type: str
+    sample: 2a5aeecc61dc98c4d780b14b330e3282
+checksum:
+    description: SHA1 checksum of the file after running copy.
+    returned: success
+    type: str
+    sample: 6e642bb8dd5c2e027bf21dd923337cbb4214f827
+backup_file:
+    description: Name of backup file created.
+    returned: changed and if backup=yes
+    type: str
+    sample: /path/to/file.txt.2015-02-12@22:09~
+gid:
+    description: Group id of the file, after execution.
+    returned: success
+    type: int
+    sample: 100
+group:
+    description: Group of the file, after execution.
+    returned: success
+    type: str
+    sample: httpd
+owner:
+    description: Owner of the file, after execution.
+    returned: success
+    type: str
+    sample: httpd
+uid:
+    description: Owner id of the file, after execution.
+    returned: success
+    type: int
+    sample: 100
+mode:
+    description: Permissions of the target, after execution.
+    returned: success
+    type: str
+    sample: "0644"
+size:
+    description: Size of the target, after execution.
+    returned: success
+    type: int
+    sample: 1220
+state:
+    description: State of the target, after execution.
+    returned: success
+    type: str
+    sample: file
+'''
+
 TMPL_REPRODUCER = '''#!/bin/bash
 pushd %(chdir)s
 %(exports)s
