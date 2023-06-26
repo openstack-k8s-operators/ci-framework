@@ -14,17 +14,31 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: "{{ operator.name }} - Set default api path"
-  ansible.builtin.set_fact:
-    operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/api"
+- name: "{{ operator.name }} - Get base module name and set the api path"
+  when:
+    - cifmw_operator_build_meta_build
+    - operator.name != cifmw_operator_build_meta_name
+  block:
+    - name: "{{ operator.name }} - Read go.mod file contents of Openstack Operator"
+      ansible.builtin.slurp:
+        src: "{{ cifmw_operator_build_meta_src }}/go.mod"
+      register: go_mod_out
+
+    - name: "{{ operator.name }} - Get base module name from go.mod"
+      ansible.builtin.set_fact:
+        operator_base_module_name: "{{ go_mod_out['content'] | b64decode | regex_search(cifmw_operator_build_org + '/' + operator.name + '/(\\w*)\\s', '\\1') | first }}"
+
+    - name: "{{ operator.name }} - Set default api path"
+      ansible.builtin.set_fact:
+        operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/{{ operator_base_module_name }}"
 
 - name: "{{ operator.name }} - Update the go.mod file in meta operator for provided PR_SHA"
   ansible.builtin.shell: |
-    go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/api@{{ operator.pr_sha }}
+    go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ operator.pr_sha }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/api@{{ operator.pr_sha }}
+      go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ operator.pr_sha }}
       go mod tidy
       popd
     fi
