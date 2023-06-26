@@ -1,0 +1,45 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_login_api: https://api.crc.testing:6443
+    cifmw_openshift_user: kubeadmin
+    cifmw_openshift_password: "123456789"
+    cifmw_openshift_login_skip_tls_verify: true
+    cifmw_install_yamls_environment: {}
+  tasks:
+    - name: Login
+      ansible.builtin.import_role:
+        name: openshift_login
+
+    - name: Check kubeconfig availabilty
+      register: kubeconfig_stat
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir + '/ci-framework-data/.kube/config' }}"
+
+    - name: Assert variables are in place
+      ansible.builtin.assert:
+        that:
+          - cifmw_openshift_user is defined and cifmw_openshift_user == 'kubeadmin'
+          - cifmw_openshift_login_api is defined and cifmw_openshift_login_api == 'https://api.crc.testing:6443'
+          - cifmw_openshift_kubeconfig is defined and cifmw_openshift_kubeconfig == (ansible_user_dir + '/ci-framework-data/.kube/config')
+          - cifmw_openshift_context is defined and cifmw_openshift_context != ''
+          - cifmw_openshift_token is defined and cifmw_openshift_token != ''
+          - kubeconfig_stat.stat.exists
