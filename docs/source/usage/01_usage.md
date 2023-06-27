@@ -30,6 +30,7 @@ provisioned with bmaas vs pre-provisioned VM.
 * `cifmw_openshift_password`: (String) Login password. If provided is the password used for login in.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
+* `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment
 
 #### Words of caution
 If you want to output the content in another location than `~/ci-framework-data`
