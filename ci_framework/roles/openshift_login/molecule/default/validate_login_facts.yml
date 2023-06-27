@@ -1,0 +1,53 @@
+---
+- name: Fetch kubeconfig content for validation
+  register: kubeconfig_slurp
+  ansible.builtin.slurp:
+    path: "{{ kubeconfig_target_path }}"
+
+- name: Prepare assertion data frpm kubeconfig
+  vars:
+    kubeconfig_yaml: "{{ kubeconfig_slurp ['content'] | b64decode | from_yaml }}"
+  block:
+    - name: Set kubeconfig context data for further asserts
+      ansible.builtin.set_fact:
+        kubeconfig_content: "{{ kubeconfig_yaml }}"
+        kubeconfig_context_name: "{{ kubeconfig_yaml['current-context'] }}"
+        kubeconfig_context: "{{ (kubeconfig_yaml['contexts'] | selectattr('name', 'equalto', kubeconfig_yaml['current-context']) | first).context }}"
+        cacheable: true
+
+    - name: Set kubeconfig user and server data for further asserts
+      ansible.builtin.set_fact:
+        kubeconfig_user_id: "{{ kubeconfig_context['user'] }}"
+        kubeconfig_user_name: "{{ kubeconfig_context['user'] | split('/') | first }}"
+        kubeconfig_user: "{{ (kubeconfig_yaml['users'] | selectattr('name', 'equalto', kubeconfig_context['user']) | first).user }}"
+        kubeconfig_cluster_name: "{{ kubeconfig_context['cluster'] }}"
+        kubeconfig_cluster: "{{ (kubeconfig_yaml['clusters'] | selectattr('name', 'equalto', kubeconfig_context['cluster']) | first).cluster }}"
+        cacheable: true
+
+- name: Assert variables are in place
+  ansible.builtin.assert:
+    that:
+      # kubeconfig
+      - cifmw_openshift_kubeconfig is defined and cifmw_openshift_kubeconfig == kubeconfig_target_path
+      - cifmw_openshift_login_kubeconfig is defined and cifmw_openshift_login_kubeconfig == cifmw_openshift_kubeconfig
+
+      # username
+      - cifmw_openshift_user is defined and cifmw_openshift_user == kubeconfig_user_name
+      - cifmw_openshift_login_user is defined and cifmw_openshift_login_user == cifmw_openshift_user
+
+      # API url
+      - cifmw_openshift_api is defined and cifmw_openshift_login_api == kubeconfig_cluster.server
+      - cifmw_openshift_login_api is defined and cifmw_openshift_login_api == cifmw_openshift_api
+
+      # kubeconfig context
+      - cifmw_openshift_context is defined and cifmw_openshift_context == kubeconfig_context_name
+      - cifmw_openshift_login_context is defined and cifmw_openshift_login_context == cifmw_openshift_context
+
+      # token, if available
+      - ('token' in kubeconfig_user) |
+        ternary(
+          cifmw_openshift_token is defined and
+          cifmw_openshift_token == kubeconfig_user['token'] and
+          cifmw_openshift_login_token is defined and
+          cifmw_openshift_login_token == cifmw_openshift_token
+        , true)
