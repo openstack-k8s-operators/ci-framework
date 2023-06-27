@@ -16,7 +16,7 @@ must be present on your system:
 * sudo
 
 # Needed specific configurations
-Your used must have full `sudo` access in order to:
+Your user must have full `sudo` access in order to:
 
 * install packages
 * push specific configurations linked to CRC
@@ -29,7 +29,7 @@ The best way to achieve that access is to add the following content to a
 ```
 USERNAME          ALL=(ALL)       NOPASSWD: ALL
 ```
-Of course, replace `USERNAME` by your user.
+Of course, replace `USERNAME` by your user's name.
 
 ## Specific access rights
 Since we're using libvirt within the "system" namespace (thanks to CRC, mostly),
