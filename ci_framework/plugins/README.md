@@ -45,6 +45,10 @@ Any of the `ansible.builtin.uri` module is supported.
   * description: Image prefix we want to filter.
   * required: True
   * type: str
+* `images_file`:
+  * description: Name of the file that contain the images with the corresponding hash
+  * required: False
+  * type: str
 
 ## Example:
 ```YAML
@@ -58,7 +62,8 @@ Any of the `ansible.builtin.uri` module is supported.
   ansible.builtin.set_fact:
     cifmw_discovered_image_name: "{{ discovered_image['data']['image_name'] }}"
     cifmw_discovered_image_url: "{{ discovered_image['data']['image_url'] }}"
-    cifmw_discovered_sha256: "{{ discovered_image['data']['sha256'] }}"
+    cifmw_discovered_hash: "{{ discovered_image['data']['hash'] }}"
+    cifmw_discovered_hash_algorithm: "{{ discovered_image['data']['hash_algorithm'] }}"
     cacheable: true
 ```
 
