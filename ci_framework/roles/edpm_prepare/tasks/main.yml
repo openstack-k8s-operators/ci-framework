@@ -101,6 +101,20 @@
           --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
           --for=jsonpath='{.status.phase}'=Complete --timeout=20m
 
+- name: Patch CSV for ansible runner image
+  when:
+    - not cifmw_edpm_prepare_dry_run
+    - cifmw_edpm_prepare_ansible_runner_image != cifmw_edpm_prepare_default_ansible_runner_image
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc patch csv -n openstack-operators openstack-ansibleee-operator.v0.0.1
+      --type='json' -p='[{"op":"replace",
+      "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
+      "value": {"name": "ANSIBLEEE_IMAGE_URL_DEFAULT", "value": "{{ cifmw_edpm_prepare_ansible_runner_image }}"}}]'
+
 - name: Install OpenStack service
   vars:
     make_openstack_deploy_env: "{{ cifmw_edpm_prepare_common_env |
