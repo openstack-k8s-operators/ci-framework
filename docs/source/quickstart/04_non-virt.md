@@ -39,7 +39,6 @@ cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
 cifmw_rhol_crc_use_installyamls: true
 cifmw_installyamls_repos: "{{ ansible_user_dir }}/install_yamls"
 cifmw_install_yamls_vars:
-  KUBECONFIG: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
   OUTPUT_DIR: "{{ cifmw_basedir }}/artifacts/edpm_compute" # used by gen-ansibleee-ssh-key.sh
   OUTPUT_BASEDIR: "{{ cifmw_basedir }}/artifacts/edpm_compute" # used by gen-edpm-compute-node.sh
   SSH_KEY: "{{ cifmw_basedir }}/artifacts/edpm_compute/ansibleee-ssh-key-id_rsa"
