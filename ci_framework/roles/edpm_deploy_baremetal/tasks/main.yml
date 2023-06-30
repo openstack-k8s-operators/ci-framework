@@ -28,14 +28,24 @@
       {% endif %}
     cifmw_edpm_deploy_baremetal_operators_build_output: "{{ operators_build_output }}"
 
-- name: Install OpenStack operator
+- name: Install Dataplane with baremetal
   vars:
-    make_edpm_compute_baremetal_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
+    make_edpm_baremetal_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
       combine(cifmw_edpm_deploy_baremetal_make_openstack_env | from_yaml)}}"
-    make_edpm_compute_baremetal_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
+    make_edpm_baremetal_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
-    tasks_from: 'make_edpm_compute_baremetal'
+    tasks_from: 'make_edpm_baremetal'
+
+- name: Wait for Ironic to be ready
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait pod -l name=ironic -n baremetal-operator-system --for=condition=Ready
+      --timeout={{ cifmw_edpm_deploy_baremetal_wait_ironic_timeout_mins }}m
 
 - name: Wait for OpenStack Provision Server pod to be created
   when: not cifmw_edpm_deploy_baremetal_dry_run
@@ -63,18 +73,6 @@
       --for condition=Available
       --timeout={{ cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins }}m
 
-- name: Get list of baremetal nodes
-  when: not cifmw_edpm_deploy_baremetal_dry_run
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc get baremetalhost
-      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-      -o=jsonpath='{.items[*].metadata.name}'
-  register: cifmw_edpm_deploy_baremetal_bmh_output
-
 - name: Wait for baremetal nodes to reach 'provisioned' state
   when: not cifmw_edpm_deploy_baremetal_dry_run
   environment:
@@ -82,12 +80,10 @@
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc wait bmh {{ item }}
+      oc wait bmh --all
       -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
       --for=jsonpath='{.status.provisioning.state}'=provisioned
       --timeout={{ cifmw_edpm_deploy_baremetal_wait_bmh_timeout_mins }}m
-
-  loop: "{{ cifmw_edpm_deploy_baremetal_bmh_output.stdout.split() }}"
 
 - name: Register the list of compute nodes
   when: not cifmw_edpm_deploy_baremetal_dry_run
