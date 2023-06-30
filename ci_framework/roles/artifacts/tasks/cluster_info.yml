@@ -40,24 +40,16 @@
 
     - name: Dump the logs of all pods
       ansible.builtin.shell: |
-        oc get pods -n openstack-operators > operator_pods.txt
-        oc get pods -n openstack > openstack_pods.txt
-        # This is implicitly relying on the fact that the pod name is
-        # prefixed with "pod/" so that the redirect places the logs
-        # in the correct pod directory. That is why we do not cd after
-        # creating the directory.
-        mkdir pod
         for ns in openstack-operators openstack baremetal-operator-system openshift-machine-api; do
+          oc get pods -n ${ns} > ${ns}_pods.txt
+          mkdir -p "pods/${ns}"
           for pod in $(oc get pods -o name -n ${ns}); do
-            oc logs ${pod} -n ${ns} > ${pod}-logs.txt
-            oc get -o yaml ${pod} -n ${ns} > ${pod}.yaml
-            oc describe ${pod} -n ${ns} > ${pod}-describe.txt
+            pod_name=$(basename $pod)
+            oc logs ${pod} -n ${ns} > "pods/${ns}/${pod_name}-logs.txt"
+            oc get -o yaml ${pod} -n ${ns} > "pods/${ns}/${pod_name}.yaml"
+            oc describe ${pod} -n ${ns} > "pods/${ns}/${pod_name}-describe.txt"
           done
         done
-        # so we rename the directory after populating it
-        # to "pods" to consistently use plural names for
-        # collected resources.
-        mv pod pods
       args:
         chdir: "{{ cifmw_artifacts_basedir }}/logs/edpm"
       changed_when: true
