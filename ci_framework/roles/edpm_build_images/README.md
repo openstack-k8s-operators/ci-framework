@@ -25,6 +25,9 @@ None
 * `cifmw_edpm_build_images_dib_yum_repo_conf`: (List) List of yum repos to be used, By default we select i.e `cifmw_edpm_build_images_dib_yum_repo_conf_centos` var or `cifmw_edpm_build_images_dib_yum_repo_conf_rhel` based on distro var.
 * `cifmw_edpm_build_images_tag`: (String) Tag with which we want to build container images. Default: `latest`.
 * `cifmw_edpm_build_images_dry_run`: (Boolean) Whether to perform a dry run of the image build. Default: false.
+* `cifmw_edpm_build_images_push_container_images`: (Boolean) Whether to push container images to remote registry. Default: false.
+* `cifmw_edpm_build_images_push_registry`: (String) Push registry where we want to push container images. Default: `quay.rdoproject.org`.
+* `cifmw_edpm_build_images_push_registry_namespace`: (String) Namespace on registry where we want to push container images. Default: `podified-main-centos9`.
 
 ### Example
 ```YAML
