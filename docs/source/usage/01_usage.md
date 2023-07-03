@@ -103,14 +103,14 @@ In order to allow user to run only a subset of tasks while still consuming the
 entry playbook, the Framework exposes tags one may leverage with either `--tags`
 or `--skip-tags`:
 
-* `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
+* `cifmw_bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
 * `packages`: Run all package installation tasks associated to the options you set.
 
 For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
 ```Bash
-$ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
-$ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
+$ ansible-playbook deploy-edpm.yml -K --tags cifmw_bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
+$ ansible-playbook deploy-edpm.yml -K --skip-tags cifmw_bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
 ```
 
 Running the commande twice, with `--tags` and `--skip-tags` as only difference,

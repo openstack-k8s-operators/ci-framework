@@ -7,7 +7,7 @@ In order to leverage this, you may first run this:
 ```Bash
 $ ansible-playbook deploy-edpm.yml \
     -e @scenarios/centos-9/local-env.yml \
-    --tags packages,boostrap
+    --tags packages,cifmw_boostrap
 ```
 This first step will create the necessary directories and install all the
 packages needed by the "local-env.yml" environment file. Of course, if you have
@@ -26,7 +26,7 @@ From now on, you may run only the actual deploy tasks:
 ```Bash
 $ ansible-playbook deploy-edpm.yml \
     -e @scenarios/centos-9/local-env.yml \
-    --skip-tags packages,boostrap
+    --skip-tags packages,cifmw_bootstrap
 ```
 This second command will run everything that isn't related to packages or
 bootstrap - making a (small) gain of time, since many tasks won't have to run.
