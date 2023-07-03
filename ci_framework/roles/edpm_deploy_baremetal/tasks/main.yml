@@ -44,6 +44,22 @@
     name: 'install_yamls_makes'
     tasks_from: 'make_metallb_config'
 
+- name: Override uefi image url when we build uefi image via content_provider
+  when: cifmw_build_images_output is defined
+  set_fact:
+    cifmw_edpm_deploy_baremetal_uefi_image_url: "{{ cifmw_build_images_output['images']['edpm-hardened-uefi']['image'] }}"
+
+- name: Patch baremetal CSV to override the uefi image
+  when:
+    - not cifmw_edpm_deploy_baremetal_dry_run
+    - cifmw_edpm_deploy_baremetal_default_uefi_image_url != cifmw_edpm_deploy_baremetal_uefi_image_url
+  ansible.builtin.command:
+    cmd: >-
+      oc patch csv -n openstack-operators openstack-baremetal-operator.v0.0.1
+      --type='json' -p='[{"op":"replace",
+      "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
+      "value": {"name": "OS_CONTAINER_IMAGE_URL_DEFAULT", "value": "{{ cifmw_edpm_deploy_baremetal_uefi_image_url }}"}}]'
+
 - name: Install Dataplane with baremetal
   vars:
     make_edpm_baremetal_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
