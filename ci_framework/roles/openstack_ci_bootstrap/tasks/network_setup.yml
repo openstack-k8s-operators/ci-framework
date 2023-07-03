@@ -1,0 +1,141 @@
+---
+- name: Calculate the external network to use if not given
+  when: cifmw_ocb_external_network is not defined
+  block:
+    - name: Fetch networks
+      register: cifmw_ocb_networks_list_out
+      ansible.builtin.command:
+        cmd: "openstack network list -c Name -f value"
+
+    - name: Get available IPs for each network
+      register: cifmw_ocb_networks_ips_availabilities_out
+      ansible.builtin.command:
+        cmd: "openstack ip availability show -f yaml {{ item }}"
+      loop: >-
+        {{
+          cifmw_ocb_networks_list_out.stdout_lines |
+          map('regex_search', '^.*_cci_(10|[4-9])+$') |
+          select('string') |
+          list
+        }}
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Compute free IPs
+      ansible.builtin.set_fact:
+        cifmw_ocb_networks_mapped_ips: >-
+          {{
+              (cifmw_ocb_networks_mapped_ips | default([])) +
+              [
+                {
+                  'free': (item.total_ips | int) - (item.used_ips | int),
+                  'id': item.network_id
+
+                }
+              ]
+          }}
+      loop: >-
+        {{
+          cifmw_ocb_networks_ips_availabilities_out.results |
+          map(attribute='stdout') |
+          map('from_yaml')
+        }}
+      loop_control:
+        label: "{{ item.network_name }}"
+
+    - name: Set the network with more IPs available as cifmw_ocb_external_network
+      ansible.builtin.set_fact:
+        cifmw_ocb_external_network: >-
+          {{
+            (cifmw_ocb_networks_mapped_ips | sort(attribute='free') | last).id
+          }}
+
+- name: Create the isolated network
+  register: cifmw_ocb_network_resource_out
+  ansible.builtin.command:
+    cmd: >-
+      openstack network create
+      --tag cifmw-resource-{{ cifmw_ocb_resource_suffix }}
+      -f yaml
+      {{ cifmw_ocb_network_name }}
+
+- name: Save network resource creation data
+  ansible.builtin.set_fact:
+    cifmw_ocb_resources: >-
+      {{
+        cifmw_ocb_resources | default({}) |
+        combine(
+          {
+           'network': cifmw_ocb_network_resource_out.stdout | from_yaml
+          }
+        )
+      }}
+    cacheable: true
+
+- name: Create the isolated network subnet
+  register: cifmw_ocb_subnetwork_resource_out
+  ansible.builtin.command:
+    cmd: >-
+      openstack subnet create
+      --network {{ cifmw_ocb_network_name }}
+      --subnet-range {{ cifmw_ocb_isolated_subnet }}
+      --tag cifmw-resource-{{ cifmw_ocb_resource_suffix }}
+      -f yaml
+      {{ cifmw_ocb_subnetwork_name }}
+
+- name: Save network resource creation data
+  ansible.builtin.set_fact:
+    cifmw_ocb_resources: >-
+      {{
+        cifmw_ocb_resources |
+        combine(
+          {
+           'subnetwork': cifmw_ocb_subnetwork_resource_out.stdout | from_yaml
+          }
+        )
+      }}
+    cacheable: true
+
+- name: Create the isolated network router
+  register: cifmw_ocb_router_resource_out
+  ansible.builtin.command:
+    cmd: >-
+      openstack router create
+      --tag cifmw-resource-{{ cifmw_ocb_resource_suffix }}
+      -f yaml
+      {{ cifmw_ocb_router_name }}
+
+- name: Save router resource creation data
+  ansible.builtin.set_fact:
+    cifmw_ocb_resources: >-
+      {{
+        cifmw_ocb_resources |
+        combine(
+          {
+           'router': cifmw_ocb_router_resource_out.stdout | from_yaml
+          }
+        )
+      }}
+    cacheable: true
+
+- name: Set router external gateway
+  ansible.builtin.command:
+    cmd: >-
+      openstack router set
+      --external-gateway {{ cifmw_ocb_external_network }}
+      {{ cifmw_ocb_router_name }}
+
+- name: Add the isolated network to the router
+  ansible.builtin.command:
+    cmd: >-
+      openstack router add subnet
+      {{ cifmw_ocb_router_name }}
+      {{ cifmw_ocb_subnetwork_name }}
+
+- name: Add the isolated network to extra instances
+  ansible.builtin.command:
+    cmd: >-
+      openstack server add network
+      {{ item }}
+      {{ cifmw_ocb_network_name }}
+  loop: "{{ cifmw_ocb_net_attach_to_extra_instances | default('[]') }}"
