@@ -16,7 +16,7 @@
 
 - name: Ensure directories exist
   tags:
-    - always
+    - bootstrap
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -26,14 +26,14 @@
 
 - name: "Get environment structure"
   tags:
-    - always
+    - bootstrap
   register: get_makefiles_env_output
   get_makefiles_env:
     base_path: "{{ cifmw_install_yamls_repo }}"
 
 - name: Create env var if needed
   tags:
-    - always
+    - bootstrap
   when: cifmw_install_yamls_vars is defined
   block:
     - name: Ensure Output directory exists
@@ -76,9 +76,9 @@
 
 - name: Export empty dict in case we don't provide environment overrides
   tags:
-    - always
+    - bootstrap
   when:
-    - cifmw_install_yamls_vars is not defined
+    - cifmw_install_yamls_vars is not defined or cifmw_install_yamls_environment is not defined
   ansible.builtin.set_fact:
     cifmw_install_yamls_environment:
       OUT: "{{ cifmw_install_yamls_manifests_dir }}"
@@ -86,20 +86,20 @@
 
 - name: Set install_yamls default values
   tags:
-    - always
+    - bootstrap
   ansible.builtin.set_fact:
     cifmw_install_yamls_defaults: "{{ get_makefiles_env_output.makefiles_values  | combine(cifmw_install_yamls_environment) }}"
     cacheable: true
 
 - name: Show the env structure
   tags:
-    - always
+    - bootstrap
   ansible.builtin.debug:
     var: cifmw_install_yamls_environment
 
 - name: "Generate make targets"
   tags:
-    - always
+    - bootstrap
   register: cifmw_generate_makes
   generate_make_tasks:
     install_yamls_path: "{{ cifmw_install_yamls_repo }}"
@@ -107,13 +107,13 @@
 
 - name: Debug generate_make module
   tags:
-    - always
+    - bootstrap
   ansible.builtin.debug:
     var: cifmw_generate_makes
 
 - name: Create the install_yamls parameters file
   tags:
-    - always
+    - bootstrap
   ansible.builtin.copy:
     dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters/install-yamls-params.yml"
     content: >-
@@ -123,3 +123,11 @@
         'cifmw_install_yamls_defaults': cifmw_install_yamls_defaults
         } | to_nice_yaml
       }}
+
+- name: Create empty cifmw_install_yamls_environment if needed
+  tags:
+    - always
+  when:
+    - cifmw_install_yamls_environment is not defined
+  ansible.builtin.set_fact:
+    cifmw_install_yamls_environment: {}
