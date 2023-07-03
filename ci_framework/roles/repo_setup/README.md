@@ -14,8 +14,20 @@ Please explain the role purpose.
 * `cifmw_repo_setup_src`: (String) repo-setup repository location. Defaults to `https://github.com/openstack-k8s-operators/repo-setup`.
 * `cifmw_repo_setup_output`: (String) Repository files output. Defaults to `{{ cifmw_repo_setup_basedir }}/artifacts/repositories`.
 * `cifmw_repo_setup_opts`: (String) Additional options we may to pass to repo_setup. Defaults to `''`.
+* `cifmw_repo_setup_env`: (Dict) Environment variables to be passed to repo_setup cli . Defaults to `'{}'`.
 * `cifmw_repo_setup_enable_rhos_release`: (Boolean) Toggle `rhos-release` support. Defaults to `False`.
 
 ### Optional parameters for rhos-release
 * `cifmw_repo_setup_rhos_release_rpm`: (String) URL to rhos-release RPM.
 * `cifmw_repo_setup_rhos_release_args`: (String) Parameters to pass down to `rhos-release`.
+
+## Notes
+
+### Use repo-setup role with custom DLRN server
+
+When we use repo-setup role with custom DLRN server. The server might needs custom TLS certificates.
+Make sure we set `cifmw_repo_setup_env` variable while running repo-setup role.
+```
+cifmw_repo_setup_env:
+  CURL_CA_BUNDLE: "/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt"
+```
