@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eo pipefail
+
+{% set containers_dict = {} -%}
+{# Set the container registry url with namespace #}
+{% set _container_registry = cifmw_set_openstack_containers_registry + '/' + cifmw_set_openstack_containers_namespace -%}
+{# Environment variables contains = sign, Based on that we need to split with key and value #}
+{% for container in containers_env_list.stdout_lines if '=' in container -%}
+{%   set container_data = container.split('=') -%}
+{%   set _container_env = container_data[0] -%}
+{%   set _container = container_data[1] -%}
+{#   All the openstack services containers ends with current-podified tag #}
+{#   It filters out the same and update the container address with new url #}
+{%   if _container.endswith('current-podified') -%}
+{%     set _container_data = _container.split('/')[-1] -%}
+{%     set _container_name = _container_data.split(':')[0] -%}
+{%     set _container_address = _container_registry + '/' + _container_name + ':' + cifmw_set_openstack_containers_tag -%}
+{%     set _ = containers_dict.update({_container_env: _container_address}) -%}
+{#   This section overrides the non openstack services containers #}
+{%   elif cifmw_set_openstack_containers_overrides.items()|length > 0 -%}
+{%     if _container_env in cifmw_set_openstack_containers_overrides.items() -%}
+{%       set _ = containers_dict.update({_container_env: cifmw_set_openstack_containers_overrides[_container_env]}) -%}
+{%     endif -%}
+{%   endif -%}
+{% endfor -%}
+
+# patch csv
+oc get csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} \
+   -l operators.coreos.com/{{ operator_name }}-operator.openstack-operators -o=jsonpath='{.items[0]}' \
+   {% for key, value in containers_dict.items() -%}
+   | jq '(.spec.install.spec.deployments[0].spec.template.spec.containers[1].env[] | select(.name=={{ '\"' + key + '\"' }})) |= (.value={{ '\"' + value + '\"' }})' \
+   {% endfor -%}
+   > {{ cifmw_set_openstack_containers_basedir }}/artifacts/update_containers_patch.out
+
+
+# Apply patch
+oc patch csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} \
+   $(oc get csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} \
+   -l operators.coreos.com/{{ operator_name }}-operator.openstack-operators \
+   -o jsonpath='{.items[0].metadata.name}') \
+   --type=merge \
+   --patch-file={{ cifmw_set_openstack_containers_basedir }}/artifacts/update_containers_patch.out
