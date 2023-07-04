@@ -1,0 +1,114 @@
+---
+- hosts: crc
+  gather_facts: false
+  tasks:
+    - name: Restart the service because zuul base job is overwriting /etc/resolv.conf
+      become: true
+      ansible.builtin.systemd:
+        state: restarted
+        name: crc-pre
+
+    - name: Wait for CRC to be ready
+      ansible.builtin.shell: >
+        for i in {1..20}; do
+          if oc login api.crc.testing:6443 -u kubeadmin -p "123456789" --insecure-skip-tls-verify=true;
+          then
+            date; uptime;
+          else
+            sleep 60;
+          fi;
+        done
+
+    - name: Set fact for controller
+      ansible.builtin.set_fact:
+        controller_ip: "{{ hostvars['controller']['ansible_default_ipv4']['address'] }}"
+
+- hosts: controller
+  tasks:
+    - name: Set fact for CRC
+      ansible.builtin.set_fact:
+        crc_ip: "{{ hostvars['crc']['ansible_default_ipv4']['address'] }}"
+
+    - name: Add ssh keys
+      ansible.builtin.lineinfile:
+        path: "~{{ ansible_user |default('zuul') }}/.ssh/authorized_keys"
+        line: "{{ item }}"
+        create: true
+      loop:
+        # dpawlik
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOKLl0NYKwoZ/JY5KeZU8VwRAggeOxqQJeoqp3dsAaY9 dpawlik@x1
+        # cedric
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHUnwjB20UKmsSed9X73eGNV5AOEFccQ3NYrRW776pEk cjeanner
+        # pablo
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDK7XsKtjKF1/T7q26T3oPyTyCTz9yOhp/5Ptpx/yGFSosIViVy+om5U+D56NJFRhsZ6chTpLpt/EsghwuzGshv3tGzmbLopcPc5Ux76oebzzZryg/2TOHbo4gEmNMK7hhXLv08K52pegtPYmBQ5V7PkchMQ1AjUwdzRMc8RLxcxXXMG4G1Pp/PLykuHmwHYil1rFyYWB62wgIRmzgXzkHy9tmnKB2lwgCM25UmFEC/8mDxA3xsOtT9YuhYIU4N5jAeDyzscDedEAeMghKyIFVx3vLbgThNiH7LC9fzGYQACCvYaUJ3T27IuzAd/uGltphBDK2mkH1eKAE26MQ1GE7Xpy49y8+Od+imbLx4ORn6zrVu0+QrOnhtZvuxAVZIJ3HGZ4sSmQtdpjOlyqgFoyic4hjkQfuUt7JvJtYjE00TzlMomflAvR4KFZHucoMzABgUHZSV8E0otlnq11rn9FtDt7ajIDRNVg2Uf1K7/3koPzg1XeC3oFcolhRHyQYDfi69VzPJW5Vl2F1pQh5vCIKOCYQ+nYXbNx0iEAgL7l7kpythUohKoh4/9jSdtlyhAYX96lHfP1MShX1KgcWAEePdU4kaMNrsIMb3/WsMVDfH+2XJNy8bPxr+U+jOS9/KtgN6ACDWiqtxpozTsEEVMAu7vCZyr5EvztscIUIh6TcMCw== pabrodri@pabrodri-remote
+        # chandan
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGE+Kh8TW2fGc2U54HbeRkRrGGf46YbxAcxRB4XqLO/4 raukadah
+        # ysandeep
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD9hHZMu0S/A/BhYMyc3X/qixn/1aoPUWIbWOF01JLkCeB5Vz7EFdW8ohqr5fqe11mXRhNKpeP7NQcTZ8JjdgE5XfA8+elhjmIlJJGEuUe278KmVLie4R7H+Mdu1FcVQ7RpJRginyqLOa5U9/T0oh+oNuHjEqMVAAfrpMGo2e0SBrFs92+sowK+u1SCoF1QI34mg4aHfFY15dDFoSu6z4CUtfSI/bH+pJKPw/xB7I/Ev1RMu5bouhsqtaXCldoBagQKI1d8ZslPZ043IC+0XBG75ZA7bfWs9pW0ReYG9a3J63DEPMSsp3Tnlu36xVYY+/GtpZROgqZxyU3UnfrmFEwL sandyada
+        # afazekas
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCnB+y028w0+dMjKfRWiAnQ5Q+ej6Gc7BtHpITFndhx8Gywh0L5B5EFWHBB2fdmw7boDmqhGKTTMgaxTtUhQAFuHsfhSrlQIbmUiIgrGkFUx4Pbhr2Xf1NFqM1nXNXT7asuzwFAnBsznR3zo+uj5NWzbj8Ualr1bUJ22iq4eegBm3k18iKKEl0JelDxmcZKihyg6+2Va84cd8P6BbBPs9SUdPXVZNxcFtyDgsMOQGFsh7Ca9RMdf4tz+ONj+s3ZFpcy8xapEWrwHlXad/by3PMta0sOxYiWJTOp93yrMvgdx+jj4jsBxhvw1Yjpzyfr9Y8GU9MB9R7vdjd6D/OWSA+Iwapf4LqFNBCyo45m1rMK1ha7p7fVT5CGUbxIKcBfW3L7iJ/BAZNJAIUQUmnmF2k1m8/odZB+gHStinHOURryHpKEgy1Wbuww1pKXJTSRXBjssX+dOuUYeiWxMuHx/2VCJRmf2pPH5+IRwxVwFINXlYMkLTwYDDGVTO110U4ekq8= afazekas
+
+    - name: Add entries related to the CRC
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: >
+          {{ crc_ip }} api.crc.testing
+          canary-openshift-ingress-canary.apps-crc.testing
+          console-openshift-console.apps-crc.testing
+          default-route-openshift-image-registry.apps-crc.testing
+          downloads-openshift-console.apps-crc.testing
+          oauth-openshift.apps-crc.testing
+        create: true
+
+    - name: Create Openshift repo
+      become: true
+      ansible.builtin.copy:
+        content: |
+          [openshift-deps-rpms]
+          name=Puddle of Microshift deps RPMs
+          baseurl=https://mirror.openshift.com/pub/openshift-v4/$basearch/dependencies/rpms/4.12-el9-beta/
+          enabled=1
+          gpgcheck=0
+          skip_if_unavailable=1
+        dest: /etc/yum.repos.d/openshift.repo
+        mode: "0644"
+
+    - name: Install openshift clients
+      become: true
+      ansible.builtin.package:
+        name: openshift-clients
+        state: present
+
+    - name: Install other packages
+      become: true
+      ansible.builtin.package:
+        name:
+          - make
+          - git
+          - vim
+          - golang
+          - tar
+          - ansible-core
+          - skopeo
+          - sqlite
+          - jq
+          - podman
+        state: present
+
+    - name: Check connection to the CRC
+      ansible.builtin.shell: |
+        oc login api.crc.testing:6443 -u kubeadmin -p "123456789" --insecure-skip-tls-verify=true
+
+    - name: Create required dir
+      ansible.builtin.file:
+        path: "~{{ ansible_user | default('zuul') }}/.crc/machines/crc"
+        state: directory
+
+    - name: Create symlink for kubeconfig
+      ansible.builtin.file:
+        src: "~{{ ansible_user | default('zuul') }}/.kube/config"
+        dest: "~{{ ansible_user | default('zuul') }}/.crc/machines/crc/kubeconfig"
+        state: link
+        owner: "{{ ansible_user | default('zuul') }}"
+        group: "{{ ansible_user | default('zuul') }}"
