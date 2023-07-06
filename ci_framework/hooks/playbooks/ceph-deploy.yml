@@ -39,13 +39,22 @@
       ansible.builtin.command:
         cmd: oc get secret ceph-conf-files -o json
 
+    - name: Extract ceph.conf from secret
+      ansible.builtin.set_fact:
+        cifmw_ceph_conf_encoded: "{{ generated_uuid.stdout | from_json | json_query('data.\"ceph.conf\"') }}"
+
+    - name: Extract FSID from ceph.conf
+      ansible.builtin.set_fact:
+        cifmw_ceph_fsid: "{{ cifmw_ceph_conf_encoded | b64decode | regex_search('.*fsid.*=(.*)\n', '\\1') | first | trim }}"
+
     # That file is known by the main play - the run_hook/playbook task will
     # check for its availability after the hook is finished, and load it using
-    # the ansible.builtin.include_vars call. This will then expose the new
-    # cifmw_ceph_uuid parameter into the main play, allowing to consume it
+    # the ansible.builtin.include_vars call. This will expose the encoded
+    # cifmw_ceph_conf and ceph FDID into the main play, allowing to consume it
     # in further steps.
     - name: Extract and push ceph_uuid
       ansible.builtin.copy:
-        dest: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+        dest: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
         content: |-
-          cifmw_ceph_uuid: {{ generated_uuid.stdout | from_json | json_query('data."ceph.conf"') }}
+          cifmw_ceph_conf: {{ cifmw_ceph_conf_encoded }}
+          cifmw_ceph_fsid: {{ cifmw_ceph_fsid }}
