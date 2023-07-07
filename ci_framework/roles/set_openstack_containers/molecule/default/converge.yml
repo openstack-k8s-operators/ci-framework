@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    make_openstack_wait_dryrun: true
+    cifmw_set_openstack_containers_operator_name: keystone
+    cifmw_install_yamls_environment:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig  }}"
+      BMO_SETUP: false
+      NETWORK_ISOLATION: false
+    cifmw_install_yamls_defaults:
+      OPERATOR_NAMESPACE: openstack-operators
+  pre_tasks:
+    - name: Make download_tools
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_download_tools'
+
+    - name: Run make keystone
+      vars:
+        make_keystone_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path}) }}"
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_keystone'
+
+    - name: Wait for keystone operator to deployed
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell:
+        cmd: >-
+          oc get csv -l operators.coreos.com/keystone-operator.openstack-operators
+          --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          --no-headers=true | grep -i "succeeded"
+      register: operator_status
+      until: operator_status.rc == 0
+      changed_when: false
+      retries: 30
+      delay: 30
+
+  roles:
+    - role: "set_openstack_containers"
