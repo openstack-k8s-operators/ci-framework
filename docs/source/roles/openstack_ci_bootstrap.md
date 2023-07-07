@@ -1,1 +1,0 @@
-../../../ci_framework/roles/openstack_ci_bootstrap/README.md
