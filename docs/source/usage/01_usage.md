@@ -16,7 +16,7 @@ are shared among multiple roles:
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
 `~/ci-framework-data`
 * `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes
-provisioned with bmaas vs pre-provisioned VM.
+provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
 * `cifmw_manifests`: Directory where k8s related manifests will be places. Defaults to
 `{{ cifmw_basedir }}/manifests`
