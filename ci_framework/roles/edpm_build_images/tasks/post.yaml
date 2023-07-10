@@ -1,0 +1,36 @@
+---
+- name: "Push images to registry with {{ cifmw_edpm_build_images_tag }} tag"
+  containers.podman.podman_image:
+    name: "{{ item }}"
+    push_args:
+      dest: "{{ cifmw_edpm_build_images_push_registry }}/{{ cifmw_edpm_build_images_push_registry_namespace }}"
+    tag: "{{ cifmw_edpm_build_images_tag }}"
+    pull: false
+    push: yes
+  loop:
+    - edpm-hardened-uefi
+    - ironic-python-agent
+
+- name: Retag and push the images with podified-ci-testing tag
+  when: cifmw_repo_setup_promotion == "podified-ci-testing"
+  block:
+    - name: Retag the images with podified-ci-testing tag
+      containers.podman.podman_tag:
+        image: "{{ item }}:{{ cifmw_edpm_build_images_tag }}"
+        target_names:
+          - "{{ item }}:podified-ci-testing"
+      loop:
+        - edpm-hardened-uefi
+        - ironic-python-agent
+
+    - name: Push images to registry with podified-ci-testing tag
+      containers.podman.podman_image:
+        name: "{{ item }}"
+        push_args:
+          dest: "{{ cifmw_edpm_build_images_push_registry }}/{{ cifmw_edpm_build_images_push_registry_namespace }}"
+        tag: podified-ci-testing
+        pull: false
+        push: yes
+      loop:
+        - edpm-hardened-uefi
+        - ironic-python-agent
