@@ -3,6 +3,12 @@
 # from the cluster. This is because we want to collect as much data as
 # possible, even if the cluster is not in a good state so we use
 # ignore_errors: true.
+
+- name: Load generated parameters
+  ansible.builtin.include_vars:
+    dir: "{{ cifmw_artifacts_basedir }}/artifacts/parameters"
+  ignore_errors: true
+
 - name: Check for oc command
   ansible.builtin.command: command -v oc
   environment:
@@ -14,6 +20,7 @@
   when:
     - oc_installed is defined
     - oc_installed.rc == 0
+    - cifmw_openshift_kubeconfig is defined
   block:
     - name: Create logs/edpm directory
       ansible.builtin.file:
@@ -23,6 +30,9 @@
     - name: Collect data from openshift cluster
       changed_when: true
       ignore_errors: true
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
       ansible.builtin.shell: |
         oc get {{ item }} > {{ cifmw_artifacts_basedir }}/logs/edpm/{{ item }}.log
       loop:
@@ -35,10 +45,16 @@
     - name: Collect install plan related datas
       changed_when: true
       ignore_errors: true
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
       ansible.builtin.shell: |
         oc describe installplan -n openstack-operators > {{ cifmw_artifacts_basedir }}/logs/edpm/install_plan.log
 
     - name: Dump the logs of all pods
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
       ansible.builtin.shell: |
         for ns in openstack-operators openstack baremetal-operator-system openshift-machine-api; do
           oc get pods -n ${ns} > ${ns}_pods.txt
@@ -56,6 +72,9 @@
       ignore_errors: true
 
     - name: Dump all openstack CRs
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
       ansible.builtin.shell: |
         mkdir crs
         pushd crs
