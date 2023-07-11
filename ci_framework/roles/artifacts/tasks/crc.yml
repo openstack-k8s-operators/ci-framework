@@ -1,40 +1,62 @@
 ---
-- name: Install packages required for gathering CRC VM logs
-  become: true
-  tags:
-    - bootstrap
-    - packages
-  ansible.builtin.package:
-    name: "{{ cifmw_artifacts_dependency_packages }}"
-    state: present
+# If we're facing a VM, get its domain definition
+- name: Libvirt CRC
+  when:
+    - crc_present is defined
+    - crc_present | bool
+  block:
+    - name: Extract crc XML to find its disk
+      register: crc_xml
+      ignore_errors: true
+      ansible.builtin.command:
+        cmd: virsh -c qemu:///system dumpxml crc
 
-# Get logs from CRC VM. We also get its XML.
-- name: Extract crc XML to find its disk
-  register: crc_xml
-  ansible.builtin.command:
-    cmd: virsh -c qemu:///system dumpxml crc
-
-- name: Output XML into a file
-  ansible.builtin.copy:
-    dest: "{{ cifmw_artifacts_basedir }}/artifacts/crc-vm.xml"
-    content: "{{ crc_xml.stdout }}"
+    - name: Output XML into a file
+      ignore_errors: true
+      when:
+        - crc_xml is defined
+        - crc_xml.stdout is defined
+      ansible.builtin.copy:
+        dest: "{{ cifmw_artifacts_basedir }}/artifacts/crc-vm.xml"
+        content: "{{ crc_xml.stdout }}"
 
 - name: Create crc logs directory
+  ignore_errors: true
   ansible.builtin.file:
     path: "{{ cifmw_artifacts_basedir }}/logs/crc"
     state: directory
 
-- name: Extract crc logs from VM
-  register: guestfish_copy_out
-  environment:
-    LIBGUESTFS_BACKEND: direct
-    LIBVIRT_DEFAULT_URI: "qemu:///system"
-  ansible.builtin.command:
-    cmd: >-
-      guestfish -d crc -r run :
-      mount /dev/sda4 / :
-      copy-out /ostree/deploy/rhcos/var/log/pods {{ cifmw_artifacts_basedir }}/logs/crc/
-  retries: 5
-  delay: 5
-  until: guestfish_copy_out.rc == 0
+- name: Ensure controller knows CRC ssh keys
   ignore_errors: true
+  register: crc_host_key
+  ansible.builtin.shell:
+    cmd: >-
+      ssh-keyscan {{ cifmw_artifacts_crc_host }} >> ~/.ssh/known_hosts
+
+- name: Get CRC things only if we know it
+  when:
+    - crc_host_key is defined
+    - crc_host_key.rc is defined
+    - crc_host_key.rc == 0
+  block:
+    - name: Prepare root ssh accesses
+      ignore_errors: true
+      ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: |-
+          ssh -vv -i {{ cifmw_artifacts_crc_sshkey }} {{ cifmw_artifacts_crc_user }}@{{ cifmw_artifacts_crc_host }} <<EOF
+          sudo sed -ri 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config.d/*
+          sudo sed -i 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+          sudo systemctl restart sshd
+          sudo cp -r .ssh /root/;
+          sudo chown -R root: /root/.ssh;
+          EOF
+
+    - name: Copy logs from CRC VM
+      ignore_errors: true
+      ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: >-
+          scp -vv -r -i {{ cifmw_artifacts_crc_sshkey }}
+          root@{{ cifmw_artifacts_crc_host }}:/ostree/deploy/rhcos/var/log/pods
+          {{ cifmw_artifacts_basedir }}/logs/crc/
