@@ -28,6 +28,8 @@ None
 * `cifmw_edpm_build_images_push_container_images`: (Boolean) Whether to push container images to remote registry. Default: false.
 * `cifmw_edpm_build_images_push_registry`: (String) Push registry where we want to push container images. Default: `quay.rdoproject.org`.
 * `cifmw_edpm_build_images_push_registry_namespace`: (String) Namespace on registry where we want to push container images. Default: `podified-main-centos9`.
+* `cifmw_edpm_build_images_cert_path`: (String) Cert path. Default: `/etc/pki/ca-trust/source/anchors/rh.crt`
+* `cifmw_edpm_build_images_cert_install`: (Boolean) Whether to install cert in the image. Default: false
 
 ### Example
 ```YAML
