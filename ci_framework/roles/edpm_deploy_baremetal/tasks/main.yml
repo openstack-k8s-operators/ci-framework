@@ -28,21 +28,20 @@
       {% endif %}
     cifmw_edpm_deploy_baremetal_operators_build_output: "{{ operators_build_output }}"
 
-- name: Override uefi image url when we build uefi image via content_provider
+- name: set facts for baremetal UEFI image url
+  ansible.builtin.set_fact:
+    cifmw_set_openstack_containers_overrides:
+      OS_CONTAINER_IMAGE_URL_DEFAULT: "{{ cifmw_build_images_output['images']['edpm-hardened-uefi']['image'] }}"
+    cacheable: true
   when: cifmw_build_images_output is defined
-  set_fact:
-    cifmw_edpm_deploy_baremetal_uefi_image_url: "{{ cifmw_build_images_output['images']['edpm-hardened-uefi']['image'] }}"
 
 - name: Patch baremetal CSV to override the uefi image
-  when:
-    - not cifmw_edpm_deploy_baremetal_dry_run
-    - cifmw_edpm_deploy_baremetal_default_uefi_image_url != cifmw_edpm_deploy_baremetal_uefi_image_url
-  ansible.builtin.command:
-    cmd: >-
-      oc patch csv -n openstack-operators openstack-baremetal-operator.v0.0.1
-      --type='json' -p='[{"op":"replace",
-      "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
-      "value": {"name": "OS_CONTAINER_IMAGE_URL_DEFAULT", "value": "{{ cifmw_edpm_deploy_baremetal_uefi_image_url }}"}}]'
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  vars:
+    cifmw_edpm_prepare_update_os_containers: true
+    cifmw_set_openstack_containers_operator_name: openstack-baremetal
+  ansible.builtin.include_role:
+    name: set_openstack_containers
 
 - name: Install Dataplane with baremetal
   vars:
