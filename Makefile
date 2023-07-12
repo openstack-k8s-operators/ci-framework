@@ -41,7 +41,7 @@ create_new_role:
 
 .PHONY: role_molecule
 role_molecule: ## Regenerate the molecule jobs configuration
-	bash scripts/create_role_molecule
+	scripts/create_role_molecule.py
 
 .PHONY: new_role
 new_role: create_new_role role_molecule ## Create a new Ansible role and related molecule Zuul job - ROLE_NAME parameter is mandatory
@@ -108,8 +108,7 @@ ci_ctx: ## Build CI container with podman
 .PHONY: run_ctx_all_tests
 run_ctx_all_tests: export BUILD_VENV_CTX=no
 run_ctx_all_tests: export MOLECULE_CONFIG=".config/molecule/config_local.yml"
-run_ctx_all_tests: run_ctx_pre_commit run_ctx_molecule run_ctx_ansible_test ## Run all tests in container
-
+run_ctx_all_tests: run_ctx_pre_commit run_ctx_molecule run_ctx_ansible_test run_ctx_tox ## Run all tests in container
 
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
