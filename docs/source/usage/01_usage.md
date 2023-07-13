@@ -31,6 +31,7 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
 * `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment
+* `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 
 #### Words of caution
 If you want to output the content in another location than `~/ci-framework-data`
