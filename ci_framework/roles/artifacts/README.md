@@ -7,6 +7,9 @@ None - writes happen only in the user home.
 
 ## Parameters
 * `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
+* `cifmw_artifacts_crc_host`: (String) Hostname of the CRC instance. Defaults to `api.crc.testing`.
+* `cifmw_artifacts_crc_user`: (String) Username to connect to the CRC instance. Defaults to `core`.
+* `cifmw_artifacts_crc_sshkey`: (String) Path to the privage SSH key to connect to CRC. Defaults to `~/.crc/machines/crc/id_ecdsa`.
 
 ## Examples
 Usually we'll import the role as-is at the very start of the playbook, and
