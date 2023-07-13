@@ -11,7 +11,6 @@ None
 
 ### Parameters
 * `cifmw_edpm_build_images_basedir`: Base directory. Defaults to `cifmw_basedir` which  defaults to `~/ci-framework`.
-* `cifmw_edpm_build_images_artifacts`: Build images logs.
 * `cifmw_edpm_build_images_via_rpm`: Whether to install `edpm-image-builder` repo using rpm or not.
 * `cifmw_build_host_packages`: List of packges required to build the images.
 * `cifmw_edpm_build_images_elements`: Elements path which contains `edpm-image-builder` and `ironic-python-agent-builder` repo.
