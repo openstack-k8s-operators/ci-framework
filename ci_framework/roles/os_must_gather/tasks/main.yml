@@ -1,0 +1,57 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ cifmw_os_must_gather_output_dir }}/{{ item }}"
+    state: directory
+  loop:
+    - logs
+
+- name: Check for oc command
+  ansible.builtin.command: command -v oc
+  environment:
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  register: oc_installed
+  ignore_errors: true
+
+- name: Running openstack-must-gather tool
+  when:
+    - oc_installed is defined
+    - oc_installed.rc == 0
+    - cifmw_openshift_kubeconfig is defined
+  block:
+    - name: Run openstack-must-gather command
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell:
+        cmd: >-
+          oc adm must-gather --image {{ cifmw_os_must_gather_image }}
+          --timeout {{ cifmw_os_must_gather_timeout }}
+          --host-network={{ cifmw_os_must_gather_host_network }}
+          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs > {{ cifmw_os_must_gather_output_dir }}/logs/os_must_gather.log
+  rescue:
+    - name: Inspect the cluster after must-gather failure
+      ignore_errors: true
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: |
+        mkdir -p {{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
+        for ns in openstack-operators openstack baremetal-operator-system openshift-machine-api; do
+          oc adm inspect namespace/"${ns}" --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect || echo "Error getting logs from ${ns}"
+        done
