@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ./{{ cifmw_kustomize_cr_file_name }}
+namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+patches:
+- patch: |-
+    - op: replace
+      path: /spec/cinder/template/cinderVolumes/ceph/replicas
+      value: {{ cifmw_services_cinder_vol_replicas | default(1) }}
+    - op: add
+      path: /spec/cinder/template/cinderVolumes/ceph/customServiceConfig
+      value: |
+            [DEFAULT]
+            enabled_backends=ceph
+            debug=True
+            [ceph]
+            volume_backend_name=ceph
+            volume_driver=cinder.volume.drivers.rbd.RBDDriver
+            rbd_ceph_conf=/etc/ceph/ceph.conf
+            rbd_user=openstack
+            rbd_pool=volumes
+            rbd_flatten_volume_from_snapshot=False
+            report_discard_supported=True
+            backend_host=hostgroup
+            rbd_secret_uuid={{ cifmw_ceph_fsid }}
+    - op: add
+      path: /spec/cinder/template/cinderBackup/replicas
+      value: {{ cifmw_services_cinder_bkp_replicas | default(1) }}
+    - op: replace
+      path: /spec/manila/template/manilaShares/share1/replicas
+      value: {{ cifmw_services_manila_shr_replicas | default(1) }}
+  target:
+    kind: OpenStackControlPlane

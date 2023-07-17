@@ -1,0 +1,46 @@
+- hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Set artifact directory
+      tags:
+        - always
+      ansible.builtin.set_fact:
+        cifmw_kustomize_cr_artifact_dir: "{{ cifmw_kustomize_cr_artifact_dir | default(ansible_user_dir ~ '/ci-framework-data') }}/kustomize_cr"
+
+    - name: Ensure directory exists
+      tags:
+        - always
+      ansible.builtin.file:
+        path: "{{ cifmw_kustomize_cr_artifact_dir }}"
+        state: directory
+
+    - name: Load vars from previous hooks
+      when: cifmw_kustomize_cr_include_vars is defined
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop: "{{ cifmw_kustomize_cr_include_vars }}"
+
+    - name: Copy CR to kustomize_cr directory
+      ansible.builtin.copy:
+        src: "{{ cifmw_kustomize_cr_file_path }}/{{ cifmw_kustomize_cr_file_name }}"
+        dest: "{{ cifmw_kustomize_cr_artifact_dir }}/{{ cifmw_kustomize_cr_file_name }}"
+        remote_src: true
+
+    - name: Generate kustomization file
+      when: cifmw_kustomize_cr_template is defined
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/{{ cifmw_kustomize_cr_template }}"
+        dest: "{{ cifmw_kustomize_cr_artifact_dir }}/kustomization.yaml"
+
+    - name: Run oc kustomize
+      environment:
+        PATH: "{{ cifmw_path }}"
+      register: kustomized_cr
+      ansible.builtin.command:
+        chdir: "{{ cifmw_kustomize_cr_artifact_dir }}"
+        cmd: oc kustomize
+
+    - name: Save kustomized cr output
+      ansible.builtin.copy:
+        dest: "{{ cifmw_kustomize_cr_artifact_dir }}/kustomized_{{ cifmw_kustomize_cr_file_name }}"
+        content: "{{ kustomized_cr.stdout }}"

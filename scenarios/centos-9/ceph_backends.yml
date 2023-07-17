@@ -1,0 +1,36 @@
+
+
+cifmw_kustomize_cr_file_path: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/openstack-operator/config/samples"
+cifmw_kustomize_cr_file_name: "core_v1beta1_openstackcontrolplane_network_isolation_ceph.yaml"
+cifmw_kustomize_cr_template: "../templates/service_config_ceph.yaml.j2"
+cifmw_kustomize_cr_include_vars:
+  - "{{ cifmw_basedir }}/artifacts/pre_deploy_ceph_deploy.yml"
+cifmw_kustomize_cr_artifact_dir: "{{ cifmw_basedir }}/kustomize_cr"
+
+cifmw_install_yamls_vars:
+  BMO_SETUP: false
+  OPENSTACK_CR: "{{ cifmw_kustomize_cr_artifact_dir }}/kustomized_{{ cifmw_kustomize_cr_file_name }}"
+  STORAGE_CLASS: crc-csi-hostpath-provisioner
+
+cifmw_edpm_prepare_skip_crc_storage_creation: true
+
+cifmw_make_ceph_environment:
+  TIMEOUT: 90
+  DATA_SIZE: "10Gi"
+
+pre_deploy:
+  - name: Ceph deploy
+    type: playbook
+    source: ceph-deploy.yml
+  - name: Kustomize OpenStack CR
+    type: playbook
+    source: kustomize_cr.yml
+
+cifmw_run_tests: true
+cifmw_tempest_default_groups: &test_operator_list
+  - openstack-operator
+  - cinder-operator
+  - keystone-operator
+  - neutron-operator
+  - nova-operator
+cifmw_tempest_default_jobs: *test_operator_list
