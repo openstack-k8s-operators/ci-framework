@@ -12,3 +12,4 @@ become - Required to install required rpm packages
 * `cifmw_tempest_image`: (String) Name of the tempest image to be used. Default to `quay.io/podified-antelope-centos9/openstack-tempest`
 * `cifmw_tempest_image_tag`: (String) Tag for the `cifmw_tempest_image`. Default to `current-podified`
 * `cifmw_tempest_dry_run`: (Boolean) Whether tempest should run or not. Default to `false`
+* `cifmw_tempest_remove_container`: (Boolean) Cleanup tempest container after it is done. Default to `false`
