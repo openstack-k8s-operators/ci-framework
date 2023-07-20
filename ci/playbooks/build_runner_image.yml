@@ -1,0 +1,41 @@
+---
+- hosts: all
+  tasks:
+    - name: Get git tag for image tagging
+      register: edpm_ansible_tag
+      ansible.builtin.command:
+        cmd: git show-ref --head --hash head
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-ansible"
+
+    - name: Set openstack-runner image
+      ansible.builtin.set_fact:
+        ansibleee_runner_img: "quay.rdoproject.org/openstack-k8s-operators/openstack-ansibleee-runner:{{ edpm_ansible_tag.stdout|trim }}"
+
+    - name: Build openstack-runner image
+      community.general.make:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-ansible"
+        target: openstack_ansibleee_build
+        params:
+          IMG: "{{ ansibleee_runner_img }}"
+
+    - name: Push openstack-runner image
+      community.general.make:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-ansible"
+        target: openstack_ansibleee_push
+        params:
+          IMG: "{{ ansibleee_runner_img }}"
+
+    - name: Make sure ci-framework directory exists
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/ci-framework/"
+        state: directory
+
+    - name: Create EDPM ansible var file
+      ansible.builtin.copy:
+        mode: 0644
+        content: |
+          cifmw_edpm_prepare_update_os_containers: true
+          cifmw_set_openstack_containers_operator_name: openstack-ansibleee
+          cifmw_set_openstack_containers_overrides:
+            ANSIBLEEE_IMAGE_URL_DEFAULT: "{{ ansibleee_runner_img }}"
+        dest: "{{ ansible_user_dir }}/ci-framework/edpm-ansible.yml"
