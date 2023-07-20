@@ -1,0 +1,42 @@
+---
+
+- name: Bootstrap step
+  ansible.builtin.import_playbook: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ci_framework/playbooks/01-bootstrap.yml"
+
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Deploy local registry
+      tags:
+        - container_img_build
+      ansible.builtin.include_role:
+        name: registry_deploy
+
+    - name: Read hash from delorean.repo.md5 file
+      tags:
+        - container_img_build
+      ansible.builtin.slurp:
+        path: "{{ cifmw_basedir }}/artifacts/repositories/delorean.repo.md5"
+      register: file_content
+
+    - name: Set fact for cifmw_build_containers_image_tag var
+      tags:
+        - container_img_build
+      ansible.builtin.set_fact:
+        cifmw_build_containers_image_tag: "{{ file_content['content'] | b64decode | string | trim }}"
+
+    - name: Build containers
+      tags:
+        - container_img_build
+      ansible.builtin.include_role:
+        name: build_containers
+
+    - name: Get the containers list from container registry
+      ansible.builtin.command: "curl -X GET {{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
+      register: cp_imgs
+
+    - name: Add the container list to file
+      ansible.builtin.copy:
+        mode: 0644
+        content: "{{ cp_imgs.stdout }}"
+        dest: "{{ ansible_user_dir }}/local_registry.log"
