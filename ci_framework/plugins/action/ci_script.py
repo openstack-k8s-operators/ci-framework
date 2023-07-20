@@ -26,6 +26,9 @@ options:
         description: The shell script content to be run
         required: true
         type: str
+    chdir:
+        description: Change into this directory on the remote node before running the script.
+        type: str
     creates:
         description: A filename on the remote node, when it already exists, this step will not be run.
         type: str
@@ -100,7 +103,9 @@ TMPL_SCRIPT = '''#!/bin/bash
 set -euo pipefail
 %(opts)s
 exec > >(tee -i %(logpath)s) 2>&1
+%(pushcmd)s
 %(content)s
+%(popcmd)s
 '''
 
 
@@ -127,10 +132,6 @@ class ActionModule(ActionBase):
         if 'script' not in self._task.args:
             raise AnsibleActionFail('script parameter is missing')
 
-        # Ensure chdir is not used
-        if 'chdir' in self._task.args:
-            raise AnsibleActionFail('chdir parameter is not supported')
-
         output_dir = pathlib.Path(self._task.args.pop('output_dir'))
         if not output_dir.is_dir():
             raise AnsibleActionFail('output_dir points to a non-existing directory')
@@ -145,10 +146,13 @@ class ActionModule(ActionBase):
 
         fnum = len(glob.glob(f'{output_dir}/ci_script_*'))
         t_name = re.sub(r'([^\x00-\x7F]|\s)+', '_', self._task._name).lower()
+        chdir_path = self._task.args.pop('chdir', None)
         script_template_data = {
             'content': self._task.args.pop('script'),
             'logpath': logs_dir.joinpath(f'ci_script_{fnum:03}_{t_name}.log').as_posix(),
-            'opts': self.__build_options(task_vars)
+            'opts': self.__build_options(task_vars),
+            'pushcmd': f'pushd {chdir_path}' if chdir_path else '',
+            'popcmd': 'popd' if chdir_path else ''
         }
 
         script_path_str = self.__script_file_path.as_posix()
