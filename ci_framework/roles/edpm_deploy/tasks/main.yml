@@ -32,10 +32,11 @@
 - name: Wait for EDPM compute deployment to finish
   when:
     - not cifmw_edpm_deploy_dryrun | bool
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   block:
     - name: Get info about dataplane node
-      environment:
-        PATH: "{{ cifmw_path }}"
       ansible.builtin.shell: |
         oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
         oc get openstackdataplanerole -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
@@ -45,8 +46,6 @@
 
     - name: Get nova-edpm-compute-0-deploy-nova pod name
       register: edpm_pod
-      environment:
-        PATH: "{{ cifmw_path }}"
       ansible.builtin.shell:
         cmd: >-
           oc get pods -o name
@@ -58,8 +57,6 @@
 
     - name: Wait for nova-edpm-compute-0-deploy-nova pod to finish
       register: deploy_status
-      environment:
-        PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
           oc wait -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
@@ -70,8 +67,13 @@
       delay: 20
 
 - name: Get the logs of EDPM Deploy
+  when:
+    - deploy_status is defined
+    - "'rc' in deploy_status"
+    - deploy_status.rc == 0
   environment:
     PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   ansible.builtin.shell: |
     for POD in $(oc get pods -o name -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | egrep "dataplane-deployment-|nova-edpm-compute");
     do
@@ -79,10 +81,6 @@
       oc logs -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} $POD;
     done
   register: edpm_logs
-  when:
-    - deploy_status is defined
-    - "'rc' in deploy_status"
-    - deploy_status.rc == 0
 
 - name: Collect logs for EDPM deploy
   when:
@@ -102,9 +100,9 @@
         dest: "{{ cifmw_edpm_deploy_log_path }}"
 
 - name: Validate EDPM
+  when: cifmw_edpm_deploy_run_validation | bool
   vars:
     make_edpm_deploy_instance_env: "{{ cifmw_edpm_deploy_env }}"
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_deploy_instance'
-  when: cifmw_edpm_deploy_run_validation | bool
