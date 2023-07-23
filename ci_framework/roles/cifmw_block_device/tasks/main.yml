@@ -1,0 +1,66 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install packages
+  become: true
+  dnf:
+    name:
+      - util-linux
+      - lvm2
+      - jq
+      - podman
+    state: present
+
+- name: stat loop device see if it already exists
+  stat:
+    path: "{{ cifmw_block_device_loop }}"
+  register: cifmw_block_device_loop_res
+
+- name: log to syslog if loop device exists
+  syslogger:
+    msg: "Warning {{ cifmw_block_device_loop }} already exists"
+  when: cifmw_block_device_loop_res.stat.exists
+
+- name: Use dd and losetup to create the loop device
+  become: true
+  shell: |
+    dd if=/dev/zero of={{ cifmw_block_device_image_file }} bs=1 count=0 seek={{ cifmw_block_device_size }}
+    losetup {{ cifmw_block_device_loop }} {{ cifmw_block_device_image_file }}
+    lsblk
+
+- name: Use {pv,vg,lv}create to create logical volume on loop device
+  become: true
+  shell: |
+    pvcreate {{ cifmw_block_device_loop }}
+    vgcreate {{ cifmw_block_vg_name }} {{ cifmw_block_device_loop }}
+    lvcreate -n {{ cifmw_block_lv_name }} -l +100%FREE {{ cifmw_block_vg_name }}
+    lvs
+
+- name: Create a systemd service that restores the device on startup
+  become: true
+  template:
+    src: templates/ceph-osd-losetup.service.j2
+    dest: "{{ cifmw_block_systemd_unit_file }}"
+    mode: 0644
+    force: true
+
+- name: Ensure ceph-osd-losetup is running and enabled
+  become: true
+  tags: systemd
+  systemd:
+    state: started
+    enabled: true
+    name: ceph-osd-losetup
