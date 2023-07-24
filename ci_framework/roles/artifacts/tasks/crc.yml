@@ -1,25 +1,4 @@
 ---
-# If we're facing a VM, get its domain definition
-- name: Libvirt CRC
-  when:
-    - crc_present is defined
-    - crc_present | bool
-  block:
-    - name: Extract crc XML to find its disk
-      register: crc_xml
-      ignore_errors: true
-      ansible.builtin.command:
-        cmd: virsh -c qemu:///system dumpxml crc
-
-    - name: Output XML into a file
-      ignore_errors: true
-      when:
-        - crc_xml is defined
-        - crc_xml.stdout is defined
-      ansible.builtin.copy:
-        dest: "{{ cifmw_artifacts_basedir }}/artifacts/crc-vm.xml"
-        content: "{{ crc_xml.stdout }}"
-
 - name: Create crc logs directory
   ignore_errors: true
   ansible.builtin.file:
@@ -46,7 +25,7 @@
         script: |-
           ssh -i {{ cifmw_artifacts_crc_sshkey }} {{ cifmw_artifacts_crc_user }}@{{ cifmw_artifacts_crc_host }} <<EOF
           set -xe;
-          sudo sed -ri 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config.d/*;
+          test -d /etc/ssh/sshd_config.d/ && sudo sed -ri 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config.d/* || true;
           sudo sed -i 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config;
           sudo systemctl restart sshd;
           sudo cp -r .ssh /root/;
