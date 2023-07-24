@@ -14,6 +14,7 @@ play has a great chance of failure.
 ### Playbook
 In such a case, the following data can be provided to the hook:
 * `config_file`: (String) Ansible configuration file. Defaults to `ansible_config_file`.
+* `connection`: (String) Set the connection type for ansible. Defaults to `omit`.
 * `creates`: (String) Refer to the `ansible.builtin.command` "creates" parameter. Defaults to `omit`.
 * `inventory`: (String) Refer to the `--inventory` option for `ansible-playbook`. Defaults to `inventory_file`.
 * `name`: (String) Describe the hook.
