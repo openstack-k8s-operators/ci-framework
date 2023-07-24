@@ -84,11 +84,8 @@ ansible-playbook -e @scenarios/centos-9/local-env.yml deploy-edpm.yml
 
 ## Cleaning the local_env VM
 
-Running the following commands will clean up the provisionned VM:
 ```Bash
-virsh -c qemu:///system destroy cifmw-vm
-virsh -c qemu:///system undefine cifmw-vm
-rm -rf ~/ci-framework-data
+make local_env_vm_cleanup
 ```
 
 ## I want some details
