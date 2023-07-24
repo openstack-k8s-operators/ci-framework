@@ -14,45 +14,76 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
-- name: Copy list_allowed to artifacts dir
-  ansible.builtin.copy:
-    dest: "{{ cifmw_tempest_artifacts_basedir }}/list_allowed.yml"
-    src: "list_allowed.yml"
+- name: Configuring tests to be executed via skiplist
+  when: cifmw_tempest_tests_allowed is not defined
+  block:
+    - name: Copy list_allowed to artifacts dir
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/list_allowed.yml"
+        src: "list_allowed.yml"
 
-- name: Copy list_skipped to artifacts dir
-  ansible.builtin.copy:
-    dest: "{{ cifmw_tempest_artifacts_basedir }}/list_skipped.yml"
-    src: "list_skipped.yml"
+    - name: Get list of tests to be executed
+      tempest_list_allowed:
+        yaml_file: "{{ cifmw_tempest_artifacts_basedir }}/list_allowed.yml"
+        groups: "{{ cifmw_tempest_default_groups }}"
+        job: "{{ cifmw_tempest_job_name | default(omit) }}"
+      register:
+        list_allowed
 
-- name: Get list of tests to be executed
-  tempest_list_allowed:
-    yaml_file: "{{ cifmw_tempest_artifacts_basedir }}/list_allowed.yml"
-    groups: "{{ cifmw_tempest_default_groups }}"
-    # job: "{{ cifmw_tempest_job_name | default(omit) }}"
-  register:
-    list_allowed
+    - name: Creating include.txt
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/include.txt"
+        content: "{% for test in list_allowed.allowed_tests %}{{ test }}\n{% endfor %}"
 
-- name: Show tests to be executed
-  ansible.builtin.debug:
-    msg: "{{ list_allowed }}"
+    - name: Show tests to be executed
+      ansible.builtin.debug:
+        msg: "{{ list_allowed }}"
 
-- name: Get list of tests to be excluded
-  tempest_list_skipped:
-    yaml_file: "{{ cifmw_tempest_artifacts_basedir }}/list_skipped.yml"
-    jobs: "{{ cifmw_tempest_default_jobs }}"
-  register:
-    list_skipped
+- name: Configuring tests to be skipped via skiplist
+  when: cifmw_tempest_tests_skipped is not defined
+  block:
+    - name: Copy list_skipped to artifacts dir
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/list_skipped.yml"
+        src: "list_skipped.yml"
 
-- name: Show tests to be excluded
-  ansible.builtin.debug:
-    msg: "{{ list_skipped.skipped_tests }}"
+    - name: Get list of tests to be excluded
+      tempest_list_skipped:
+        yaml_file: "{{ cifmw_tempest_artifacts_basedir }}/list_skipped.yml"
+        jobs: "{{ cifmw_tempest_default_jobs }}"
+      register:
+        list_skipped
 
-- name: Creating include.txt
-  ansible.builtin.copy:
-    dest: "{{ cifmw_tempest_artifacts_basedir }}/include.txt"
-    content: "{% for test in list_allowed.allowed_tests %}{{ test }}\n{% endfor %}"
+    - name: Creating exclude.txt
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/exclude.txt"
+        content: "{% for test in list_skipped.skipped_tests %}{{ test }}\n{% endfor %}"
 
-- name: Creating exclude.txt
-  ansible.builtin.copy:
-    dest: "{{ cifmw_tempest_artifacts_basedir }}/exclude.txt"
-    content: "{% for test in list_skipped.skipped_tests %}{{ test }}\n{% endfor %}"
+    - name: Show tests to be excluded
+      ansible.builtin.debug:
+        msg: "{{ list_skipped.skipped_tests }}"
+
+
+- name: Configuring tests to be executed via cifmw_tempest_tests_allowed
+  when: cifmw_tempest_tests_allowed is defined
+  block:
+    - name: Creating include.txt
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/include.txt"
+        content: "{% for test in cifmw_tempest_tests_allowed %}{{ test }}\n{% endfor %}"
+
+    - name: Show tests to be executed
+      ansible.builtin.debug:
+        msg: "{{ cifmw_tempest_tests_allowed }}"
+
+- name: Configuring tests to be skipped via cifmw_tempest_tests_skipped
+  when: cifmw_tempest_tests_skipped is defined
+  block:
+    - name: Creating exclude.txt
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/exclude.txt"
+        content: "{% for test in cifmw_tempest_tests_skipped %}{{ test }}\n{% endfor %}"
+
+    - name: Show tests to be executed
+      ansible.builtin.debug:
+        msg: "{{ cifmw_tempest_tests_allowed }}"
