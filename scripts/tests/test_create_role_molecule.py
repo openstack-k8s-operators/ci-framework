@@ -98,9 +98,9 @@ class CreateRoleMoleculeTest(unittest.TestCase):
                             'cifmw-kuttl',
                             'cifmw-edpm-build-image',
                             'cifmw-content-provider-build-images',
-                            'role_2',
-                            'role_1',
-                            'role_3'
+                            'cifmw-molecule-role_2',
+                            'cifmw-molecule-role_1',
+                            'cifmw-molecule-role_3'
                         ]
                     }
                 }

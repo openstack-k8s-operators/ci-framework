@@ -86,7 +86,7 @@ def regenerate_projects_zuul_jobs_yaml(generated_paths):
             logging.warning("Skipping. Not a role directory")
             continue
         projects_jobs_info[0]['project']['github-check']['jobs'].append(
-            role_directory.name
+            f"cifmw-molecule-{role_directory.name}"
         )
 
     with open(generated_paths['zuul_job_dir'] / 'projects.yaml', 'w') as projects_file:
