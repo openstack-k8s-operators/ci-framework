@@ -1,0 +1,73 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ cifmw_build_containers_basedir }}/{{ item }}"
+    state: directory
+  loop:
+    - tmp
+    - artifacts
+    - logs
+
+- name: Install tcib
+  ansible.builtin.import_tasks: install.yml
+
+- name: Generate container_build.sh script
+  ansible.builtin.template:
+    src: templates/build_containers.sh.j2
+    dest: "{{ cifmw_build_containers_basedir }}/artifacts/build_containers.sh"
+    mode: 0777
+    force: true
+
+- name: Run container_build.sh script
+  become: true
+  args:
+    chdir: "{{ cifmw_build_containers_basedir }}/artifacts"
+  ansible.builtin.shell: |
+    set -o pipefail && bash build_containers.sh 2>&1 {{ cifmw_build_containers_timestamper_cmd }} > {{ cifmw_build_containers_basedir }}/logs/build.log
+  environment:
+   PATH: /usr/local/bin:{{ ansible_env.PATH }}
+
+- name: Make sure authfile exists
+  when:
+    - cifmw_build_containers_authfile_path is defined
+    - cifmw_build_containers_push_containers | bool
+  block:
+    - name: Check for authfile
+      ansible.builtin.stat:
+        path: '{{ cifmw_build_containers_authfile_path }}'
+      register: authfile_exist
+
+    - name: Make sure autfile exists
+      ansible.builtin.assert:
+        that:
+          - authfile_exist.stat.exists | bool
+
+- name: Retrieve built images  # noqa risky-shell-pipe
+  ansible.builtin.shell: "podman images | grep {{ cifmw_build_containers_container_name_prefix }} | awk '{ print $1 }'"
+  register: built_images
+  become: true
+  changed_when: false
+
+- name: "Push image: {{ item }}"
+  become: true
+  ansible.builtin.command: >
+    buildah push {{ item }}:{{ cifmw_build_containers_image_tag }}
+  loop: "{{ built_images.stdout_lines }}"
+  when:
+    - cifmw_build_containers_buildah_push | default ('false') | bool
+    - not cifmw_build_containers_push_containers | bool
