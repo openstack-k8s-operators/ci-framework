@@ -48,7 +48,7 @@ It is used in edpm-prepare role to update all openstack service containers.
         name: set_openstack_containers
 ```
 
-### Update all the openstack servicess containers env vars with podified-ci-testing for a single operator `baremetal`
+### Update all the openstack services containers env vars with podified-ci-testing for a single operator `baremetal`
 
 It is used in edpm_deploy_baremetal role to update the UEFI image
 ```yaml

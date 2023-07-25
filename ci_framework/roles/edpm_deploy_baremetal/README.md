@@ -4,7 +4,7 @@ and provision the compute nodes for further deployment by toggling the deploy:tr
 and waits for the necessary components to be available.
 
 ## Privilege escalation
-This role doesn't need privilege scalation.
+This role doesn't need privilege escalation.
 
 ## Parameters
 * `cifmw_edpm_deploy_baremetal_manifests_dir`: (string) The directory path where the manifests will be stored. Default: `{{ cifmw_manifests | default(cifmw_edpm_deploy_baremetal_basedir ~ '/artifacts/manifests') }}`

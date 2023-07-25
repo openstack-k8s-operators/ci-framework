@@ -4,7 +4,7 @@ Role to deploy get, configure and start RHOL/CRC instance.
 
 ## Privilege escalation
 
-Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` since these ones add and remove under `/etc/sudoers.d/` folder.
+Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` since these add and remove under `/etc/sudoers.d/` folder.
 
 ## Parameters
 
@@ -13,8 +13,8 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_use_installyamls`: (Boolean) Tell the role to leverage install_yamls `crc` related targets. Defaults to `False`.
 * `cifmw_rhol_crc_dryrun`: (Boolean) Toggle the `ci_make` `dry_run` parameter. Defaults to `False`.
 * `cifmw_rhol_crc_config`: (Dict) This structure is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Defaults to `{}`.
-* `cifmw_rhol_crc_version`: (String) RHOL/CRC binary version we wanna use. Default: `latest`.
-* `cifmw_rhol_crc_tarball_name`: (String) RHOL/CRC tarball name depending of the architecture. Defaults to `crc-linux-amd64.tar.xz`.
+* `cifmw_rhol_crc_version`: (String) RHOL/CRC binary version we want to use. Default: `latest`.
+* `cifmw_rhol_crc_tarball_name`: (String) RHOL/CRC tarball name depending on the architecture. Defaults to `crc-linux-amd64.tar.xz`.
 * `cifmw_rhol_crc_tarball_checksum_name`: (String) RHOL/CRC tarball file checksum name. Defaults to `crc-linux-amd64.tar.xz.sha256`.
 * `cifmw_rhol_crc_base_url`: (String) RHOL/CRC URL base. Defaults to `https://mirror.openshift.com/pub/openshift-v4/clients/crc/2.14.0`.
 * `cifmw_rhol_crc_binary_folder`: (String) Folder that will be used to store the RHOL/CRC binary. Defaults to `{{ cifmw_rhol_crc_basedir }}/bin`.

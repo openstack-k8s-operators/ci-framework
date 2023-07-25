@@ -25,7 +25,7 @@ Please explain the role purpose.
 
 ### Use repo-setup role with custom DLRN server
 
-When we use repo-setup role with custom DLRN server. The server might needs custom TLS certificates.
+When we use repo-setup role with custom DLRN server. The server might need custom TLS certificates.
 Make sure we set `cifmw_repo_setup_env` variable while running repo-setup role.
 ```
 cifmw_repo_setup_env:

@@ -3,10 +3,10 @@ Manages OpenShift login operations
 
 This role performs OpenShift login based on calls to the `oc` cli tool and exposes a well defined set of
 variables that, after a successful login, can be used as credentials and API endpoints in other parts of
-the framework. If more than one login attempts are neeeded the role retries as many time as dictated by
+the framework. If more than one login attempts are needed the role retries as many times as dictated by
 `cifmw_openshift_login_retries`.
 
-Many login scenarios are allowed by passing or ommiting the following variables:
+Many login scenarios are allowed by passing or omitting the following variables:
 - `cifmw_openshift_login_kubeconfig`: The kubeconfig file path, if not given, the role will try to use user/password login
     and will create the kubeconfig in the default location `~/.kube/config`.
 - `cifmw_openshift_login_api`: The OpenShift API endpoint. If not given the role will extract it from the kubeconfig.
@@ -32,11 +32,11 @@ No privilege escalation needed.
 * `cifmw_openshift_login_force_refresh`: (Boolean) Disallow reusing already existing token. Defaults to `false`.
 * `cifmw_openshift_login_retries`: (Integer) Number of attempts to retry the login action if it fails. Defaults to `10`.
 * `cifmw_openshift_login_retries_delay`: (Integer) Delay, in seconds, between login retries. Defaults to `20`.
-* `cifmw_openshift_login_assume_cert_system_user`: (Boolean) When trying cert key login from kubeconfig, assume that the infered user is a `system:` admin. Defaults to `true`.
+* `cifmw_openshift_login_assume_cert_system_user`: (Boolean) When trying cert key login from kubeconfig, assume that the inferred user is a `system:` admin. Defaults to `true`.
 * `cifmw_openshift_login_skip_tls_verify`: (Boolean) Skip TLS verification to login. Note: This option may break admin login using certs. Defaults to `false`.
 
 ## Examples
-### 1 - Login using user/password and API convination
+### 1 - Login using user/password and API combination
 ```yaml
 - hosts: all
   tasks:
@@ -49,7 +49,7 @@ No privilege escalation needed.
         cifmw_openshift_login_password: "12345678"
 ```
 
-### 2 - Login using user/password and kubeconfig convination
+### 2 - Login using user/password and kubeconfig combination
 ```yaml
 - hosts: all
   tasks:

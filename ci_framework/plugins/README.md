@@ -86,7 +86,7 @@ Description: Generate task file per Makefile target.
   * required: True
   * type: str
 * `output_directory`:
-  * description: Absolute path to the output directory. It must exists
+  * description: Absolute path to the output directory. It must exist
   * required: True
   * type: str
 
@@ -151,7 +151,7 @@ may call the generated task file for the desired `make` target. For instance:
     tasks_from: 'make_crc_storage'
 ```
 This block will call the `make crc_storage` command, passing some variables
-that will then be transfered to the `ci_make` call.
+that will then be transferred to the `ci_make` call.
 
 ### Available parameters
 * `make_TARGET_env`: (List) Allows to pass `environment` parameter to the task.

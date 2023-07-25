@@ -24,7 +24,7 @@ In such a case, the following data can be provided to the hook:
 
 #### Hook callback
 A hook may generate new parameters that will be fed into the main play. In order
-to do so, the hook playbook has to create a YAML file as follow:
+to do so, the hook playbook has to create a YAML file as follows:
 ```YAML
 - name: Feed generated content to main play
   ansible.builtin.copy:

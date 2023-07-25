@@ -1,5 +1,5 @@
 # edpm_deploy
-Peform External compute deploy on the pre-provisioned node from openshift cluster.
+Perform External compute deploy on the pre-provisioned node from openshift cluster.
 
 ## Privilege escalation
 None

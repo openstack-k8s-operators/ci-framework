@@ -59,7 +59,7 @@ pre_infra:
     source: "{{ cifmw_installyamls_repos }}/devsetup/download_tools.yaml"
 ```
 
-⚠️ Ensure you're not overprovisioning the CRC VM - here, it's allocating
+⚠️ Ensure you're not over provisioning the CRC VM - here, it's allocating
 about 30G of RAM, 10 Cores and 120G of disk space. It's more than the minimal
 requirements.
 
