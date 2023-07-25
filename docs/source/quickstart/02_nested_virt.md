@@ -48,7 +48,7 @@ make local_env_create LOCAL_ENV_OPTS="-K"
 in the roles - please refer to the READMEs located in the used roles: libvirt_manager). Of course, if you have a NOPASSWD directive in your sudoers, you don't need
 to pass that option/parameter.
 
-ℹ️ You may want to check the local_env_vm role README in order to find all of the available parameters. You can then pass them as follow:
+ℹ️ You may want to check the local_env_vm role README in order to find all of the available parameters. You can then pass them as follows:
 ```Bash
 make local_env_create LOCAL_ENV_OPTS="-K -e param_name='param_value' -e @my-custom-file.yml"
 ```
@@ -65,7 +65,7 @@ If everything goes as expected, you should see the following message:
 ssh cifmw-vm
 ```
 
-ℹ️ This is possible because your `~/.ssh/config` has a configuration block allowing an easy access to the VM.
+ℹ️ This is possible because your `~/.ssh/config` has a configuration block allowing easy access to the VM.
 
 8. **Run the ci-framework**
 
@@ -98,5 +98,5 @@ The `make` target will call `ansible-playbook` against the dev-local-env.yml pla
 - generate an ephemeral SSH keypair in `~/ci-framework-data/artifacts` and allow it in the VM
 - fetch the latest CentOS Stream 9 image and store it in `~/ci-framework-data/images`
 - create a layered image based upon that CS9 image, and store i in `~/ci-framework-data/images`
-- bootstrap the VM, installing some softwares, configuring services and all
-- inject a block in your `~/.ssh/config` file for an easy access
+- bootstrap the VM, installing some software, configuring services and all
+- inject a block in your `~/.ssh/config` file for easy access

@@ -3,7 +3,7 @@ This role bootstrap a VM on your host, and makes it ready for the ci-framework
 usage directly on it.
 
 Running in a VM might be slow, so you want to get proper hardware (especially
-regarding to the I/O performances) - please note it's using nested virtualization
+in regard to the I/O performances) - please note it's using nested virtualization
 in the end (CRC + Compute VMs will be running from within the virtual machine
 this role creates).
 

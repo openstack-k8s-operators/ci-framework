@@ -45,7 +45,7 @@ This role is wrapper around the Hive service providing the following support
   for the claimed OpenShift cluster.
 
 ### OpenStack platform optional parameters
-* `cifmw_hive_openstack_claim_life_time`: (String) Maximum life time of the
+* `cifmw_hive_openstack_claim_life_time`: (String) Maximum lifetime of the
   claimed OpenShift cluster. Defaults to `24h`.
 * `cifmw_hive_openstack_claim_timeout`: (String) Maximum allowed time before
   failing during the claim operation. Defaults to `59m`.

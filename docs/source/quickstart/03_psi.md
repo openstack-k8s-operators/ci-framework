@@ -33,7 +33,7 @@ openstack network list --external -c Name -f value | \
   xargs -n1 openstack network show  -c name -f value
 ```
 
-Finally, create a vm with valued you picked for the falvor/image/network/key-pair
+Finally, create a vm with valued you picked for the flavor/image/network/key-pair
 
 ```
 openstack server create --flavor ocp4-compute-large --image CentOS-Stream-9-latest \

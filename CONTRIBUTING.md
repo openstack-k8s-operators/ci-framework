@@ -11,7 +11,7 @@ $ make create_new_role ROLE_NAME=my_wonderful_role
 ### Consuming install_yamls varibles
 CI Framework sets a couple of facts that are useful enough to mention, the
 `cifmw_install_yamls_vars`, that contains all the install_yamls variables
-that should be passed to any instal_yaml target, and the `cifmw_install_yamls_default`,
+that should be passed to any install_yamls target, and the `cifmw_install_yamls_default`,
 that contains the default values of every possible parameter of the install_yamls
 Makefiles.
 

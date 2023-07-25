@@ -55,8 +55,8 @@ proper parameter name, you may run arbitrary playbook or load custom CRDs at
 specific points in the standard run.
 
 Allowed parameter names are:
-* `pre_infra`: before bootstraping the infrastructure
-* `post_infra`: after bootstraping the infrastructure
+* `pre_infra`: before bootstrapping the infrastructure
+* `post_infra`: after bootstrapping the infrastructure
 * `pre_package_build`: before building packages against sources
 * `post_package_build`: after building packages against sources
 * `pre_container_build`: before building container images
@@ -114,7 +114,7 @@ $ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/c
 $ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
 ```
 
-Running the commande twice, with `--tags` and `--skip-tags` as only difference,
+Running the command twice, with `--tags` and `--skip-tags` as only difference,
 will ensure your environment has the needed directories, packages and
 configurations with the first run, while skip all of those tasks in the
 following runs. That way, you will save time and resources.
