@@ -142,7 +142,7 @@ enable-git-hooks:
 	git config core.hooksPath "./.githooks"
 	$(warning REMEMBER, YOU MUST HAVE REVIEWED THE CUSTOM HOOKS in .githooks!)
 
-##@ Developper environments
+##@ Developer environments
 .PHONY: local_env_create
 local_env_create: ## Create a virtualized lab on your local machine. Nested virt MUST be supported by your system. Use LOCAL_ENV_OPTS param to pass options to ansible-playbook
 	if [ "x${LOCAL_ENV_OPTS}" == "x" ]; then \
@@ -150,6 +150,10 @@ local_env_create: ## Create a virtualized lab on your local machine. Nested virt
 	else \
 		ansible-playbook -i localhost, -c local dev-local-env.yml ${LOCAL_ENV_OPTS}; \
 	fi
+
+.PHONY: local_env_vm_cleanup
+local_env_vm_cleanup: ## Cleanup virtualized lab on your local machine.
+	bash scripts/local_env_vm_cleanup.sh
 
 ##@ Generate documentation
 .PHONY: docs
