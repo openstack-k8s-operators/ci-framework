@@ -57,7 +57,7 @@ No privilege escalation needed.
       include_role:
         name: openshift_login
       vars:
-        # API infered from the given kubeconfig
+        # API inferred from the given kubeconfig
         cifmw_openshift_login_kubeconfig: "/home/zuul/.crc/machines/crc/kubeconfig"
         cifmw_openshift_login_user: "kubeadmin"
         cifmw_openshift_login_password: "12345678"

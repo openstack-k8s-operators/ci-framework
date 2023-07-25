@@ -2,7 +2,7 @@
 [![CodeQL](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml/badge.svg)](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml)
 
 ## Documentation
-All the documentation can be checked on [ReadTheDoc](https://ci-framework.readthedocs.io/en/latest/).
+All the documentation can be checked on [ReadTheDocs](https://ci-framework.readthedocs.io/en/latest/).
 
 ## License
 Copyright 2023.

@@ -7,7 +7,7 @@ Role to setup jump tool and upload XML test results to Polarion.
 * `cifmw_polarion_jump_result_dir`: (String) Test results directory. Defaults to `~/ci-framework-data/tests/tempest/`.
 * `cifmw_polarion_jump_repo_url`: (String) URL of jump repository.
 * `cifmw_polarion_test_id`: (String) A test-id provided by Polarion test case.
-* `cifmw_polarion_update_testcases`: (Boolean) A value of True/False to update the testcase.
+* `cifmw_polarion_update_testcases`: (Boolean) A value of True/False to update the testcases.
 * `cifmw_polarion_jump_extra_vars`: (String) A list of extra_vars that are being passed to the jump script. Defaults to empty.
 
 ## Examples
