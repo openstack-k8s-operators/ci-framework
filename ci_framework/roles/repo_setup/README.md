@@ -13,7 +13,7 @@ Please explain the role purpose.
 * `cifmw_repo_setup_os_release`: (String) Operating system release. Defaults to `{{ ansible_distribution|lower }}`.
 * `cifmw_repo_setup_src`: (String) repo-setup repository location. Defaults to `https://github.com/openstack-k8s-operators/repo-setup`.
 * `cifmw_repo_setup_output`: (String) Repository files output. Defaults to `{{ cifmw_repo_setup_basedir }}/artifacts/repositories`.
-* `cifmw_repo_setup_opts`: (String) Additional options we may to pass to repo_setup. Defaults to `''`.
+* `cifmw_repo_setup_additional_repos`: (String) Additional repos(ceph, deps) to enable. Defaults to `''`.
 * `cifmw_repo_setup_env`: (Dict) Environment variables to be passed to repo_setup cli . Defaults to `'{}'`.
 * `cifmw_repo_setup_enable_rhos_release`: (Boolean) Toggle `rhos-release` support. Defaults to `False`.
 
