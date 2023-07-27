@@ -2,6 +2,11 @@
 - hosts: all
   gather_facts: true
   tasks:
+    - name: Check for edpm-ansible.yml file
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
+      register: edpm_file
+
     - name: Perform Podified and EDPM deployment on compute nodes with virtual baremetal
       ansible.builtin.command:
         chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
@@ -9,6 +14,9 @@
           ansible-playbook deploy-edpm.yml
           -e @scenarios/centos-9/base.yml
           -e @scenarios/centos-9/edpm_baremetal_deployment_ci.yml
+          {%- if edpm_file.stat.exists %}
+          -e @{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml
+          {%- endif %}
           {%- if cifmw_extras is defined %}
           {%-   for extra_var in cifmw_extras %}
           -e "{{   extra_var }}"
