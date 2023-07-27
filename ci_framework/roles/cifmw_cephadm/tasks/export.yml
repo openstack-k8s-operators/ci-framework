@@ -1,0 +1,84 @@
+---
+# Copyright 2021 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Creates a file which cifmw_ceph_client role can pass to include_vars
+# The file will be saved in the path "{{ cifmw_ceph_client_vars }}"
+
+- name: Get ceph_cli
+  include_tasks: ceph_cli.yml
+
+- name: Wait for the expected number of monitors to be running
+  include_tasks: wait_for_expected_num_mons.yml
+  when:
+    - not cifmw_cephadm_deployed_ceph | bool
+    - cifmw_cephadm_wait_for_mons | bool
+
+- name: Run ceph mon dump to get all monitors
+  command: "{{ cifmw_cephadm_ceph_cli }} mon dump --format json"
+  register: ceph_mon_dump
+  become: true
+  tags:
+    - cephadm_mon_dump
+
+- name: Extract mons_json
+  set_fact:
+    cifmw_cephadm_mons_json: "{{ (ceph_mon_dump.stdout | from_json).mons |
+                   map(attribute='public_addrs') |
+                   map(attribute='addrvec') |
+                   list }}"
+
+- name: Build mons_list
+  set_fact:
+    cifmw_cephadm_mons_list: "{{ cifmw_cephadm_mons_list | default([]) +
+      [ '[' ~
+        item[0].type ~ ':' ~ item[0].addr ~ '/' ~ item[0].nonce
+        ~ ',' ~
+        item[1].type ~ ':' ~ item[1].addr ~ '/' ~ item[1].nonce
+        ~ ']'
+      ] }}"
+  loop: "{{ cifmw_cephadm_mons_json }}"
+
+- name: Set cifmw_ceph_client_external_cluster_mon_ips from mons_list
+  set_fact:
+    cifmw_ceph_client_external_cluster_mon_ips: "{{ cifmw_cephadm_mons_list | join(',') }}"
+
+- name: Verify the keyring
+  include_tasks: check_keyring.yml
+  vars:
+    current_key: "{{ item.name }}"
+  loop: "{{ cifmw_cephadm_keys| default([]) }}"
+  when:
+    - cifmw_cephadm_keys is defined
+    - cifmw_cephadm_keys | length > 0
+  tags:
+    - cephadm_extract_keys
+
+- name: Ensure cifmw_ceph_client_vars path exists
+  file:
+    path: "{{ cifmw_ceph_client_vars | dirname }}"
+    state: directory
+    recurse: yes
+  delegate_to: localhost
+  when:
+    - (cifmw_ceph_client_vars | dirname) | length > 0
+
+- name: Save cifmw_ceph_client_vars file
+  template:
+    src: templates/ceph_client.yaml.j2
+    dest: "{{ cifmw_ceph_client_vars }}"
+    mode: 0644
+    force: true
+  delegate_to: localhost
