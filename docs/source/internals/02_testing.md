@@ -1,11 +1,32 @@
 # Testing
 
-Right now we are using 2 different CI systems in the CI Framework project:
+Right now we are using 3 different CI systems in the CI Framework project:
 
+- Github workflows
 - Zuul CI
 - Prow CI
 
 The goal was to unify the tests in a single CI system but since we can't have privilege escalation using Prow CI, the team has decided to use Zuul CI to execute tests under each ansible role.
+
+## Github workflow
+A series of Github workflows take place in the pull request checks:
+
+- Spellchecking using pySpelling
+- Ensure commit message has a (checked) checklist
+- CodeQL (actually a scheduled run)
+
+### Spellchecking
+We're using pySpelling, a python wrapper around aspell. You can add custom words
+in the `docs/dictionary/en-custom.txt` file. In order to keep it tidy and
+avoid duplication, please do as follow:
+```Bash
+$ pyspelling -c .spellcheck.yml
+# Recover the list of words, paste them in a temporary file
+$ cat docs/dictionary/en-custom.txt >> your_temporary_file
+$ cat temporary_file | tr '[:upper:]' '[:lower:]' | sort -u > en-custom.txt
+```
+That way, you ensure that only unique, lower-case words are added to the list.
+
 
 ## Prow CI
 

@@ -18,7 +18,7 @@ In such a case, the following data can be provided to the hook:
 * `creates`: (String) Refer to the `ansible.builtin.command` "creates" parameter. Defaults to `omit`.
 * `inventory`: (String) Refer to the `--inventory` option for `ansible-playbook`. Defaults to `inventory_file`.
 * `name`: (String) Describe the hook.
-* `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `ci_framwork/hooks/playbooks`. It can be an absolute path.
+* `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `ci_framework/hooks/playbooks`. It can be an absolute path.
 * `type`: (String) Type of the hook. In this case, set it to `playbook`.
 * `extra_vars`: (Dict) Structure listing the extra variables you want to pass down
 
@@ -58,7 +58,7 @@ pre_deploy:
 ### CRD
 In such a case, the following data can be provided to the hook:
 * `type`: (String) Type of the hook. In this case, set it to `crd`.
-* `source`: (String) Source of the CRD. If it's a filename, the CRD is expected in `ci_framwork/hooks/crds`. It can be an absolute path.
+* `source`: (String) Source of the CRD. If it's a filename, the CRD is expected in `ci_framework/hooks/crds`. It can be an absolute path.
 * `host`: (String) Cluster API endpoint. Defaults to `https://api.crc.testing:6443`.
 * `username`: (String) Username for authentication against the cluster. Defaults to `kubeadmin`.
 * `password`: (String) Password for authentication against the cluster. Defaults to `12345678`.

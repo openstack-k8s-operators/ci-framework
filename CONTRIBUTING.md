@@ -8,7 +8,7 @@ Run the following command to get your new role ready:
 $ make create_new_role ROLE_NAME=my_wonderful_role
 ```
 
-### Consuming install_yamls varibles
+### Consuming install_yamls variables
 CI Framework sets a couple of facts that are useful enough to mention, the
 `cifmw_install_yamls_vars`, that contains all the install_yamls variables
 that should be passed to any install_yamls target, and the `cifmw_install_yamls_default`,
@@ -28,8 +28,8 @@ Here is an example, based on a common use-case, on how to use those variables
 
 ```YAML
 # Fetch openstackdataplane resources from the default namespace declared in install_yamls
-# Makefile. If the NAMESPACE has been overidden by cifmw_install_yamls_vars this variable
-# already points to the overriden value.
+# Makefile. If the NAMESPACE has been overridden by cifmw_install_yamls_vars this variable
+# already points to the overridden value.
 - name: Get info about dataplane node
   environment:
     PATH: "{{ cifmw_path }}"
