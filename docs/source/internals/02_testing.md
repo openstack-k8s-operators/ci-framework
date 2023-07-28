@@ -20,6 +20,8 @@ We're using pySpelling, a python wrapper around aspell. You can add custom words
 in the `docs/dictionary/en-custom.txt` file. In order to keep it tidy and
 avoid duplication, please do as follow:
 ```Bash
+$ sudo dnf install -y aspell-en
+$ pip install pyspelling
 $ pyspelling -c .spellcheck.yml
 # Recover the list of words, paste them in a temporary file
 $ cat docs/dictionary/en-custom.txt >> your_temporary_file
