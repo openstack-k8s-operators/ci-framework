@@ -38,7 +38,7 @@ need to be changed for a typical EDPM deployment.
 
 * `cifmw_cephadm_default_container`: If this is value is `true`, then
   `cephadm bootstrap` is not passed the `--image` parameter and whatever
-  default Ceph container defined inside of `cephadm` is used. Otherise
+  default Ceph container defined inside of `cephadm` is used. Otherwise
   use `cifmw_cephadm_container_ns` (e.g. "quay.io/ceph"),
   `cifmw_cephadm_container_image` (e.g. "ceph") and
   `cifmw_cephadm_container_tag` (e.g. "v17").
@@ -109,7 +109,7 @@ In the `ceph.yml` playbook, set the `storage_network_range` variable.
   EDPM IP address range).
 
 * If network isolation is used, then as per the
-  [openstack-k8s-operators networking docuemation](https://github.com/openstack-k8s-operators/docs/blob/main/networking.md),
+  [openstack-k8s-operators networking documentation](https://github.com/openstack-k8s-operators/docs/blob/main/networking.md),
   the default storage network is `172.18.0.0/24` and the
   `storage_network_range` variable should be set accordingly.
   As per the

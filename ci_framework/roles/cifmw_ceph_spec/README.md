@@ -23,7 +23,7 @@ None
 ## Parameters
 
 * `cifmw_ceph_spec_host_to_ip`: map of hostname to IP address (default `{"edpm-compute-0": "192.168.122.100"}`)
-* `cifmw_ceph_spec_data_devices`: YAML multiline string describing the
+* `cifmw_ceph_spec_data_devices`: YAML multi line string describing the
   Ceph spec data devices (defaults to the path `/dev/ceph_vg/ceph_lv_data`
   which is created by the `cifmw_block_device` role)
 * `cifmw_ceph_spec_path`: path of the rendered spec file (default
@@ -49,7 +49,7 @@ cifmw_ceph_spec_host_to_ip:
   edpm-compute-N: 172.18.0.N
 ```
 If network isolation is used, then as per the
-[openstack-k8s-operators networking docuemation](https://github.com/openstack-k8s-operators/docs/blob/main/networking.md),
+[openstack-k8s-operators networking documentation](https://github.com/openstack-k8s-operators/docs/blob/main/networking.md),
 the storage network is `172.18.0.0/24`.
 
 Assuming the networks are already provisioned on the EDPM nodes and
