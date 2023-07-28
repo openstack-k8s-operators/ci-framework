@@ -1,0 +1,25 @@
+---
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Discover the host ip
+      ansible.builtin.set_fact:
+        node_ip: >-
+          {{ hostvars[groups.all[0]].ansible_host if hostvars[groups.all[0]].ansible_host
+          is match("[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
+          else hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+
+    - name: Run tcib playbook
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook ci/playbooks/tcib/tcib.yml
+          -e @scenarios/centos-9/base.yml
+          -e @scenarios/centos-9/tcib.yml
+          -e "cifmw_rp_registry_ip={{ node_ip }}"
+          {%- if cifmw_extras is defined %}
+          {%-   for extra_vars in cifmw_extras %}
+          -e "{{   extra_vars }}"
+          {%-   endfor %}
+          {%- endif %}
+          -e @scenarios/centos-9/zuul_inventory.yml

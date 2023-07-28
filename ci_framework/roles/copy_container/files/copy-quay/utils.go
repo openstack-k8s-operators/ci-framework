@@ -190,6 +190,11 @@ func fetchLogs(URL string) string {
     }
 
     if data == "" {
+        path = fmt.Sprintf("%sci-framework-data/logs/containers-built.log", URL)
+        data , _ = _fetch(path)
+    }
+
+    if data == "" {
         path = fmt.Sprintf("%sjob-output.txt", URL)
         data, _ = _fetch(path)
     }
