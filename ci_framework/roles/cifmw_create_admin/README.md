@@ -8,9 +8,9 @@ any account.
 
 Requires root in order to create user on target host(s). Private key
 may optionally be provided so that the admin users can SSH into EDPM
-nodes as eachother. E.g. ceph-admin@host-0 can `ssh ceph-admin@host-1`.
+nodes as each other. E.g. ceph-admin@host-0 can `ssh ceph-admin@host-1`.
 
-## Paramters
+## Parameters
 
 | Name              | Default Value       | Description           |
 |-------------------|---------------------|-----------------------|
