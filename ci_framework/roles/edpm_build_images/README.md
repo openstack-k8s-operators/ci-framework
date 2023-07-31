@@ -29,6 +29,7 @@ None
 * `cifmw_edpm_build_images_push_registry_namespace`: (String) Namespace on registry where we want to push container images. Default: `podified-main-centos9`.
 * `cifmw_edpm_build_images_cert_path`: (String) Cert path. Default: `/etc/pki/ca-trust/source/anchors/rh.crt`
 * `cifmw_edpm_build_images_cert_install`: (Boolean) Whether to install cert in the image. Default: false
+* `cifmw_edpm_build_images_base_image`: (String) Base image to package the edpm and ipa qcow2 images into the container images for rhel distro.
 
 ### Example
 ```YAML
