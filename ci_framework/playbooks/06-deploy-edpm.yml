@@ -49,9 +49,39 @@
           name: libvirt_manager
           tasks_from: deploy_edpm_compute.yml
 
+      - name: Enabled only network services for HCI deploy
+        when:
+          - cifmw_edpm_deploy_hci | default(false) | bool
+        ansible.builtin.set_fact:
+          cifmw_edpm_deploy_network_only: true
+          cifmw_edpm_deploy_storage_mgmt_network: true
+          cifmw_edpm_deploy_enable_hci_nova_config: false
+
       - name: Deploy EDPM
         ansible.builtin.import_role:
           name: edpm_deploy
+
+- name: Deploy ceph deploy playbook
+  ansible.builtin.import_playbook: ceph.yml
+  when: cifmw_edpm_deploy_hci | default(false) | bool
+
+- name: Deploy remaining services in HCI environment
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Create Ceph secrets and retrieve FSID info
+      when: cifmw_edpm_deploy_hci | default(false) | bool
+      block:
+        - name: Update deploy configuration
+          ansible.builtin.set_fact:
+            cifmw_edpm_deploy_network_only: false
+            cifmw_edpm_deploy_storage_mgmt_network: true
+            cifmw_edpm_deploy_enable_hci_nova_config: true
+            cifmw_edpm_deploy_ceph_fsid: "{{ cifmw_ceph_fsid }}"
+
+        - name: Continue HCI deployment
+          ansible.builtin.import_role:
+            name: edpm_deploy
 
 - name: Run post_deploy hooks
   vars:

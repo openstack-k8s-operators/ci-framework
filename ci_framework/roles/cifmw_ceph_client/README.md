@@ -32,6 +32,7 @@ None
     cifmw_ceph_client_fetch_dir: /tmp
     cifmw_ceph_client_k8s_secret_name: ceph-conf-files
     cifmw_ceph_client_k8s_namespace: openstack
+    cifmw_ceph_client_k8s_secret_filename: k8s_ceph_secret.yml
   tasks:
     - name: Export configuration for ceph client
       import_role:

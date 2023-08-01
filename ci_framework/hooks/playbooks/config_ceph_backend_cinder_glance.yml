@@ -1,0 +1,86 @@
+---
+- hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - ansible.builtin.find:
+        paths: "{{ cifmw_basedir }}/artifacts/manifests/{{ cifmw_install_yamls_defaults['NAMESPACE'] }}/openstack/cr/"
+        patterns: "*.yaml"
+        excludes: "kustomization.yaml"
+      register: find_result
+
+    - name: Set CR path fact
+      ansible.builtin.set_fact:
+        cifmw_edpm_kustomize_cr_path: "{{ find_result.files|map(attribute='path') | list | first }}"
+
+    - name: Kustomize Cinder configuration
+      vars:
+        cifmw_edpm_kustomize_content: |-
+            apiVersion: kustomize.config.k8s.io/v1beta1
+            kind: Kustomization
+            resources:
+            namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+            patches:
+            - target:
+                kind: OpenStackControlPlane
+              patch: |-
+                - op: replace
+                  path: /spec/cinder/template/cinderVolumes/volume1/replicas
+                  value: {{ cifmw_services_cinder_vol_replicas | default(1) }}
+                - op: add
+                  path: /spec/cinder/template/cinderVolumes/volume1/customServiceConfig
+                  value: |
+                    [DEFAULT]
+                    enabled_backends=ceph
+                    debug=True
+                    [ceph]
+                    volume_backend_name=ceph
+                    volume_driver=cinder.volume.drivers.rbd.RBDDriver
+                    rbd_ceph_conf=/etc/ceph/ceph.conf
+                    rbd_user=openstack
+                    rbd_pool=volumes
+                    rbd_flatten_volume_from_snapshot=False
+                    report_discard_supported=True
+                    backend_host=hostgroup
+                    rbd_secret_uuid={{ cifmw_ceph_fsid }}
+                - op: add
+                  path: /spec/glance/template/customServiceConfig
+                  value: |
+                    [DEFAULT]
+                    enabled_backends = default_backend:rbd
+                    [glance_store]
+                    default_backend = default_backend
+                    [default_backend]
+                    rbd_store_ceph_conf = /etc/ceph/ceph.conf
+                    store_description = "RBD backend"
+                    rbd_store_pool = images
+                    rbd_store_user = openstack
+                - op: add
+                  path: /spec/extraMounts
+                  value:
+                    - name: v1
+                      region: r1
+                      extraVol:
+                        - propagation:
+                          - CinderVolume
+                          - GlanceAPI
+                          extraVolType: Ceph
+                          volumes:
+                          - name: ceph
+                            projected:
+                              sources:
+                              - secret:
+                                  name: ceph-conf-files
+                          mounts:
+                          - name: ceph
+                            mountPath: "/etc/ceph"
+                            readOnly: true
+      ansible.builtin.include_role:
+        name: edpm_kustomize
+
+    - name: Apply and update OpenStackControlPlane
+      environment:
+        PATH: "{{ cifmw_path }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc apply -f {{ cifmw_edpm_kustomize_cr_path }}

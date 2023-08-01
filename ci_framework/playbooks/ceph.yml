@@ -16,7 +16,7 @@
 
 - name: Create local SSH keypair
   tags: keypair
-  hosts: localhost
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   vars:
     cifmw_admin_user: ceph-admin
@@ -49,8 +49,6 @@
   hosts: edpm
   gather_facts: false
   become: true
-  vars:
-    ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
   pre_tasks:
     - name: Get local private key
       slurp:
@@ -76,18 +74,15 @@
   hosts: edpm
   gather_facts: true
   become: true
-  vars:
-    ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
   roles:
     - role: cifmw_block_device
 
 - name: Build Ceph spec from gathered IP addresses of EDPM inventory group
   tags: spec
-  hosts: localhost
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: true
   vars:
-    #storage_network_range: 172.18.0.0/24
-    storage_network_range: 192.168.122.0/24
+    storage_network_range: 172.18.0.0/24
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
     - name: Build a dict mapping hostname to its IP which is in storage network range
@@ -106,7 +101,6 @@
   hosts: edpm[0]
   gather_facts: false
   vars:
-    ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
     cifmw_cephadm_spec_ansible_host: /tmp/ceph_spec.yml
     cifmw_cephadm_bootstrap_conf: /tmp/initial_ceph.conf
     cifmw_ceph_client_vars: /tmp/ceph_client.yml
@@ -197,16 +191,33 @@
 
 - name: Render Ceph client configuration
   tags: client
-  hosts: localhost
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   vars:
     cifmw_ceph_client_vars: /tmp/ceph_client.yml
     cifmw_ceph_client_fetch_dir: /tmp
     cifmw_ceph_client_k8s_secret_name: ceph-conf-files
     cifmw_ceph_client_k8s_namespace: openstack
+    cifmw_ceph_secret: /tmp/k8s_ceph_secret.yml
   tasks:
     - name: Export configuration for ceph client
       import_role:
         name: cifmw_ceph_client
-    - debug:
-        msg: "Import ceph secret into k8s 'kubectl create -f /tmp/k8s_ceph_secret.yml'"
+
+    - name: Create Ceph secrets and retrieve FSID info
+      environment:
+        PATH: "{{ cifmw_path }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      block:
+        - name: Create ceph config secret
+          ansible.builtin.command: >-
+            oc apply -f {{ cifmw_ceph_secret }}
+          register: apply_result
+          changed_when: ('stdout' in apply_result) and ('unchanged' not in apply_result.stdout)
+          failed_when: ( apply_result.rc | int ) > 0
+
+        - name: Set Ceph FSID fact
+          ansible.builtin.set_fact:
+            cifmw_ceph_fsid: "{{ (lookup('template', cifmw_ceph_secret)|from_yaml).data['ceph.conf'] \
+             | b64decode | regex_search('fsid = (.*)', '\\1')}}"
+            cacheable: true
