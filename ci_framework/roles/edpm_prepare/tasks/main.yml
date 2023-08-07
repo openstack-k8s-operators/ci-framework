@@ -164,3 +164,30 @@
           --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --for=condition=ready
           --timeout={{ cifmw_edpm_prepare_timeout }}m
+
+- name: Wait for keystone to be ready
+  when: not cifmw_edpm_prepare_dry_run
+  block:
+    - name: Extract keystone endpoint host
+      register: _keystone_endpoint
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get route keystone-public
+          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          -o jsonpath='{ .spec.host }'
+
+    - name: Wait for keystone endpoint to exist in DNS
+      register: _cifmw_edpm_prepare_check_keystone_dns
+      vars:
+        _keystone_response_codes: [200, 300, 301, 302, 401, 402, 403]
+      ansible.builtin.uri:
+        url: "http://{{ _keystone_endpoint.stdout | trim }}"
+        status_code: "{{ _keystone_response_codes }}"
+      retries: 20
+      delay: 10
+      until:
+        - _cifmw_edpm_prepare_check_keystone_dns.status is defined
+        - _cifmw_edpm_prepare_check_keystone_dns.status in _keystone_response_codes
