@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check mandatory parameters
+  block:
+    - name: Ensure we pass the mandatory parameters
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_kustomize_cr_path is defined
+        msg: "Please ensure cifmw_edpm_kustomize_cr_path is defined"
+
+- name: Ensure directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_edpm_kustomize_cr_path | dirname }}"
+    state: directory
+
+- name: Check if there is already a kustomization
+  register: cifmw_edpm_kustomize_kustomize_yaml_stat
+  ansible.builtin.stat:
+    path: "{{ cifmw_edpm_kustomize_cr_path | dirname }}/kustomization.yaml"
+
+- name: Update the already existing kustomization to point to the new CR
+  when: cifmw_edpm_kustomize_kustomize_yaml_stat.stat.exists
+  block:
+    - name: Load the kustomization
+      ansible.builtin.slurp:
+        src: "{{ cifmw_edpm_kustomize_cr_path | dirname }}/kustomization.yaml"
+      register: cifmw_edpm_kustomize_yaml_slurp
+
+    - name: Prepare and load the ci-framework kustomize template file
+      vars:
+        _kustomize_content: "{{ cifmw_edpm_kustomize_yaml_slurp['content'] | b64decode | from_yaml }}"
+      ansible.builtin.include_tasks: kustomize.yml
+
+- name: Apply ci-framework kustomization
+  when: cifmw_edpm_kustomize_content | default('{}') | from_yaml | length > 0
+  block:
+    - name: Rename the already applied kustomize.yaml file if present
+      when: cifmw_edpm_kustomize_kustomize_yaml_stat.stat.exists
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ cifmw_edpm_kustomize_cr_path | dirname }}/kustomization.yaml"
+        dest: "{{ cifmw_edpm_kustomize_cr_path | dirname }}/kustomization.initial.yaml"
+
+    - name: Prepare and load the ci-framework kustomize template file
+      vars:
+        _kustomize_content: "{{ cifmw_edpm_kustomize_content | from_yaml}}"
+      ansible.builtin.include_tasks: kustomize.yml

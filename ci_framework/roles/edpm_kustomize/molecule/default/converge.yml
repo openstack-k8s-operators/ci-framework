@@ -1,0 +1,52 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+    cifmw_edpm_kustomize_cr_path: "{{ cifmw_basedir }}/artifacts/manifests/openstack/dataplane/cr/dataplane_v1beta1_openstackdataplane.yaml"
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+  tasks:
+    - name: Run without any kustomization
+      ansible.builtin.include_role:
+        name: edpm_kustomize
+
+    - name: Run with a light kustomization
+      vars:
+        cifmw_edpm_kustomize_content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+          patches:
+          - target:
+              kind: OpenStackDataPlane
+            patch: |-
+              - op: replace
+                path: /spec/roles/edpm-compute/nodeTemplate/ansibleVars/neutron_public_interface_name
+                value: "eno1"
+
+              - op: replace
+                path: /spec/roles/edpm-compute/nodeTemplate/ansibleVars/ctlplane_mtu
+                value: "1350"
+
+              - op: replace
+                path: /spec/roles/edpm-compute/nodeTemplate/ansibleUser
+                value: "{{ hostvars.compute.ansible_user | default('zuul') }}"
+      ansible.builtin.include_role:
+        name: edpm_kustomize
