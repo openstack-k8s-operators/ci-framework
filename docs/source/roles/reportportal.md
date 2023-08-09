@@ -1,0 +1,1 @@
+../../../ci_framework/roles/reportportal/README.md

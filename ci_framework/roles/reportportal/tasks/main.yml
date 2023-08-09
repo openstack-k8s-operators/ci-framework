@@ -1,0 +1,92 @@
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+---
+- name: define path to secrets file
+  set_fact:
+    secrets_file: "/tmp/tmp12.yml"
+
+# NOTE: the operation will fail on an external network
+#       causing role execution cease, therefore 
+#       no sensitive data will be disclosed.
+# TODO: When everything works create a permanet link 
+- name: Download secrests file from a link
+  ansible.builtin.get_url:
+    url: https://url.corp.redhat.com/tmp12
+    dest: "{{ secrets_file }}"
+
+# avoid error "yaml.constructor.ConstructorError: could not 
+# determine a constructor for the tag '!include-raw:'"
+- name: Remove !include-raw from file
+  ansible.builtin.lineinfile:
+    path:  "{{ secrets_file }}"
+    regexp: '^(\s*){{ item }}(.*)$'
+    state: absent
+  loop:
+    - "!include-raw:"
+    - "dsl:"
+    - "- reportportal_update.groovy"
+
+- name: Register a file content as a variable
+  ansible.builtin.shell: "cat {{ secrets_file }}"
+  register: ymlfile
+
+- name: Get reportportal server URL
+  register: discovered_url
+  yml_get_value:
+    parameter_path: "job.parameters.hidden[name=RHOS_PSI_INSTANCE_URL].default"
+    file_path: "{{ secrets_file }}"
+
+- name: Get reportportal server token
+  register: discovered_token
+  yml_get_value:
+    parameter_path: "job.parameters.hidden[name=RHOS_PSI_TOKEN].default"
+    file_path: "{{ secrets_file }}"
+
+# No real need, since the task is executed on a machine connected to internal
+# network. Still removing the file.
+- name: Remove the file
+  file:
+    path: "{{ secrets_file }}"
+    state: absent
+
+# NOTE: this path also present in ansible.cfg, line "libabry=..."
+#       Make sure to update them both. There is no way to dynamically
+#       update the path to the library during the execution of
+#       an Ansible playbook.
+- name: Define path for local copy of the reportportal repository
+  set_fact:
+    reportportal_local_repo_path: "/home/dsariel/projects/reportportal"
+
+- name: Remove existing local repository (if exists)
+  ansible.builtin.file:
+    path: "{{ reportportal_local_repo_path }}"
+    state: absent
+  run_once: true
+
+- name: Clone fresh reportportal repository
+  git:
+    repo: "{{ cifmw_reportportal_repo_url }}"
+    dest: "{{ reportportal_local_repo_path }}"
+    version: master
+
+
+- name: Import results to ReportPortal
+  include: "{{ reportportal_local_repo_path }}/tasks/import/main.yml"
+
+
+
+
+
+
