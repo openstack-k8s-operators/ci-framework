@@ -49,6 +49,7 @@ cifmw_rhol_crc_config:
   memory: 30520
   disk-size: 120
 cifmw_use_libvirt: true
+cifmw_deploy_edpm: true
 cifmw_use_crc: true
 cifmw_operator_build_push_registry: "default-route-openshift-image-registry.apps-crc.testing"
 cifmw_operator_build_meta_build: false
