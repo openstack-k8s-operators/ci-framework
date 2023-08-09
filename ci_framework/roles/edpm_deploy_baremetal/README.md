@@ -14,6 +14,7 @@ This role doesn't need privilege escalation.
 * `cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins`: (integer) Timeout for waiting for the Provision Server deployment. Default: `20`
 * `cifmw_edpm_deploy_baremetal_wait_bmh_timeout_mins`: (integer) Timeout for waiting for the bare metal nodes. Default: `20`
 * `cifmw_edpm_deploy_baremetal_wait_dataplane_timeout_mins`: (integer) Timeout for waiting for the OpenStackDataPlane. Default: `30`
+* `cifmw_edpm_deploy_baremetal_update_os_containers`: (Boolean) Update the uefi image. Default: `false`
 
 ## Examples
 ### 1 - Perform edpm baremetal deployment
