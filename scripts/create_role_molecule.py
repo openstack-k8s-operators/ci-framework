@@ -81,7 +81,7 @@ def regenerate_projects_zuul_jobs_yaml(generated_paths):
         projects_jobs_info = yaml.safe_load(file)
 
     # Add each role name after the generated content
-    for role_directory in generated_paths['roles_dir'].iterdir():
+    for role_directory in sorted(generated_paths['roles_dir'].iterdir()):
         if not role_directory.is_dir():
             logging.warning("Skipping. Not a role directory")
             continue
