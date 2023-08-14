@@ -1,0 +1,27 @@
+---
+- name: Kustomize ControlPlane for ironic service
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/{{ item }}"
+        state: directory
+      loop:
+        - controlplane
+
+    - name: Create kustomization to enable ironic
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/98-ironic-kustomization.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+            patch: |-
+              - op: add
+                path: /spec/ironic/enabled
+                value: {{ cifmw_services_ironic_enabled | default('false') }}
