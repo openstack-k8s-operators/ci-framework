@@ -1,0 +1,97 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Discover latest image for CS9
+  ansible.builtin.import_role:
+    name: discover_latest_image
+
+- name: Deploy layout on target host
+  ansible.builtin.import_role:
+    name: libvirt_manager
+    tasks_from: deploy_layout
+
+- name: Ensure crc-0 knows about its second NIC
+  delegate_to: crc-0
+  remote_user: root
+  community.general.nmcli:
+    autoconnect: true
+    conn_name: private_net
+    ifname: enp2s0
+    type: ethernet
+    ip4: "{{ cifmw_reproducer_crc_ip4 }}"
+    gw4: "{{ cifmw_reproducer_crc_gw4 }}"
+    state: present
+
+- name: Get kubeconfig file from crc directory
+  register: kubeconfig
+  ansible.builtin.slurp:
+    path: "{{ cifmw_reproducer_kubecfg }}"
+
+- name: Configure controller-0
+  delegate_to: controller-0
+  remote_user: root
+  block:
+    - name: Ensure controller-0 has an IP in private network
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: private_net
+        ifname: eth1
+        type: ethernet
+        ip4: "{{ cifmw_reproducer_ctl_ip4 }}"
+        gw4: "{{ cifmw_reproducer_ctl_gw4 }}"
+        state: present
+
+    - name: Create kube directory
+      ansible.builtin.file:
+        path: "/home/zuul/.kube"
+        state: directory
+        owner: zuul
+        group: zuul
+        mode: 0755
+
+    - name: Inject kubeconfig content
+      ansible.builtin.copy:
+        dest: "/home/zuul/.kube/config"
+        content: "{{ kubeconfig.content | b64decode }}"
+
+    - name: Inject crc related host entry
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: >-
+          {{ cifmw_reproducer_crc_ip4 }} api.crc.testing
+          canary-openshift-ingress-canary.apps-crc.testing
+          console-openshift-console.apps-crc.testing
+          default-route-openshift-image-registry.apps-crc.testing
+          downloads-openshift-console.apps-crc.testing
+          oauth-openshift.apps-crc.testing
+
+    - name: Install some tools
+      ansible.builtin.package:
+        name:
+          - ansible-core
+          - bash-completion
+          - git-core
+          - tmux
+          - vim
+
+- name: Sync known repositories to ansible controller
+  local_action:
+    module: ansible.builtin.command
+    cmd: >-
+      rsync -ar {{ item.src }} zuul@controller-0:{{ item.dest }}
+  loop: "{{ cifmw_reproducer_repositories }}"
+  loop_control:
+    label: "{{ item.src | basename }}"

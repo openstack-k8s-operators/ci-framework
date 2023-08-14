@@ -1,0 +1,93 @@
+---
+- name: Create needed worload directory
+  ansible.builtin.file:
+    path: "{{ cifmw_reproducer_basedir }}/workload"
+    state: directory
+
+- name: Ensure networks are defined
+  community.libvirt.virt_net:
+    command: define
+    name: "cifmw-{{ item.key }}"
+    xml: "{{ item.value | replace(item.key, 'cifmw-' ~ item.key) }}"
+    uri: "qemu:///system"
+  loop: "{{ cifmw_libvirt_manager_configuration.networks | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Ensure networks are created/started
+  community.libvirt.virt_net:
+    command: create
+    name: "cifmw-{{ item.key }}"
+    uri: "qemu:///system"
+  loop: "{{ cifmw_libvirt_manager_configuration.networks | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Ensure networks are active
+  community.libvirt.virt_net:
+    state: active
+    name: "cifmw-{{ item.key }}"
+    uri: "qemu:///system"
+  loop: "{{ cifmw_libvirt_manager_configuration.networks | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Ensure images are present
+  vars:
+    image_data: "{{ item.value }}"
+  ansible.builtin.include_tasks:
+    file: get_image.yml
+  loop: "{{ cifmw_libvirt_manager_configuration.vms | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Prepare base image with user and ssh accesses
+  when:
+    - item.key is not match('^crc.*$')
+  vars:
+    _admin_user: "{{ item.value.admin_user | default('root') }}"
+  ansible.builtin.shell:
+    cmd: >-
+      virt-sysprep -a "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}"
+      --selinux-relabel
+      --firstboot-command "growpart /dev/sda 1"
+      --firstboot-command "xfs_growfs /"
+      --root-password "password:{{ item.value.password | default('fooBar') }}"
+      --ssh-inject {{ _admin_user }}:file:{{ ansible_user_dir }}/.ssh/authorized_keys
+      | tee -a {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log
+    creates: "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log"
+  loop: "{{ cifmw_libvirt_manager_configuration.vms | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Create and run VMs
+  vars:
+    vm_type: "{{ vm_data.key }}"
+  ansible.builtin.include_tasks:
+    file: create_vms.yml
+  loop: "{{ cifmw_libvirt_manager_configuration.vms | dict2items }}"
+  loop_control:
+    label: "{{ vm_data.key }}"
+    loop_var: vm_data
+
+- name: Ensure we get proper access to CRC
+  vars:
+    crc_private_key: "{{ cifmw_libvirt_manager_configuration.vms.crc.image_local_dir }}/id_ecdsa"
+  block:
+    - name: Copy authorized_keys
+      ansible.builtin.command:
+        cmd: >-
+          scp -i {{ crc_private_key }}
+          ~/.ssh/authorized_keys
+          core@crc-0:.ssh/authorized_keys.d/custom
+
+    - name: Enable root access on CRC
+      ansible.builtin.shell:
+        cmd: |-
+          set -xe -o pipefail
+          cat << EOF | ssh -i {{ crc_private_key }} core@crc-0
+            sudo sed -i 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config.d/40-rhcos-defaults.conf;
+            sudo systemctl restart sshd;
+            sudo cp -r /home/core/.ssh/authorized_keys.d /root/.ssh;
+            sudo chown -R root: /root/.ssh;
+          EOF

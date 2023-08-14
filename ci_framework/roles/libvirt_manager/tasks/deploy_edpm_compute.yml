@@ -25,30 +25,13 @@
     path: "{{ item }}"
     state: directory
   loop:
-    - "{{ compute_config.image_local_dir }}"
     - "{{ cifmw_libvirt_manager_basedir }}/workload"
     - "{{ cifmw_libvirt_manager_basedir }}/artifacts/edpm_compute"
 
-- name: Compute base image checks
-  block:
-    - name: Check if base image exists
-      ansible.builtin.stat:
-        path: "{{ compute_config.image_local_dir }}/{{ compute_config.disk_file_name }}"
-      register: disk_file_name_status
-
-    - name: Download base image
-      when:
-        - not disk_file_name_status.stat.exists
-      register: download_base_img
-      ansible.builtin.get_url:
-        url: "{{ compute_config.image_url }}"
-        dest: "{{ compute_config.image_local_dir }}/{{ compute_config.disk_file_name }}"
-        checksum: "sha256:{{ compute_config.sha256_image_name }}"
-      until:
-        - "'status_code' in download_base_img"
-        - download_base_img.status_code == 200
-      retries: 30
-      delay: 5
+- name: Ensure image is available
+  vars:
+    image_data: "{{ compute_config }}"
+  ansible.builtin.include_tasks: get_image.yml
 
 - name: Create EDPM compute VMs
   vars:

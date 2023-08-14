@@ -1,0 +1,121 @@
+---
+- name: "Create VM overlays for {{ vm_type }}"
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create
+      -o backing_file={{ vm_data.value.image_local_dir }}/{{ vm_data.value.disk_file_name }},backing_fmt=qcow2
+      -f qcow2
+      "{{ vm_type }}-{{ vm_id }}.qcow2" "{{ vm_data.value.disksize|default ('40') }}G"
+    creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
+    chdir: "{{ cifmw_reproducer_basedir }}/workload"
+  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Define VMs for type {{ vm_type }}"
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('template', 'domain.xml.j2') }}"
+    uri: "qemu:///system"
+  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Start VMs for type {{ vm_type }}"
+  community.libvirt.virt:
+    state: running
+    name: "cifmw-{{ vm_type }}-{{ vm_id }}"
+    uri: "qemu:///system"
+  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Grab IPs for nodes type {{ vm_type }}"
+  register: vm_ips
+  ansible.builtin.shell:
+    cmd: >-
+      virsh -c qemu:///system -q
+      domifaddr cifmw-{{ vm_type }}-{{ vm_id }} | head -1
+  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+  retries: 20
+  delay: 5
+  until:
+    - vm_ips.rc == 0
+    - vm_ips.stdout != ''
+
+- name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
+  delegate_to: localhost
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] |replace('/24','') }}"
+  ansible.builtin.blockinfile:
+    create: true
+    path: "~/.ssh/config"
+    marker: "## {mark} {{ vm_type }}-{{ vm_ip.item }}"
+    block: |-
+      Host {{ vm_type }}-{{ vm_ip.item }} cifmw-{{ vm_type }}-{{ vm_ip.item }} {{ extracted_ip }}
+        ProxyJump {{ ansible_user }}@{{ inventory_hostname }}
+        Hostname {{ extracted_ip }}
+        User zuul
+        StrictHostKeyChecking no
+        UserKnownHostsFile /dev/null
+  loop: "{{ vm_ips.results }}"
+  loop_control:
+    loop_var: vm_ip
+    label: "{{ vm_ip.item }}"
+
+- name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] |replace('/24','') }}"
+  ansible.builtin.blockinfile:
+    create: true
+    path: "~/.ssh/config"
+    marker: "## {mark} {{ vm_type }}-{{ vm_ip.item }}"
+    block: |-
+      Host {{ vm_type }}-{{ vm_ip.item }} cifmw-{{ vm_type }}-{{ vm_ip.item }} {{ extracted_ip }}
+        Hostname {{ extracted_ip }}
+        User zuul
+        StrictHostKeyChecking no
+        UserKnownHostsFile /dev/null
+  loop: "{{ vm_ips.results }}"
+  loop_control:
+    loop_var: vm_ip
+    label: "{{ vm_ip.item }}"
+
+- name: "Wait for VMs type {{ vm_type }} SSH"
+  delegate_to: localhost
+  ansible.builtin.wait_for:
+    host: "{{ vm_ip.item }}"
+    port: 22
+    delay: 5
+  loop: "{{ vm_ips.results }}"
+  loop_control:
+    loop_var: vm_ip
+    label: "{{ vm_ip.item }}"
+
+- name: "Configure VMs type {{ vm_type }}"
+  when:
+    - vm_type is not match('^crc.*$')
+  delegate_to: "{{ vm_type }}-{{ vm_id }}"
+  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |-
+      test -d /home/zuul && exit 0;
+      set -xe -o pipefail;
+      echo "{{ vm_type }}-{{ vm_id }}" | sudo tee /etc/hostname;
+      sudo hostname -F /etc/hostname;
+      sudo useradd -m -d /home/zuul zuul;
+      echo "zuul ALL=(ALL)	NOPASSWD: ALL" | sudo tee /etc/sudoers.d/zuul;
+      sudo -u zuul mkdir -p /home/zuul/.ssh /home/zuul/src/github.com/openstack-k8s-operators;
+      sudo cp ${HOME}/.ssh/authorized_keys /home/zuul/.ssh/;
+      chown -R zuul: /home/zuul/.ssh;
+  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"

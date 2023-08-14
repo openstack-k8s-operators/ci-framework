@@ -1,0 +1,56 @@
+---
+- name: List all of the existing virtual machines
+  register: vms_list
+  community.libvirt.virt:
+    command: list_vms
+    uri: "qemu:///system"
+
+- name: Filter out target environment
+  ansible.builtin.set_fact:
+    cleanup_vms: "{{ vms_list.list_vms | select('match', '^cifmw-.*$') }}"
+
+- name: Expose cleanup list
+  ansible.builtin.debug:
+    var: cleanup_vms
+
+- name: Destroy machine
+  community.libvirt.virt:
+    command: destroy
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ cleanup_vms }}"
+
+- name: Undefine machine
+  community.libvirt.virt:
+    command: undefine
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ cleanup_vms }}"
+
+- name: Get network list
+  register: nets_list
+  community.libvirt.virt_net:
+    command: list_nets
+    uri: "qemu:///system"
+
+- name: Filter out target nets
+  ansible.builtin.set_fact:
+    cleanup_nets: "{{ nets_list.list_nets | select('match', '^cifmw-.*$') }}"
+
+- name: Expose cleanup list
+  ansible.builtin.debug:
+    var: cleanup_nets
+
+- name: Destroy networks
+  community.libvirt.virt_net:
+    command: destroy
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ cleanup_nets }}"
+
+- name: Undefine networks
+  community.libvirt.virt_net:
+    command: undefine
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ cleanup_nets }}"

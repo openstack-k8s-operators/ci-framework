@@ -1,0 +1,43 @@
+- name: Ensure directory exists
+  ansible.builtin.file:
+    path: "{{ image_data.image_local_dir }}"
+    state: directory
+
+- name: Check if base image exists
+  ansible.builtin.stat:
+    path: "{{ image_data.image_local_dir }}/{{ image_data.disk_file_name }}"
+    get_checksum: false
+  register: disk_file_name_status
+
+- name: Download base image
+  when:
+    - not disk_file_name_status.stat.exists
+    - image_data.image_url is defined
+  register: download_base_img
+  ansible.builtin.get_url:
+    url: "{{ image_data.image_url }}"
+    dest: "{{ image_data.image_local_dir }}/{{ image_data.disk_file_name }}"
+    checksum: >-
+      {% if image_data.sha256_image_name -%}
+      sha256:{{ image_data.sha256_image_name }}
+      {% endif -%}
+  until:
+    - download_base_img.status_code is defined
+    - download_base_img.status_code == 200
+  retries: 30
+  delay: 5
+
+- name: Validate image availability
+  block:
+    - name: Check image
+      register: image_status
+      ansible.builtin.stat:
+        path: "{{ image_data.image_local_dir }}/{{ image_data.disk_file_name }}"
+        get_checksum: false
+
+    - name: Assert image status
+      ansible.builtin.assert:
+        that:
+          - image_status.stat.exists is defined
+          - image_status.stat.exists|bool
+        msg: "Unable to find {{ image_data.image_local_dir }}/{{ image_data.disk_file_name }}!"
