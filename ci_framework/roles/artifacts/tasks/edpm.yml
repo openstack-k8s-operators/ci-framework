@@ -1,0 +1,43 @@
+---
+- name: List all of the existing virtual machines
+  ignore_errors: true
+  register: vms_list
+  community.libvirt.virt:
+    command: list_vms
+    uri: "qemu:///system"
+
+- name: Filter out edpm vm
+  ignore_errors: true
+  ansible.builtin.set_fact:
+    edpm_vm: "{{ vms_list.list_vms | select('match', '^edpm-.*$') }}"
+
+- name: Generate logs on EDPM vms
+  when:
+    - '"edpm-compute-0" in edpm_vm'
+  block:
+    - name: Generate logs on edpm vm
+      ignore_errors: true
+      ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: |-
+          ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i {{ cifmw_artifacts_basedir }}/artifacts/edpm/ansibleee-ssh-key-id_rsa root@192.168.122.100 <<EOF
+          set -xe;
+          mkdir -p /tmp/edpm
+          cp -r /var/log/ /tmp/edpm
+          cp -r /var/lib/config-data /tmp/edpm
+          cp -r /var/lib/nova /tmp/edpm
+          cp -r /etc/nftables /tmp/edpm
+          ip a > /tmp/edpm/network.txt
+          ip ro ls >> /tmp/edpm/network.txt
+          rpm -qa > /tmp/edpm/rpm_qa.txt
+          podman images > /tmp/edpm/podman_images.txt
+          ausearch -i | grep denied > /tmp/edpm/selinux-denials.log
+          journalctl -p warning -t kernel -o short -g DROPPING --no-pager &> /tmp/edpm/firewall-drops.txt
+          EOF
+
+    - name: Copy logs to host machine from edpm vm
+      ignore_errors: true
+      ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: |-
+          scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -v -r -i {{ cifmw_artifacts_basedir }}/artifacts/edpm/ansibleee-ssh-key-id_rsa root@192.168.122.100:/tmp/edpm {{ cifmw_artifacts_basedir }}/logs
