@@ -14,7 +14,7 @@ None
 * `cifmw_edpm_deploy_retries`: (Integer) Number of retries for edpm deploy status. Defaults to `100`.
 * `cifmw_edpm_deploy_run_validation`: (Boolean) Run validation on EDPM node. Defaults to `False`.
 * `cifmw_edpm_deploy_dryrun`: (Boolean) Do a dry run on make edpm_deploy command. Defaults to `False`.
-* `cifmw_edpm_deploy_nova_pod_name`: (String) Name of the nova deployment pod started by an EDPM deploy. Defaults to `nova-edpm-compute-0-deploy-nova`.
+* `cifmw_edpm_deploy_timeout`: (Integer) Time, in minutes to wait for the deployment to be ready. Defaults to `40`.
 
 ## TODO
 - Add support for deploying multiple compute node

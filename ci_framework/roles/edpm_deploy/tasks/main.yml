@@ -68,68 +68,31 @@
         name: edpm_kustomize
 
     - name: Apply the OpenStackDataPlane CR
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
       when: not cifmw_edpm_deploy_dryrun
       ci_script:
         output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
         script: "oc apply -f {{ cifmw_edpm_deploy_cr_manifest_paths.files[0].path }}"
 
-- name: Wait for EDPM compute deployment to finish
-  when:
-    - not cifmw_edpm_deploy_dryrun | bool
-  environment:
-    PATH: "{{ cifmw_path }}"
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-  block:
-    - name: Get info about dataplane node
-      ci_script:
-        output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
-        script: |-
-          oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          oc get openstackdataplanerole -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          oc get openstackdataplanenode -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          oc get pods -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | grep edpm
-      ignore_errors: true
-
-    - name: Get EDPM nova deployment pod name
-      register: edpm_pod
-      ansible.builtin.shell:
-        cmd: >-
-          oc get pods -o name
-          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} |
-          grep -m1  {{ cifmw_edpm_deploy_nova_pod_name }}
-      until: edpm_pod.rc == 0
-      retries: "{{ cifmw_edpm_deploy_retries }}"
-      delay: 50
-
-    - name: Wait for EDPM nova deployment pod to finish
-      register: deploy_status
+    - name: Wait for OpenStackDataplane to be deployed
       ansible.builtin.command:
         cmd: >-
-          oc wait -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          --timeout=0 --for=jsonpath='{.status.phase}'=Succeeded
-          {{ edpm_pod.stdout |trim }}
-      until: deploy_status.rc == 0
-      retries: "{{ cifmw_edpm_deploy_retries }}"
-      delay: 20
+          oc wait OpenStackDataplane {{ cifmw_edpm_kustomize_last_cr_content.metadata.name }}
+          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          --for=condition=ready
+          --timeout={{ cifmw_edpm_deploy_timeout }}m
 
-- name: Get the logs of EDPM Deploy
-  when:
-    - deploy_status is defined
-    - "'rc' in deploy_status"
-    - deploy_status.rc == 0
-  environment:
-    PATH: "{{ cifmw_path }}"
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-  ansible.builtin.shell: |
-    for POD in $(oc get pods -o name -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | egrep "dataplane-deployment-|nova-edpm-compute");
-    do
-      echo $POD;
-      oc logs -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} $POD;
-    done
-  register: edpm_logs
+    - name: Get the logs of EDPM Deploy
+      when:
+        - deploy_status is defined
+        - "'rc' in deploy_status"
+        - deploy_status.rc == 0
+      ansible.builtin.shell: |
+        for POD in $(oc get pods -o name -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | egrep "dataplane-deployment-|nova-edpm-compute");
+        do
+          echo $POD;
+          oc logs -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} $POD;
+        done
+      register: edpm_logs
 
 - name: Collect logs for EDPM deploy
   when:
