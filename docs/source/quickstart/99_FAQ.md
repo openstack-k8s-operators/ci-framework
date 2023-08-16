@@ -59,3 +59,14 @@ You can review the logs to see the error with:
 ```Bash
 oc logs -n openstack -l component=cinder-api
 ```
+
+## Working in air gapped environment
+
+### Wait for OpenStackDataplane to be deployed
+If deployment of `OpenStackDataplane` fails, please ensure if you have an access to `pool.ntp.org`.
+During the deployment, `chronyc` is trying to sync up with default NTP servers.
+If you don't have an access, you can provide modify your `env.yml` file to include:
+```
+cifmw_install_yamls_vars:
+  DATAPLANE_CHRONY_NTP_SERVER: "<your_chosen_ntp_server>"
+```
