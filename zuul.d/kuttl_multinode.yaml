@@ -1,0 +1,71 @@
+---
+- job:
+    name: cifmw-base-multinode-kuttl
+    parent: cifmw-podified-multinode-edpm-base-crc
+    timeout: 5400
+    abstract: true
+    nodeset:
+      nodes:
+        - name: controller
+          label: cloud-centos-9-stream-tripleo-vexxhost
+        - name: crc
+          label: coreos-crc-extracted-xxl
+    vars:
+      zuul_log_collection: true
+    extra-vars:
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            range: 192.168.122.0/24
+            mtu: 1500
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/24
+          storage:
+            vlan: 21
+            range: 172.18.0.0/24
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/24
+        instances:
+          controller:
+            networks:
+              default:
+                ip: 192.168.122.11
+          crc:
+            networks:
+              default:
+                ip: 192.168.122.10
+              internal-api:
+                ip: 172.17.0.5
+              storage:
+                ip: 172.18.0.5
+              tenant:
+                ip: 172.19.0.5
+    pre-run:
+      - ci/playbooks/e2e-prepare.yml
+    run:
+      - ci/playbooks/dump_zuul_vars.yml
+      - ci/playbooks/kuttl/run.yml
+    post-run:
+      - ci/playbooks/collect-logs.yml
+    required-projects:
+      - github.com/openstack-k8s-operators/install_yamls
+
+- job:
+    name: cifmw-multinode-kuttl
+    parent: cifmw-base-multinode-kuttl
+    files:
+      - ^ci/playbooks/kuttl/.*
+      - ^scenarios/centos-9/kuttl.yml
+      - ^zuul.d/kuttl.yaml
+    vars:
+      cifmw_kuttl_tests_operator_list:
+        - ansibleee
+        - keystone
+      commands_before_kuttl_run:
+        - oc get pv
+        - oc get all
+      commands_after_kuttl_run:
+        - oc get pv
+        - oc get all
