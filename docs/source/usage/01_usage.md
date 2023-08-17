@@ -28,6 +28,7 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_openshift_user`: (String) Login user. If provided, the user that logins.
 * `cifmw_openshift_provided_token`: (String) Initial login token. If provided, that token will be used to authenticate into OpenShift.
 * `cifmw_openshift_password`: (String) Login password. If provided is the password used for login in.
+* `cifmw_openshift_skip_tls_verify`: (Boolean) Skip TLS verification to login. Defaults to `false`.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
 * `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment
