@@ -33,7 +33,7 @@ No privilege escalation needed.
 * `cifmw_openshift_login_retries`: (Integer) Number of attempts to retry the login action if it fails. Defaults to `10`.
 * `cifmw_openshift_login_retries_delay`: (Integer) Delay, in seconds, between login retries. Defaults to `20`.
 * `cifmw_openshift_login_assume_cert_system_user`: (Boolean) When trying cert key login from kubeconfig, assume that the inferred user is a `system:` admin. Defaults to `true`.
-* `cifmw_openshift_login_skip_tls_verify`: (Boolean) Skip TLS verification to login. Note: This option may break admin login using certs. Defaults to `false`.
+* `cifmw_openshift_login_skip_tls_verify`: (Boolean) Skip TLS verification to login. Note: This option may break admin login using certs. Defaults to `cifmw_openshift_skip_tls_verify` and `false` as last instance..
 
 ## Examples
 ### 1 - Login using user/password and API combination
