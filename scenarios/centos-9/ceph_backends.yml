@@ -1,14 +1,9 @@
 ---
-cifmw_kustomize_cr_file_path: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/openstack-operator/config/samples"
-cifmw_kustomize_cr_file_name: "core_v1beta1_openstackcontrolplane_network_isolation_ceph.yaml"
-cifmw_kustomize_cr_template: "../templates/service_config_ceph.yaml.j2"
-cifmw_kustomize_cr_include_vars:
+cifmw_control_plane_ceph_backend_include_vars:
   - "{{ cifmw_basedir }}/artifacts/pre_deploy_ceph_deploy.yml"
-cifmw_kustomize_cr_artifact_dir: "{{ cifmw_basedir }}/kustomize_cr"
 
 cifmw_install_yamls_vars:
   BMO_SETUP: false
-  OPENSTACK_CR: "{{ cifmw_kustomize_cr_artifact_dir }}/kustomized_{{ cifmw_kustomize_cr_file_name }}"
   STORAGE_CLASS: crc-csi-hostpath-provisioner
   INSTALL_CERT_MANAGER: false
 
@@ -22,15 +17,33 @@ pre_deploy:
   - name: Ceph deploy
     type: playbook
     source: ceph-deploy.yml
-  - name: Kustomize OpenStack CR
+  - name: Kustomize OpenStack CR with Ceph
     type: playbook
-    source: kustomize_cr.yml
+    source: control_plane_ceph_backends.yml
+
+cifmw_services_manila_enabled: true
+
+pre_tempest:
+  - name: Create manila resources
+    type: playbook
+    source: manila_create_default_resources.yml
 
 cifmw_run_tests: true
 cifmw_tempest_default_groups: &test_operator_list
   - openstack-operator
   - cinder-operator
   - keystone-operator
-  - neutron-operator
-  - nova-operator
+  - manila-operator
 cifmw_tempest_default_jobs: *test_operator_list
+
+cifmw_tempest_tests_allowed_override_scenario: true
+
+cifmw_tempest_tempestconf_profile:
+  create: true
+  debug: true
+  os_cloud: default
+  overrides:
+    identity.v3_endpoint_type: public
+    share.run_share_group_tests: "False"
+    share.capability_storage_protocol: CEPHFS
+    share.suppress_errors_in_cleanup: "True"
