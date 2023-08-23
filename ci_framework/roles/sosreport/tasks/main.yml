@@ -1,0 +1,63 @@
+---
+- name: Ensure sos is installed
+  become: true
+  ansible.builtin.package:
+    name: sos
+    state: present
+
+- name: Create local "sos" directory
+  ansible.builtin.file:
+    path: "/tmp/sos"
+    state: directory
+
+- name: Provide config file for "sos"
+  ansible.builtin.template:
+    src: sos.conf.j2
+    dest: "/tmp/sos/sos.conf"
+
+- name: Display sos.conf
+  ansible.builtin.command: cat /tmp/sos/sos.conf
+  register: sosfile
+
+- name: Ensure that logs directory is writable
+  ansible.builtin.file:
+    path: "{{ cifmw_sosreport_tmp_dir }}"
+    state: directory
+
+- name: Run "sos collect" on given nodes
+  ansible.builtin.command: >
+    sos collect --config-file /tmp/sos/sos.conf
+
+- name: Get "sos collect" file
+  ansible.builtin.find:
+    paths: "{{ cifmw_sosreport_tmp_dir }}"
+    patterns: ["sos-collector-*.tar.gz"]
+  register: soscollect_files
+
+- name: Show sos files
+  ansible.builtin.debug:
+    var: soscollect_files.files
+
+- name: Extract "sos collect" files
+  ansible.builtin.unarchive:
+    src: "{{ item.path }}"
+    dest: "{{ cifmw_sosreport_tmp_dir }}"
+  with_items: soscollect_files.files
+
+- name: Get "sos report" file
+  ansible.builtin.find:
+    paths: "{{ cifmw_sosreport_tmp_dir }}"
+    patterns: ["sosreport-*.tar.gz"]
+    depth: 2
+    recurse: true
+  register: sosreport_files
+
+- name: Show sos files
+  ansible.builtin.debug:
+    var: sosreport_files.files
+
+- name: Extract "sos report" files
+  ansible.builtin.unarchive:
+    src: "{{ item.path }}"
+    dest: "{{ cifmw_sosreport_tmp_dir }}"
+  with_items: sosreport_files.files
