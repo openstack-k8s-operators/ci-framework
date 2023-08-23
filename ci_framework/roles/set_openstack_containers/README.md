@@ -15,6 +15,7 @@ The role will generate two 2 files in ~/ci-framework-data/artifacts/ directory a
 * `cifmw_set_openstack_containers_tag_from_md5`: Get the tag from delorean.repo.md5. Defaults to `false`.
 * `cifmw_set_openstack_containers_dlrn_md5_path`: Full path of delorean.repo.md5. Defaults to `/etc/yum.repos.d/delorean.repo.md5`.
 * `cifmw_set_openstack_containers_overrides`: Extra container overrides. Defaults to `{}`
+* `cifmw_set_openstack_containers_tag_filter`: Update container tags ending with. Defaults to `current-podified`
 
 ## Examples
 
