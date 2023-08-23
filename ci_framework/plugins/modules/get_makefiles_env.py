@@ -82,7 +82,7 @@ def main():
     makefiles_root = module.params.get("base_path")
     makefiles_vars = __get_makefiles_vars(makefiles_root)
     if not makefiles_vars:
-        result['msg'] = f"Error! Makefiles bae path {makefiles_root} not found"
+        result['msg'] = f"Error! Makefiles base path {makefiles_root} not found"
         module.fail_json(**result)
         return
 
