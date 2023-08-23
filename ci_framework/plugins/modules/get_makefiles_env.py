@@ -48,7 +48,57 @@ makefiles_values:
 
 
 from ansible.module_utils.basic import AnsibleModule
+import os
 import pathlib
+import subprocess
+import tempfile
+
+
+__TMP_TARGET_NAME = "cifmw_dump_vars"
+__TMPL_DUMP_VARS_TARGET = '''
+.PHONY: %(target)s
+%(target)s:
+\tprintf "%(cmd)s" >> %(out_file)s
+'''
+
+
+def __get_makefile_raw_variables(makefile_path):
+    with open(makefile_path, "r") as f:
+        return set([line.split('?=')[0].rstrip() for line in f.readlines() if '?=' in line and (not line.startswith("#"))])
+
+
+def __get_makefile_variables(makefile_path):
+    makefile_variables = __get_makefile_raw_variables(makefile_path)
+    with open(makefile_path, "r") as makefile_f, tempfile.TemporaryDirectory() as temp_dir, open(os.path.join(temp_dir, "Makefile"), "w") as temp_makefile_f:
+        # Copy the Makefile content to the new temporal one
+        makefile_lines = makefile_f.readlines()
+        temp_makefile_f.writelines(makefile_lines)
+
+        # Prepare a single printf command that will dump each known variable to a file
+        var_dump_cmd = "\\n".join(["{0}: ${{{1}}}".format(var_name, var_name) for var_name in makefile_variables])
+
+        # Create the injected target that will dump the variables to a file using the previous command
+        vars_out_path = os.path.join(temp_dir, "vars")
+        target_data = __TMPL_DUMP_VARS_TARGET % {
+            "target": __TMP_TARGET_NAME,
+            "cmd": var_dump_cmd,
+            "out_file": vars_out_path,
+        }
+
+        # Write the injected target to the temporal Makefile
+        temp_makefile_f.write(target_data)
+        temp_makefile_f.flush()
+
+        # Call the injected target
+        subprocess.run(["make", __TMP_TARGET_NAME], check=False, cwd=temp_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Read and parse the resulting dump file
+        with open(vars_out_path, "r") as vars_content:
+            vars_dict = {}
+            for vars_line in vars_content.readlines():
+                line_split = vars_line.strip().split(":", 1)
+                vars_dict[line_split[0]] = line_split[1].lstrip() if len(line_split) > 1 else None
+            return vars_dict
 
 
 def __get_makefiles_vars(root_path):
@@ -57,10 +107,7 @@ def __get_makefiles_vars(root_path):
         return None
     makefiles_vars = {}
     for path in base_path.rglob('Makefile'):
-        with path.open() as f:
-            lines_split = [line.split('?=') for line in f.readlines() if '?=' in line and not line.startswith('#')]
-            for k, v in lines_split:
-                makefiles_vars[k.strip()] = v.strip()
+        makefiles_vars.update(__get_makefile_variables(path))
 
     return makefiles_vars
 
