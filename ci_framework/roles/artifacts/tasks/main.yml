@@ -14,6 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Verify if "success" flag exists after successful tests execution
+  register: cifmw_success_flag
+  ansible.builtin.stat:
+    path: "{{ ansible_user_dir }}/cifmw-success"
+
 - name: Ensure we have at least minimal ansible facts
   tags:
     - always
@@ -44,8 +49,15 @@
     - always
   ansible.builtin.import_tasks: cleanup.yml
 
-- name: Gather CRC logs
-  ansible.builtin.import_tasks: crc.yml
-
-- name: Gather EDPM logs
-  ansible.builtin.import_tasks: edpm.yml
+- name: Gather logs when forced or tests failed
+  when: cifmw_artifacts_gather_logs | bool or not cifmw_success_flag.stat.exists
+  block:
+    - name: Run os_must_gather
+      ansible.builtin.import_role:
+        name: os_must_gather
+  rescue:
+    - name: Get CRC logs if os_must_gather failed
+      ansible.builtin.import_tasks: crc.yml
+  always:
+    - name: Get EDPM logs
+      ansible.builtin.import_tasks: edpm.yml
