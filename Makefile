@@ -15,6 +15,8 @@ MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 TEST_ALL_ROLES ?= ${TEST_ALL_ROLES:-no}
 # Ansible options for the local_env_vm target
 LOCAL_ENV_OPTS ?= ""
+# Cert Manager version
+CERT_MANAGER_VERSION = v1.12.3
 
 # target vars for generic operator install info 1: target name , 2: operator name
 define vars
@@ -159,3 +161,14 @@ local_env_vm_cleanup: ## Cleanup virtualized lab on your local machine.
 .PHONY: docs
 docs: ## Create documentation under docs/build/html
 	./docs/source/build-docs.sh
+
+##@ Install cert-manager
+.PHONY: install-cmctl
+install-cmctl: ## Install the cert-manager cmctl CLI
+	@bash -c "mkdir -p bin; test -f bin/cmctl || { curl -sSL -o cmctl.tar.gz https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cmctl-linux-amd64.tar.gz && tar xzf cmctl.tar.gz && mv cmctl ./bin; rm cmctl.tar.gz; }"
+
+.PHONY: install-cert-manager
+install-cert-manager: install-cmctl ## Install the cert-manager operator from a OLM sub and wait for API availability
+	kubectl apply -f ./olm-deps/cert-manager.yaml
+	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
+	./bin/cmctl check api --wait=2m
