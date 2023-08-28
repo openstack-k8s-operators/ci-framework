@@ -115,7 +115,7 @@
   ansible.builtin.debug:
     var: compute_nodes_output.stdout_lines
 
-- name: Patch OpenStackDataPlane to add repo-setup-downstream service
+- name: Patch OpenStackDataPlaneNodeSet to add repo-setup-downstream service
   when:
     - cifmw_edpm_deploy_baremetal_repo_setup_override
     - not cifmw_edpm_deploy_baremetal_dry_run
@@ -133,57 +133,57 @@
     # We can drop this step once we drop dev-preview#1 jobs in downstream
     # This is added because install_yamls is tagged and we don't
     # have repo-setup service in OpenStackDataPlane in v0.1.0 tag
-    - name: Get list of services defined under OpenStackDataPlane resource
+    - name: Get list of services defined under OpenStackDataPlaneNodeSet resource
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
-          oc get openstackdataplane openstack-edpm
+          oc get openstackdataplanenodeset openstack-edpm-ipam
           -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          -o jsonpath='{.spec.roles.edpm-compute.services[*]}'
+          -o jsonpath='{.spec.services[*]}'
       register: services_list
       changed_when: false
       ignore_errors: yes
 
     # to-do:  We can drop this step once we drop dev-preview#1 jobs in downstream
-    - name: Patch OpenStackDataPlane resource to add "repo-setup-downstream" service
+    - name: Patch OpenStackDataPlaneNodeSet resource to add "repo-setup-downstream" service
       when: "'repo-setup' not in services_list.stdout"
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
-          oc patch openstackdataplane openstack-edpm
+          oc patch openstackdataplanenodeset openstack-edpm-ipam
           -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --type json
-          -p '[{"op": "add", "path": "/spec/roles/edpm-compute/services/0", "value": "repo-setup-downstream"}]'
+          -p '[{"op": "add", "path": "/spec/services/0", "value": "repo-setup-downstream"}]'
 
     # to-do: We can drop the when condition once we drop dev-preview#1 jobs in downstream
-    - name: Patch OpenStackDataPlane resource to replace "repo-setup" with "repo-setup-downstream" service
+    - name: Patch OpenStackDataPlaneNodeSet resource to replace "repo-setup" with "repo-setup-downstream" service
       when: "'repo-setup' in services_list.stdout"
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
-          oc patch openstackdataplane openstack-edpm
+          oc patch openstackdataplanenodeset openstack-edpm-ipam
           -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --type json
-          -p '[{"op": "replace", "path": "/spec/roles/edpm-compute/services/0", "value": "repo-setup-downstream"}]'
+          -p '[{"op": "replace", "path": "/spec/services/0", "value": "repo-setup-downstream"}]'
 
-- name: Patch OpenStackDataPlane
+- name: Patch OpenStackDataPlaneNodeSet
   when: not cifmw_edpm_deploy_baremetal_dry_run
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc patch openstackdataplane openstack-edpm
+      oc patch openstackdataplanenodeset openstack-edpm-ipam
       --type=merge -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
       -p '{"spec":{"deployStrategy":{"deploy":true}}}'
 
-- name: Wait for OpenStackDataPlane to be Ready
+- name: Wait for OpenStackDataPlaneNodeSet to be Ready
   when: not cifmw_edpm_deploy_baremetal_dry_run
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
@@ -191,5 +191,5 @@
   ansible.builtin.command:
     cmd: >-
       oc wait --timeout={{ cifmw_edpm_deploy_baremetal_wait_dataplane_timeout_mins }}m
-      --for=condition=Ready openstackdataplane openstack-edpm
+      --for=condition=Ready openstackdataplanenodeset openstack-edpm-ipam
       -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}

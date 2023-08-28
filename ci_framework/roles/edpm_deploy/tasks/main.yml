@@ -33,7 +33,7 @@
     dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/hostvars-dump.yml"
     content: "{{ hostvars | to_nice_yaml }}"
 
-- name: Prepare OpenStack Dataplane CR
+- name: Prepare OpenStack Dataplane NodeSet CR
   vars:
     make_edpm_deploy_prep_env: "{{ cifmw_edpm_deploy_env }}"
     make_edpm_deploy_prep_dryrun: "{{ cifmw_edpm_deploy_dryrun | bool }}"
@@ -41,7 +41,7 @@
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_deploy_prep'
 
-- name: Kustomize and deploy OpenStackDataPlane
+- name: Kustomize and deploy OpenStackDataPlaneNodeSet
   when:
     - not cifmw_edpm_deploy_dryrun | bool
   vars:
@@ -59,23 +59,37 @@
     PATH: "{{ cifmw_path }}"
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   block:
-    - name: Perform kustomizations to the OpenStackDataPlane CR
+    - name: Find the OpenStack Dataplane NodeSet CR manifest
+      ansible.builtin.find:
+        paths: "{{ cifmw_edpm_deploy_manifests_dir }}/{{ cifmw_install_yamls_defaults['NAMESPACE'] }}/dataplane/cr"
+        contains: "kind: OpenStackDataPlaneNodeSet"
+        excludes: "kind: Kustomization"
+        patterns: "*.yaml"
+      register: cifmw_edpm_deploy_cr_manifest_paths
+
+    - name: Ensure manifest exists
+      ansible.builtin.assert:
+        that: cifmw_edpm_deploy_cr_manifest_paths.matched == 1
+        quiet: true
+        msg: "Cannot determine OpenStackDataPlaneNodeSet deployment manifest"
+
+    - name: Perform kustomizations to the OpenStackDataPlaneNodeSet CR
       vars:
         cifmw_edpm_kustomize_cr_path: "{{ cifmw_edpm_deploy_openstack_cr_path }}"
         cifmw_edpm_kustomize_content: "{{ cifmw_edpm_deploy_dataplane_cr_kustomization | default('{}') }}"
       ansible.builtin.include_role:
         name: edpm_kustomize
 
-    - name: Apply the OpenStackDataPlane CR
+    - name: Apply the OpenStackDataPlaneNodeSet CR
       when: not cifmw_edpm_deploy_dryrun
       ci_script:
         output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
         script: "oc apply -f {{ cifmw_edpm_deploy_openstack_cr_path }}"
 
-    - name: Wait for OpenStackDataplane to be deployed
+    - name: Wait for OpenStackDataplaneNodeSet to be deployed
       ansible.builtin.command:
         cmd: >-
-          oc wait OpenStackDataplane {{ cifmw_edpm_kustomize_last_cr_content.metadata.name }}
+          oc wait OpenStackDataplaneNodeSet {{ cifmw_edpm_kustomize_last_cr_content.metadata.name }}
           --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --for=condition=ready
           --timeout={{ cifmw_edpm_deploy_timeout }}m
