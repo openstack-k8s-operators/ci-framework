@@ -88,6 +88,10 @@ pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 		pre-commit run --all-files; \
 	fi
 
+.PHONY: check_zuul_files
+check_zuul_files: role_molecule ## Regenerate zuul files and check if they have not been modified manually
+	./scripts/check_zuul_files.sh
+
 ##@ Ansible-test testing
 .PHONY: ansible_test
 ansible_test: setup_tests ansible_test_nodeps ## Runs ansible-test with dependencies install
