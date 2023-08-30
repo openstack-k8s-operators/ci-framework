@@ -115,6 +115,63 @@
   ansible.builtin.debug:
     var: compute_nodes_output.stdout_lines
 
+- name: Patch OpenStackDataPlane to add repo-setup-downstream service
+  when:
+    - cifmw_edpm_deploy_baremetal_repo_setup_override
+    - not cifmw_edpm_deploy_baremetal_dry_run
+  block:
+    # This file will be created in downstream job's pre-playbook
+    - name: Create repo-setup-downstream OpenStackDataPlaneService
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc apply -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          -f "{{ cifmw_installyamls_repos }}/devsetup/edpm/services/dataplane_v1beta1_openstackdataplaneservice_reposetup_downstream.yaml"
+
+    # We can drop this step once we drop dev-preview#1 jobs in downstream
+    # This is added because install_yamls is tagged and we don't
+    # have repo-setup service in OpenStackDataPlane in v0.1.0 tag
+    - name: Get list of services defined under OpenStackDataPlane resource
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get openstackdataplane openstack-edpm
+          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          -o jsonpath='{.spec.roles.edpm-compute.services[*]}'
+      register: services_list
+      changed_when: false
+      ignore_errors: yes
+
+    # to-do:  We can drop this step once we drop dev-preview#1 jobs in downstream
+    - name: Patch OpenStackDataPlane resource to add "repo-setup-downstream" service
+      when: "'repo-setup' not in services_list.stdout"
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc patch openstackdataplane openstack-edpm
+          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          --type json
+          -p '[{"op": "add", "path": "/spec/roles/edpm-compute/services/0", "value": "repo-setup-downstream"}]'
+
+    # to-do: We can drop the when condition once we drop dev-preview#1 jobs in downstream
+    - name: Patch OpenStackDataPlane resource to replace "repo-setup" with "repo-setup-downstream" service
+      when: "'repo-setup' in services_list.stdout"
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc patch openstackdataplane openstack-edpm
+          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          --type json
+          -p '[{"op": "replace", "path": "/spec/roles/edpm-compute/services/0", "value": "repo-setup-downstream"}]'
+
 - name: Patch OpenStackDataPlane
   when: not cifmw_edpm_deploy_baremetal_dry_run
   environment:
