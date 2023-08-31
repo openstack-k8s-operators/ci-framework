@@ -58,6 +58,15 @@ need to be changed for a typical EDPM deployment.
 
 * `cifmw_cephadm_keys`: see below
 
+* `cifmw_cephadm_rgw_network`: the Ceph `public_network` where the `radosgw`
+   instances should be bound. The network range is gathered from the
+   `cifmw_cephadm_bootstrap_conf` file, which represents the initial Ceph
+   configuration file passed at bootstrap time.
+
+* `cifmw_cephadm_rgw_vip`: the ingress daemon deployed along with `radosgw`
+   requires a `VIP` that will be owned by `keepalived`. This IP address will
+   be used as entry point to reach the `radosgw backends` through `haproxy`.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
