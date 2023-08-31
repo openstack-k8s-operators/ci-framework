@@ -1,0 +1,72 @@
+---
+# Base job definition for adoption. Provide base layout with CRC on a dedicated
+# nodeset  and an ansible-controller.
+- job:
+    name: cifmw-adoption-base
+    parent: base-extracted-crc
+    abstract: true
+    timeout: 10800
+    attempts: 1
+    nodeset:
+      nodes:
+        - name: controller
+          label: cloud-centos-9-stream-tripleo-vexxhost-xl
+        - name: crc
+          label: coreos-crc-extracted-xxl
+      groups:
+        - name: computes
+          nodes: []
+    roles:
+      - zuul: github.com/openstack-k8s-operators/ci-framework
+    pre-run:
+      - ci/playbooks/multinode-customizations.yml
+      - ci/playbooks/e2e-prepare.yml
+      - ci/playbooks/dump_zuul_vars.yml
+    post-run:
+      - ci/playbooks/multinode-autohold.yml
+    vars:
+      zuul_log_collection: true
+      registry_login_enabled: true
+      push_registry: quay.rdoproject.org
+      quay_login_secret_name: quay_nextgen_zuulgithubci
+      cifmw_artifacts_crc_sshkey: "~/.ssh/id_rsa"
+      cifmw_openshift_user: kubeadmin
+      cifmw_openshift_password: "123456789"
+      cifmw_openshift_api: api.crc.testing:6443
+      cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+      cifmw_openshift_skip_tls_verify: true
+      cifmw_openshift_setup_skip_internal_registry_tls_verify: true
+      cifmw_use_libvirt: true
+      cifmw_use_crc: false
+      cifmw_zuul_target_host: controller
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            mtu: 1500
+            range: 192.168.122.0/24
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/24
+          storage:
+            vlan: 21
+            range: 172.18.0.0/24
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/24
+        instances:
+          controller:
+            networks:
+              default:
+                ip: 192.168.122.11
+              internal-api:
+                ip: 172.17.0.4
+          crc:
+            networks:
+              default:
+                ip: 192.168.122.10
+              internal-api:
+                ip: 172.17.0.5
+              storage:
+                ip: 172.18.0.5
+              tenant:
+                ip: 172.19.0.5
