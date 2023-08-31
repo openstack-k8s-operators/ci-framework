@@ -15,3 +15,25 @@ become - Required to install required rpm packages
 * `cifmw_tempest_remove_container`: (Boolean) Cleanup tempest container after it is done. Default to `false`
 * `cifmw_tempest_tests_skipped`: (List) List of tests to be skipped. Setting this will not use the `list_skipped` plugin
 * `cifmw_tempest_tests_allowed`: (List) List of tests to be executed. Setting this will not use the `list_allowed` plugin
+* `cifmw_tempest_tempestconf_profile`: (Dictionary) List of settings to be overwritten in tempest.conf.
+
+## Use of cifmw_tempest_tempestconf_profile
+
+You can pass arguments to tempestconf and also override tempest config options.
+The tempest config options goes under overrides, while the tempestconf options
+goes in the root of the dictionary, for example:
+
+```
+cifmw_tempest_tempestconf_profile:
+debug: true
+deployer-input: /etc/tempest-deployer-input.conf
+overrides:
+    validation.run_ssh: false
+    telemetry.alarm_granularity: '60'
+```
+
+Where debug is the same as passing `--debug` to cli and deployer-input is the
+same as `--deployer-input`. Under overrides, you have validation.run_ssh as
+false, this will create in tempest.conf under validation section an option
+run_ssh as false. The same with telemetry.alarm_granularity, it will create
+under telemetry section an option alarm_granularity set to 60.
