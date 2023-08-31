@@ -1,0 +1,48 @@
+---
+- name: Patch the image.config.openshift.io resource to include insecure registry
+  ansible.builtin.shell: |
+    oc patch --type=merge --patch='{
+    "spec": {
+      "registrySources": {
+        "insecureRegistries": [
+        "{{ content_provider_registry_ip }}:5001"
+        ]
+      }
+    }
+    }' image.config.openshift.io/cluster
+
+- name: Patch the image.config.openshift.io resource to allow insecure registry
+  ansible.builtin.shell: |
+    oc patch --type=merge --patch='{
+    "spec": {
+      "registrySources": {
+        "allowedRegistries": [
+        "{{ content_provider_registry_ip }}:5001",
+        "quay.io",
+        "registry.redhat.io",
+        "image-registry.openshift-image-registry.svc:5000"
+        ]
+      }
+    }
+    }' image.config.openshift.io/cluster
+
+- name: Set Insecure registry for content provider
+  become: true
+  ansible.builtin.blockinfile:
+    state: present
+    insertafter: EOF
+    dest: /etc/containers/registries.conf
+    content: |-
+      [[registry]]
+      location = "{{ content_provider_registry_ip }}:5001"
+      insecure = true
+      blocked = false
+      mirror-by-digest-only = false
+      prefix = ""
+
+- name: Restart crio
+  become: true
+  ansible.builtin.service:
+    name: crio
+    state: reloaded
+    enabled: true
