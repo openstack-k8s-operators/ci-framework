@@ -44,27 +44,24 @@
 - name: Kustomize and deploy OpenStackDataPlane
   when:
     - not cifmw_edpm_deploy_dryrun | bool
+  vars:
+    cifmw_edpm_deploy_openstack_cr_path: >-
+      {{
+        [
+          cifmw_edpm_deploy_manifests_dir,
+          cifmw_install_yamls_defaults['NAMESPACE'],
+          'dataplane',
+          'cr',
+          (cifmw_install_yamls_defaults['DATAPLANE_CR'] | basename)
+        ] | ansible.builtin.path_join
+      }}
   environment:
     PATH: "{{ cifmw_path }}"
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   block:
-    - name: Find the OpenStack Dataplane CR manifest
-      ansible.builtin.find:
-        paths: "{{ cifmw_edpm_deploy_manifests_dir }}/{{ cifmw_install_yamls_defaults['NAMESPACE'] }}/dataplane/cr"
-        contains: "kind: OpenStackDataPlane"
-        excludes: "kind: Kustomization"
-        patterns: "*.yaml"
-      register: cifmw_edpm_deploy_cr_manifest_paths
-
-    - name: Ensure manifest exists
-      ansible.builtin.assert:
-        that: cifmw_edpm_deploy_cr_manifest_paths.matched == 1
-        quiet: true
-        msg: "Cannot determine OpenStackDataPlane deployment manifest"
-
     - name: Perform kustomizations to the OpenStackDataPlane CR
       vars:
-        cifmw_edpm_kustomize_cr_path: "{{ cifmw_edpm_deploy_cr_manifest_paths.files[0].path }}"
+        cifmw_edpm_kustomize_cr_path: "{{ cifmw_edpm_deploy_openstack_cr_path }}"
         cifmw_edpm_kustomize_content: "{{ cifmw_edpm_deploy_dataplane_cr_kustomization | default('{}') }}"
       ansible.builtin.include_role:
         name: edpm_kustomize
@@ -73,7 +70,7 @@
       when: not cifmw_edpm_deploy_dryrun
       ci_script:
         output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
-        script: "oc apply -f {{ cifmw_edpm_deploy_cr_manifest_paths.files[0].path }}"
+        script: "oc apply -f {{ cifmw_edpm_deploy_openstack_cr_path }}"
 
     - name: Wait for OpenStackDataplane to be deployed
       ansible.builtin.command:
