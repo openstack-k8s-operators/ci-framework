@@ -1,10 +1,16 @@
-# CI-Framework
+# ![CIFMW Logo](docs/source/images/logo_cifmw_64.png) CI-Framework
 [![CodeQL](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml/badge.svg)](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml)
 
 ## Documentation
 All the documentation can be checked on [ReadTheDocs](https://ci-framework.readthedocs.io/en/latest/).
 
-## License
+## Licenses
+
+### Logo
+* Font: [borg9](https://www.1001freefonts.com/borg-9.font) - [Creative Commons Zero license](https://creativecommons.org/publicdomain/zero/1.0/)
+* Logo: [Cloud Acceleration SVG Vector](https://www.svgrepo.com/svg/530455/cloud-acceleration) - [Creative Commons Zero license](https://creativecommons.org/publicdomain/zero/1.0/)
+
+### Code
 Copyright 2023.
 
 Licensed under the Apache License, Version 2.0 (the "License");
