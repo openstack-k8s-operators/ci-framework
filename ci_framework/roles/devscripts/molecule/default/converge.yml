@@ -1,0 +1,107 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+
+  vars:
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_use_devscripts: true
+    cifmw_network_local_dns:
+      domains:
+        - "ocp.openstack.lab"
+    cifmw_devscripts_dry_run: true
+    cifmw_devscripts_ci_token: "random value"
+    cifmw_devscripts_pull_secret: "should be a json"
+    cifmw_devscripts_ocp_version: "4.13.12"
+    cifmw_devscripts_crb_repo: "https://mirror.stream.centos.org/9-stream/CRB/x86_64/os/"
+    cifmw_devscripts_user: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    cifmw_devscripts_repo_dir: "{{ (ansible_user_dir, 'src', 'dev-scripts') | path_join }}"
+    cifmw_devscripts_data_dir: "{{ (ansible_user_dir, 'ci-framework-data') | path_join }}"
+    cifmw_devscripts_artifacts_dir: "{{ (cifmw_devscripts_data_dir, 'devscripts', 'artifacts') | path_join }}"
+    cifmw_devscripts_logs_dir: "{{ (cifmw_devscripts_data_dir, 'devscripts', 'logs') | path_join }}"
+    cifmw_devscripts_output_dir: "{{ (cifmw_devscripts_data_dir, 'devscripts', 'output') | path_join }}"
+    cifmw_devscripts_config_overrides:
+      num_extra_workers: 2
+      extra_worker_memory: 16384
+      extra_worker_disk: 80
+      extra_worker_vcpu: 10
+      osp_trunk_network_subnet_v4: "192.168.122.0/24"
+      extra_network_names: "osp_trunk"
+
+  tasks:
+    - name: Apply devscripts role
+      ansible.builtin.include_role:
+        name: devscripts
+
+    - name: Testing the default values
+      ansible.builtin.assert:
+        that:
+          - cifmw_devscripts_config.cluster_name == 'ocp'
+          - cifmw_devscripts_config.base_domain == 'openstack.lab'
+          - cifmw_devscripts_config.openshift_release_type == 'ga'
+          - cifmw_devscripts_config.ip_stack == 'v4'
+          - cifmw_devscripts_config.ntp_servers == 'clock.corp.redhat.com'
+          - cifmw_devscripts_config.network_type == 'OpenShiftSDN'
+          - cifmw_devscripts_config.provisioning_network_profile == 'Managed'
+          - cifmw_devscripts_config.num_masters == 3
+          - cifmw_devscripts_config.num_workers == 0
+
+    - name: Collect stat information
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ cifmw_devscripts_data_dir }}"
+        - "{{ cifmw_devscripts_artifacts_dir }}"
+        - "{{ cifmw_devscripts_repo_dir }}"
+        - "{{ cifmw_devscripts_logs_dir }}"
+        - "{{ cifmw_devscripts_output_dir }}"
+      register: stat_results
+
+    - name: Test directory exists
+      ansible.builtin.assert:
+        that:
+          - item.stat is defined
+          - item.stat.isdir
+      loop: "{{ stat_results.results }}"
+
+    - name: Collect stat of pull secret file
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ cifmw_devscripts_repo_dir }}/pull_secret.json"
+        - "{{ cifmw_devscripts_repo_dir }}/config_{{ cifmw_devscripts_user }}.sh"
+      register: file_stat_results
+
+    - name: Test pull secret file stat information
+      ansible.builtin.assert:
+        that:
+          - item.stat is defined
+          - item.stat.exists
+      loop: "{{ file_stat_results.results }}"
+
+    - name: Test override dev-scripts configuration.
+      ansible.builtin.assert:
+        that:
+          - cifmw_devscripts_config.extra_network_names == 'osp_trunk'
+          - cifmw_devscripts_config.num_extra_workers | int == 2
+
+    - name: Perform cleanup
+      ansible.builtin.include_role:
+        name: devscripts
+        tasks_from: cleanup.yml

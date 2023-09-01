@@ -1,18 +1,23 @@
 # ci_network
+
 Apply and manage connection in NetworkManager. This role is especially important for CI
 and CI Job reproducer, since we have to prepare most of the network beforehand.
 
 ## Privilege escalation
+
 It needs sudo access to edit Network Manager connections.
 
 ## Parameters
+
 * `cifmw_network_generated_layout`: (Str) Path to the generated layout you want to apply. Defaults to `/etc/ci/env/network-layout.yml`.
 * `cifmw_network_pre_cleanup`: (Bool) Clean existing ethernet connections before applying configuration. Defaults to `true`.
 * `cifmw_network_layout`: (Dict) Network layout you want to apply.
 * `cifmw_network_nm_config_file`: (Str) Path to NetworkManager configuration file. Defaults to `/etc/NetworkManager/NetworkManager.conf`.
 * `cifmw_network_nm_config`: (List(dict)) List of editions to do in the NetworkManager.conf. Defaults to `[]`
+* `cifmw_network_local_dns`: (Dict) DNS configuration to be applied on the KVM host.
 
 ## NetworkManager configuration layout
+
 The list must be as follow:
 
 ```YAML
@@ -24,6 +29,7 @@ cifmw_network_nm_config:
 ```
 
 ## Network configuration layout
+
 This dict has to represent all of the networks as follow:
 
 ```YAML
@@ -43,5 +49,22 @@ cifmw_network_layout:
 ```
 
 ## Bootstrap CI
+
 It will also look for a specific parameter from the CI Bootstrap steps: `crc_ci_bootstrap_networks_out`.
 If it finds it, it will consume it instead of `cifmw_network_layout`.
+
+## DNS configuration
+
+The configuration is represented by
+
+```YAML
+cifmw_network_local_dns:
+  listen_addresses:   # Optional. list, IP address for the daemon to listen on. Default: 127.0.0.1
+  interfaces:         # Optional. list, names of network interfaces to listen on.
+  domains:            # Optional. list, local domains to be configured
+  addresses:          # Optional. list, of dictionaries
+    - fqdn:           # str, Fully Qualified Domain Name
+      address:        # str, a valid IP address
+  forwarders:
+    - 8.8.8.8         # Optional. list, of DNS forwarders to be applied.
+```
