@@ -40,3 +40,25 @@
           scp -v -r -i {{ cifmw_artifacts_crc_sshkey }}
           root@{{ cifmw_artifacts_crc_host }}:/ostree/deploy/rhcos/var/log/pods
           {{ cifmw_artifacts_basedir }}/logs/crc/
+
+    - name: Collect pods status and cr files
+      ignore_errors: true
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: |-
+          for ns in openstack-operators openstack baremetal-operator-system; do
+            oc get pods -n ${ns} > {{ cifmw_artifacts_basedir }}/logs/${ns}_pods.txt
+          done
+          pushd {{ cifmw_artifacts_basedir }}/logs/crc/
+          mkdir crs
+          pushd crs
+          all_crds=$(oc get crd | awk '/openstack/ { print $1}' | awk -F '.' '{print $1}')
+          for cr in ${all_crds}; do
+            echo ${cr}
+            oc get -o yaml ${cr} > ${cr}.yaml
+          done
+          popd
+          popd
