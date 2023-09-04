@@ -22,25 +22,25 @@
     cifmw_admin_user: ceph-admin
   tasks:
     - name: set ssh key path facts
-      set_fact:
+      ansible.builtin.set_fact:
         private_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa"
         public_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa.pub"
       run_once: true
     - name: stat private key
-      stat:
+      ansible.builtin.stat:
         path: "{{ private_key }}"
       register: private_key_stat
     - name: stat public key
-      stat:
+      ansible.builtin.stat:
         path: "{{ public_key }}"
       register: public_key_stat
     - name: create private key if it does not exist
-      shell: "ssh-keygen -t rsa -q -N '' -f {{ private_key }}"
+      ansible.builtin.shell: "ssh-keygen -t rsa -q -N '' -f {{ private_key }}"
       no_log: true
       when:
         - not private_key_stat.stat.exists
     - name: create public key if it does not exist
-      shell: "ssh-keygen -y -f {{ private_key }} > {{ public_key }}"
+      ansible.builtin.shell: "ssh-keygen -y -f {{ private_key }} > {{ public_key }}"
       when:
         - not public_key_stat.stat.exists
 
@@ -53,13 +53,13 @@
     ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
   pre_tasks:
     - name: Get local private key
-      slurp:
+      ansible.builtin.slurp:
         src: "{{ hostvars['localhost']['private_key'] }}"
       register: private_key_get
       delegate_to: localhost
       no_log: true
     - name: Get local public key
-      slurp:
+      ansible.builtin.slurp:
         src: "{{ hostvars['localhost']['public_key'] }}"
       register: public_key_get
       delegate_to: localhost
@@ -91,7 +91,7 @@
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
     - name: Build a dict mapping hostname to its IP which is in storage network range
-      set_fact:
+      ansible.builtin.set_fact:
         host_to_ip: "{{ host_to_ip | default({}) | combine({ hostvars[item]['ansible_hostname'] :
           hostvars[item][all_addresses] | ipaddr(storage_network_range) | first }) }}"
       delegate_to: "{{ item }}"
@@ -136,7 +136,7 @@
       no_log: true
 
     - name: Set cifmw_cephadm_keys with the cephx key and cifmw_cephadm_pools
-      set_fact:
+      ansible.builtin.set_fact:
         cifmw_cephadm_keys:
           - name: client.openstack
             key: "{{ cephx.key }}"
@@ -151,7 +151,7 @@
       no_log: true
 
     - name: Set IP address of first monitor
-      set_fact:
+      ansible.builtin.set_fact:
         cifmw_cephadm_first_mon_ip: "{{ item.addr }}"
       when:
         - item.service_type == 'host'
@@ -161,37 +161,37 @@
 
   tasks:
     - name: Satisfy Ceph prerequisites
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: pre
 
     - name: Bootstrap Ceph
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: bootstrap
 
     - name: Apply Ceph spec
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: apply_spec
 
     - name: Create ceph pools
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: pools
 
     - name: Create Cephx Keys for OpenStack
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: keys
 
     - name: Export configuration as vars for cifmw_ceph_client
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: export
 
     - name: Show the Ceph cluster status
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: post
 
@@ -206,7 +206,7 @@
     cifmw_ceph_client_k8s_namespace: openstack
   tasks:
     - name: Export configuration for ceph client
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_ceph_client
-    - debug:
+    - ansible.builtin.debug:
         msg: "Import ceph secret into k8s 'kubectl create -f /tmp/k8s_ceph_secret.yml'"
