@@ -34,7 +34,7 @@ None
     cifmw_ceph_client_k8s_namespace: openstack
   tasks:
     - name: Export configuration for ceph client
-      import_role:
+      ansible.builtin.import_role:
         name: cifmw_ceph_client
 ```
 After the above Ansible runs a file called `/tmp/k8s_ceph_secret.yml`

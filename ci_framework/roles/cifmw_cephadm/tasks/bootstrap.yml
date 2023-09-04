@@ -15,25 +15,25 @@
 # under the License.
 
 - name: Add spec to necessary file list when using spec to bootstrap
-  set_fact:
+  ansible.builtin.set_fact:
     cifmw_cephadm_bootstrap_files: "{{ cifmw_cephadm_bootstrap_files + [ cifmw_cephadm_spec ] }}"
   when: cifmw_cephadm_spec_on_bootstrap | bool
 
 - name: Stat necessary files to bootstrap with cephadm
-  stat:
+  ansible.builtin.stat:
     path: "{{ item }}"
   register: cifmw_cephadm_bootstrap_files_stat
   become: true
   loop: "{{ cifmw_cephadm_bootstrap_files }}"
 
 - name: Fail if necessary files are missing
-  fail:
+  ansible.builtin.fail:
     msg: "{{ item.invocation.module_args.path }} does not exist"
   loop: "{{ cifmw_cephadm_bootstrap_files_stat.results | list }}"
   when: not item.stat.exists
 
 - name: Stat pre ceph conf file in case we should bootrap with it
-  stat:
+  ansible.builtin.stat:
     path: "{{ cifmw_cephadm_assimilate_conf }}"
   register: cifmw_cephadm_assimilate_conf_stat
   become: true
@@ -43,7 +43,7 @@
 - name: Bootstrap Ceph if there are no running Ceph Daemons
   block:
     - name: Run cephadm bootstrap
-      shell: |
+      ansible.builtin.shell: |
         {{ cifmw_cephadm_bin }} \
         {% if not cifmw_cephadm_default_container %}--image {{ cifmw_cephadm_container_ns + '/' + cifmw_cephadm_container_image + ':' + cifmw_cephadm_container_tag|string }} \{% endif %}
         bootstrap \
@@ -68,20 +68,20 @@
       register: cephadm_bootstrap
       become: true
     - name: Show results of bootstrap
-      debug:
+      ansible.builtin.debug:
         msg: "{{ cephadm_bootstrap }}"
       when: cifmw_cephadm_verbose | bool
     - name: Ensure cifmw_cephadm_ceph_cli is set
-      include_tasks: ceph_cli.yml
+      ansible.builtin.include_tasks: ceph_cli.yml
       when:
         - cifmw_cephadm_ceph_cli is not defined
     - name: Ensure cephadm uses image tags instead of digests
-      command: |
+      ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} config set mgr mgr/cephadm/use_repo_digest false
       changed_when: false
       become: true
     - name: Set the default container image in ceph configuration
-      command: |
+      ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} config set global container_image \
         {{ cifmw_cephadm_container_ns + '/' + cifmw_cephadm_container_image + ':' + cifmw_cephadm_container_tag|string }}
       changed_when: false
@@ -95,7 +95,7 @@
     - cephadm_bootstrap
 
 - name: If cephadm bootstrap was not run report the reason
-  debug:
+  ansible.builtin.debug:
     msg: |
       'cephadm bootstrap' was not run because 'cephadm ls'
       indicates that Ceph containers are already running.
