@@ -1,0 +1,194 @@
+---
+- name: Apply an invalid kustomization that should fail when applied by kustomize
+  vars:
+    kustomize_tc_extra_path: "{{ ci_kustomize_oc_bin_path }}"
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-invalid-kustomization-operation"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      patches:
+      -   patch: |-
+            - op: nonexistingop
+              path: /metadata/labels/cifmw-label-2
+              value: "cifmw-label-2-value"
+          target:
+              kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "Unexpected kind: nonexistingop"
+    kustomize_tc_should_contain_details: "Unexpected kind"
+    kustomize_tc_should_contain_invalid_kustomization_run: true
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply a yaml that has no apiVersion
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-invalid-kustomization-yaml-string"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      patches:
+         patch: |-sss
+            - op: replace
+              path: /metadata/labels/cifmw-label-2
+              value: "cifmw-label-2-value"
+          target:
+              kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "YAML Error"
+    kustomize_tc_should_contain_validation_error_content: "{{ kustomize_tc_kustomizations }}"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply a yaml that has no apiVersion
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-invalid-api-version"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations:
+      kind: Kustomization
+      patches:
+        - patch: |-
+            - op: add
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+            kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "manifest without apiVersion"
+    kustomize_tc_should_contain_validation_error_content: "{{ kustomize_tc_kustomizations | to_nice_yaml(indent=2) }}"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply a yaml that has an apiVersion that is not the kustomization one
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-invalid-api-version"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations:
+      apiVersion: apps/v1
+      kind: Kustomization
+      patches:
+        - patch: |-
+            - op: add
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+            kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "that is not kustomize.config.k8s.io"
+    kustomize_tc_should_contain_validation_error_content: "{{ kustomize_tc_kustomizations | to_nice_yaml(indent=2) }}"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply a yaml that has no kind
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-no-kind-field"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations:
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      patches:
+        - patch: |-
+            - op: add
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+            kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "manifest without kind"
+    kustomize_tc_should_contain_validation_error_content: "{{ kustomize_tc_kustomizations | to_nice_yaml(indent=2) }}"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply a yaml that has a kind that is not kustomization
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-kind-not-kustomization"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations:
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Deployment
+      patches:
+        - patch: |-
+            - op: add
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+            kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "is not Kustomization"
+    kustomize_tc_should_contain_validation_error_content: "{{ kustomize_tc_kustomizations | to_nice_yaml(indent=2) }}"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Assert that the target_path is mandatory
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-target-path-mandatory"
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "is mandatory"
+    kustomize_tc_should_contain_invalid_argument: "target_path"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Assert that the target_path exists
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-target-path-exists"
+    kustomize_tc_target_manifest_path: "this-file-does-not-exist.yaml"
+    kustomize_tc_skip_non_existing_sources: true
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "path does not exist"
+    kustomize_tc_should_contain_invalid_argument: "target_path"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Assert that if output_path given is not an existing dir
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-output-file-not-dir"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_output_path: "{{ ansible_env.HOME }}"
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "output file cannot point to a directory"
+    kustomize_tc_should_contain_invalid_argument: "output_path"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Assert that if no kustomization tool given is a formatted error raises
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_set_path: "/tmp/non-existing"
+    kustomize_tc_name: "tc-failure-no-kustomization-tool"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "Cannot find oc nor kustomize"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Assert that kustomizations_paths has the proper format
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_name: "tc-failure-kustomizations-paths-format"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomization_paths: "abcde1234"
+    # Define assertions
+    kustomize_tc_should_fail: true
+    kustomize_tc_should_change: false
+    kustomize_tc_should_contain_error: "list of paths"
+    kustomize_tc_should_contain_invalid_argument: "kustomizations_paths"
+  ansible.builtin.include_tasks: run_test_case.yml

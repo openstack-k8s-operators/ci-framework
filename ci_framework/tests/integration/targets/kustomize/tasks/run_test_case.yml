@@ -1,0 +1,216 @@
+---
+- name: "[{{ kustomize_tc_name }}] Create temporary directory for the scenario" # noqa: name[template]
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: cifmw-ci-kustomize-scenario-dir
+  register: _ci_kustomize_temporal_dir
+
+- name: "[{{ kustomize_tc_name }}] Create extra directories if requested" # noqa: name[template]
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: cifmw-ci-kustomize-scenario-extras-dir
+  register: _ci_kustomize_extras_paths
+  loop: "{{ kustomize_tc_copy_kustomization_paths | default([]) }}"
+
+- name: "[{{ kustomize_tc_name }}] Set a fact with the all the files that needs to be copied" # noqa: name[template]
+  vars:
+    kustomizations_extra_paths: >-
+      {% set paths = {} -%}
+      {% for temp_paths_out in _ci_kustomize_extras_paths.results | default([]) -%}
+      {%     if (temp_paths_out.item is string) -%}
+      {%         set target_path = [temp_paths_out.path, temp_paths_out.item] | path_join -%}
+      {%         set _ = paths.update({target_path: temp_paths_out.item}) -%}
+      {%     else -%}
+      {%         for item in temp_paths_out.item | default([]) -%}
+      {%           set target_path = [temp_paths_out.path, item] | path_join -%}
+      {%           set _ = paths.update({target_path: item}) -%}
+      {%         endfor -%}
+      {%     endif -%}
+      {% endfor -%}
+      {{ paths }}
+    kustomizations_paths: >-
+      {% set paths = {} -%}
+      {% for file_name in kustomize_tc_copy_kustomization_files | default([]) -%}
+      {%       set target_path = [_ci_kustomize_temporal_dir.path, file_name] | path_join -%}
+      {%       set _ = paths.update({target_path: file_name}) -%}
+      {% endfor -%}
+      {{ paths }}
+    target_dir_manifests_paths: >-
+      {% set paths = {} -%}
+      {% for file_name in kustomize_tc_target_dir_paths | default([]) -%}
+      {%       set target_path = [_ci_kustomize_temporal_dir.path, file_name] | path_join -%}
+      {%       set _ = paths.update({target_path: file_name}) -%}
+      {% endfor -%}
+      {{ paths }}
+    target_manifests_to_copy: >-
+      {{
+          {
+            (
+              [_ci_kustomize_temporal_dir.path, kustomize_tc_target_manifest_path] | path_join
+            ): kustomize_tc_target_manifest_path
+          }
+          if (kustomize_tc_target_manifest_path is defined)
+          else
+          (
+            target_dir_manifests_paths
+            if (kustomize_tc_target_dir_paths is defined)
+            else {}
+          )
+      }}
+  ansible.builtin.set_fact:
+    _ci_kustomize_extra_kustomizations: "{{ kustomizations_extra_paths }}"
+    _ci_kustomize_kustomizations: "{{ kustomizations_paths }}"
+    _ci_kustomize_to_copy: >-
+      {{
+        target_manifests_to_copy |
+        combine(kustomizations_paths) |
+        combine(kustomizations_extra_paths)
+      }}
+
+# Typically used for testing non-existing path validations
+- name: "[{{ kustomize_tc_name }}] Skip copying not existing files if told so" # noqa: name[template]
+  when: "kustomize_tc_skip_non_existing_sources | default(false)"
+  block:
+    - name: "[{{ kustomize_tc_name }}] Check if source file exits" # noqa: name[template]
+      ansible.builtin.stat:
+        path: "{{ ci_kustomize_files_dir_path }}/{{ item }}"
+      register: _ci_kustomize_source_files_stat
+      loop: "{{ _ci_kustomize_to_copy.values() | list | unique }}"
+
+    - name: "[{{ kustomize_tc_name }}] Filter source files to include only the existing ones" # noqa: name[template]
+      vars:
+        existing_paths: >-
+          {{
+            _ci_kustomize_source_files_stat.results |
+            selectattr('stat.exists', 'equalto', true) |
+            map(attribute='item')
+          }}
+      ansible.builtin.set_fact:
+        _ci_kustomize_to_copy: >-
+          {{
+              _ci_kustomize_to_copy |
+              dict2items |
+              selectattr('value', 'in', existing_paths) |
+              items2dict
+          }}
+
+- name: "[{{ kustomize_tc_name }}] Copy files to each desidered dest" # noqa: name[template]
+  ansible.builtin.copy:
+    dest: "{{ item.key }}"
+    src: "{{ ci_kustomize_files_dir_path }}/{{ item.value }}"
+    remote_src: true
+  loop: "{{ _ci_kustomize_to_copy | dict2items }}"
+
+- name: "[{{ kustomize_tc_name }}] Run TC" # noqa: name[template]
+  environment:
+    PATH: >-
+      {{
+        (
+          kustomize_tc_extra_path + ':' + ansible_env.PATH
+        )
+        if (kustomize_tc_extra_path is defined) else
+        (
+          kustomize_tc_set_path
+          if (kustomize_tc_set_path is defined) else
+          ansible_env.PATH
+        )
+      }}
+  vars:
+    _kustomizations_paths: >-
+      {% set paths = [] -%}
+      {% for temp_paths_out in _ci_kustomize_extras_paths.results | default([]) -%}
+      {%   if (temp_paths_out.item is string) -%}
+      {%       set _ = paths.append(([temp_paths_out.path, temp_paths_out.item] | path_join)) -%}
+      {%   else -%}
+      {%       set _ = paths.append(temp_paths_out.path) -%}
+      {%   endif -%}
+      {% endfor -%}
+      {{ paths }}
+  ci_kustomize:
+    target_path: >-
+      {{
+        (
+          ([_ci_kustomize_temporal_dir.path, kustomize_tc_target_manifest_path] | path_join)
+        ) if (kustomize_tc_target_manifest_path is defined)
+        else
+        (
+          _ci_kustomize_temporal_dir.path
+          if (kustomize_tc_target_dir_paths is defined) else omit
+        )
+      }}
+    output_path: >-
+      {{
+        (
+          ([_ci_kustomize_temporal_dir.path, kustomize_tc_output_path] | path_join)
+        ) if (kustomize_tc_output_path is defined) else omit
+      }}
+    kustomizations: "{{ kustomize_tc_kustomizations | default(omit) }}"
+    kustomizations_paths: >-
+      {{
+        _kustomizations_paths
+        if (kustomize_tc_kustomization_paths is not defined and _kustomizations_paths | length > 0)
+        else (
+          kustomize_tc_kustomization_paths if (kustomize_tc_kustomization_paths is defined)
+          else omit
+        )
+      }}
+    kustomization_files_goes_first: "{{ kustomize_tc_kustomization_files_goes_first | default(omit) }}"
+    preserve_workspace: "{{ kustomize_tc_preserve_workspace | default(omit) }}"
+    sort_ascending: "{{ kustomize_tc_sort_ascending | default(omit) }}"
+  register: _ci_kustomize_last_output
+  ignore_errors: true
+  loop: "{{ range(1, (3 if kustomize_tc_idempotence | default(false) else 2)) | list }}"
+  loop_control:
+    label: "Run {{ kustomize_tc_run_num }}"
+    loop_var: kustomize_tc_run_num
+
+- name: "[{{ kustomize_tc_name }}] Assert idempotence" # noqa: name[template]
+  when: "kustomize_tc_idempotence | default(false) | bool"
+  ansible.builtin.assert:
+    that:
+      - "_ci_kustomize_last_output.results is defined"
+      - "_ci_kustomize_last_output.results | length == 2"
+      - "(_ci_kustomize_last_output.results | last).changed is defined"
+      - "not (_ci_kustomize_last_output.results | last).changed"
+    quiet: true
+
+- name: "[{{ kustomize_tc_name }}] Verify ci_kustomize call" # noqa: name[template]
+  vars:
+    output: >-
+      {{
+        _ci_kustomize_last_output.results | first
+        if _ci_kustomize_last_output.results is defined
+        else _ci_kustomize_last_output
+      }}
+    should_fail: "{{ kustomize_tc_should_fail | default(omit) }}"
+    should_change: "{{ kustomize_tc_should_change | default(omit) }}"
+    _ci_kustomize_tc_out_expected_file_name: >-
+      {{
+          kustomize_tc_output_path
+          if (kustomize_tc_output_path is defined)
+          else (
+            kustomize_tc_target_manifest_path
+            if (kustomize_tc_target_manifest_path is defined)
+            else 'cifmw-kustomization-result.yaml'
+          )
+      }}
+    _ci_kustomize_tc_out_temp_path: >-
+      {{
+          [
+            _ci_kustomize_temporal_dir.path,
+            _ci_kustomize_tc_out_expected_file_name
+          ] | path_join
+      }}
+  ansible.builtin.include_tasks: run_test_case_validate.yml
+
+- name: "[{{ kustomize_tc_name }}] Delete temporal dirs" # noqa: name[template]
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{
+      [ _ci_kustomize_temporal_dir.path ] +
+      (
+        _ci_kustomize_extras_paths.results | default([]) | map(attribute='path')
+      )
+    }}
