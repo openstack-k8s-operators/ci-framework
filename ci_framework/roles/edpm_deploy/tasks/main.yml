@@ -80,36 +80,6 @@
           --for=condition=ready
           --timeout={{ cifmw_edpm_deploy_timeout }}m
 
-    - name: Get the logs of EDPM Deploy
-      when:
-        - deploy_status is defined
-        - "'rc' in deploy_status"
-        - deploy_status.rc == 0
-      ansible.builtin.shell: |
-        for POD in $(oc get pods -o name -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} | egrep "dataplane-deployment-|nova-edpm-compute");
-        do
-          echo $POD;
-          oc logs -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} $POD;
-        done
-      register: edpm_logs
-
-- name: Collect logs for EDPM deploy
-  when:
-    - edpm_logs is defined
-    - "'rc' in edpm_logs"
-    - edpm_logs.rc == 0
-  block:
-    - name: Check for edpm logs directory
-      ansible.builtin.file:
-        path: "{{ cifmw_edpm_deploy_log_path | dirname }}"
-        state: directory
-
-    - name: Collect EDPM deploy logs
-      ansible.builtin.copy:
-        mode: 0644
-        content: "{{ edpm_logs.stdout }}"
-        dest: "{{ cifmw_edpm_deploy_log_path }}"
-
 - name: Validate EDPM
   when: cifmw_edpm_deploy_run_validation | bool
   vars:
