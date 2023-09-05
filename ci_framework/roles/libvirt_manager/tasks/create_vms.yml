@@ -1,7 +1,8 @@
 ---
 - name: "Create VM overlays for {{ vm_type }}"
-  ansible.builtin.command:
-    cmd: >-
+  ci_script:
+    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
+    script: >-
       qemu-img create
       -o backing_file={{ vm_data.value.image_local_dir }}/{{ vm_data.value.disk_file_name }},backing_fmt=qcow2
       -f qcow2
@@ -35,8 +36,9 @@
 
 - name: "Grab IPs for nodes type {{ vm_type }}"
   register: vm_ips
-  ansible.builtin.shell:
-    cmd: >-
+  ci_script:
+    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
+    script: >-
       virsh -c qemu:///system -q
       domifaddr cifmw-{{ vm_type }}-{{ vm_id }} | head -1
   loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
@@ -103,9 +105,10 @@
     - vm_type is not match('^crc.*$')
   delegate_to: "{{ vm_type }}-{{ vm_id }}"
   remote_user: "{{ vm_data.value.admin_user | default('root') }}"
-  ansible.builtin.shell:
+  ci_script:
+    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
     executable: /bin/bash
-    cmd: |-
+    script: |-
       test -d /home/zuul && exit 0;
       set -xe -o pipefail;
       echo "{{ vm_type }}-{{ vm_id }}" | sudo tee /etc/hostname;
