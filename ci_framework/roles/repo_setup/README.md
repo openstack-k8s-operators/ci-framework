@@ -16,6 +16,7 @@ Please explain the role purpose.
 * `cifmw_repo_setup_additional_repos`: (String) Additional repos(ceph, deps) to enable. Defaults to `''`.
 * `cifmw_repo_setup_env`: (Dict) Environment variables to be passed to repo_setup cli . Defaults to `'{}'`.
 * `cifmw_repo_setup_enable_rhos_release`: (Boolean) Toggle `rhos-release` support. Defaults to `False`.
+* `cifmw_repo_setup_dlrn_hash_tag`: (String) repo-setup dlrn-hash-tag. Defaults to `{}`.
 
 ### Optional parameters for rhos-release
 * `cifmw_repo_setup_rhos_release_rpm`: (String) URL to rhos-release RPM.
