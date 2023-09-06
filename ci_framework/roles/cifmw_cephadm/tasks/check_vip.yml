@@ -14,13 +14,20 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Process VIP
+  block:
+    - name: Increment the retry count
+      set_fact:
+        count: "{{ 2 if count is undefined else count | int + 2 }}"
 
-# All variables intended for modification should be placed in this file.
-# All variables within this role should have a prefix of "cifmw_edpm_deploy"
-cifmw_edpm_deploy_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
-cifmw_edpm_deploy_manifests_dir: "{{ cifmw_manifests | default(cifmw_edpm_deploy_basedir ~ '/artifacts/manifests') }}"
-cifmw_edpm_deploy_retries: 100
-cifmw_edpm_deploy_run_validation: false
-cifmw_edpm_deploy_dryrun: false
-cifmw_edpm_deploy_timeout: 40
-cifmw_edpm_deploy_registry_url: "{{ cifmw_install_yamls_defaults['DATAPLANE_REGISTRY_URL'] }}"
+    - name: Get an IP address from the Storage network
+      set_fact:
+        cur_ip: "{{ cifmw_cephadm_rgw_network | ansible.utils.next_nth_usable(count) }}"
+
+    - name: Reserve VIP if the address is available
+      set_fact:
+        cifmw_cephadm_vip: "{{ cur_ip }}"
+      when: cur_ip not in ips | default([])
+  when:
+    # cifmw_cephadm_vip is always defined in the ceph.yml playbook
+    - cifmw_cephadm_vip | default() | length == 0

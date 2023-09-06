@@ -107,25 +107,6 @@
         dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
         src: "{{ inventory_file }}"
 
-    - name: Set fact for CRC
-      ansible.builtin.set_fact:
-        crc_ip: "{{ hostvars['crc']['ansible_default_ipv4']['address'] }}"
-
-    - name: Add entries related to the CRC
-      become: true
-      vars:
-        crc_ip: "{{ hostvars['crc']['ansible_default_ipv4']['address'] }}"
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        line: >
-          {{ crc_ip }} api.crc.testing
-          canary-openshift-ingress-canary.apps-crc.testing
-          console-openshift-console.apps-crc.testing
-          default-route-openshift-image-registry.apps-crc.testing
-          downloads-openshift-console.apps-crc.testing
-          oauth-openshift.apps-crc.testing
-        create: true
-
     - name: Install other packages
       become: true
       ansible.builtin.package:
@@ -143,11 +124,9 @@
       ansible.builtin.slurp:
         path: "{{ ansible_user_dir }}/.ssh/id_ed25519.pub"
 
-    - name: Inject key in authorized_key
-      delegate_to: crc
-      ansible.posix.authorized_key:
-        user: core
-        key: "{{ pub_key_slurp['content'] | b64decode }}"
+    - name: Register pub key as a fact
+      ansible.builtin.set_fact:
+        persistent_ssh_key: "{{ pub_key_slurp['content'] | b64decode }}"
 
     - name: Get the default iface connection
       register: controller_default_connection_out
@@ -162,3 +141,17 @@
         cmd: |-
           nmcli con mod '{{ controller_default_connection_out.stdout | trim }}' ipv4.dns '{{ dns_servers_string }}' ipv4.route-metric 100;
           nmcli con up '{{ controller_default_connection_out.stdout | trim }}';
+
+- name: "Ensure persistent SSH access"
+  hosts: all
+  tasks:
+    - name: Inject key in ansible_user
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ hostvars['controller']['persistent_ssh_key'] }}"
+
+    - name: Inject key in root
+      become: true
+      ansible.posix.authorized_key:
+        user: "root"
+        key: "{{ hostvars['controller']['persistent_ssh_key'] }}"

@@ -64,7 +64,7 @@ storage network IP range.
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
     - name: Build a dict mapping hostname to its IP which is in storage network range
-      set_fact:
+      ansible.builtin.set_fact:
         host_to_ip: "{{ host_to_ip | default({}) | combine({ hostvars[item]['ansible_hostname'] :
           hostvars[item][all_addresses] | ipaddr(storage_network_range) | first }) }}"
       loop: "{{ groups['edpm'] }}"

@@ -18,30 +18,30 @@
 # The file will be saved in the path "{{ cifmw_ceph_client_vars }}"
 
 - name: Get ceph_cli
-  include_tasks: ceph_cli.yml
+  ansible.builtin.include_tasks: ceph_cli.yml
 
 - name: Wait for the expected number of monitors to be running
-  include_tasks: wait_for_expected_num_mons.yml
+  ansible.builtin.include_tasks: wait_for_expected_num_mons.yml
   when:
     - not cifmw_cephadm_deployed_ceph | bool
     - cifmw_cephadm_wait_for_mons | bool
 
 - name: Run ceph mon dump to get all monitors
-  command: "{{ cifmw_cephadm_ceph_cli }} mon dump --format json"
+  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} mon dump --format json"
   register: ceph_mon_dump
   become: true
   tags:
     - cephadm_mon_dump
 
 - name: Extract mons_json
-  set_fact:
+  ansible.builtin.set_fact:
     cifmw_cephadm_mons_json: "{{ (ceph_mon_dump.stdout | from_json).mons |
                    map(attribute='public_addrs') |
                    map(attribute='addrvec') |
                    list }}"
 
 - name: Build mons_list
-  set_fact:
+  ansible.builtin.set_fact:
     cifmw_cephadm_mons_list: "{{ cifmw_cephadm_mons_list | default([]) +
       [ '[' ~
         item[0].type ~ ':' ~ item[0].addr ~ '/' ~ item[0].nonce
@@ -52,11 +52,11 @@
   loop: "{{ cifmw_cephadm_mons_json }}"
 
 - name: Set cifmw_ceph_client_external_cluster_mon_ips from mons_list
-  set_fact:
+  ansible.builtin.set_fact:
     cifmw_ceph_client_external_cluster_mon_ips: "{{ cifmw_cephadm_mons_list | join(',') }}"
 
 - name: Verify the keyring
-  include_tasks: check_keyring.yml
+  ansible.builtin.include_tasks: check_keyring.yml
   vars:
     current_key: "{{ item.name }}"
   loop: "{{ cifmw_cephadm_keys| default([]) }}"
@@ -67,7 +67,7 @@
     - cephadm_extract_keys
 
 - name: Ensure cifmw_ceph_client_vars path exists
-  file:
+  ansible.builtin.file:
     path: "{{ cifmw_ceph_client_vars | dirname }}"
     state: directory
     recurse: yes
@@ -76,7 +76,7 @@
     - (cifmw_ceph_client_vars | dirname) | length > 0
 
 - name: Save cifmw_ceph_client_vars file
-  template:
+  ansible.builtin.template:
     src: templates/ceph_client.yaml.j2
     dest: "{{ cifmw_ceph_client_vars }}"
     mode: 0644
