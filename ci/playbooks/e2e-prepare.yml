@@ -4,7 +4,7 @@
   gather_facts: true
   tasks:
     - name: Clone repos in the job workspace
-      include_role:
+      ansible.builtin.include_role:
         name: prepare-workspace
 
     - name: Output pip related things
@@ -15,7 +15,7 @@
       ansible.builtin.file:
         path: "{{ ansible_user_dir }}/zuul-output/logs"
         state: directory
-        mode: 0755
+        mode: "0755"
 
     - name: Install required packages
       become: true
@@ -27,19 +27,22 @@
 
     - name: Install requirements
       community.general.make:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        chdir: "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}"
         target: setup_molecule
 
     - name: Add cronjob to trigger job stats
       ansible.builtin.cron:
         name: Get cri-o container stats
         minute: "*"
-        job: "/usr/bin/date >> /tmp/crio-stats.log; {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scripts/get-stats.sh >> /tmp/crio-stats.log"
+        job: >-
+          /usr/bin/date >> /tmp/crio-stats.log;
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scripts/get-stats.sh >>
+          /tmp/crio-stats.log
       when: cifmw_openshift_crio_stats | default(true)
 
-    - name: construct project change list
+    - name: Construct project change list
       ansible.builtin.set_fact:
-        zuul_change_list: "{{ zuul_change_list|default([]) + [item.project.short_name] }}"
+        zuul_change_list: "{{ zuul_change_list | default([]) + [item.project.short_name] }}"
         cacheable: true
       with_items: "{{ zuul['items'] }}"
       when:
