@@ -1,8 +1,8 @@
 ---
-- name: "Set playbook {{ hook.name }} path"
-  set_fact:
-    cifmw_basedir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}"
-    hook_name: "{{ hook.name | regex_replace('([^\x00-\x7F]|\\s|`)+', '_') |lower }}"
+- name: "Set playbook path for {{ hook.name }}"
+  ansible.builtin.set_fact:
+    cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+    hook_name: "{{ hook.name | regex_replace('([^\x00-\x7F]|\\s|`)+', '_') | lower }}"
     playbook_path: >-
       {%- if hook.source is not ansible.builtin.abs -%}
       {{ role_path }}/../../hooks/playbooks/{{ hook.source }}
@@ -27,8 +27,8 @@
     patterns: '*.yml'
   register: cifmw_run_hook_parameters_files
 
-- name: "Add parameters artifacts as extra variables"
-  set_fact:
+- name: "Add parameters artifacts as extra variables"  # noqa jinja[spacing]
+  ansible.builtin.set_fact:
     extra_vars: >-
       {{ extra_vars }}
       {% for file in cifmw_run_hook_parameters_files.files %}
@@ -57,15 +57,15 @@
 # "main" play.
 - name: Ensure we get the logs even in case of failure
   block:
-    - name: "Run {{ playbook_path }} playbook"
+    - name: "Run play {{ playbook_path }}"
       register: play_output
       environment:
         ANSIBLE_CONFIG: "{{ hook.config_file | default(ansible_config_file) }}"
-      ansible.builtin.command:
+      ansible.builtin.shell:  # noqa: command-instead-of-shell
         cmd: >-
           ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
           {% if hook.connection is defined -%}
-          -c {{ hook.connection }}
+          -c {{ hook.connection }}
           {% endif -%}
           {{ extra_vars }}
           -e "cifmw_basedir={{ cifmw_basedir }}"
