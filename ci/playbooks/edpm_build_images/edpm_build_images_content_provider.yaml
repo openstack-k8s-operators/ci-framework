@@ -11,10 +11,10 @@
       ansible.builtin.import_role:
         name: repo_setup
       vars:
-       cifmw_repo_setup_output: "/etc/yum.repos.d/"
+        cifmw_repo_setup_output: "/etc/yum.repos.d/"
 
     - name: Get latest commit when no PR is provided
-      ansible.builtin.command:
+      ansible.builtin.command:  # noqa: command-instead-of-module
         cmd: git show-ref --head --hash head
       args:
         chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-image-builder"
@@ -37,7 +37,7 @@
         push_args:
           dest: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001"
         tag: "{{ pr_sha }}"
-        push: yes
+        push: true
       loop:
         - edpm-hardened-uefi
         - ironic-python-agent
@@ -53,14 +53,16 @@
         cacheable: true
 
     - name: Get the containers list from container registry
-      ansible.builtin.command: "curl -X GET {{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
+      ansible.builtin.uri:
+        url: "{{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
+        return_content: true
       register: cp_imgs
 
     - name: Add the container list to file
       ansible.builtin.copy:
-        mode: 0644
-        content: "{{ cp_imgs.stdout }}"
+        content: "{{ cp_imgs.content }}"
         dest: "{{ ansible_user_dir }}/ci-framework-data/logs/local_registry.log"
+        mode: "0644"
 
 - name: Run log related tasks
-  ansible.builtin.import_playbook: "{{ cifmw_project_root }}/ci_framework/playbooks/99-logs.yml"
+  ansible.builtin.import_playbook: "{{ ansible_user_dir }}/{{ zuul.project.src_dir }}/ci_framework/playbooks/99-logs.yml"
