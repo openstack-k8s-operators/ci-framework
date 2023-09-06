@@ -44,7 +44,8 @@
     - {regexp: 'distro=.*', line: 'distro={{ cifmw_bop_rdo_release }}'}
     - {regexp: 'source=.*', line: 'source={{ cifmw_bop_openstack_release }}'}
 
-- block:
+- name: Mapp project
+  block:
     - name: Map project name to DLRN project name
       register: project_name_mapped
       ansible.builtin.shell:
@@ -61,15 +62,19 @@
       failed_when: project_name_mapped.rc != 0 or not project_name_mapped.stdout
 
   rescue:
-    - ansible.builtin.debug:
-        msg: |
-          WARNING: Got {{ project_name_mapped.rc }} result code trying to build {{ cifmw_bop_openstack_project_path | basename }}
+    - name: We failed mapping
+      ansible.builtin.debug:
+        msg: >-
+          WARNING:
+          Got {{ project_name_mapped.rc }} result code trying to build
+          {{ cifmw_bop_openstack_project_path | basename }}
           --- STDERR ---
           {{ project_name_mapped.stderr }}
           --- STDOUT ---
           {{ project_name_mapped.stdout }}
 
-- when: project_name_mapped is success
+- name: Mapping succeeded
+  when: project_name_mapped is success
   block:
     - name: Append project name to package list
       ansible.builtin.set_fact:
@@ -80,12 +85,12 @@
         path: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/"
         state: directory
 
-    - name: Check if project {{ project_name_mapped.stdout }} source already exist
+    - name: "Check for existing {{ project_name_mapped.stdout }}"
       ansible.builtin.stat:
         path: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}/.git'
       register: repo_status
 
-    - name: Clone {{ project_name_mapped.stdout }} source
+    - name: "Clone {{ project_name_mapped.stdout }}"  # noqa: latest[git]
       ansible.builtin.git:
         accept_hostkey: true
         repo: '{{ cifmw_bop_openstack_project_path }}'
@@ -100,16 +105,16 @@
       ansible.builtin.template:
         src: run_dlrn.sh.j2
         dest: "{{ cifmw_bop_build_repo_dir }}/run_dlrn.sh"
-        mode: 0744
+        mode: "0744"
 
     - name: Print info about building
       ansible.builtin.debug:
         msg: "Building change for {{ project_name_mapped.stdout|default('unknown') }}"
 
     - name: Run DLRN
-      ansible.builtin.shell: >
-        set -o pipefail &&
-        {{ cifmw_bop_build_repo_dir }}/run_dlrn.sh 2>&1 {{ cifmw_bop_timestamper_cmd }} >> {{ cifmw_bop_build_repo_dir }}/dlrn.log
-      args:
-        chdir: '{{ cifmw_bop_build_repo_dir }}'
       register: repo_built
+      ansible.builtin.shell:
+        cmd: >
+          set -o pipefail &&
+          {{ cifmw_bop_build_repo_dir }}/run_dlrn.sh 2>&1 {{ cifmw_bop_timestamper_cmd }} >> {{ cifmw_bop_build_repo_dir }}/dlrn.log
+        chdir: '{{ cifmw_bop_build_repo_dir }}'
