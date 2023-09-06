@@ -15,66 +15,65 @@
 # under the License.
 
 
-- name: create user {{ cifmw_admin_user }}
+- name: "Create user {{ cifmw_admin_user }}"
   become: true
   ansible.builtin.user:
     name: '{{ cifmw_admin_user }}'
     generate_ssh_key: '{{ cifmw_admin_generate_key }}'
 
-- name: grant admin rights to user {{ cifmw_admin_user }}
+- name: "Grant admin rights to user {{ cifmw_admin_user }}"
   become: true
   ansible.builtin.copy:
-    dest: /etc/sudoers.d/{{ cifmw_admin_user }}
-    content: |
-      {{ cifmw_admin_user }} ALL=(ALL) NOPASSWD:ALL
-    mode: 0440
+    dest: "/etc/sudoers.d/{{ cifmw_admin_user }}"
+    content: "{{ cifmw_admin_user }} ALL=(ALL) NOPASSWD:ALL"
+    mode: "0440"
     owner: root
     group: root
 
 # workaround for https://bugs.launchpad.net/tripleo/+bug/1917856
-- name: ensure home dir has the right owner/group for user {{ cifmw_admin_user }}
+- name: "Ensure home dir has the right owner/group for user {{ cifmw_admin_user }}"
   become: true
   ansible.builtin.file:
-    path: /home/{{ cifmw_admin_user }}
+    path: "/home/{{ cifmw_admin_user }}"
     state: directory
-    owner: '{{ cifmw_admin_user }}'
-    group: '{{ cifmw_admin_user }}'
-    mode: 0700
+    owner: "{{ cifmw_admin_user }}"
+    group: "{{ cifmw_admin_user }}"
+    mode: "0700"
 
-- name: ensure .ssh dir exists for user {{ cifmw_admin_user }}
+- name: "Ensure .ssh dir exists for user {{ cifmw_admin_user }}"
   become: true
   ansible.builtin.file:
-    path: /home/{{ cifmw_admin_user }}/.ssh
+    path: "/home/{{ cifmw_admin_user }}/.ssh"
     state: directory
-    owner: '{{ cifmw_admin_user }}'
-    group: '{{ cifmw_admin_user }}'
-    mode: 0700
+    owner: "{{ cifmw_admin_user }}"
+    group: "{{ cifmw_admin_user }}"
+    mode: "0700"
 
-- name: ensure authorized_keys file exists for user {{ cifmw_admin_user }}
+- name: "Ensure authorized_keys file exists for user {{ cifmw_admin_user }}"
   become: true
   ansible.builtin.file:
-    path: /home/{{ cifmw_admin_user }}/.ssh/authorized_keys
+    path: "/home/{{ cifmw_admin_user }}/.ssh/authorized_keys"
     state: touch
     owner: '{{ cifmw_admin_user }}'
     group: '{{ cifmw_admin_user }}'
-    mode: 0600
+    mode: "0600"
 
-- name: get remote {{ cifmw_admin_user }} public key
+- name: "Get remote key for {{ cifmw_admin_user }}"
   become: true
-  ansible.builtin.slurp:
-    src: /home/{{ cifmw_admin_user }}/.ssh/id_rsa.pub
-  register: key
   when:
     - cifmw_admin_generate_key | bool
+  ansible.builtin.slurp:
+    src: "/home/{{ cifmw_admin_user }}/.ssh/id_rsa.pub"
+  register: key
 
-- name: append {{ cifmw_admin_user }} public key to authorized_keys
+- name: "Append pub key for {{ cifmw_admin_user }}"
   become: true
+  when:
+    - cifmw_admin_generate_key | bool
   ansible.builtin.lineinfile:
-    path: /home/{{ cifmw_admin_user }}/.ssh/authorized_keys
+    path: "/home/{{ cifmw_admin_user }}/.ssh/authorized_keys"
     line: "{{ key['content'] | b64decode }}"
     state: present
-    owner: '{{ cifmw_admin_user }}'
-    group: '{{ cifmw_admin_user }}'
-    mode: 0600
-  when:
-    - cifmw_admin_generate_key | bool
+    owner: "{{ cifmw_admin_user }}"
+    group: "{{ cifmw_admin_user }}"
+    mode: "0600"
