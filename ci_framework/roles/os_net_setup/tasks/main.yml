@@ -1,39 +1,42 @@
-- name: get openstack admin credentials from k8s
+---
+- name: Get openstack admin credentials from k8s
   block:
-  - name: Get clouds.yaml configuration
-    kubernetes.core.k8s_info:
-      kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-      context: "{{ cifmw_openshift_context }}"
-      kind: ConfigMap
-      namespace: openstack
-      name: openstack-config
-    register: clouds_yaml
+    - name: Get clouds.yaml configuration
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        context: "{{ cifmw_openshift_context }}"
+        kind: ConfigMap
+        namespace: openstack
+        name: openstack-config
+      register: clouds_yaml
 
-  - name: Get the OSP admin password
-    kubernetes.core.k8s_info:
-      kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-      context: "{{ cifmw_openshift_context }}"
-      kind: Secret
-      namespace: openstack
-      name: openstack-config-secret
-    register: osp_secret
+    - name: Get the OSP admin password
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        context: "{{ cifmw_openshift_context }}"
+        kind: Secret
+        namespace: openstack
+        name: openstack-config-secret
+      register: osp_secret
 
 - name: Construct auth param for openstack
   block:
-  - name: Set openstack auth fact
-    ansible.builtin.set_fact:
-      openstack_auth: |
-        {{ ((clouds_yaml.resources[0].data['clouds.yaml']| from_yaml)['clouds']['default'] |
-        combine ({'auth': { 'password' : (osp_secret.resources[0].data['secure.yaml']|b64decode|from_yaml)['clouds']['default']['auth']['password']} }, recursive=true))['auth'] }}
-      region_name: "{{ (clouds_yaml.resources[0].data['clouds.yaml']| from_yaml)['clouds']['default']['region_name'] }}"
+    - name: Set openstack auth fact
+      ansible.builtin.set_fact: # noqa: yaml[line-length]
+        openstack_auth: |
+          {{ ((clouds_yaml.resources[0].data['clouds.yaml']| from_yaml)['clouds']['default'] |
+          combine ({'auth': { 'password' : (osp_secret.resources[0].data['secure.yaml']|b64decode|from_yaml)['clouds']['default']['auth']['password']} }, recursive=true))['auth'] }}
+        region_name: "{{ (clouds_yaml.resources[0].data['clouds.yaml']| from_yaml)['clouds']['default']['region_name'] }}"
   rescue:
-  - fail:
-      msg: |
-        Failed to Retrive auth Infomation
-        clouds.yaml: {{ clouds_yaml }}
-        osp_secret: {{ osp_secret }}
+    - name: Fail if we do not have auth information
+      ansible.builtin.fail:
+        msg: |
+          Failed to Retrive auth Infomation
+          clouds.yaml: {{ clouds_yaml }}
+          osp_secret: {{ osp_secret }}
 
-- openstack.cloud.networks_info:
+- name: Get network information
+  openstack.cloud.networks_info:
     auth: "{{ openstack_auth }}"
   register: net_info
 
