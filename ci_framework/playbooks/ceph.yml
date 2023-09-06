@@ -112,6 +112,7 @@
     cifmw_ceph_client_vars: /tmp/ceph_client.yml
     cifmw_cephadm_bootstrap_host: "{{ ansible_hostname }}"
     cifmw_cephadm_default_container: true
+    all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
     cifmw_cephadm_pools:
       - name: vms
         pg_autoscale_mode: True
@@ -159,6 +160,27 @@
       loop: "{{ lookup('file', cifmw_cephadm_spec_ansible_host) | from_yaml_all | list }}"
       delegate_to: localhost
 
+    # public network always exist because is provided by the ceph_spec role
+    - name: Get Storage network range
+      ansible.builtin.set_fact:
+        cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network', section='global',  file=cifmw_cephadm_bootstrap_conf) }}"
+
+    - name: Get already assigned IP addresses
+      ansible.builtin.set_fact:
+        ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
+      loop: "{{ groups['edpm'] }}"
+
+    # cifmw_cephadm_vip is the VIP reserved in the Storage network
+    - name: Set VIP var as empty string
+      set_fact:
+        cifmw_cephadm_vip: ""
+
+    - name: Process VIP
+      ansible.builtin.include_role:
+        name: cifmw_cephadm
+        tasks_from: check_vip
+      loop: "{{ range(1, (ips | length) + 1) | list }}"
+
   tasks:
     - name: Satisfy Ceph prerequisites
       ansible.builtin.import_role:
@@ -179,6 +201,14 @@
       ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: pools
+
+    - name: Deploy RGW
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: rgw
+      vars:
+        # cifmw_cephadm_vip is computed or passed as an override via -e @extra.yml
+        cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}/24"
 
     - name: Create Cephx Keys for OpenStack
       ansible.builtin.import_role:
