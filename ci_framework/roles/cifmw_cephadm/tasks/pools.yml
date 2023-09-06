@@ -16,22 +16,32 @@
 
 - name: Create Ceph Pools
   become: true
+  when:
+    - cifmw_cephadm_pools is defined
+    - cifmw_cephadm_pools | length > 0
   block:
     - name: Get ceph_cli
       ansible.builtin.include_tasks: ceph_cli.yml
 
     - name: Create pool
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} osd pool create {{ item.name }} {{ item.pg_num | default('') }} {{ item.rule_name | default('replicated_rule') }} --autoscale-mode {{ item.pg_autoscale | default('on') }}"
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }}
+          osd pool create
+          {{ item.name }} {{ item.pg_num | default('') }}
+          {{ item.rule_name | default('replicated_rule') }}
+          --autoscale-mode {{ item.pg_autoscale | default('on') }}
       loop: "{{ cifmw_cephadm_pools | default([]) }}"
       changed_when: false
 
     - name: Enable application on Ceph pools
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} osd pool application enable {{ item.name }} {{ item.application }}"
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }}
+          osd pool application enable
+          {{ item.name }} {{ item.application }}
       loop: "{{ cifmw_cephadm_pools | default([]) }}"
       changed_when: false
-  when:
-    - cifmw_cephadm_pools is defined
-    - cifmw_cephadm_pools | length > 0
 
 - name: Configure the RBD trash purge scheduler
   when:
@@ -44,9 +54,10 @@
         ceph_command: rbd
 
     - name: Set trash interval
-      ansible.builtin.command: |
-        {{ cifmw_cephadm_ceph_cli }} trash purge schedule add \
-        {{ cifmw_cephadm_rbd_trash_interval | default(15) }} --pool {{ item }}
+      ansible.builtin.command:
+        cmd: |
+          {{ cifmw_cephadm_ceph_cli }} trash purge schedule add \
+          {{ cifmw_cephadm_rbd_trash_interval | default(15) }} --pool {{ item }}
       changed_when: false
       become: true
       loop: "{{ [ cinder_pool.name | default('volumes') ] + cinder_pool.cinder_extra_pools | default([]) }}"

@@ -41,8 +41,15 @@
 # cephadm_ls should be registered by pre.yml
 
 - name: Bootstrap Ceph if there are no running Ceph Daemons
+  when:
+    - cephadm_ls is defined
+    - cephadm_ls.stdout == '[]'
+  tags:
+    - cephadm_bootstrap
   block:
     - name: Run cephadm bootstrap
+      become: true
+      register: cephadm_bootstrap
       ansible.builtin.shell: |
         {{ cifmw_cephadm_bin }} \
         {% if not cifmw_cephadm_default_container %}--image {{ cifmw_cephadm_container_ns + '/' + cifmw_cephadm_container_image + ':' + cifmw_cephadm_container_tag|string }} \{% endif %}
@@ -65,40 +72,37 @@
         --skip-monitoring-stack --skip-dashboard \
         {% if cifmw_cephadm_extra_args|length > 0 %}{{ cifmw_cephadm_extra_args }} \{% endif %}
         --mon-ip {{ cifmw_cephadm_first_mon_ip }}
-      register: cephadm_bootstrap
-      become: true
+
     - name: Show results of bootstrap
+      when: cifmw_cephadm_verbose | bool
       ansible.builtin.debug:
         msg: "{{ cephadm_bootstrap }}"
-      when: cifmw_cephadm_verbose | bool
+
     - name: Ensure cifmw_cephadm_ceph_cli is set
-      ansible.builtin.include_tasks: ceph_cli.yml
       when:
         - cifmw_cephadm_ceph_cli is not defined
+      ansible.builtin.include_tasks: ceph_cli.yml
+
     - name: Ensure cephadm uses image tags instead of digests
+      become: true
       ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} config set mgr mgr/cephadm/use_repo_digest false
       changed_when: false
-      become: true
+
     - name: Set the default container image in ceph configuration
+      become: true
+      when:
+        - not (cifmw_cephadm_default_container | default(false) | bool)
       ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} config set global container_image \
         {{ cifmw_cephadm_container_ns + '/' + cifmw_cephadm_container_image + ':' + cifmw_cephadm_container_tag|string }}
       changed_when: false
-      become: true
-      when:
-        - not (cifmw_cephadm_default_container | default(false) | bool)
-  when:
-    - cephadm_ls is defined
-    - cephadm_ls.stdout == '[]'
-  tags:
-    - cephadm_bootstrap
 
 - name: If cephadm bootstrap was not run report the reason
+  when:
+    - cephadm_ls is defined
+    - cephadm_ls.stdout != '[]'
   ansible.builtin.debug:
     msg: |
       'cephadm bootstrap' was not run because 'cephadm ls'
       indicates that Ceph containers are already running.
-  when:
-    - cephadm_ls is defined
-    - cephadm_ls.stdout != '[]'

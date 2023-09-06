@@ -21,58 +21,68 @@
   tags:
     - always
 
-- name: Install cephadm package
+- name: Install cephadm package  # noqa: package-latest
   become: true
+  when:
+    - cifmw_cephadm_predeployed | bool
   ansible.builtin.package:
     name: cephadm
     state: latest
     releasever: "{{ ansible_facts['distribution_major_version'] }}"
-  when:
-    - cifmw_cephadm_predeployed | bool
 
 - name: Stat cephadm file
   ansible.builtin.stat:
     path: "{{ cifmw_cephadm_bin }}"
   register: stat_cephadm
   become: true
-  ignore_errors: true
+  ignore_errors: true  # noqa: ignore-errors
 
 - name: Fail if cephadm is not available
+  when:
+    - not stat_cephadm.stat.exists
   ansible.builtin.fail:
     msg: "{{ cifmw_cephadm_bin }} does not exist"
-  when: not stat_cephadm.stat.exists
 
 - name: List Ceph daemon instances on this host
-  ansible.builtin.shell: "{{ cifmw_cephadm_bin }} ls --no-detail"
+  ansible.builtin.command:
+    cmd: "{{ cifmw_cephadm_bin }} ls --no-detail"
   register: cephadm_ls
   become: true
   tags:
     - cephadm_bootstrap
 
 - name: Ensure cifmw_cephadm_fsid variable is set if none was provided
+  when: cifmw_cephadm_fsid is not defined or cifmw_cephadm_fsid | length == 0
   block:
     - name: Set list of found FSIDs
-      ansible.builtin.set_fact:
-        cifmw_cephadm_fsid_list: "{{ cephadm_ls.stdout | from_json | map(attribute='fsid') | sort | unique }}"
       when:
         - cephadm_ls is defined
         - cephadm_ls.stdout is defined
         - cephadm_ls.stdout != '[]'
+      ansible.builtin.set_fact:
+        cifmw_cephadm_fsid_list: |-
+          {{
+            cephadm_ls.stdout |
+            from_json |
+            map(attribute='fsid') |
+            sort | unique
+          }}
     - name: Fail if >1 FSID was discovered
+      when: cifmw_cephadm_fsid_list | length > 1
       ansible.builtin.fail:
         msg: |
           Multiple FSIDs were found. This Ansible role does not
           support management of multiple Ceph clusters on one host.
-      when: cifmw_cephadm_fsid_list | length > 1
+
     - name: Set FSID to the discovered value
+      when: cifmw_cephadm_fsid_list | length == 1
       ansible.builtin.set_fact:
         cifmw_cephadm_fsid: "{{ cifmw_cephadm_fsid_list[0] }}"
-      when: cifmw_cephadm_fsid_list | length == 1
+
     - name: Set random cifmw_cephadm_fsid if no running ceph containers were found
+      when: cifmw_cephadm_fsid_list | length == 0
       ansible.builtin.set_fact:
         cifmw_cephadm_fsid: "{{ 99999999 | random | to_uuid | lower }}"
-      when: cifmw_cephadm_fsid_list | length == 0
-  when: cifmw_cephadm_fsid is not defined or (cifmw_cephadm_fsid is defined and cifmw_cephadm_fsid | length == 0)
 
 - name: Set first monitor IP if it was not passed
   ansible.builtin.set_fact:
@@ -101,7 +111,7 @@
   delegate_to: localhost
   become: true
 
-- name: push cifmw_cephadm_spec to bootstrap node if spec file exsits
+- name: Push cifmw_cephadm_spec to bootstrap node if spec file exsits
   ansible.builtin.copy:
     src: "{{ cifmw_cephadm_spec_ansible_host }}"
     dest: "{{ cifmw_cephadm_spec }}"
@@ -111,12 +121,12 @@
   become: true
   when: cifmw_cephadm_spec_stat_host.stat.exists
 
-- name: was a cifmw_cephadm_bootstrap_conf passed?
+- name: "Was a cifmw_cephadm_bootstrap_conf passed?"
   when:
     - cifmw_cephadm_bootstrap_conf is defined
     - cifmw_cephadm_bootstrap_conf | length > 0
   block:
-    - name: stat cifmw_cephadm_bootstrap_conf file
+    - name: Stat cifmw_cephadm_bootstrap_conf file
       ansible.builtin.stat:
         path: "{{ cifmw_cephadm_bootstrap_conf }}"
       register: stat_bootstrap_conf
@@ -124,7 +134,7 @@
       delegate_to: localhost
       ignore_errors: true
 
-    - name: push it to cifmw_cephadm_assimilate_conf on bootstrap node
+    - name: Push it to cifmw_cephadm_assimilate_conf on bootstrap node
       ansible.builtin.copy:
         src: "{{ cifmw_cephadm_bootstrap_conf }}"
         dest: "{{ cifmw_cephadm_assimilate_conf }}"
@@ -134,7 +144,11 @@
       become: true
       when: stat_bootstrap_conf.stat.exists
 
-- name: generate cifmw_cephadm_assimilate_conf on bootstrap node
+- name: Generate cifmw_cephadm_assimilate_conf on bootstrap node
+  when:
+    - cifmw_cephadm_bootstrap_conf is not defined or
+      cifmw_cephadm_bootstrap_conf | length == 0
+  become: true
   action: config_template
   args:
     src: "ceph.conf.j2"
@@ -144,7 +158,3 @@
     mode: "0644"
     config_overrides: "{{ cifmw_cephadm_conf_overrides }}"
     config_type: ini
-  become: true
-  when:
-    - cifmw_cephadm_bootstrap_conf is not defined or
-      cifmw_cephadm_bootstrap_conf | length == 0
