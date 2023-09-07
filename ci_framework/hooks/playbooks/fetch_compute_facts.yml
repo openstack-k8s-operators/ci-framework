@@ -75,7 +75,7 @@
           vars:
             dns_servers: "{{ ((['192.168.122.10'] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
             edpm_install_yamls_vars:
-              SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_rsa"
+              SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_ed25519"
               DATAPLANE_COMPUTE_IP: "{{ crc_ci_bootstrap_networks_out.compute.default.ip | ansible.utils.ipaddr('address') }}"
               DATAPLANE_SSHD_ALLOWED_RANGES: "['0.0.0.0/0']"
 
@@ -99,24 +99,24 @@
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_mtu
-                    value: "{{ crc_ci_bootstrap_networks_out.compute.default.mtu | default('') }}"
+                    value: {{ crc_ci_bootstrap_networks_out.compute.default.mtu | default(1500) }}
 
               {% if 'tenant' in crc_ci_bootstrap_networks_out.compute %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/tenant_mtu
-                    value: "{{ crc_ci_bootstrap_networks_out.compute['tenant'].mtu | default('') }}"
+                    value: {{ crc_ci_bootstrap_networks_out.compute['tenant'].mtu | default(1500) }}
               {% endif %}
 
               {% if 'storage' in crc_ci_bootstrap_networks_out.compute %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/storage_mtu
-                    value: "{{ crc_ci_bootstrap_networks_out.compute['storage'].mtu | default('') }}"
+                    value: {{ crc_ci_bootstrap_networks_out.compute['storage'].mtu | default(1500) }}
               {% endif %}
 
               {% if 'internal-api' in crc_ci_bootstrap_networks_out.compute %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/internal_api_mtu
-                    value: "{{ crc_ci_bootstrap_networks_out.compute['internal-api'].mtu | default('') }}"
+                    value: {{ crc_ci_bootstrap_networks_out.compute['internal-api'].mtu | default(1500) }}
               {% endif %}
 
                   - op: add
@@ -124,13 +124,13 @@
                     value:
                       net_config_data_lookup:
                         edpm-compute:
-                          nic2: "{{ crc_ci_bootstrap_networks_out.compute.default.iface | default('') }}"
+                          nic2: "{{ crc_ci_bootstrap_networks_out.compute.default.iface | default('ens7') }}"
 
                   - op: replace
                     path: /spec/nodeTemplate/networkConfig
                     value:
                       template: |-
-                        {% raw %}
+                        {%- raw %}
                         ---
                         {{ '{%' }} set mtu_list = [ctlplane_mtu] {{ '%}' }}
                         {{ '{%' }} for network in role_networks {{ '%}' }}
@@ -161,7 +161,7 @@
                                 {{ '{{' }} lookup("vars", networks_lower[network] ~ "_ip") {{ '}}' }}/{{ '{{' }} lookup('vars', networks_lower[network] ~ '_cidr') {{ '}}' }}
                             routes: {{ '{{' }} lookup('vars', networks_lower[network] ~ '_host_routes') }}
                         {{ '{%' }} endfor {{ '%}' }}
-                        {% endraw %}
+                        {% endraw -%}
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleUser
