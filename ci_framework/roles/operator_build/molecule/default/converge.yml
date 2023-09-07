@@ -22,6 +22,21 @@
     cifmw_operator_build_push_ct: false
     cifmw_operator_build_push_registry: "anything.io"
     cifmw_operator_build_push_org: "molecule"
+  pre_tasks:
+    - name: Get open PR list for mariadb-operator
+      register: pr_list
+      ansible.builtin.uri:
+        return_content: true
+        url: "https://api.github.com/repos/openstack-k8s-operators/mariadb-operator/pulls?state=open"
+        headers:
+          Content-Type: "application/json"
+          Accept: "application/vnd.github+json"
+          X-GitHub-Api-Version: "2022-11-28"
+
+    - name: Extract latest PR from list
+      ansible.builtin.set_fact:
+        latest_open_pr: "{{ pr_list.json[0] }}"
+
   tasks:
     - name: Build keystone-operator
       ansible.builtin.include_role:
@@ -56,10 +71,10 @@
             src: "{{ ansible_user_dir }}/mariadb-operator"
         zuul:
           items:
-            - branch: master
-              change: '147'
-              change_url: https://github.com/openstack-k8s-operators/mariadb-operator/pull/147
-              patchset: 6a06e11aa8876a9d37147621aae3ac4b2a92af69
+            - branch: "{{ latest_open_pr.base.ref }}"
+              change: "{{ latest_open_pr.number }}"
+              change_url: "{{ latest_open_pr.html_url }}"
+              patchset: "{{ latest_open_pr.head.sha }}"
               project:
                 canonical_hostname: github.com
                 canonical_name: github.com/openstack-k8s-operators/mariadb-operator
@@ -76,4 +91,4 @@
       loop:
         - name: "mariadb-operator"
           src: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/mariadb-operator"
-          pr_sha: "912229102d02c43cead640ad9bf863e090444ab6"
+          pr_sha: "{{ latest_open_pr.head.sha }}"
