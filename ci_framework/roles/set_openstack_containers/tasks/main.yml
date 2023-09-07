@@ -103,19 +103,19 @@
   ci_script:
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
     script: "oc get pods -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} -o name"
-  register: operator_pod_name
+  register: pod_name
+
+- name: List all the pods
+  ansible.builtin.debug:
+    var: pod_name
 
 - name: Get the operator pod name
   ansible.builtin.set_fact:
-    operator_pod_name: >-
-      {{
-      '\n'.join(operator_pod_name.stdout_lines) |
-      regex_search('^pod/' ~ operator_name ~ '-operator-controller-manager-.*$', multiline=True)
-      }}
+    pod_name: "{{ '\n'.join(pod_name.stdout_lines) |regex_search('^pod/' ~ operator_name ~ '-operator-controller-manager-.*$', multiline=True) }}"
 
 - name: Print the operator pod name
   ansible.builtin.debug:
-    var: operator_pod_name
+    var: pod_name
 
 - name: Get operator environment variable after update
   environment:
@@ -123,6 +123,6 @@
     PATH: "{{ cifmw_path }}"
   ci_script:
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
-    script: "oc set env {{ operator_pod_name }} -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} --list > operator_env.txt"
+    script: "oc set env {{ pod_name }} -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} --list > operator_env.txt"
     chdir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
     creates: operator_env.txt
