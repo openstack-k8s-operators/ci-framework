@@ -16,16 +16,14 @@ Please check [this page](./01_requirements.md) first.
 
 ### 1. Get the project and its dependencies
 ```Bash
-$ cd $HOME
-$ git clone https://github.com/openstack-k8s-operators/install_yamls
-$ cd install_yamls/devsetup
-$ make cifmw_prepare
-$ cd ci-framework
+git clone https://github.com/openstack-k8s-operators/install_yamls $HOME/install_yamls
+git clone https://github.com/openstack-k8s-operators/ci-framework $HOME/ci-framework
+cd $HOME/ci-framework
 ```
 
 ### 2. Install dependencies
 ```Bash
-$ make setup_molecule
+make setup_molecule
 ```
 
 ### 3. Prepare an environment file with needed data
@@ -68,7 +66,7 @@ and save it in `$HOME/pull-secret`.
 
 ### 5. Run the playbook
 ```Bash
-$ ansible-playbook deploy-edpm.yml -e @~/my-env.yml
+ansible-playbook deploy-edpm.yml -e @~/my-env.yml
 ```
 
 ### 6. Go grab some coffee
@@ -81,9 +79,8 @@ Check if the `roles_path` in `install_yamls/devsetup/ci-framework/ansible.cfg`
 points to the right `cifmw_basedir`, in case you are using a custom config.
 
 ```
-cd $HOME/install_yamls/devsetup/ci-framework
+cd $HOME/ci-framework
 ansible-playbook cleanup-edpm.yml -e @~/my-env.yml
-cd ..
-make crc_cleanup edpm_compute_cleanup
 rm -rf ~/ci-framework-data
+make -C $HOME/install_yamls/devsetup crc_cleanup edpm_compute_cleanup
 ```
