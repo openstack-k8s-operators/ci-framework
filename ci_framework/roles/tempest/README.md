@@ -16,6 +16,7 @@ become - Required to install required rpm packages
 * `cifmw_tempest_tests_skipped`: (List) List of tests to be skipped. Setting this will not use the `list_skipped` plugin
 * `cifmw_tempest_tests_allowed`: (List) List of tests to be executed. Setting this will not use the `list_allowed` plugin
 * `cifmw_tempest_tempestconf_profile`: (Dictionary) List of settings to be overwritten in tempest.conf.
+* `cifmw_tempest_concurrency`: (Integer) Tempest concurrency value.
 
 ## Use of cifmw_tempest_tempestconf_profile
 
