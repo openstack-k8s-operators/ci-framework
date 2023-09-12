@@ -16,7 +16,10 @@
     region_name: '{{ region_name }}'
     state: present
     auth: "{{ openstack_auth }}"
-  register: net_info
+  register: cifmw_os_net_setup_net_fetch_out
+  until: cifmw_os_net_setup_net_fetch_out is not failed
+  retries: "{{ cifmw_os_net_setup_osp_calls_retries }}"
+  delay: "{{ cifmw_os_net_setup_osp_calls_delay }}"
 
 - name: Process subnet list elements
   openstack.cloud.subnet:
@@ -34,7 +37,7 @@
     ipv6_ra_mode: '{{ subnet_item.ipv6_ra_mode | default(omit) }}'
     is_dhcp_enabled: '{{ subnet_item.is_dhcp_enabled | default(omit) }}'
     name: '{{ subnet_item.name | default(omit) }}'
-    network: "{{ net_info.id }}"
+    network: "{{ cifmw_os_net_setup_net_fetch_out.id }}"
     prefix_length: '{{ subnet_item.prefix_length | default(omit) }}'
     subnet_pool: '{{ subnet_item.subnet_pool | default(omit) }}'
     use_default_subnet_pool: '{{ subnet_item.use_default_subnet_pool | default(omit) }}'
@@ -44,3 +47,7 @@
   loop: "{{ net_item.subnets | flatten(levels=1) }}"
   loop_control:
     loop_var: subnet_item
+  register: cifmw_os_net_setup_subnet_fetch_out
+  until: cifmw_os_net_setup_subnet_fetch_out is not failed
+  retries: "{{ cifmw_os_net_setup_osp_calls_retries }}"
+  delay: "{{ cifmw_os_net_setup_osp_calls_delay }}"
