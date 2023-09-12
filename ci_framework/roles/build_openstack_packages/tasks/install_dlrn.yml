@@ -80,7 +80,7 @@
   changed_when: result.stdout or result.stderr
 
 - name: Create dlrn-venv
-  ansible.builtin.pip:
+  ansible.builtin.pip:  # noqa: package-latest
     name: pip
     virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
     virtualenv_command: "/usr/bin/python3 -m venv"
@@ -113,25 +113,25 @@
   when: not cifmw_bop_dlrn_from_source|bool
   block:
     - name: Pip install rdopkg
-      ansible.builtin.pip:
+      ansible.builtin.pip:  # noqa: package-latest
         name: rdopkg
         virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
         virtualenv_command: "/usr/bin/python3 -m venv"
         state: latest
 
     - name: Pip install DLRN
-      ansible.builtin.pip:
+      ansible.builtin.pip:  # noqa: package-latest
         name: dlrn
         virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
         virtualenv_command: "/usr/bin/python3 -m venv"
         state: latest
 
 - name: Drop in the templated version of projects.ini
-  template:
+  ansible.builtin.template:
     src: projects.ini.j2
     dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/projects.ini'
 
-- name: copy the DLRN scripts in the virtualenv to the scripts dir
+- name: Copy the DLRN scripts in the virtualenv to the scripts dir
   ansible.posix.synchronize:
     src: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv/share/dlrn/scripts"
     dest: "{{ cifmw_bop_build_repo_dir }}/DLRN"
@@ -147,30 +147,30 @@
   retries: 3
   delay: 5
 
-- name: Remove ssh reference from dist-git url
-  ansible.builtin.shell: >
-    sed -i -e "s|osp-distgit: git+ssh|osp-distgit: git|g" packages.yml
-  args:
+- name: Remove ssh reference from dist-git url  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: "sed -i -e 's|osp-distgit: git+ssh|osp-distgit: git|g' packages.yml"
     chdir: "{{ bcifmw_bop_uild_repo_dir }}/DLRN/{{ cifmw_bop_rdoinfo_repo_name }}"
   when: ansible_distribution in ['RedHat']
 
 - name: Append repos in dlrn targets
-  ansible.builtin.shell: >
-    set -o pipefail ;
-    gawk '{ print $0 }; /^# repos$/ { exit }' {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}.cfg
-    > {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-    cat {{ cifmw_bop_yum_repos_dir }}/repo-setup-*.repo >> {{cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-    find {{ cifmw_bop_yum_repos_dir }} -name "delorean*repo" ! -name "delorean*build-deps.repo" -exec cat {} \; -exec echo ""  \;
-    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-    find {{ cifmw_bop_yum_repos_dir }} -name "CentOS-Stream-*repo" -not -name "CentOS-Stream*Extras-common*repo" -exec cat {} \; -exec echo ""  \;
-    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-    find {{ cifmw_bop_yum_repos_dir }} -name "delorean*build-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
-    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-    {% if ansible_distribution in ["RedHat"] and osp_release is defined %}
-    find /etc/yum.repos.d -name "osptrunk-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
-    >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-    {% endif %}
-    echo '"""' >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+  ansible.builtin.shell:
+    cmd: >
+      set -o pipefail ;
+      gawk '{ print $0 }; /^# repos$/ { exit }' {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}.cfg
+      > {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+      cat {{ cifmw_bop_yum_repos_dir }}/repo-setup-*.repo >> {{cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+      find {{ cifmw_bop_yum_repos_dir }} -name "delorean*repo" ! -name "delorean*build-deps.repo" -exec cat {} \; -exec echo ""  \;
+      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+      find {{ cifmw_bop_yum_repos_dir }} -name "CentOS-Stream-*repo" -not -name "CentOS-Stream*Extras-common*repo" -exec cat {} \; -exec echo ""  \;
+      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+      find {{ cifmw_bop_yum_repos_dir }} -name "delorean*build-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
+      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+      {% if ansible_distribution in ["RedHat"] and osp_release is defined %}
+      find /etc/yum.repos.d -name "osptrunk-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
+      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+      {% endif %}
+      echo '"""' >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
 
 - name: Check loop devices stat
   ansible.builtin.stat:

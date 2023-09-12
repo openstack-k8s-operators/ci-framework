@@ -34,75 +34,75 @@
   ansible.builtin.find:
     paths: "{{ cifmw_polarion_jump_result_dir }}"
     patterns: "*.xml"
-    recurse: yes
+    recurse: true
   register: xml_files
 
 - name: Deploy jump and report to polarion
   when: xml_files.files | length > 0
   block:
-  - name: Validate XML files with xmllint
-    ansible.builtin.command: "xmllint --noout {{ item.path }}"
-    loop: "{{ xml_files.files }}"
-    register: xmllint_output
-    changed_when: false
-    failed_when: xmllint_output.rc != 0
+    - name: Validate XML files with xmllint
+      ansible.builtin.command: "xmllint --noout {{ item.path }}"
+      loop: "{{ xml_files.files }}"
+      register: xmllint_output
+      changed_when: false
+      failed_when: xmllint_output.rc != 0
 
-  - name: Clone Jump repository
-    ansible.builtin.git:
-      repo: "{{ cifmw_polarion_jump_repo_url }}"
-      dest: "{{ cifmw_polarion_jump_repo_dir }}"
-      version: "{{ cifmw_polarion_jump_repo_branch }}"
-      force: true
+    - name: Clone Jump repository
+      ansible.builtin.git:
+        repo: "{{ cifmw_polarion_jump_repo_url }}"
+        dest: "{{ cifmw_polarion_jump_repo_dir }}"
+        version: "{{ cifmw_polarion_jump_repo_branch }}"
+        force: true
 
-  - name: Create virtualenv
-    when:
-      - cifmw_polarion_jump_repo_dir is defined and cifmw_polarion_jump_repo_dir != ""
-    ansible.builtin.pip:
-      name: pip
-      virtualenv: "{{ cifmw_polarion_jump_repo_dir }}/jump-venv"
-      virtualenv_command: "/usr/bin/python3 -m venv"
-      state: latest
-      extra_args: --upgrade
+    - name: Create virtualenv
+      when:
+        - cifmw_polarion_jump_repo_dir is defined and cifmw_polarion_jump_repo_dir != ""
+      ansible.builtin.pip:
+        name: pip
+        virtualenv: "{{ cifmw_polarion_jump_repo_dir }}/jump-venv"
+        virtualenv_command: "/usr/bin/python3 -m venv"
+        state: latest # noqa: package-latest
+        extra_args: --upgrade
 
-  - name: Use polarion-staging
-    when:
-      - cifmw_polarion_fqdn is defined and cifmw_polarion_fqdn != ""
-      - cifmw_polarion_stage_fqdn is defined and cifmw_polarion_stage_fqdn != ""
-    ansible.builtin.replace:
-      path: "{{ cifmw_polarion_jump_repo_dir }}/{{ item }}"
-      regexp: "{{ cifmw_polarion_fqdn }}"
-      replace: "{{ cifmw_polarion_stage_fqdn }}"
-    loop:
-      - "helpers.py"
-      - ".pylero"
+    - name: Use polarion-staging
+      when:
+        - cifmw_polarion_fqdn is defined and cifmw_polarion_fqdn != ""
+        - cifmw_polarion_stage_fqdn is defined and cifmw_polarion_stage_fqdn != ""
+      ansible.builtin.replace:
+        path: "{{ cifmw_polarion_jump_repo_dir }}/{{ item }}"
+        regexp: "{{ cifmw_polarion_fqdn }}"
+        replace: "{{ cifmw_polarion_stage_fqdn }}"
+      loop:
+        - "helpers.py"
+        - ".pylero"
 
-  - name: Run prepare_pylero.sh
-    ansible.builtin.shell: >
-      source jump-venv/bin/activate && \
-      ./prepare_pylero.sh
-    args:
-      chdir: "{{ cifmw_polarion_jump_repo_dir }}"
-      executable: /bin/bash
-    register: pylero_output
+    - name: Run prepare_pylero.sh
+      ansible.builtin.shell: >
+        source jump-venv/bin/activate && \
+        ./prepare_pylero.sh
+      args:
+        chdir: "{{ cifmw_polarion_jump_repo_dir }}"
+        executable: /bin/bash
+      register: pylero_output
 
-  - name: Output prepare_pylero
-    ansible.builtin.debug:
-      var: pylero_output.stdout_lines
+    - name: Output prepare_pylero
+      ansible.builtin.debug:
+        var: pylero_output.stdout_lines
 
-  - name: Update Test Runs
-    vars:
-      - found_xml_files: "{{ xml_files.files | map(attribute='path') | join(',') }}"
-    ansible.builtin.shell:
-      chdir: "{{ cifmw_polarion_jump_repo_dir }}"
-      cmd: |
-        source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" && \
-        {{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/python jump.py \
-          --testrun-id={{ cifmw_polarion_test_id }} \
-          --xml-file={{ found_xml_files }} \
-          --update_testcases={{ cifmw_polarion_update_testcases | default(false) }} \
-          {{ cifmw_polarion_jump_extra_vars | default ('')}}
-    register: jump_script
+    - name: Update Test Runs
+      vars:
+        found_xml_files: "{{ xml_files.files | map(attribute='path') | join(',') }}"
+      ansible.builtin.shell:
+        chdir: "{{ cifmw_polarion_jump_repo_dir }}"
+        cmd: >-
+          source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" &&
+          {{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/python jump.py
+            --testrun-id={{ cifmw_polarion_test_id }}
+            --xml-file={{ found_xml_files }}
+            --update_testcases={{ cifmw_polarion_update_testcases | default(false) }}
+            {{ cifmw_polarion_jump_extra_vars | default ('') }}
+      register: jump_script
 
-  - name: Output of jump
-    ansible.builtin.debug:
-      var: jump_script.stderr_lines
+    - name: Output of jump
+      ansible.builtin.debug:
+        var: jump_script.stderr_lines

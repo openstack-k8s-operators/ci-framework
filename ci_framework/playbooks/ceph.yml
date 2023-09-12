@@ -21,25 +21,30 @@
   vars:
     cifmw_admin_user: ceph-admin
   tasks:
-    - name: set ssh key path facts
+    - name: Set ssh key path facts
       ansible.builtin.set_fact:
         private_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa"
         public_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa.pub"
-      run_once: true
-    - name: stat private key
+      run_once: true  # noqa: run-once[task]
+
+    - name: Stat private key
       ansible.builtin.stat:
         path: "{{ private_key }}"
       register: private_key_stat
-    - name: stat public key
+
+    - name: Stat public key
       ansible.builtin.stat:
         path: "{{ public_key }}"
       register: public_key_stat
-    - name: create private key if it does not exist
-      ansible.builtin.shell: "ssh-keygen -t rsa -q -N '' -f {{ private_key }}"
+
+    - name: Create private key if it does not exist
+      ansible.builtin.command:
+        cmd: "ssh-keygen -t rsa -q -N '' -f {{ private_key }}"
       no_log: true
       when:
         - not private_key_stat.stat.exists
-    - name: create public key if it does not exist
+
+    - name: Create public key if it does not exist
       ansible.builtin.shell: "ssh-keygen -y -f {{ private_key }} > {{ public_key }}"
       when:
         - not public_key_stat.stat.exists
@@ -58,6 +63,7 @@
       register: private_key_get
       delegate_to: localhost
       no_log: true
+
     - name: Get local public key
       ansible.builtin.slurp:
         src: "{{ hostvars['localhost']['public_key'] }}"
@@ -86,14 +92,14 @@
   hosts: localhost
   gather_facts: true
   vars:
-    #storage_network_range: 172.18.0.0/24
+    # storage_network_range: 172.18.0.0/24
     storage_network_range: 192.168.122.0/24
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
     - name: Build a dict mapping hostname to its IP which is in storage network range
       ansible.builtin.set_fact:
-        host_to_ip: "{{ host_to_ip | default({}) | combine({ hostvars[item]['ansible_hostname'] :
-          hostvars[item][all_addresses] | ipaddr(storage_network_range) | first }) }}"
+        host_to_ip: >-
+          {{ host_to_ip | default({}) | combine({hostvars['ansible_hostname']: hostvars | ipaddr(storage_network_range) | first}) }}
       delegate_to: "{{ item }}"
       loop: "{{ groups['edpm'] }}"
   roles:
@@ -115,20 +121,20 @@
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
     cifmw_cephadm_pools:
       - name: vms
-        pg_autoscale_mode: True
+        pg_autoscale_mode: true
         target_size_ratio: 0.3
         application: rbd
       - name: volumes
-        pg_autoscale_mode: True
+        pg_autoscale_mode: true
         target_size_ratio: 0.3
         application: rbd
       - name: backups
-        pg_autoscale_mode: True
+        pg_autoscale_mode: true
         target_size_ratio: 0.2
         application: rbd
       - name: images
         target_size_ratio: 0.2
-        pg_autoscale_mode: True
+        pg_autoscale_mode: true
         application: rbd
   pre_tasks:
     - name: Generate a cephx key
@@ -156,7 +162,7 @@
         cifmw_cephadm_first_mon_ip: "{{ item.addr }}"
       when:
         - item.service_type == 'host'
-        - item.hostname == "{{ cifmw_cephadm_bootstrap_host }}"
+        - item.hostname == "{{ cifmw_cephadm_bootstrap_host }}"  # noqa: no-jinja-when
       loop: "{{ lookup('file', cifmw_cephadm_spec_ansible_host) | from_yaml_all | list }}"
       delegate_to: localhost
 
@@ -238,5 +244,8 @@
     - name: Export configuration for ceph client
       ansible.builtin.import_role:
         name: cifmw_ceph_client
-    - ansible.builtin.debug:
-        msg: "Import ceph secret into k8s 'kubectl create -f /tmp/k8s_ceph_secret.yml'"
+    - name: Output usage
+      ansible.builtin.debug:
+        msg: >-
+          Import ceph secret into k8s
+          'kubectl create -f /tmp/k8s_ceph_secret.yml'

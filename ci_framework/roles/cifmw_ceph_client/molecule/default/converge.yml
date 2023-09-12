@@ -56,23 +56,6 @@
 
   tasks:
     - name: Check the cifmw_ceph_client_fetch_dir content
-      block:
-        - name: Check current file
-          ansible.builtin.stat:
-            path: "{{ cifmw_ceph_client_fetch_dir }}/{{ item }}"
-          register: st
-          loop: "{{ expected_files }}"
-        - ansible.builtin.fail:
-            msg: "The file {{ item }} doesn't exist"
-          when: not item.stat.exists
-          loop: "{{ st.results }}"
-        - name: Show the content of the generated Ceph config file
-          ansible.builtin.shell: "cat {{ cifmw_ceph_client_fetch_dir +'/'+ cifmw_ceph_client_cluster + '.conf' }}"
-          register: cat_ceph_conf
-          when: verbosity
-        - ansible.builtin.debug:
-            var: cat_ceph_conf.stdout
-          when: verbosity
       vars:
         cifmw_ceph_client_cluster: "ceph"
         verbosity: true
@@ -80,3 +63,29 @@
           - '{{ cifmw_ceph_client_cluster }}.client.glance.keyring'
           - '{{ cifmw_ceph_client_cluster }}.client.manila.keyring'
           - '{{ cifmw_ceph_client_cluster }}.conf'
+      block:
+        - name: Check current file
+          ansible.builtin.stat:
+            path: "{{ cifmw_ceph_client_fetch_dir }}/{{ item }}"
+          register: st
+          loop: "{{ expected_files }}"
+
+        - name: Fail if file not found
+          when:
+            - not item.stat.exists
+          ansible.builtin.fail:
+            msg: "The file {{ item }} doesn't exist"
+          loop: "{{ st.results }}"
+
+        - name: Show the content of the generated Ceph config file
+          when:
+            - verbosity | bool
+          ansible.builtin.slurp:
+            path: "{{ cifmw_ceph_client_fetch_dir +'/'+ cifmw_ceph_client_cluster + '.conf' }}"
+          register: cat_ceph_conf
+
+        - name: Debug ceph config
+          when:
+            - verbosity | bool
+          ansible.builtin.debug:
+            msg: "{{ cat_ceph_conf['content'] | b64decode }}"

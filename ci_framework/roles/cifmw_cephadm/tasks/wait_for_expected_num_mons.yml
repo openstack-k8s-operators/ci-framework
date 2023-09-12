@@ -15,10 +15,15 @@
 # under the License.
 
 - name: Get the expected number of mons
+  when:
+    - cifmw_cephadm_num_mons_expected is not defined
+    - cifmw_cephadm_spec_ansible_host is defined
+    - cifmw_cephadm_spec_ansible_host | length > 0
   block:
     - name: Read the spec file
       ansible.builtin.set_fact:
         cifmw_cephadm_spec_content: "{{ lookup('file', cifmw_cephadm_spec_ansible_host) }}"
+
     - name: Parse each yaml document in the spec file looking for the list of mons
       ansible.builtin.set_fact:
         cifmw_cephadm_num_mons_expected: "{{ item.placement.hosts | list | length | int }}"
@@ -29,13 +34,10 @@
         - item.service_type == 'mon'
         - item.placement is defined
         - item.placement.hosts is defined
-  when:
-    - cifmw_cephadm_num_mons_expected is not defined
-    - cifmw_cephadm_spec_ansible_host is defined
-    - cifmw_cephadm_spec_ansible_host | length > 0
 
 - name: Wait for expected number of mons to be running
-  ansible.builtin.shell: "{{ cifmw_cephadm_ceph_cli }} status --format json | jq .monmap.num_mons"
+  ansible.builtin.shell:
+    cmd: "{{ cifmw_cephadm_ceph_cli }} status --format json | jq .monmap.num_mons"
   register: ceph_status
   become: true
   until: (ceph_status.stdout | int) >= ((cifmw_cephadm_num_mons_expected | int) | default(1))

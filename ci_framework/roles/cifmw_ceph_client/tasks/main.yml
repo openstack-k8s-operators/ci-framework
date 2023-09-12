@@ -24,10 +24,12 @@
   ansible.builtin.include_vars: '{{ cifmw_ceph_client_vars }}'
   when:
     - cifmw_ceph_client_vars is defined
-    - ceph_input_vars.stat.exists == True
+    - ceph_input_vars.stat.exists | bool
 
-- ansible.builtin.include_tasks: create_keys.yml
-  name: Render keys provided for the Ceph cluster
+- name: Render keys provided for the Ceph cluster
+  ansible.builtin.include_tasks: create_keys.yml
+  when:
+    - (cifmw_ceph_client_keys is defined) or (keys is defined)
   vars:
     ceph_keys: |
       {% if cifmw_ceph_client_keys | length > 0 %}
@@ -38,11 +40,9 @@
       {% set client_keys = keys %}
       {% endif %}
       {{ client_keys }}
-  when:
-    - (cifmw_ceph_client_keys is defined) or (keys is defined)
 
-- ansible.builtin.include_tasks: create_ceph_conf.yml
-  name: Render ceph config for the Ceph Clients
+- name: Render ceph config for the Ceph Clients
+  ansible.builtin.include_tasks: create_ceph_conf.yml
   vars:
     config_overrides: |
       {% if cifmw_ceph_client_config_overrides is defined and cifmw_ceph_client_config_overrides | length > 0 %}
@@ -54,7 +54,7 @@
       {% endif %}
       {{ overrides }}
 
-- name: base64 encode ceph.conf file
+- name: Base64 encode ceph.conf file
   tags: k8s
   ansible.builtin.slurp:
     src: "{{ cifmw_ceph_client_fetch_dir }}/{{ cifmw_ceph_client_cluster | default('ceph') }}.conf"
@@ -62,7 +62,7 @@
   delegate_to: localhost
   no_log: true
 
-- name: base64 encode cephx key file
+- name: Base64 encode cephx key file
   tags: k8s
   ansible.builtin.slurp:
     src: "{{ cifmw_ceph_client_fetch_dir }}/{{ cifmw_ceph_client_cluster | default('ceph') }}.client.openstack.keyring"
@@ -70,10 +70,10 @@
   delegate_to: localhost
   no_log: true
 
-- name: create k8s_ceph_secret.yml with base64 encoded files
+- name: Create k8s_ceph_secret.yml with base64 encoded files
   tags: k8s
   ansible.builtin.template:
     src: templates/k8s_ceph_secret.yml.j2
     dest: "{{ cifmw_ceph_client_fetch_dir }}/k8s_ceph_secret.yml"
-    mode: 0600
+    mode: "0600"
     force: true

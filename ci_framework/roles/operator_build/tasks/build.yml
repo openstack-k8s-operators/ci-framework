@@ -14,25 +14,25 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: "{{ operator.name }} - Get base module name and set the api path"
+- name: "{{ operator.name }} - Get base module name and set the api path"  # noqa: name[template]
   when:
     - cifmw_operator_build_meta_build
     - operator.name != cifmw_operator_build_meta_name
   block:
-    - name: "{{ operator.name }} - Read go.mod file contents of Openstack Operator"
+    - name: "{{ operator.name }} - Read go.mod file contents of Openstack Operator"  # noqa: name[template]
       ansible.builtin.slurp:
         src: "{{ cifmw_operator_build_meta_src }}/go.mod"
       register: go_mod_out
 
-    - name: "{{ operator.name }} - Get base module name from go.mod"
+    - name: "{{ operator.name }} - Get base module name from go.mod"  # noqa: name[template]
       ansible.builtin.set_fact:
         operator_base_module_name: "{{ go_mod_out['content'] | b64decode | regex_search(cifmw_operator_build_org + '/' + operator.name + '/(\\w*)\\s', '\\1') | first }}"
 
-    - name: "{{ operator.name }} - Set default api path"
+    - name: "{{ operator.name }} - Set default api path"  # noqa: name[template]
       ansible.builtin.set_fact:
         operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/{{ operator_base_module_name }}"
 
-- name: "{{ operator.name }} - Update the go.mod file in meta operator for provided PR_SHA"
+- name: "{{ operator.name }} - Update the go.mod file in meta operator for provided PR_SHA"  # noqa: name[template]
   ansible.builtin.shell: |
     go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ operator.pr_sha }}
     go mod tidy
@@ -50,17 +50,17 @@
     - operator.pr_owner is defined
     - operator.pr_sha is defined
 
-- name: "{{ operator.name }} - Get latest commit when no PR is provided"
+- name: "{{ operator.name }} - Get latest commit when no PR is provided"  # noqa: name[template] command-instead-of-module
   ansible.builtin.command:
     cmd: git show-ref --head --hash head
     chdir: "{{ operator.src }}"
   register: git_head_out
 
-- name: "{{ operator.name }} - Set pr_sha to be used as image tag"
+- name: "{{ operator.name }} - Set pr_sha to be used as image tag"  # noqa: name[template]
   ansible.builtin.set_fact:
     pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
 
-- name: "{{ operator.name }} - Update the go.mod file using latest commit if no PR is provided"
+- name: "{{ operator.name }} - Update the go.mod file using latest commit if no PR is provided"  # noqa: name[template]
   ansible.builtin.shell: |
     go mod edit -replace {{ operator_api_path }}={{ operator_api_path }}@{{ pr_sha }}
     go mod tidy
@@ -79,12 +79,12 @@
 
 - name: Get container image
   block:
-    - name: "{{ operator.name }} - Get golang container image"
+    - name: "{{ operator.name }} - Get golang container image"  # noqa: name[template]
       containers.podman.podman_image:
         name: "{{ cifmw_operator_build_golang_ct }}"
         pull: true
   rescue:
-    - name: "{{ operator.name }} - Get alternative golang container image"
+    - name: "{{ operator.name }} - Get alternative golang container image"  # noqa: name[template]
       containers.podman.podman_image:
         name: "{{ cifmw_operator_build_golang_alt_ct }}"
         pull: true
@@ -93,38 +93,38 @@
         cifmw_operator_build_golang_ct: "{{ cifmw_operator_build_golang_alt_ct }}"
 
 
-- name: "{{ operator.name }} - Set operator image tag"
+- name: "{{ operator.name }} - Set operator image tag"  # noqa: name[template]
   ansible.builtin.set_fact:
     operator_tag: "{{ pr_sha }}"
     operator_registry_prefix: "{{ cifmw_operator_build_push_registry }}/{{ cifmw_operator_build_push_org }}/{{ operator.name }}"
     cacheable: true
 
-- name: "{{ operator.name }} - Set operator image names"
+- name: "{{ operator.name }} - Set operator image names"  # noqa: name[template]
   ansible.builtin.set_fact:
     operator_img: "{{ operator_registry_prefix }}:{{ operator_tag }}"
     operator_img_bundle: "{{ operator_registry_prefix }}-bundle:{{ operator_tag }}"
     operator_img_catalog: "{{ operator_registry_prefix }}-index:{{ operator_tag }}"
     cacheable: true
 
-- name: "{{ operator.name }} - Set operator build output"
+- name: "{{ operator.name }} - Set operator build output"  # noqa: name[template]
   ansible.builtin.set_fact:
-      cifmw_operator_build_output: >-
-        {{ cifmw_operator_build_output|combine({'operators': { operator.name: {
-          'git_commit_hash': pr_sha,
-          'git_src_dir': operator.src,
-          'image': operator_img,
-          'image_bundle': operator_img_bundle,
-          'image_catalog': operator_img_catalog,
-        }}}, recursive=True)}}
+    cifmw_operator_build_output: >-
+      {{ cifmw_operator_build_output|combine({'operators': { operator.name: {
+        'git_commit_hash': pr_sha,
+        'git_src_dir': operator.src,
+        'image': operator_img,
+        'image_bundle': operator_img_bundle,
+        'image_catalog': operator_img_catalog,
+      }}}, recursive=True)}}
 
-- name: "{{ operator.name }} - Call manifests"
+- name: "{{ operator.name }} - Call manifests"  # noqa: name[template]
   ci_make:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
     chdir: "{{ operator.src }}"
     output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
     target: manifests
 
-- name: "{{ operator.name }} - Call docker-build"
+- name: "{{ operator.name }} - Call docker-build"  # noqa: name[template]
   ci_make:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
     chdir: "{{ operator.src }}"
@@ -133,7 +133,7 @@
     params:
       IMG: "{{ operator_img }}"
 
-- name: "{{ operator.name }} - Call docker-push"
+- name: "{{ operator.name }} - Call docker-push"  # noqa: name[template]
   when:
     - cifmw_operator_build_push_ct|bool
   ci_make:
@@ -149,7 +149,7 @@
   retries: 5
   delay: 10
 
-- name: "{{ operator.name }} - Call bundle"
+- name: "{{ operator.name }} - Call bundle"  # noqa: name[template]
   ci_make:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
     chdir: "{{ operator.src }}"
@@ -162,7 +162,7 @@
       IMAGEBASE: "{{ operator.image_base | default('') }}"
       LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default (0) }}"
 
-- name: "{{ operator.name }} - Call bundle-build"
+- name: "{{ operator.name }} - Call bundle-build"  # noqa: name[template]
   ci_make:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
     chdir: "{{ operator.src }}"
@@ -176,7 +176,7 @@
       IMAGEBASE: "{{ operator.image_base | default('') }}"
       LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default (0) }}"
 
-- name: "{{ operator.name }} - Push bundle image"
+- name: "{{ operator.name }} - Push bundle image"  # noqa: name[template]
   when:
     - cifmw_operator_build_push_ct|bool
   containers.podman.podman_image:
@@ -188,7 +188,7 @@
   retries: 5
   delay: 10
 
-- name: "{{ operator.name }} - Call catalog-build"
+- name: "{{ operator.name }} - Call catalog-build"  # noqa: name[template]
   ci_make:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
     chdir: "{{ operator.src }}"
@@ -203,7 +203,7 @@
       LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default (0) }}"
 
 
-- name: "{{ operator.name }} - Call catalog-push"
+- name: "{{ operator.name }} - Call catalog-push"  # noqa: name[template]
   when:
     - cifmw_operator_build_push_ct|bool
   ci_make:
