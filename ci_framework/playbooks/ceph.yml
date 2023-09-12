@@ -98,9 +98,18 @@
   pre_tasks:
     - name: Build a dict mapping hostname to its IP which is in storage network range
       ansible.builtin.set_fact:
-        host_to_ip: >-
-          {{ host_to_ip | default({}) | combine({hostvars['ansible_hostname']: hostvars | ipaddr(storage_network_range) | first}) }}
+        host_to_ip:
+          "{{ host_to_ip | default({}) |
+            combine(
+              {
+                hostvars[item]['ansible_hostname'] :
+                hostvars[item][all_addresses] | ipaddr(storage_network_range) | first
+              }
+            )
+           }}"
       delegate_to: "{{ item }}"
+      when:
+        - hostvars[item]['ansible_hostname'] is defined
       loop: "{{ groups['edpm'] }}"
   roles:
     - role: cifmw_ceph_spec
