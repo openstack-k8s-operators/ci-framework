@@ -66,7 +66,7 @@ ssh cloud-user@<obtained IP> -i ~/.ssh/rhos-jenkins
 ```
 sudo yum -y groupinstall "Development Tools"
 sudo yum -y install  qemu-img qemu-kvm libguestfs libguestfs-tools-c wget pip
-python3 -m pip install --user ansible jmespath
+python3 -m pip install --user ansible
 ```
 
 6. **Continue with Quickstart**
