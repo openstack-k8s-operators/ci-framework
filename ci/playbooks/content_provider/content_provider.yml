@@ -25,14 +25,26 @@
         name: registry_deploy
 
     - name: Set var for cifmw_operator_build_operators var
+      # It handles the case of setting image_base for
+      # openstack-ansibleee-operator and openstack-operator project
+      # for openstack-ansibleee-operator, it will return ansibleee
+      # and for openstack-operator, openstack will be returned
       when:
-        - project is defined
-        - "'short_name' in project"
+        - zuul is defined
+        - "'project' in zuul"
+        - "'short_name' in zuul.project"
       ansible.builtin.set_fact:
         cifmw_operator_build_operators:
           - name: "openstack-operator"
             src: "~/src/github.com/{{ cifmw_operator_build_org }}/openstack-operator"
-            image_base: "{{ project.short_name | split('-') | first }}"
+            image_base: >-
+              {%- if zuul.project.short_name | split('-') | length > 2 -%}
+              {{ zuul.project.short_name | split('-', 1) | last | split('-') | first }}
+              {%- else -%}
+              {{ zuul.project.short_name | split('-') | first }}
+              {%- endif -%}
+
+
 
     - name: Build Operators
       ansible.builtin.include_role:
