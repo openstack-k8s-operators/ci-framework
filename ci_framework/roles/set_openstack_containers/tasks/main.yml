@@ -33,9 +33,15 @@
         cifmw_set_openstack_containers_tag: "{{ dlrn_md5['content'] | b64decode | trim }}"
         cacheable: true
 
-- name: Set the operator name
+- name: Set common facts for the role
   ansible.builtin.set_fact:
     operator_name: "{{ cifmw_set_openstack_containers_operator_name }}"
+    cifmw_set_openstack_containers_common_env: >-
+      {{
+        cifmw_install_yamls_environment |
+        combine({'PATH': cifmw_path}) |
+        combine(cifmw_set_openstack_containers_extra_vars | default({}))
+      }}
     cacheable: true
 
 - name: Get all openstack pods
@@ -81,7 +87,7 @@
 
 - name: Wait for reinstallation of meta operator
   vars:
-    make_openstack_wait_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path}) }}"
+    make_openstack_wait_env: "{{ cifmw_set_openstack_containers_common_env }}"
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_openstack_wait'
@@ -89,7 +95,7 @@
 
 - name: Wait for reinstallation of operator
   vars:
-    make_wait_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path}) }}"
+    make_wait_env: "{{ cifmw_set_openstack_containers_common_env }}"
     make_wait_params:
       OPERATOR_NAME: "{{ operator_name }}"
   ansible.builtin.include_role:
