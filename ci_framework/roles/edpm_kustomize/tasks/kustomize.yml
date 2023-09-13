@@ -20,26 +20,16 @@
       - _kustomize_content is defined
 
 - name: Load and prepare the ci-framework kustomize template file
-  vars:
-    _resource_list: >-
-      {{
-        _kustomize_content.resources |
-        default([], true) |
-        map('regex_replace', '^./(.)', "\1") |
-        list
-      }}
   ansible.builtin.copy:
     force: true
     dest: "{{ cifmw_edpm_kustomize_cr_path | dirname }}/kustomization.yaml"
     content: >-
       {{
         _kustomize_content |
+        combine({ 'resources': omit }) |
         combine(
           {
-            'resources': (
-              (_resource_list + [(cifmw_edpm_kustomize_cr_path | basename)]) |
-              unique
-            )
+            'resources': [(cifmw_edpm_kustomize_cr_path | basename)]
           }
         ) | to_nice_yaml
       }}
@@ -51,13 +41,3 @@
     output_dir: "{{ cifmw_edpm_kustomize_artifacts_dir }}"
     chdir: "{{ cifmw_edpm_kustomize_cr_path | dirname }}"
     script: "oc kustomize  -o {{ cifmw_edpm_kustomize_cr_path }}"
-
-- name: Fetch the kustomization result
-  ansible.builtin.slurp:
-    src: "{{ cifmw_edpm_kustomize_cr_path }}"
-  register: cifmw_edpm_kustomize_kustomized_cr_slurp
-
-- name: Save the latest kustomization result for further usage
-  ansible.builtin.set_fact:
-    cifmw_edpm_kustomize_last_cr_content: "{{ cifmw_edpm_kustomize_kustomized_cr_slurp['content'] | b64decode | from_yaml }}"
-    cacheable: true
