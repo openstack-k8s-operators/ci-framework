@@ -1,9 +1,42 @@
 ---
+
+- name: Set environment vars for kuttl test
+  ansible.builtin.set_fact:
+    cifmw_kuttl_tests_env: >-
+      {{
+        cifmw_install_yamls_environment |
+        combine(cifmw_kuttl_tests_env_vars | default({})) |
+        combine({'PATH': cifmw_path})
+      }}
+
+- name: 'Run make crc_storage_cleanup_with_retries'
+  vars:
+    make_crc_storage_cleanup_with_retries_env: "{{ cifmw_kuttl_tests_env }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_crc_storage_cleanup_with_retries.yml'
+
+- name: 'Run make crc_storage_with_retries'
+  vars:
+    make_crc_storage_with_retries_env: "{{ cifmw_kuttl_tests_env }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_crc_storage_with_retries.yml'
+
+
 - name: 'Get resource status before {{ operator }}_kuttl run'
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
   ansible.builtin.shell: |
     {{ item }} >> {{ cifmw_artifacts_basedir }}/logs/cmd_before_{{ operator }}_kuttl.log
   loop: "{{ commands_before_kuttl_run }}"
   ignore_errors: true
+
+
+- name: 'Set make_{{ operator }}_kuttl_env vars'
+  ansible.builtin.set_fact:
+    make_{{ operator }}_kuttl_env: "{{ cifmw_kuttl_tests_env }}"
 
 - name: 'Run make_{{ operator }}_kuttl'
   ansible.builtin.include_role:
@@ -11,6 +44,9 @@
     tasks_from: 'make_{{ operator }}_kuttl.yml'
 
 - name: 'Get resource status after {{ operator }}_kuttl run'
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
   ansible.builtin.shell: |
     {{ item }} > {{ cifmw_artifacts_basedir }}/logs/cmd_after_{{ operator }}_kuttl.log
   loop: "{{ commands_after_kuttl_run }}"
