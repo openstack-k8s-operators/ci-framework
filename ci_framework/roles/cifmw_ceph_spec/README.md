@@ -66,7 +66,7 @@ storage network IP range.
     - name: Build a dict mapping hostname to its IP which is in storage network range
       ansible.builtin.set_fact:
         host_to_ip: "{{ host_to_ip | default({}) | combine({ hostvars[item]['ansible_hostname'] :
-          hostvars[item][all_addresses] | ipaddr(storage_network_range) | first }) }}"
+          hostvars[item][all_addresses] | ansible.utils.ipaddr(storage_network_range) | first }) }}"
       loop: "{{ groups['edpm'] }}"
   roles:
     - role: cifmw_ceph_spec
