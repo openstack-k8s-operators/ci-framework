@@ -61,15 +61,16 @@
   when:
     - cifmw_openshift_login_user is not defined
     - cifmw_openshift_login_kubeconfig_content_b64.content is defined
-  vars:
-    key_based_users_query: 'users[?user."client-key-data"].name'
   ansible.builtin.set_fact:
     cifmw_openshift_login_key_based_users: >-
       {{
-        cifmw_openshift_login_kubeconfig_content_b64.content |
-        b64decode |
-        from_yaml |
-        community.general.json_query(key_based_users_query) |
+        (
+          cifmw_openshift_login_kubeconfig_content_b64.content |
+          b64decode |
+          from_yaml
+        ). users | default([]) |
+        selectattr('user.client-certificate-data', 'defined') |
+        map(attribute="name") |
         map("split", "/") |
         map("first")
       }}
