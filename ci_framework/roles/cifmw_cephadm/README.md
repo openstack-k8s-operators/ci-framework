@@ -25,7 +25,7 @@ a three EDPM node deployment from
 [install_yamls](https://github.com/openstack-k8s-operators/install_yamls).
 
 ## Privilege escalation
-Requires root to install Ceph server.
+Requires an Ansible user who can become root to install Ceph server.
 
 ## Parameters
 
@@ -158,7 +158,7 @@ generates an SSH key `install_yamls/out/edpm/ansibleee-ssh-key-id_rsa`
 for root on every EDPM node. Configure the Ansible environment to use
 this user and key.
 ```
-export ANSIBLE_REMOTE_USER=root
+export ANSIBLE_REMOTE_USER=cloud-admin
 export ANSIBLE_SSH_PRIVATE_KEY=~/install_yamls/out/edpm/ansibleee-ssh-key-id_rsa
 export ANSIBLE_HOST_KEY_CHECKING=False
 ```
