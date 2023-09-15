@@ -1,0 +1,71 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Stat ceph spec file
+  ansible.builtin.stat:
+    path: "{{ cifmw_ceph_spec_path }}"
+  register: cifmw_ceph_spec_path_stat
+  become: true
+
+- name: Fail if ceph spec file is missing
+  ansible.builtin.fail:
+    msg: "{{ cifmw_ceph_spec_path }} does not exist according to stat"
+  when:
+    - cifmw_ceph_spec_path_stat.stat.exists is not defined
+
+- name: Read the ceph spec file
+  ansible.builtin.command: "cat {{ cifmw_ceph_spec_path }}"
+  register: cat_ceph_spec
+  delegate_to: localhost
+
+- name: Assert expected values about hosts entries
+  ansible.builtin.assert:
+    that:
+      - item.hostname is match("edpm-compute-0")
+      - item.addr is match("192.168.122.100")
+      - (item.labels | join(' ')) is match ("mgr|mon|osd|_admin")
+  when:
+    - item.service_type == 'host'
+  loop: "{{ cat_ceph_spec.stdout | from_yaml_all | list }}"
+
+- name: Assert expected values about mon and mgr daemon entries
+  ansible.builtin.assert:
+    that:
+      - item.placement.hosts == expected_hosts
+      - item.service_id == item.service_name
+  when:
+    - item.service_type == 'mon' or item.service_type == 'mgr'
+  loop: "{{ cat_ceph_spec.stdout | from_yaml_all | list }}"
+  vars:
+    expected_hosts:
+      - edpm-compute-0
+
+- name: Assert expected values about osd daemon entries
+  ansible.builtin.assert:
+    that:
+      - item.placement.hosts == expected_hosts
+      - item.service_id == 'default_drive_group'
+      - item.service_name == 'osd.default_drive_group'
+      - item.data_devices == expected_devices
+  when:
+    - item.service_type == 'osd'
+  loop: "{{ cat_ceph_spec.stdout | from_yaml_all | list }}"
+  vars:
+    expected_hosts:
+      - edpm-compute-0
+    expected_devices:
+      paths:
+        - /dev/ceph_vg/ceph_lv_data
