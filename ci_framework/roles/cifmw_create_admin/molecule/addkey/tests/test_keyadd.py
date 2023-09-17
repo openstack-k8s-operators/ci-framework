@@ -20,11 +20,12 @@ import testinfra.utils.ansible_runner
 
 
 testinfra_hosts = testinfra.utils.ansible_runner.AnsibleRunner(
-    os.environ['MOLECULE_INVENTORY_FILE']).get_hosts('all')
+    os.environ["MOLECULE_INVENTORY_FILE"]
+).get_hosts("all")
 
 
 def test_user_key_add(host):
     auth_keys = host.file("/home/cifmw-admin/.ssh/authorized_keys")
-    assert 'ssh-rsa AAAATEST' in auth_keys.content_string
+    assert "ssh-rsa AAAATEST" in auth_keys.content_string
     private_key = host.file("/home/cifmw-admin/.ssh/id_rsa")
-    assert '-----BEGIN OPENSSH PRIVATE KEY-----' in private_key.content_string
+    assert "-----BEGIN OPENSSH PRIVATE KEY-----" in private_key.content_string
