@@ -64,7 +64,7 @@ tests_nodeps: pre_commit_nodeps molecule_nodeps ## Run all tests without install
 
 .PHONY: tox
 tox: ## Run tox based on the tox.ini file
-	tox -v
+	tox -v -e ALL
 
 ##@ Molecule testing
 .PHONY: molecule
