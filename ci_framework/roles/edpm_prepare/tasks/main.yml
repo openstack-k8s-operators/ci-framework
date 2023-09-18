@@ -127,14 +127,13 @@
 
 - name: Kustomize and deploy OpenStackControlPlane
   vars:
-    cifmw_edpm_prepare_openstack_cr_path: >-
+    cifmw_edpm_prepare_openstack_crs_path: >-
       {{
         [
           cifmw_edpm_prepare_manifests_dir,
           cifmw_install_yamls_defaults['NAMESPACE'],
           'openstack',
-          'cr',
-          (cifmw_install_yamls_defaults['OPENSTACK_CTLPLANE'] | basename)
+          'cr'
         ] | ansible.builtin.path_join
       }}
 
@@ -142,11 +141,28 @@
     - not cifmw_edpm_prepare_dry_run | bool
   block:
     - name: Perform kustomizations to the OpenStackControlPlane CR
-      vars:
-        cifmw_edpm_kustomize_cr_path: "{{ cifmw_edpm_prepare_openstack_cr_path }}"
-        cifmw_edpm_kustomize_content: "{{ cifmw_edpm_prepare_openstack_cr_kustomization | default('{}') }}"
-      ansible.builtin.include_role:
-        name: edpm_kustomize
+      when: not cifmw_edpm_prepare_dry_run
+      ci_kustomize:
+        target_path: "{{ cifmw_edpm_prepare_openstack_crs_path }}"
+        sort_ascending: false
+        kustomizations_paths: >-
+          {{
+            [
+              (
+                [
+                  cifmw_edpm_prepare_manifests_dir,
+                  'kustomizations',
+                  'controlplane'
+                ] | ansible.builtin.path_join
+              )
+            ]
+          }}
+      register: cifmw_edpm_prepare_crs_kustomize_result
+
+    - name: Log the CR that is about to be applied
+      when: not cifmw_edpm_prepare_dry_run
+      ansible.builtin.debug:
+        var: cifmw_edpm_prepare_crs_kustomize_result
 
     - name: Apply the OpenStackControlPlane CR
       environment:
@@ -155,27 +171,21 @@
       when: not cifmw_edpm_prepare_dry_run
       ci_script:
         output_dir: "{{ cifmw_edpm_prepare_basedir }}/artifacts"
-        script: "oc apply -f {{ cifmw_edpm_prepare_openstack_cr_path }}"
-
-    - name: Fetch the OpenStack controlplane name
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      when: not cifmw_edpm_prepare_dry_run
-      ansible.builtin.command:
-        cmd: >-
-          oc get OpenStackControlPlane
-          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          -o name
-      until: cifmw_edpm_prepare_cr_name_out.rc == 0 and cifmw_edpm_prepare_cr_name_out.stdout != ""
-      register: cifmw_edpm_prepare_cr_name_out
-      retries: 30
-      delay: 10
+        script: "oc apply -f {{ cifmw_edpm_prepare_crs_kustomize_result.output_path }}"
 
     - name: Wait for OpenStack controlplane to be deployed
       when: not cifmw_edpm_prepare_dry_run
       vars:
-        cr_name: "{{ cifmw_edpm_prepare_cr_name_out.stdout | trim | split('/') | last }}"
+        cr_name: >-
+          {{
+            (
+              cifmw_edpm_prepare_crs_kustomize_result.result |
+              selectattr('kind', 'defined') |
+              selectattr('metadata.name', 'defined') |
+              selectattr('kind', 'equalto', 'OpenStackControlPlane') |
+              first
+            ).metadata.name
+          }}
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
