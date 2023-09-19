@@ -88,23 +88,24 @@
   roles:
     - role: cifmw_block_device
 
-- name: Build Ceph spec from gathered IP addresses of EDPM inventory group
+- name: Build Ceph spec and conf from gathered IPs of EDPM inventory group
   tags: spec
   hosts: localhost
   gather_facts: true
   vars:
+    ssh_network_range: 192.168.122.0/24
     # storage_network_range: 172.18.0.0/24
-    storage_network_range: 192.168.122.0/24
+    # storage_mgmt_network_range: 172.20.0.0/24
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
-    - name: Build a dict mapping hostname to its IP which is in storage network range
+    - name: Build a dict mapping hostname to its IP which is in management network range
       ansible.builtin.set_fact:
         host_to_ip:
           "{{ host_to_ip | default({}) |
             combine(
               {
                 hostvars[item]['ansible_hostname'] :
-                hostvars[item][all_addresses] | ansible.utils.ipaddr(storage_network_range) | first
+                hostvars[item][all_addresses] | ansible.utils.ipaddr(ssh_network_range) | first
               }
             )
            }}"
@@ -115,7 +116,8 @@
   roles:
     - role: cifmw_ceph_spec
       cifmw_ceph_spec_host_to_ip: "{{ host_to_ip }}"
-      cifmw_ceph_spec_public_network: "{{ storage_network_range }}"
+      cifmw_ceph_spec_public_network: "{{ storage_network_range | default(ssh_network_range) }}"
+      cifmw_ceph_spec_private_network: "{{ storage_mgmt_network_range | default('') }}"
 
 - name: Bootstrap Ceph and apply spec
   tags: cephadm
