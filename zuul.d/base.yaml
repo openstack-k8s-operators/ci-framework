@@ -137,6 +137,7 @@
       cifmw_openshift_api: api.crc.testing:6443
       cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
       cifmw_openshift_skip_tls_verify: true
+      crc_ci_bootstrap_skip_cleanup: true
       cifmw_use_libvirt: false
       cifmw_zuul_target_host: controller
       crc_ci_bootstrap_networking:
@@ -158,6 +159,8 @@
             networks:
               default:
                 ip: 192.168.122.11
+              internal-api:
+                ip: 172.17.0.4
           crc:
             networks:
               default:
@@ -174,13 +177,65 @@
                 ip: 192.168.122.100
               internal-api:
                 ip: 172.17.0.100
-                config_nm: false
               storage:
                 ip: 172.18.0.100
-                config_nm: false
               tenant:
                 ip: 172.19.0.100
-                config_nm: false
+
+- job:
+    name: dummy-run
+    parent: base-extracted-crc
+    timeout: 10800
+    attempts: 1
+    nodeset:
+      nodes:
+        - name: controller
+          label: cloud-centos-9-stream-tripleo-vexxhost
+        - name: compute
+          label: cloud-centos-9-stream-tripleo-vexxhost
+    irrelevant-files: *ir_files
+    roles:
+      - zuul: github.com/openstack-k8s-operators/ci-framework
+    run:
+      - ci/playbooks/dummy-run.yml
+    vars:
+      crc_ci_bootstrap_skip_cleanup: true
+      cifmw_zuul_target_host: controller
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            mtu: 1500
+            range: 192.168.122.0/24
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/24
+          storage:
+            vlan: 21
+            range: 172.18.0.0/24
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/24
+        instances:
+          controller:
+            networks:
+              default:
+                ip: 192.168.122.11
+              internal-api:
+                ip: 172.17.0.11
+              storage:
+                ip: 172.18.0.11
+              tenant:
+                ip: 172.19.0.11
+          compute:
+            networks:
+              default:
+                ip: 192.168.122.100
+              internal-api:
+                ip: 172.17.0.100
+              storage:
+                ip: 172.18.0.100
+              tenant:
+                ip: 172.19.0.100
 
 #
 # EDPM BASE Jobs
