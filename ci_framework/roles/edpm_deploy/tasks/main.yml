@@ -45,72 +45,68 @@
   when:
     - not cifmw_edpm_deploy_dryrun | bool
   vars:
-    cifmw_edpm_deploy_openstack_cr_path: >-
+    cifmw_edpm_deploy_openstack_crs_path: >-
       {{
         [
           cifmw_edpm_deploy_manifests_dir,
           cifmw_install_yamls_defaults['NAMESPACE'],
           'dataplane',
-          'cr',
-          (cifmw_install_yamls_defaults['DATAPLANE_NODESET_CR'] | basename)
+          'cr'
         ] | ansible.builtin.path_join
       }}
   environment:
     PATH: "{{ cifmw_path }}"
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   block:
-    - name: Find the OpenStack Dataplane NodeSet CR manifest
-      ansible.builtin.find:
-        paths: "{{ cifmw_edpm_deploy_manifests_dir }}/{{ cifmw_install_yamls_defaults['NAMESPACE'] }}/dataplane/cr"
-        contains: "kind: OpenStackDataPlaneNodeSet"
-        excludes: "kind: Kustomization"
-        patterns: "*.yaml"
-      register: cifmw_edpm_deploy_cr_manifest_paths
-
-    - name: Ensure manifest exists
-      ansible.builtin.assert:
-        that: cifmw_edpm_deploy_cr_manifest_paths.matched == 1
-        quiet: true
-        msg: "Cannot determine OpenStackDataPlaneNodeSet deployment manifest"
-
     - name: Perform kustomizations to the OpenStackDataPlaneNodeSet CR
-      vars:
-        cifmw_edpm_kustomize_cr_path: "{{ cifmw_edpm_deploy_openstack_cr_path }}"
-        cifmw_edpm_kustomize_content: "{{ cifmw_edpm_deploy_dataplane_cr_kustomization | default('{}') }}"
-      ansible.builtin.include_role:
-        name: edpm_kustomize
+      when: not cifmw_edpm_deploy_dryrun
+      ci_kustomize:
+        target_path: "{{ cifmw_edpm_deploy_openstack_crs_path }}"
+        sort_ascending: false
+        kustomizations_paths: >-
+          {{
+            [
+              (
+                [
+                  cifmw_edpm_deploy_manifests_dir,
+                  'kustomizations',
+                  'dataplane'
+                ] | ansible.builtin.path_join
+              )
+            ]
+          }}
+      register: cifmw_edpm_deploy_crs_kustomize_result
+
+    - name: Log the CR that is about to be applied
+      when: not cifmw_edpm_deploy_dryrun
+      ansible.builtin.debug:
+        var: cifmw_edpm_deploy_crs_kustomize_result
 
     - name: Apply the OpenStackDataPlaneNodeSet CR
       when: not cifmw_edpm_deploy_dryrun
       ci_script:
         output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
-        script: "oc apply -f {{ cifmw_edpm_deploy_openstack_cr_path }}"
+        script: "oc apply -f {{ cifmw_edpm_deploy_crs_kustomize_result.output_path }}"
 
-    - name: Fetch the OpenStackDataplaneeNodeSet CR name
-      when: not cifmw_edpm_deploy_dryrun
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc get OpenStackDataplaneNodeSet
-          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          -o name
-      until: cifmw_edpm_deploy_cr_name_out.rc == 0 and cifmw_edpm_deploy_cr_name_out.stdout != ""
-      register: cifmw_edpm_deploy_cr_name_out
-      retries: 30
-      delay: 10
-
-    - name: Wait for OpenStackDataplaneNodeSet to be deployed
+    - name: Wait for OpenStackDataPlaneNodeSet to be deployed
       when: not cifmw_edpm_deploy_dryrun
       vars:
-        cr_name: "{{ cifmw_edpm_deploy_cr_name_out.stdout | trim | split('/') | last }}"
+        cr_name: >-
+          {{
+            (
+              cifmw_edpm_deploy_crs_kustomize_result.result |
+              selectattr('kind', 'defined') |
+              selectattr('metadata.name', 'defined') |
+              selectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet') |
+              first
+            ).metadata.name
+          }}
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
         cmd: >-
-          oc wait OpenStackDataplaneNodeSet {{ cr_name }}
+          oc wait OpenStackDataPlaneNodeSet {{ cr_name }}
           --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
           --for=condition=ready
           --timeout={{ cifmw_edpm_deploy_timeout }}m
