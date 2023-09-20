@@ -1,0 +1,50 @@
+---
+ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+cifmw_install_yamls_vars:
+  DATAPLANE_REPO: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/dataplane-operator"
+  STORAGE_CLASS: crc-csi-hostpath-provisioner
+  BMO_SETUP: false
+
+# edpm_prepare role vars
+cifmw_operator_build_meta_name: "openstack-operator"
+cifmw_edpm_prepare_skip_crc_storage_creation: true
+
+# edpm_deploy role vars
+cifmw_deploy_edpm: true
+
+# openshift_setup role vars
+cifmw_openshift_setup_skip_internal_registry: true
+
+# openshift_login role vars
+cifmw_openshift_user: "kubeadmin"
+cifmw_openshift_password: "123456789"
+cifmw_openshift_api: api.crc.testing:6443
+cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+cifmw_openshift_skip_tls_verify: true
+
+pre_deploy:
+  - name: Disable openstack marketplace
+    type: playbook
+    source: disable_os_marketplace.yml
+
+pre_infra:
+  - name: Download needed tools
+    inventory: 'localhost,'
+    connection: local
+    type: playbook
+    source: "{{ cifmw_installyamls_repos }}/devsetup/download_tools.yaml"
+
+post_ctlplane_deploy:
+  - name: Tune rabbitmq resources
+    type: playbook
+    source: rabbitmq_tuning.yml
+
+  - name: Validate podified control plane
+    type: playbook
+    source: validate_podified_deployment.yml
+    extra_vars:
+      podified_validation: "{{ podified_validation | default ('false') | bool }}"
+      cifmw_openshift_login_kubeconfig: "{{ cifmw_openshift_login_kubeconfig }}"
+      cifmw_path: "{{ cifmw_path }}"
+      openstack_namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
