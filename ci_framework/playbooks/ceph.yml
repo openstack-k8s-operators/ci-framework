@@ -169,19 +169,16 @@
         pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
       no_log: true
 
-    - name: Set IP address of first monitor
-      ansible.builtin.set_fact:
-        cifmw_cephadm_first_mon_ip: "{{ item.addr }}"
-      when:
-        - item.service_type == 'host'
-        - item.hostname == "{{ cifmw_cephadm_bootstrap_host }}"  # noqa: no-jinja-when
-      loop: "{{ lookup('file', cifmw_cephadm_spec_ansible_host) | from_yaml_all | list }}"
-      delegate_to: localhost
-
     # public network always exist because is provided by the ceph_spec role
     - name: Get Storage network range
       ansible.builtin.set_fact:
         cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+
+    - name: Set IP address of first monitor
+      ansible.builtin.set_fact:
+        cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
+      vars:
+        this_host: "{{ groups['edpm'][0] }}"
 
     - name: Get already assigned IP addresses
       ansible.builtin.set_fact:
