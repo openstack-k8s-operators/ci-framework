@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -eux
+set -o pipefail
+
+pushd {{ cifmw_rt_rootdir }}
+export ANSIBLE_CONFIG="ansible.cfg"
+ansible-playbook {{ cifmw_rt_playbook_dir }}/{{ cifmw_rt_deploy_playbook }} \
+    {%- if cifmw_rt_verbosity | length > 0 and cifmw_rt_verbosity.startswith('-v') %}
+    {{ cifmw_rt_verbosity }} \
+    {%- endif %}
+    {%- if cifmw_rt_dry_run | bool -%}
+    --syntax-check
+    {%- endif %}
+    {%- if cifmw_rt_tags | length > 0%}
+    -t {{ cifmw_rt_tags | join(',') }} \
+    {%- endif %}
+    {%- if cifmw_rt_skip_tags | length > 0%}
+    --skip-tags {{ cifmw_rt_skip_tags | join(',') }} \
+    {%- endif %}
+    -e @{{ cifmw_rt_config_dir }}/common/ci_vars.yml \
+    {%- for varfile in cifmw_rt_deploy_varfiles %}
+    -e @{{ cifmw_rt_config_dir }}/{{ varfile }} \
+    {%- endfor %}
+    -e @{{ cifmw_rt_config_dir }}/release/{{ cifmw_rt_release_file }} \
+    -e @scenarios/centos-9/zuul_inventory.yml
+
+{% if cifmw_rt_force_failure | bool %}
+exit 1
+{% endif %}

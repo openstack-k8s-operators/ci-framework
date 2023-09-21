@@ -1,0 +1,65 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ cifmw_rt_basedir }}/{{ item }}"
+    state: directory
+  loop:
+    - artifacts
+    - logs
+
+- name: Make sure Ansible package is installed
+  become: true
+  ansible.builtin.package:
+    name: ansible-core
+    state: present
+
+- name: Make sure deployment playbook and config exists
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _check_item
+  with_items:
+    - "{{ cifmw_rt_playbook_dir }}/{{ cifmw_rt_deploy_playbook }}"
+    - "{{ cifmw_rt_config_dir }}/release/{{ cifmw_rt_release_file }}"
+
+- name: Verifying if deployment playbook and config exists
+  debug: msg="File {{ item.item }} exist"
+  with_items: "{{ _check_item.results }}"
+  when: item.stat.exists
+
+- name: Make sure deployment varfiles file exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_rt_config_dir }}/varfiles/{{ item }}"
+  register: _check_path
+  with_items: "{{ cifmw_rt_deploy_varfiles }}"
+
+- name: Verifying if deployment varfiles exists
+  debug: msg="File {{ item.item }} exist"
+  with_items: "{{ _check_path.results }}"
+  when: item.stat.exists
+
+- name: Render run_ci_test.sh script
+  ansible.builtin.template:
+    src: "run_ci_test.sh.j2"
+    dest: "{{ cifmw_rt_basedir }}/run_ci_test.sh"
+
+- name: Run run_ci_test.sh script
+  ansible.builtin.shell:
+    cmd: |
+      set -ex
+      bash -xe {{ cifmw_rt_basedir }}/run_ci_test.sh
+    executable: /bin/bash
