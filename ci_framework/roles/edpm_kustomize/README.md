@@ -33,18 +33,18 @@ None
 
            - op: replace
              path: /spec/nodeTemplate/ansible/ansibleUser
-             value: "{{ hostvars.compute.ansible_user | default('zuul') }}"
+             value: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
 
            - op: replace
              path: /spec/nodeTemplate/ansible/ansibleVars/edpm_os_net_config_mappings
              value:
                net_config_data_lookup:
                  edpm-compute:
-                   nic1: "{{ crc_ci_bootstrap_networks_out.compute.default.iface }}"
+                   nic1: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface }}"
 
            - op: replace
              path: /spec/nodeTemplate/ansible/ansibleUser
-             value: "{{ hostvars.compute.ansible_user | default('zuul') }}"
+             value: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
   ansible.builtin.include_role:
     name: edpm_kustomize
 ```

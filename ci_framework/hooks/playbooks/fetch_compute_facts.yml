@@ -40,14 +40,7 @@
 
     - name: Check we have some compute in inventory
       ansible.builtin.set_fact:
-        has_compute: >-
-          {% set ns = namespace(found=false) -%}
-          {% for host in hostvars.keys() -%}
-          {%   if host is match('^compute.*') -%}
-          {%     set ns.found = true -%}
-          {%   endif -%}
-          {% endfor -%}
-          {{ ns.found }}
+        computes_len: "{{ groups['computes'] | length }}"
 
     - name: Ensure that the isolated net was configured for crc
       ansible.builtin.assert:
@@ -58,11 +51,11 @@
 
     - name: Ensure we have needed bits for compute when needed
       when:
-        - has_compute | bool
+        - computes_len | int > 0
       ansible.builtin.assert:
         that:
-          - "'compute' in crc_ci_bootstrap_networks_out"
-          - "'default' in crc_ci_bootstrap_networks_out['compute']"
+          - "'compute-0' in crc_ci_bootstrap_networks_out"
+          - "'default' in crc_ci_bootstrap_networks_out['compute-0']"
 
     - name: Set facts for further usage within the framework
       ansible.builtin.set_fact:
@@ -105,14 +98,18 @@
 
     - name: Prepare EDPM deploy related facts and keys
       when:
-        - has_compute | bool
+        - computes_len | int > 0
       block:
         - name: Set specific fact for compute accesses
           vars:
+            dns_servers: "{{ ((['192.168.122.10'] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
             edpm_install_yamls_vars:
               SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_ed25519"
-              DATAPLANE_COMPUTE_IP: "{{ crc_ci_bootstrap_networks_out.compute.default.ip | ansible.utils.ipaddr('address') }}"
+              DATAPLANE_COMPUTE_IP: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.ip | ansible.utils.ipaddr('address') }}"
               DATAPLANE_SSHD_ALLOWED_RANGES: "['0.0.0.0/0']"
+              DATAPLANE_TOTAL_NODES: "{{ computes_len | int }}"
+              DATAPLANE_SINGLE_NODE: "{{ (computes_len | int > 1) | ternary('false', 'true') }}"
+
           ansible.builtin.set_fact:
             cifmw_edpm_deploy_extra_vars: "{{ edpm_install_yamls_vars }}"
 
@@ -132,36 +129,46 @@
                 patch: |-
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/neutron_public_interface_name
-                    value: "{{ crc_ci_bootstrap_networks_out.compute.default.iface | default('') }}"
+                    value: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('') }}"
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_mtu
-                    value: {{ crc_ci_bootstrap_networks_out.compute.default.mtu | default(1500) }}
+                    value: {{ crc_ci_bootstrap_networks_out['compute-0'].default.mtu | default(1500) }}
 
-              {% if 'tenant' in crc_ci_bootstrap_networks_out.compute %}
+              {% if 'tenant' in crc_ci_bootstrap_networks_out['compute-0'] %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/tenant_mtu
-                    value: {{ crc_ci_bootstrap_networks_out.compute['tenant'].mtu | default(1500) }}
+                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['tenant'].mtu | default(1500) }}
               {% endif %}
 
-              {% if 'storage' in crc_ci_bootstrap_networks_out.compute %}
+              {% if 'storage' in crc_ci_bootstrap_networks_out['compute-0'] %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/storage_mtu
-                    value: {{ crc_ci_bootstrap_networks_out.compute['storage'].mtu | default(1500) }}
+                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage'].mtu | default(1500) }}
               {% endif %}
 
-              {% if 'internal-api' in crc_ci_bootstrap_networks_out.compute %}
+              {% if 'internal-api' in crc_ci_bootstrap_networks_out['compute-0'] %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/internal_api_mtu
-                    value: {{ crc_ci_bootstrap_networks_out.compute['internal-api'].mtu | default(1500) }}
+                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['internal-api'].mtu | default(1500) }}
               {% endif %}
+
+              {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
+                  - op: replace
+                    path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
+                    value: {{ crc_ci_bootstrap_networks_out[compute_node].default.ip  | ansible.utils.ipaddr('address') }}
+
+                  - op: replace
+                    path: /spec/nodes/edpm-{{ compute_node }}/networks/0/fixedIP
+                    value: {{ crc_ci_bootstrap_networks_out[compute_node].default.ip  | ansible.utils.ipaddr('address') }}
+              {% endfor %}
 
                   - op: add
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_os_net_config_mappings
                     value:
                       net_config_data_lookup:
                         edpm-compute:
-                          nic2: "{{ crc_ci_bootstrap_networks_out.compute.default.iface | default('ens7') }}"
+                          nic2: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('ens7') }}"
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_override
@@ -201,7 +208,7 @@
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleUser
-                    value: "{{ hostvars.compute.ansible_user | default('zuul') }}"
+                    value: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_dns_nameservers
