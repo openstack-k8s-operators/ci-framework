@@ -1,0 +1,42 @@
+---
+- name: Check reports from DLRN
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      dlrnapi --url {{ cifmw_repo_setup_dlrn_api_url }}
+      {% if cifmw_dlrn_promote_kerberos_auth|bool -%}
+      --server-principal {{ cifmw_dlrn_promote_dlrnapi_host_principal }} --auth-method kerberosAuth --force-auth
+      {% endif -%}
+      promotion-get
+      {% if (cifmw_repo_setup_full_hash is defined) and (cifmw_repo_setup_full_hash | length > 0) -%}
+      --agg-hash {{ cifmw_repo_setup_full_hash }}
+      {% endif -%}
+      {% if (cifmw_repo_setup_extended_hash is defined) and (cifmw_repo_setup_extended_hash | length > 0) -%}
+      --extended_hash {{ cifmw_repo_setup_extended_hash }}
+      {% endif -%}
+      {% if (cifmw_repo_setup_commit_hash is defined) and (cifmw_repo_setup_commit_hash | length > 0) -%}
+      --commit_hash {{ cifmw_repo_setup_commit_hash }}
+      {% endif -%}
+      {% if (cifmw_repo_setup_distro_hash is defined) and (cifmw_repo_setup_distro_hash | length > 0) -%}
+      --distro_hash {{ cifmw_repo_setup_distro_hash }}
+      {% endif -%}
+      --promote-name {{ cifmw_dlrn_promote_promotion_target }}
+      | tee -a {{ cifmw_dlrn_promote_workspace }}/cifmw_dlrn_promote_hash_promote_target_output.txt
+  environment: |
+    {{ zuul | zuul_legacy_vars | combine({
+      'DLRNAPI_PASSWORD': dlrnapi.password,
+      'DLRNAPI_USERNAME': cifmw_dlrn_report_dlrnapi_user,
+      'SSL_CA_BUNDLE': cifmw_dlrn_promote_ssl_ca_bundle
+      }) }}
+  changed_when: true
+
+- name: Get the the DLRN output results
+  ansible.builtin.slurp:
+    path: "{{ cifmw_dlrn_promote_workspace }}/cifmw_dlrn_promote_hash_promote_target_output.txt"
+  register: cifmw_dlrn_promote_hash_in_promote_target_from_slurp
+
+- name: Set fact for  promotion target output
+  ansible.builtin.set_fact:
+    cifmw_dlrn_promote_hash_in_promote_target:
+      "{{ cifmw_dlrn_promote_hash_in_promote_target_from_slurp['content'] | b64decode }}"
+    cacheable: true

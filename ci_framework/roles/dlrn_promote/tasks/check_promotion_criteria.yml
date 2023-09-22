@@ -1,0 +1,28 @@
+---
+- name: Empty dlrnapi output (no jobs reported)
+  ansible.builtin.fail:
+    msg: "FAILURE: No successful jobs reported to DLRN API"
+  when:
+    - cifmw_dlrn_promote_hash_report_status_output | length == 0 or cifmw_dlrn_promote_hash_report_status_output == '[]'
+
+- name: Check for promotion criteria
+  when:
+    - cifmw_dlrn_promote_hash_report_status_output | length > 0
+    - cifmw_dlrn_promote_hash_report_status_output  != '[]'
+  block:
+    - name: Fetch criteria file
+      ansible.builtin.fetch:
+        dest: "{{ cifmw_dlrn_promote_workspace }}/"
+        src: "{{ cifmw_dlrn_promote_criteria_file }}"
+        flat: true
+
+    - name: Load criteria for promotion
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_dlrn_promote_workspace }}/{{ cifmw_dlrn_promote_criteria_file | basename }}"
+        name: "criteria"
+
+    - name: Query to match promotion criteria
+      ansible.builtin.include_tasks: query_criteria.yml
+      with_items: "{{ criteria[promote_target] }}"
+      loop_control:
+        loop_var: "cifmw_dlrn_promote_criteria_job"
