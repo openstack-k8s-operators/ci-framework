@@ -3,8 +3,21 @@
   name: "Tweak CRC node"
   gather_facts: false
   tasks:
+
+    - name: Load network parameters
+      register: _cifmw_multinode_customizations_crc_net_env_slurp
+      ansible.builtin.slurp:
+        src: "/etc/ci/env/networking-info.yml"
+
     - name: Harcode crc-pre script
       become: true
+      vars:
+        _decoded_net_env: "{{ _cifmw_multinode_customizations_crc_net_env_slurp['content'] | b64decode | from_yaml }}"
+        _crc_default_net_ip: >-
+          {{
+            _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.ip | ansible.utils.ipaddr('address')
+          }}
+        _crc_default_net_dns: "{{ _decoded_net_env.crc_ci_bootstrap_provider_dns | default([]) }}"
       ansible.builtin.copy:
         dest: "/usr/local/bin/configure-pre-crc.sh"
         mode: '0755'
@@ -15,23 +28,6 @@
 
           set -x
 
-          HOST_IP=$(ip route get 1.2.3.4 | awk '{print $7}' | head -n1)
-          HOST_DEF_INT=$(ip -br -4 a sh | grep $HOST_IP | awk '{print $1}')
-          ALL_DNS=$(nmcli -g IP4.DNS device show $HOST_DEF_INT)
-
-          DNS1=$(echo $ALL_DNS| cut -f1 -d'|')
-          DNS2=$(echo $ALL_DNS| cut -f2 -d'|')
-
-          if [ -z $DNS1 ]; then
-              echo "DNS1 is empty. Setting 1.1.1.1"
-              DNS1='1.1.1.1'
-          fi
-
-          if [ -z $DNS2 ]; then
-              echo "DNS2 is empty. Setting 8.8.8.8"
-              DNS2='8.8.8.8'
-          fi
-
           cat << EOL | sudo tee /var/srv/dnsmasq.conf
           user=root
           port=53
@@ -41,16 +37,17 @@
           no-negcache
           local=/crc.testing/
           domain=crc.testing
-          address=/apps-crc.testing/192.168.122.10
-          address=/api.crc.testing/192.168.122.10
-          address=/api-int.crc.testing/192.168.122.10
-          address=/crc-74q6p-master-0.crc.testing/192.168.121.10
-          server=$DNS1
-          server=$DNS2
+          address=/apps-crc.testing/{{ _crc_default_net_ip }}
+          address=/api.crc.testing/{{ _crc_default_net_ip }}
+          address=/api-int.crc.testing/{{ _crc_default_net_ip }}
+          address=/crc-74q6p-master-0.crc.testing/{{ _crc_default_net_ip }}
+          {% for dns_server in _crc_default_net_dns -%}
+          server={{ dns_server }}
+          {% endfor %}
           EOL
 
           cat << EOL | sudo tee /etc/resolv.conf
-          nameserver 127.0.0.1
+          nameserver {{ _crc_default_net_ip }}
           EOL
 
           # stop overwriting /etc/resolv.conf after reboot
