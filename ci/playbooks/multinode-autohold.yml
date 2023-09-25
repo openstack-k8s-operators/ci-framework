@@ -3,13 +3,20 @@
   hosts: controller
   gather_facts: true
   tasks:
-    - name: Check if the current run is an authold target
+    - name: Verify if "success" flag exists after successful tests execution
+      register: cifmw_success_flag
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/cifmw-success"
+
+    - name: Check if the current run is an autohold target
       when:
+        - not cifmw_success_flag.stat.exists
         - zuul is defined
         - "'ref' in zuul"
         - "'tenant' in zuul"
         - "'job' in zuul"
         - "'project' in zuul"
+        - "'canonical_name' in zuul.project"
       block:
         - name: Fetch existing autoholds from zuul
           vars:
@@ -21,7 +28,7 @@
                   'api',
                   'tenant',
                   zuul.tenant,
-                  'autoholds'
+                  'autohold'
                 ] | join('/')
               }}
           ansible.builtin.uri:
@@ -43,7 +50,7 @@
             - "autoholds_response.content_type.startswith('application/json')"
           ignore_errors: true
 
-        - name: Check if any authold matches
+        - name: Check if any autohold matches
           vars:
             autoholds_returned_data: >-
               {{
@@ -67,7 +74,7 @@
                 selectattr('current_count', 'defined') |
                 selectattr('max_count', 'defined') |
                 selectattr('tenant', 'equalto', zuul.tenant) |
-                selectattr('project', 'equalto', zuul.project) |
+                selectattr('project', 'equalto', zuul.project.canonical_name) |
                 selectattr('job', 'equalto', zuul.job)
               }}
             matching_candidates: >-
