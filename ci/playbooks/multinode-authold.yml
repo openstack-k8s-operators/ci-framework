@@ -1,0 +1,84 @@
+---
+- name: "Run ci/playbooks/multinode-autohold.yml"
+  hosts: controller
+  gather_facts: true
+  tasks:
+    - name: Check if the current run is an authold target
+      when:
+        - zuul is defined
+        - "'ref' in zuul"
+        - "'tenant' in zuul"
+        - "'job' in zuul"
+        - "'project' in zuul"
+      block:
+        - name: Fetch existing autoholds from zuul
+          vars:
+            _zuul_api_url: >-
+              {{
+                [
+                  ('https://'+ (zuul.executor.hostname | split('.'))[1:] | join('.')),
+                  'zuul',
+                  'api'
+                  'tenant',
+                  zuul.tenant,
+                  'autoholds'
+                ] | join('/')
+              }}
+          ansible.builtin.uri:
+            url: "{{ _zuul_api_url }}"
+            method: GET
+            headers:
+              Content-Type: "application/json"
+              Accept: "application/json"
+            return_content: yes
+            status_code: 200
+            body_format: json
+          register: autoholds_response
+          retries: 2
+          delay: 10
+          until:
+            - autoholds_response.status is defined
+            - autoholds_response.content_type is defined
+            - autoholds_response.status == 200
+            - "autoholds_response.content_type.startswith('application/json')"
+          ignore_errors: true
+
+        - name: Check if any authold matches
+          vars:
+            autoholds_returned_data: >-
+              {{
+                (
+                  autoholds_response.content |
+                  default('[]') |
+                  from_json
+                ) if
+                  (
+                    (not autoholds_response.failed) and
+                    autoholds_response.content_type.startswith('application/json')
+                  )
+                else []
+              }}
+            autohold_candidates: >-
+              {{
+                autoholds_returned_data |
+                selectattr('tenant', 'defined') |
+                selectattr('project', 'defined') |
+                selectattr('job', 'defined') |
+                selectattr('current_count', 'defined') |
+                selectattr('max_count', 'defined') |
+                selectattr('tenant', 'equalto', zuul.tenant) |
+                selectattr('project', 'equalto', zuul.project) |
+                selectattr('job', 'equalto', zuul.job)
+              }}
+            matching_candidates: >-
+              {% set matching_holds = [] -%}
+              {% for candidate in autohold_candidates -%}
+              {%   if zuul.ref | regex_search(candidate.ref_filter) and (candidate.max_count > candidate.current_count) -%}
+              {%     set _ = matching_holds.append(candidate) -%}
+              {%   endif -%}
+              {% endfor -%}
+              {{ matching_holds }}
+          when: matching_candidates | length > 0
+          ansible.builtin.file:
+            path: "{{ ansible_user_dir }}/crc-ci-bootstrap-skip-cleanup"
+            state: touch
