@@ -17,6 +17,8 @@ become - Required to install required rpm packages
 * `cifmw_tempest_tests_allowed`: (List) List of tests to be executed. Setting this will not use the `list_allowed` plugin
 * `cifmw_tempest_tempestconf_profile`: (Dictionary) List of settings to be overwritten in tempest.conf.
 * `cifmw_tempest_concurrency`: (Integer) Tempest concurrency value.
+* `cifmw_tempest_retries`: (Integer) Number of retries of tempest run.
+* `cifmw_tempest_retries_delay`: (Integer) Delay between retries.
 
 ## Use of cifmw_tempest_tempestconf_profile
 

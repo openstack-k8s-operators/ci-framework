@@ -37,40 +37,45 @@
     cmd: "podman unshare chown 42480:42480 -R {{ cifmw_tempest_artifacts_basedir }}"
   when: not cifmw_tempest_dry_run | bool
 
-- name: Run tempest
-  ignore_errors: true
-  containers.podman.podman_container:
-    name: tempest
-    image: "{{ cifmw_tempest_image }}:{{ cifmw_tempest_image_tag }}"
-    state: started
-    auto_remove: "{{ cifmw_tempest_remove_container | default(false) }}"
-    network: host
-    volume:
-      - "{{ cifmw_tempest_artifacts_basedir }}/:/var/lib/tempest/external_files:Z"
-    detach: false
-    env:
-      CONCURRENCY: "{{ cifmw_tempest_concurrency | default(omit) }}"
-  when: not cifmw_tempest_dry_run | bool
-  register: tempest_run_output
+- name: Wrap tempest run
+  block:
+    - name: Run tempest
+      when: not cifmw_tempest_dry_run | bool
+      register: tempest_run_output
+      retries: "{{ cifmw_tempest_retries | int}}"
+      delay: "{{ cifmw_tempest_retries_delay | int }}"
+      until: not tempest_run_output.failed
+      containers.podman.podman_container:
+        name: tempest
+        image: "{{ cifmw_tempest_image }}:{{ cifmw_tempest_image_tag }}"
+        state: started
+        auto_remove: "{{ cifmw_tempest_remove_container | default(false) }}"
+        network: host
+        volume:
+          - "{{ cifmw_tempest_artifacts_basedir }}/:/var/lib/tempest/external_files:Z"
+        detach: false
+        env:
+          CONCURRENCY: "{{ cifmw_tempest_concurrency | default(omit) }}"
 
-- name: Change tempest directory permission back to original
-  become: true
-  ansible.builtin.file:
-    path: "{{ cifmw_tempest_artifacts_basedir }}"
-    state: directory
-    recurse: true
-    owner: "{{ lookup('env', 'USER') }}"
-    group: "{{ lookup('env', 'USER') }}"
+  always:
+    - name: Change tempest directory permission back to original
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_tempest_artifacts_basedir }}"
+        state: directory
+        recurse: true
+        owner: "{{ lookup('env', 'USER') }}"
+        group: "{{ lookup('env', 'USER') }}"
 
-- name: Save logs from podman
-  when: not cifmw_tempest_dry_run | bool
-  ansible.builtin.copy:
-    dest: "{{ cifmw_tempest_artifacts_basedir }}/podman_tempest.log"
-    content: |
-      "{{ tempest_run_output.stdout }}"
+    - name: Save logs from podman
+      when: not cifmw_tempest_dry_run | bool
+      ansible.builtin.copy:
+        dest: "{{ cifmw_tempest_artifacts_basedir }}/podman_tempest.log"
+        content: |
+          "{{ tempest_run_output.stdout }}"
 
-- name: Fail if podman container did not succeed
-  when: not cifmw_tempest_dry_run | bool
-  ansible.builtin.assert:
-    that:
-      - "tempest_run_output.failed == false"
+    - name: Fail if podman container did not succeed
+      when: not cifmw_tempest_dry_run | bool
+      ansible.builtin.assert:
+        that:
+          - "tempest_run_output.failed == false"
