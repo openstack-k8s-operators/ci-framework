@@ -1,0 +1,55 @@
+---
+- name: Get commit.yaml file
+  ansible.builtin.get_url:
+    url: "{{ commit_url }}/commit.yaml"
+    dest: "{{ cifmw_dlrn_promote_workspace }}/commit.yaml"
+    force: true
+  register: result
+  until: result is success
+  retries: 6
+  delay: 50
+
+- name: Load data from commit.yaml file
+  ansible.builtin.include_vars:
+    file: "{{ cifmw_dlrn_promote_workspace }}/commit.yaml"
+    name: _hashes
+
+- name: Get individual commit/distro hashes
+  ansible.builtin.set_fact:
+    cifmw_dlrn_promote_distro_hash: "{{ _hashes['commits'][0]['distro_hash'] }}"
+    cifmw_dlrn_promote_commit_hash: "{{ _hashes['commits'][0]['commit_hash'] }}"
+
+- name: Get individual extended hash - if it is not None
+  ansible.builtin.set_fact:
+    cifmw_dlrn_promote_extended_hash: "{{ _hashes['commits'][0]['extended_hash'] }}"
+  when: _hashes['commits'][0]['extended_hash'] != 'None'
+
+- name: Print out commit_hash
+  ansible.builtin.debug:
+    var: cifmw_dlrn_promote_commit_hash
+
+- name: Print out distro_hash
+  ansible.builtin.debug:
+    var: cifmw_dlrn_promote_distro_hash
+
+- name: Print out extended_hash
+  ansible.builtin.debug:
+    var: cifmw_dlrn_promote_extended_hash
+  when: cifmw_dlrn_promote_extended_hash is defined
+
+- name: Converge commit/distro hashes into full_hash
+  ansible.builtin.set_fact:
+    cifmw_dlrn_promote_full_hash: "{{ cifmw_dlrn_promote_commit_hash }}_{{ cifmw_dlrn_promote_distro_hash[:8] }}"
+
+- name: Add extended_hash to full_hash if defined
+  ansible.builtin.set_fact:
+    cifmw_dlrn_promote_full_hash: "{{ cifmw_dlrn_promote_full_hash }}_{{ cifmw_dlrn_promote_extended_hash.split('_')[0][:8] }}_{{ cifmw_dlrn_promote_extended_hash.split('_')[1][:8] }}"
+  when: cifmw_dlrn_promote_extended_hash is defined
+
+- name: Print out full_hash
+  ansible.builtin.debug:
+    var: cifmw_dlrn_promote_full_hash
+
+- name: Run promotion
+  ansible.builtin.include_tasks: promote_hash.yml
+  when: cifmw_dlrn_promote_hash_promote_content | bool
