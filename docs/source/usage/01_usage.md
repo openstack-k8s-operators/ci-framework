@@ -15,6 +15,8 @@ The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
 `~/ci-framework-data`
+* `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook
+in the multinode layout, especially for the reproducer case.
 * `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes
 provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`

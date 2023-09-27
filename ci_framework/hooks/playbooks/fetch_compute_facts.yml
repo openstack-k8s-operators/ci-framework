@@ -38,6 +38,10 @@
       loop_control:
         label: "{{ item }}"
 
+    - name: Ensure CRC hostname is set
+      ansible.builtin.set_fact:
+        _crc_hostname: "{{ cifmw_crc_hostname | default('crc') }}"
+
     - name: Check we have some compute in inventory
       ansible.builtin.set_fact:
         computes_len: "{{ groups['computes'] | length }}"
@@ -46,8 +50,8 @@
       ansible.builtin.assert:
         that:
           - crc_ci_bootstrap_networks_out is defined
-          - "'crc' in crc_ci_bootstrap_networks_out"
-          - "'default' in crc_ci_bootstrap_networks_out['crc']"
+          - crc_ci_bootstrap_networks_out[_crc_hostname] is defined
+          - crc_ci_bootstrap_networks_out[_crc_hostname]['default'] is defined
 
     - name: Ensure we have needed bits for compute when needed
       when:
@@ -60,8 +64,8 @@
     - name: Set facts for further usage within the framework
       ansible.builtin.set_fact:
         cifmw_edpm_prepare_extra_vars:
-          NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out.crc.default.iface }}"
-          NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out.crc.default.mtu }}"
+          NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.iface }}"
+          NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.mtu }}"
 
     - name: Ensure the kustomizations dirs exists
       ansible.builtin.file:
