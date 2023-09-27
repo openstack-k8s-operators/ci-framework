@@ -1,0 +1,35 @@
+---
+- name: Fetch routes as a json
+  register: ip_routes
+  ansible.builtin.command:
+    cmd: ip -j ro ls
+
+- name: Get nm existing ethernet connections
+  register: nm_ethernet
+  ansible.builtin.command:
+    cmd: nmcli -t -f TYPE,DEVICE,NAME con show --active
+
+- name: Remove non-default ethernet connections
+  vars:
+    default_route_dev: >-
+      {{
+        ip_routes.stdout |
+        from_json |
+        selectattr("dst", "equalto", "default") |
+        map(attribute="dev") | first
+      }}
+    nm_con_list: >-
+      {{
+        nm_ethernet.stdout_lines |
+        select('search', 'ethernet') |
+        map('split', ':')
+      }}
+  become: true
+  when:
+    - item[1] != default_route_dev
+  community.general.nmcli:
+    conn_name: "{{ item[2] }}"
+    state: absent
+  loop: "{{ nm_con_list }}"
+  loop_control:
+    label: "{{ item[1] }}"
