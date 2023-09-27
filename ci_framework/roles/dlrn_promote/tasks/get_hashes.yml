@@ -1,0 +1,21 @@
+---
+- name: Copy delorean.repo to dlrn_promote workspace
+  ansible.builtin.fetch:
+    src: "{{ cifmw_dlrn_promote_dlrnrepo_path }}"
+    dest: "{{ cifmw_dlrn_promote_workspace }}/"
+    flat: true
+
+- name: Get baseurls from delorean.repo
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      cat {{ cifmw_dlrn_promote_workspace }}/delorean.repo
+      | grep  'baseurl=' | cut -d '=' -f 2
+  register: base_urls
+  changed_when: true
+
+- name: Run promotion for each base component urls
+  ansible.builtin.include_tasks: get_hash_from_commit.yaml
+  with_items: "{{ base_urls.stdout_lines }}"
+  loop_control:
+    loop_var: "commit_url"
