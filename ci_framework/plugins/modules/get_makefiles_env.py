@@ -55,11 +55,13 @@ import subprocess
 import tempfile
 
 
+__FILES_ENCODING = "utf-8"
+__JOIN_CHARS = "|#_:_#|"
 __TMP_TARGET_NAME = "cifmw_dump_vars"
 __TMPL_DUMP_VARS_TARGET = """
 .PHONY: %(target)s
 %(target)s:
-\tprintf "%(cmd)s" >> %(out_file)s
+\techo "%(cmd)s" >> %(out_file)s
 """
 
 
@@ -77,9 +79,9 @@ def __get_makefile_raw_variables(makefile_path):
 def __get_makefile_variables(makefile_path):
     makefile_variables = __get_makefile_raw_variables(makefile_path)
     with open(
-        makefile_path, "r"
+        makefile_path, "r", encoding=__FILES_ENCODING
     ) as makefile_f, tempfile.TemporaryDirectory() as temp_dir, open(
-        os.path.join(temp_dir, "Makefile"), "w"
+        os.path.join(temp_dir, "Makefile"), "w", encoding=__FILES_ENCODING
     ) as temp_makefile_f:
         # Copy the Makefile content to the new temporal one
         makefile_lines = makefile_f.readlines()
@@ -87,7 +89,7 @@ def __get_makefile_variables(makefile_path):
 
         # Prepare a single printf command that will dump each known variable
         # to a file
-        var_dump_cmd = "\\n".join(
+        var_dump_cmd = __JOIN_CHARS.join(
             [
                 "{0}: ${{{1}}}".format(var_name, var_name)
                 for var_name in makefile_variables
@@ -110,16 +112,16 @@ def __get_makefile_variables(makefile_path):
         # Call the injected target
         subprocess.run(
             ["make", __TMP_TARGET_NAME],
-            check=False,
+            check=True,
             cwd=temp_dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
 
         # Read and parse the resulting dump file
-        with open(vars_out_path, "r") as vars_content:
+        with open(vars_out_path, "r", encoding=__FILES_ENCODING) as vars_content:
             vars_dict = {}
-            for vars_line in vars_content.readlines():
+            for vars_line in vars_content.read().split(__JOIN_CHARS):
                 line_split = vars_line.strip().split(":", 1)
                 vars_dict[line_split[0]] = (
                     line_split[1].lstrip() if len(line_split) > 1 else None
