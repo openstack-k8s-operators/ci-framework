@@ -41,3 +41,7 @@ cifmw_network_layout:
       gw6:  # Optional. IPv6 gateway.
       dns6:  # Optional. IPV6 DNS servers list.
 ```
+
+## Bootstrap CI
+It will also look for a specific parameter from the CI Bootstrap steps: `crc_ci_bootstrap_networks_out`.
+If it finds it, it will consume it instead of `cifmw_network_layout`.
