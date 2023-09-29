@@ -67,6 +67,12 @@ need to be changed for a typical EDPM deployment.
    requires a `VIP` that will be owned by `keepalived`. This IP address will
    be used as entry point to reach the `radosgw backends` through `haproxy`.
 
+* `cifmw_cephadm_nfs_vip`: the ingress daemon deployed along with the `nfs`
+   cluster requires a `VIP` that will be owned by `keepalived`. This IP
+   address is the same used for rgw unless an override is passed, and it's
+   used as entry point to reach the `ganesha backends` through an `haproxy`
+   instance where proxy-protocol is enabled.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
