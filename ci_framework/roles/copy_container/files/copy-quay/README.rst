@@ -29,7 +29,7 @@ Since this uses the podman api to copy the repositories, you can use podman to a
 
 Then, the simplest way to run it is::
 
-    copy-quay --token $TOKEN --from-namespace podified-main-centos9 --to-namespace podified-main-centos9 copy
+    copy-quay --token $TOKEN --from-namespace podified-master-centos9 --to-namespace podified-master-centos9 copy
 
 If you require to parse a job::
 
