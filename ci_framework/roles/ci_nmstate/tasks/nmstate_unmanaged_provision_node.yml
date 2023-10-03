@@ -1,0 +1,28 @@
+---
+- name: Install required packages
+  tags:
+    - packages
+  become: true
+  delegate_to: "{{ cifmw_ci_nmstate_unmanaged_host }}"
+  ansible.builtin.package:
+    name:
+      - nmstate
+      - python3-libnmstate
+    state: latest  # noqa: package-latest
+
+- name: Save nmstate state for the node
+  ansible.builtin.copy:
+    dest: "{{ cifmw_ci_nmstate_configs_dir }}/{{ cifmw_ci_nmstate_unmanaged_host }}-state.yaml"
+    content: "{{ cifmw_ci_nmstate_unmanaged_node_config | to_nice_yaml }}"
+
+- name: Apply the desidered state
+  become: true
+  delegate_to: "{{ cifmw_ci_nmstate_unmanaged_host }}"
+  ci_nmstate_apply_state:
+    state: "{{ cifmw_ci_nmstate_unmanaged_node_config }}"
+  register: _cifmw_ci_nmstate_unmanaged_node_state_out
+
+- name: Save nmstate final state for debug purposes
+  ansible.builtin.copy:
+    dest: "{{ cifmw_ci_nmstate_configs_dir }}/{{ cifmw_ci_nmstate_unmanaged_host }}-final-state.yaml"
+    content: "{{ _cifmw_ci_nmstate_unmanaged_node_state_out.state | to_nice_yaml }}"

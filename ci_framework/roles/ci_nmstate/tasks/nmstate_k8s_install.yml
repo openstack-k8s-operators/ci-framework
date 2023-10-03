@@ -1,0 +1,106 @@
+---
+- name: Create the nmstate namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    name: "{{ cifmw_ci_nmstate_namespace }}"
+    kind: Namespace
+    state: present
+
+- name: Save k8s nmstate OLM manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_ci_nmstate_manifests_dir }}/nmstate-{{ item.kind | lower }}-olm.yaml"
+    content: "{{ item | to_nice_yaml }}"
+  loop:
+    - "{{ cifmw_ci_nmstate_olm_operator_group }}"
+    - "{{ cifmw_ci_nmstate_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Create the OLM subscription resources
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition: "{{ item }}"
+    state: present
+  loop:
+    - "{{ cifmw_ci_nmstate_olm_operator_group }}"
+    - "{{ cifmw_ci_nmstate_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Wait for nmstate operator to be intalled
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      -n "{{ cifmw_ci_nmstate_namespace }}"
+      -o jsonpath='{.items[*].status.phase}'
+  changed_when: false
+  register: _nsmate_csv_out
+  retries: 12
+  delay: 10
+  until:
+    - _nsmate_csv_out is defined
+    - _nsmate_csv_out.failed is false
+    - _nsmate_csv_out.stdout_lines | length > 0
+    - "(_nsmate_csv_out.stdout_lines[0] | lower) == 'succeeded'"
+
+- name: Save nmstate operator config as an artifact
+  ansible.builtin.copy:
+    dest: "{{ cifmw_ci_nmstate_manifests_dir }}/nmstate-{{ cifmw_ci_nmstate_operator_config.kind | lower }}-olm.yaml"
+    content: "{{ cifmw_ci_nmstate_operator_config | to_nice_yaml }}"
+
+- name: Trigger nmstate operator to install nmstate
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition: "{{ cifmw_ci_nmstate_operator_config }}"
+    state: present
+
+- name: Wait for nsmtate Deployments to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    label_selectors:
+      - "app=kubernetes-nmstate"
+    namespace: "{{ cifmw_ci_nmstate_namespace }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    wait: true
+    wait_sleep: 10
+    wait_timeout: 600
+    wait_condition:
+      type: Available
+      status: "True"
+
+- name: Wait for nsmtate DaemonSet to be ready
+  kubernetes.core.k8s_info:
+    kind: DaemonSet
+    label_selectors:
+      - "app=kubernetes-nmstate"
+    namespace: "{{ cifmw_ci_nmstate_namespace }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+  register: _nsmate_daemonset_out
+  retries: 12
+  delay: 10
+  until:
+    - _nsmate_daemonset_out is defined
+    - _nsmate_daemonset_out is not failed
+    - _nsmate_daemonset_out.resources | length > 0
+    - _nsmate_daemonset_out.resources[0].status.numberAvailable is defined
+    - _nsmate_daemonset_out.resources[0].status.desiredNumberScheduled is defined
+    - >-
+      _nsmate_daemonset_out.resources[0].status.numberAvailable ==
+      _nsmate_daemonset_out.resources[0].status.desiredNumberScheduled
+
+- name: Provision nncps
+  ansible.builtin.include_tasks: nmstate_k8s_provision_node.yml
+  loop: "{{ _cifmw_ci_nmstate_k8s_hosts }}"
