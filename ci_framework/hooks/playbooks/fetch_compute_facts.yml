@@ -13,7 +13,7 @@
         label: "{{ item }}"
 
 - name: Push repositories hook
-  hosts: all
+  hosts: all,!crcs,!crc
   gather_facts: true
   tasks:
     - name: Copy repositories from controller to compute
@@ -65,6 +65,12 @@
       ansible.builtin.set_fact:
         cifmw_edpm_prepare_extra_vars:
           NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.iface }}"
+          NNCP_DNS_SERVER: >-
+            {{
+              crc_ci_bootstrap_networks_out[_crc_hostname].default.ip4 |
+              default(crc_ci_bootstrap_networks_out[_crc_hostname].default.ip) |
+              replace('/24', '')
+            }}
           NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.mtu }}"
 
     - name: Ensure the kustomizations dirs exists
@@ -109,7 +115,12 @@
             dns_servers: "{{ ((['192.168.122.10'] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
             edpm_install_yamls_vars:
               SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_ed25519"
-              DATAPLANE_COMPUTE_IP: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.ip | ansible.utils.ipaddr('address') }}"
+              DATAPLANE_COMPUTE_IP: >-
+                {{
+                  crc_ci_bootstrap_networks_out['compute-0'].default.ip4 |
+                  default(crc_ci_bootstrap_networks_out['compute-0'].default.ip) |
+                  ansible.utils.ipaddr('address')
+                }}
               DATAPLANE_SSHD_ALLOWED_RANGES: "['0.0.0.0/0']"
               DATAPLANE_TOTAL_NODES: "{{ computes_len | int }}"
               DATAPLANE_SINGLE_NODE: "{{ (computes_len | int > 1) | ternary('false', 'true') }}"
@@ -160,11 +171,21 @@
               {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
                   - op: replace
                     path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
-                    value: {{ crc_ci_bootstrap_networks_out[compute_node].default.ip  | ansible.utils.ipaddr('address') }}
+                    value: >-
+                      {{
+                        crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                        default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                        ansible.utils.ipaddr('address')
+                      }}
 
                   - op: replace
                     path: /spec/nodes/edpm-{{ compute_node }}/networks/0/fixedIP
-                    value: {{ crc_ci_bootstrap_networks_out[compute_node].default.ip  | ansible.utils.ipaddr('address') }}
+                    value: >-
+                      {{
+                        crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                        default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                        ansible.utils.ipaddr('address')
+                      }}
               {% endfor %}
 
                   - op: add
