@@ -1,0 +1,92 @@
+---
+- name: Configure networking on all nodes
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    cifmw_network_generated_layout: "/etc/ci/env/networking-info.yml"
+  tasks:
+    - name: Create ci-env directory tree
+      when:
+        - inventory_hostname != 'controller-0'
+      ansible.builtin.file:
+        path: "/etc/ci/env"
+        state: directory
+    - name: Copy networking-info to hosts
+      when:
+        - inventory_hostname != 'controller-0'
+      ansible.builtin.copy:
+        src: "{{ cifmw_network_generated_layout }}"
+        dest: "{{ cifmw_network_generated_layout }}"
+    - name: Configure networking on nodes
+      ansible.builtin.import_role:
+        role: ci_network
+
+- name: Reboot CRC and wait for its services
+  hosts: crc-0
+  gather_facts: false
+  tasks:
+    - name: Reboot CRC node
+      become: true
+      ansible.builtin.reboot:
+
+- name: Disable cloud-init on computes
+  hosts: computes
+  gather_facts: false
+  tasks:
+    - name: Disable cloud-init
+      become: true
+      ansible.builtin.service:
+        name: cloud-init
+        enabled: false
+        state: stopped
+
+- name: Configure some last content on controller
+  hosts: controller-0
+  gather_facts: true
+  tasks:
+    - name: .crc directory tree
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/.crc/machines/crc/"
+        state: directory
+
+    - name: Copy kubeconfig
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ ansible_user_dir }}/.kube/config"
+        dest: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+
+    - name: Create artifact directory
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters"
+        state: directory
+
+    - name: Copy zuul inventory in the artifacts
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/zuul_inventory.yml"
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+
+    - name: Inject CRC hostname
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/crc-hostname.yml"
+        content: |-
+          cifmw_crc_hostname: crc-0
+
+- name: Wait for CRC services
+  hosts: crc-0
+  gather_facts: false
+  tasks:
+    - name: Wait for CRC to be ready
+      register: oc_login_ok
+      ansible.builtin.command:
+        cmd: >-
+          oc login -u kubeadmin
+          -p 12345678
+          --insecure-skip-tls-verify=true
+          https://api.crc.testing:6443
+      retries: 10
+      delay: 30
+      until:
+        - oc_login_ok is defined
+        - oc_login_ok.rc == 0
