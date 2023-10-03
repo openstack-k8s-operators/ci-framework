@@ -18,7 +18,7 @@ This role does not need privilege escalation.
 * `cifmw_dlrn_promote_hash`: (boolean) Whether to run DLRN promote hash. Default: `false`
 * `cifmw_dlrn_promote_ssl_ca_bundle`: (string) Path to SSL CA cert. Default: `"/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt"`
 * `cifmw_dlrn_promote_hash_promote_content`: (boolean) Whether to promote DLRN content. Default: `false`
-* `cifmw_dlrn_promote_dlrnrepo_path`: (String) Path tp delorean.repo file Default: `{{ cifmw_dlrn_promote_workspace }}/artifacts/repositories/delorean.repo`
+* `cifmw_dlrn_promote_dlrnrepo_path`: (String) Path to delorean.repo file Default: `{{ cifmw_dlrn_promote_workspace }}/artifacts/repositories/delorean.repo`
 
 ### Notes
 

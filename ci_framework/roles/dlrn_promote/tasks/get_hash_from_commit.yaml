@@ -5,7 +5,9 @@
     dest: "{{ cifmw_dlrn_promote_workspace }}/commit.yaml"
     force: true
   register: result
-  until: result is success
+  until:
+    - result.status_code is defined
+    - result.status_code == 200
   retries: 6
   delay: 50
 
@@ -18,37 +20,25 @@
   ansible.builtin.set_fact:
     cifmw_dlrn_promote_distro_hash: "{{ _hashes['commits'][0]['distro_hash'] }}"
     cifmw_dlrn_promote_commit_hash: "{{ _hashes['commits'][0]['commit_hash'] }}"
+    cifmw_dlrn_promote_full_hash: "{{ _hashes['commits'][0]['commit_hash'] }}_{{ _hashes['commits'][0]['distro_hash'][:8] }}"
 
 - name: Get individual extended hash - if it is not None
   ansible.builtin.set_fact:
     cifmw_dlrn_promote_extended_hash: "{{ _hashes['commits'][0]['extended_hash'] }}"
   when: _hashes['commits'][0]['extended_hash'] != 'None'
 
-- name: Print out commit_hash
-  ansible.builtin.debug:
-    var: cifmw_dlrn_promote_commit_hash
-
-- name: Print out distro_hash
-  ansible.builtin.debug:
-    var: cifmw_dlrn_promote_distro_hash
-
-- name: Print out extended_hash
-  ansible.builtin.debug:
-    var: cifmw_dlrn_promote_extended_hash
-  when: cifmw_dlrn_promote_extended_hash is defined
-
-- name: Converge commit/distro hashes into full_hash
-  ansible.builtin.set_fact:
-    cifmw_dlrn_promote_full_hash: "{{ cifmw_dlrn_promote_commit_hash }}_{{ cifmw_dlrn_promote_distro_hash[:8] }}"
-
 - name: Add extended_hash to full_hash if defined
   ansible.builtin.set_fact:
     cifmw_dlrn_promote_full_hash: "{{ cifmw_dlrn_promote_full_hash }}_{{ cifmw_dlrn_promote_extended_hash.split('_')[0][:8] }}_{{ cifmw_dlrn_promote_extended_hash.split('_')[1][:8] }}"
   when: cifmw_dlrn_promote_extended_hash is defined
 
-- name: Print out full_hash
+- name: Print hash infos
   ansible.builtin.debug:
-    var: cifmw_dlrn_promote_full_hash
+    msg:
+      - "Commit Hash: {{ cifmw_dlrn_promote_commit_hash }}"
+      - "Distro Hash: {{ cifmw_dlrn_promote_distro_hash }}"
+      - "Extended Hash: {{ cifmw_dlrn_promote_extended_hash | default('') }}"
+      - "Full Hash: {{ cifmw_dlrn_promote_full_hash }}"
 
 - name: Run promotion
   ansible.builtin.include_tasks: promote_hash.yml
