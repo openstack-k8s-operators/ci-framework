@@ -1,15 +1,14 @@
 ---
 - name: "Create VM overlays for {{ vm_type }}"
-  ci_script:
-    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
-    script: >-
+  ansible.builtin.command:
+    cmd: >-
       qemu-img create
       -o backing_file={{ vm_data.value.image_local_dir }}/{{ vm_data.value.disk_file_name }},backing_fmt=qcow2
       -f qcow2
       "{{ vm_type }}-{{ vm_id }}.qcow2" "{{ vm_data.value.disksize|default ('40') }}G"
     creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
     chdir: "{{ cifmw_reproducer_basedir }}/workload"
-  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
@@ -19,7 +18,7 @@
     command: define
     xml: "{{ lookup('template', 'domain.xml.j2') }}"
     uri: "qemu:///system"
-  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
@@ -29,19 +28,18 @@
     state: running
     name: "cifmw-{{ vm_type }}-{{ vm_id }}"
     uri: "qemu:///system"
-  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
 - name: "Grab IPs for nodes type {{ vm_type }}"  # noqa: risky-shell-pipe
   register: vm_ips
-  ci_script:
-    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
-    script: >-
+  ansible.builtin.shell:
+    cmd: >-
       virsh -c qemu:///system -q
       domifaddr cifmw-{{ vm_type }}-{{ vm_id }} | head -1
-  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
@@ -89,6 +87,14 @@
     loop_var: vm_ip
     label: "{{ vm_ip.item }}"
 
+- name: "Create group inventory for {{ vm_type }}"
+  vars:
+    hosts: "{{ vm_ips.results }}"
+    admin_user: "{{ vm_data.value.admin_user | default('zuul') }}"
+  ansible.builtin.template:
+    dest: "{{ cifmw_reproducer_basedir }}/reproducer-inventory/{{ vm_type }}-group.yml"
+    src: inventory.yml.j2
+
 - name: "Wait for SSH on VMs type {{ vm_type }}"
   delegate_to: localhost
   ansible.builtin.wait_for:
@@ -100,15 +106,28 @@
     loop_var: vm_ip
     label: "{{ vm_ip.item }}"
 
+- name: "Configure ssh access on type {{ vm_type }}"
+  when:
+    - vm_type is not match('^crc.*$')
+  delegate_to: "{{ vm_type }}-{{ vm_id }}"
+  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  ansible.posix.authorized_key:
+    user: "{{ vm_data.value.admin_user | default('root') }}"
+    state: present
+    key: "{{ pub_key }}"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
 - name: "Configure VMs type {{ vm_type }}"
   when:
     - vm_type is not match('^crc.*$')
   delegate_to: "{{ vm_type }}-{{ vm_id }}"
   remote_user: "{{ vm_data.value.admin_user | default('root') }}"
-  ci_script:
-    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
+  ansible.builtin.shell:
     executable: /bin/bash
-    script: |-
+    cmd: |-
       test -d /home/zuul && exit 0;
       set -xe -o pipefail;
       echo "{{ vm_type }}-{{ vm_id }}" | sudo tee /etc/hostname;
@@ -118,7 +137,49 @@
       sudo -u zuul mkdir -p /home/zuul/.ssh /home/zuul/src/github.com/openstack-k8s-operators;
       sudo cp ${HOME}/.ssh/authorized_keys /home/zuul/.ssh/;
       chown -R zuul: /home/zuul/.ssh;
-  loop: "{{ range(0, vm_data.value.amount|default(1)) }}"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Inject private key on hosts {{ vm_type }}"
+  when:
+    - vm_type is match('^controller.*$')
+  delegate_to: "{{ vm_type }}-{{ vm_id }}"
+  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  ansible.builtin.copy:
+    dest: "/home/zuul/.ssh/id_ed25519"
+    content: "{{ priv_key }}"
+    owner: zuul
+    group: zuul
+    mode: "0400"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Inject public key on hosts {{ vm_type }}"
+  when:
+    - vm_type is match('^controller.*$')
+  delegate_to: "{{ vm_type }}-{{ vm_id }}"
+  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  ansible.builtin.copy:
+    dest: "/home/zuul/.ssh/id_ed25519.pub"
+    content: "{{ pub_key }}"
+    owner: zuul
+    group: zuul
+    mode: "0444"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Inject network configuration file on {{ vm_type }}"
+  ansible.builtin.template:
+    dest: "{{ cifmw_reproducer_basedir }}/reproducer-network-env/{{ vm_type }}-{{ vm_id }}.yml"
+    src: "network-data.yml.j2"
+    mode: "0644"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
