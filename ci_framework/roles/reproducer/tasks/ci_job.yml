@@ -1,0 +1,209 @@
+---
+- name: Extract playbook to run
+  vars:
+    playbooks: "{{ zuul.playbook_context.playbooks }}"
+    extracted: >-
+      {{
+        (playbooks |
+         map(attribute='path') |
+         select('match', '.*openstack-k8s-operators/ci-framework.*') |
+         map('split', 'openstack-k8s-operators/ci-framework/'))
+      }}
+  ansible.builtin.set_fact:
+    zuul_plays: "{{ extracted | map('last') | list }}"
+
+- name: Find all files related to networking data
+  register: network_data_files
+  ansible.builtin.find:
+    paths: "{{ cifmw_reproducer_basedir }}/reproducer-network-env/"
+    pattern: "*.yml"
+
+- name: Slurp networking data from hypervisor
+  register: network_data
+  ansible.builtin.slurp:
+    path: "{{ item.path }}"
+  loop: "{{ network_data_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Run on controller-0
+  delegate_to: controller-0
+  remote_user: zuul
+  block:
+    - name: Fetch repositories from Zuul job
+      tags:
+        - bootstrap
+      ansible.builtin.git:
+        dest: "{{ repo.project.src_dir }}"
+        repo: "https://{{ repo.project.canonical_name }}"
+        version: "{{ repo.patchset }}"
+      loop: "{{ zuul['items'] }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.project.name }}"
+
+    - name: Ensure ci-framework is here
+      tags:
+        - bootstrap
+      block:
+        - name: Check ci-framework availability
+          register: ci_framework_clone
+          ansible.builtin.stat:
+            path: "src/github.com/openstack-k8s-operators/ci-framework"
+
+        - name: Clone ci-framework if needed
+          when:
+            - not ci_framework_clone.stat.exists
+          ansible.builtin.git:  # noqa: latest[git]
+            dest: "src/github.com/openstack-k8s-operators/ci-framework"
+            repo: "https://github.com/openstack-k8s-operators/ci-framework"
+
+    - name: Ensure install_yamls is here
+      tags:
+        - bootstrap
+      block:
+        - name: Check install_yamls availability
+          register: install_yamls_clone
+          ansible.builtin.stat:
+            path: "src/github.com/openstack-k8s-operators/install_yamls"
+
+        - name: Clone install_yamls if needed
+          when:
+            - not install_yamls_clone.stat.exists
+          ansible.builtin.git:  # noqa: latest[git]
+            dest: "src/github.com/openstack-k8s-operators/install_yamls"
+            repo: "https://github.com/openstack-k8s-operators/install_yamls"
+
+    - name: Ensure /etc/ci/env is created
+      become: true
+      ansible.builtin.file:
+        path: /etc/ci/env
+        state: directory
+        mode: "0755"
+
+    - name: Create crc_ci_bootstrap_networks_out fact
+      vars:
+        net_config_list: |-
+          {{
+            network_data.results |
+            map(attribute='content') |
+            map('b64decode') |
+            map('from_yaml')
+          }}
+      ansible.builtin.set_fact:
+        crc_ci_bootstrap_networks_out: >-
+          {{
+            crc_ci_bootstrap_networks_out |
+            default({}) |
+            combine(item)
+          }}
+      loop: "{{ net_config_list | map(attribute='crc_ci_bootstrap_networks_out') }}"
+
+    - name: Inject generated networking-info.yml file on controller
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/ci/env/networking-info.yml"
+        content: >-
+          {{
+            {'crc_ci_bootstrap_networks_out': crc_ci_bootstrap_networks_out} |
+            to_nice_yaml
+          }}
+        mode: "0644"
+
+    - name: Copy environment files to controller node
+      tags:
+        - bootstrap
+      ansible.builtin.copy:
+        src: "{{ reproducer_basedir }}/parameters/"
+        dest: "./{{ job_id }}-params"
+
+    - name: Inject reproducer dedicated parameter file
+      tags:
+        - bootstrap
+      ansible.builtin.template:
+        src: "reproducer_params.yml.j2"
+        dest: "./{{ job_id }}-params/reproducer_params.yml"
+
+    - name: Install collections
+      tags:
+        - bootstrap
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: ansible-galaxy collection install -r requirements.yml
+
+    - name: Build zuul_inventory for hook usage
+      tags:
+        - bootstrap
+      ansible.builtin.shell:
+        cmd: >-
+          cat reproducer-inventory/* >
+          src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/zuul_inventory.yml
+        creates: src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/zuul_inventory.yml
+
+    - name: Generate CI job playbook
+      tags:
+        - bootstrap
+      ansible.builtin.template:
+        dest: "src/github.com/openstack-k8s-operators/ci-framework/{{ job_id }}_play.yml"
+        src: "play.yml.j2"
+
+    - name: Push extracted network data on controller-0
+      tags:
+        - bootstrap
+      ansible.builtin.copy:
+        dest: zuul-network-data.yml
+        content: "{{ {'job_network': ci_job_networking} | to_nice_yaml}}"
+
+    - name: Push pre-CI job playbook
+      tags:
+        - bootstrap
+      ansible.builtin.copy:
+        dest: "src/github.com/openstack-k8s-operators/ci-framework/pre-ci-play.yml"
+        src: "pre-ci-play.yml"
+
+    - name: Check for ansible log file and rotate it
+      block:
+        - name: Check ansible.log
+          register: ansible_log
+          ansible.builtin.stat:
+            path: ansible.log
+
+        - name: Rotate log if present
+          when:
+            - ansible_log.stat.exists
+          ansible.builtin.shell:
+            cmd: mv ansible.log "ansible.log-$(date +%s)"
+
+        - name: Check pre-ci log
+          register: pre_ci_log
+          ansible.builtin.stat:
+            path: ansible-pre-ci.log
+
+        - name: Rotate pre-ci log if present
+          when:
+            - pre_ci_log.stat.exists
+          ansible.builtin.shell:
+            cmd: mv ansible-pre-ci.log "ansible-pre-ci.log-$(date +%s)"
+
+    - name: Run pre-ci-play
+      tags:
+        - bootstrap
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-pre-ci.log"
+        ANSIBLE_HOST_KEY_CHECKING: "false"
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework/"
+        cmd: >-
+          ansible-playbook
+          -i scenarios/centos-9/zuul_inventory.yml
+          pre-ci-play.yml
+
+    - name: Run job
+      when:
+        - cifmw_reproducer_run_job | bool
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -i scenarios/centos-9/zuul_inventory.yml
+          {{ job_id }}_play.yml
