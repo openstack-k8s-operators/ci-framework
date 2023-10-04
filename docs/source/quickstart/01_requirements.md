@@ -16,6 +16,8 @@ must be present on your system:
 * sudo
 
 # Needed specific configurations
+You must run the deployment as a **non root user**.
+
 Your user must have full `sudo` access in order to:
 
 * install packages
