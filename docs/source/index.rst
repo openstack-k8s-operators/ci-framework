@@ -26,11 +26,17 @@ project.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Reproducers
+   :glob:
+
+   reproducers/*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cookbooks
    :glob:
 
    cookbooks/*
-
 
 .. toctree::
    :maxdepth: 1
