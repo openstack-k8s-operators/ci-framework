@@ -1,4 +1,83 @@
 ---
+{% if use_content_provider | default(false) | bool -%}
+- name: Configure CRC for insecure registry
+  hosts: crcs
+  vars:
+    content_provider_registry_ip: {{ cifmw_reproducer_ctl_ip4 }}
+  tasks:
+    - name: Set insecure registry on crc node
+      ansible.builtin.import_tasks: ci/playbooks/tasks/set_crc_insecure_registry.yml
+
+- name: "Content Provider"
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cifmw_rp_registry_ip: {{ cifmw_reproducer_ctl_ip4 }}
+    cifmw_rp_registry_firewall: false
+    job_id: "{{ job_id }}"
+  tasks:
+{% raw %}
+    - name: Load env variables
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "{{ ansible_user_dir }}/{{ job_id }}-params/zuul-params.yml"
+        - "./scenarios/centos-9/base.yml"
+        - "./scenarios/centos-9/content_provider.yml"
+        - "./scenarios/centos-9/zuul_inventory.yml"
+
+    - name: Install necessary tools
+      ansible.builtin.import_role:
+        name: install_yamls_makes
+        tasks_from: make_download_tools
+
+    - name: Deploy registry
+      ansible.builtin.import_role:
+        name: registry_deploy
+
+    # Imported from the ci/playbooks/content_provider/content_provider.yml play
+    # Ensure we get consistent name for the operator, linked to
+    # https://github.com/openstack-k8s-operators/ci-framework/pull/621
+    - name: Set var for cifmw_operator_build_operators var
+      when:
+        - zuul is defined
+        - "'project' in zuul"
+        - "'short_name' in zuul.project"
+      ansible.builtin.set_fact:
+        cifmw_operator_build_operators:
+          - name: "openstack-operator"
+            src: "~/src/github.com/{{ cifmw_operator_build_org }}/openstack-operator"
+            image_base: >-
+              {{ zuul.project.short_name | split('-') | reject('search','operator') | join('-') }}
+
+    - name: Build Operators
+      ansible.builtin.include_role:
+        name: operator_build
+
+    - name: Get the containers list from container registry
+      ansible.builtin.uri:
+        url: "http://{{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
+        return_content: true
+      register: cp_imgs
+
+    - name: Add the container list to file
+      ansible.builtin.copy:
+        content: "{{ cp_imgs.content }}"
+        dest: "{{ ansible_user_dir }}/local_registry.log"
+        mode: "0644"
+
+    - name: Output needed content into consumable environment
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/{{ job_id }}-params/content-provider.yml"
+        content: |-
+          {{
+            {'cifmw_operator_build_output': cifmw_operator_build_output,
+             'content_provider_registry_ip': cifmw_rp_registry_ip
+            } | to_nice_yaml
+          }}
+{% endraw %}
+{% endif %}
+
 {% for play in zuul_plays %}
 - name: "Reproducer for {{ job_id }}: {{ play }}"
   vars:
@@ -6,6 +85,9 @@
       - '@~/{{ job_id }}-params/custom-params.yml'
       - '@~/{{ job_id }}-params/install-yamls-params.yml'
       - '@~/{{ job_id }}-params/reproducer_params.yml'
+{% if use_content_provider | bool %}
+      - '@~/{{ job_id }}-params/content-provider.yml'
+{% endif %}
       - cifmw_zuul_target_host=controller-0
       - cifmw_openshift_user=kubeadmin
       - cifmw_openshift_kubeconfig=/home/zuul/.crc/machines/crc/kubeconfig

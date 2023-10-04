@@ -6,21 +6,29 @@ a job that doesn't rely on the content-provider job.
 It also has to run against the latest PR content output, since you won't
 have access to the actual commit hash on github.
 
-For now, it has been tested only against
-*podified-multinode-edpm-e2e-nobuild-tagged-crc* job.
+For now, it has been tested only the following jobs:
+* *podified-multinode-edpm-e2e-nobuild-tagged-crc*
+* *podified-multinode-edpm-deployment-crc* (which includes content-provider)
 
 ## Words of advice
 It is strongly advised to run this reproducer against a dedicated hypervisor
 with enough resources. The current configuration will require close to 40G
 of RAM and at least 24 CPUs. You can of course edit the specs,
 but keep in mind *CRC* has its own needs.
- [Please refer to its minimal spec](https://crc.dev/crc/getting_started/getting_started/installing/#_for_openshift_container_platform).
+[Please refer to its minimal spec](https://crc.dev/crc/getting_started/getting_started/installing/#_for_openshift_container_platform).
 
 ## How does it work (high level explanation)
 It will fetch a few files from the Zuul job output, read and combine them
 in order to update the layout to a matching size (especially, setting the
 right amount of computes), create the virtual machines, configure them,
 get the code tested in the job, and run the same playbook as the job itself.
+
+### Content provider case
+If the reproducer detects the presence of a content-provider dependency, it will
+reproduce that part, using the ansible controller as the content-provider.
+The reproducer will then clone all of the needed repositories, and build
+the intended operators and store them in a local registry. That registry
+will be accessible from the private network interface.
 
 ## How do I run that job?
 ### First, get the project, and get its dependencies installed
@@ -136,6 +144,72 @@ $ tail -f ~/ansible.log
 ```
 
 Note that `tmux` is installed by default, and may be handy in such a case ;).
+
+#### Zuul_inventory.yml
+That file is a generated inventory, allowing ansible to know about the compute(s) and CRC nodes.
+
+It exposes each node with the connection information (user and IP), and also created groups in
+order to access, for instance, all of the computes. Those groups mimic the same behaviour we
+have in Zuul.
+
+### Ansible tags of interest
+You may want to re-run some parts of the reproducer only, and avoid re-running the whole
+virtual machine creation by using `--skip-tags TAG`.
+
+In order to do so, the reproducer exposes two tags:
+* bootstrap_layout
+* bootstrap
+
+#### Tag: bootstrap_layout
+This covers everything related to "create and manage virtual machines". This is probably the
+most useful tag to skip once you want to iterate on a deployed layout, since it will
+ensure repositories are up-to-date, but also re-generate the needed bits to run the CI job.
+
+Note: you **must** have an already deployed layout before skipping this tag.
+
+##### Usage
+```Bash
+# Reproduce first iteration of your PR that failed on Zuul
+$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=builder1 \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e cifmw_job_uri="YOUR_URI"
+
+# Iterate with the second iteration of your PR that failed on Zuul
+$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=builder1 \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e cifmw_job_uri="YOUR_UPDATE_URI" \
+    --skip-tags bootstrap_layout
+```
+
+#### Tag: bootstrap
+This covers everything from the creation of the virtual layout (networks and machines) to
+the push of generated plays. With that, you'll only get the repositories, and some of the
+zuul data, mostly.
+
+Skip with caution, since it may end with a broken environment, where some files may miss
+an update, for instance the playbook running the job in case you wanted to just update
+the repository against a newer patch set.
+
+Note: you **must** have an already deployed layout before skipping that tag. But we strongly
+recommend *against* skipping it due to the lack of data regeneration.
+
+##### Usage
+```Bash
+# Reproduce first iteration of your PR that failed on Zuul
+$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=builder1 \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e cifmw_job_uri="YOUR_URI"
+
+# Iterate with the second iteration of your PR that failed on Zuul
+$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=builder1 \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e cifmw_job_uri="YOUR_UPDATE_URI" \
+    --skip-tags bootstrap_layout,bootstrap
+```
 
 ## Cleaning the deployed job
 Go in the ci-framework directory on your local computer and run:

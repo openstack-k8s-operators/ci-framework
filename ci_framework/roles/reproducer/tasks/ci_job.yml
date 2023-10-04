@@ -30,13 +30,29 @@
   delegate_to: controller-0
   remote_user: zuul
   block:
-    - name: Fetch repositories from Zuul job
+    - name: Fetch zuul.projects repositories for dependencies
+      tags:
+        - bootstrap
+      when:
+        - repo.key is match('^github.com')
+      ansible.builtin.git:
+        dest: "{{ repo.value.src_dir }}"
+        repo: "https://{{ repo.key }}"
+        version: "{{ repo.value.commit }}"
+        force: true
+      loop: "{{ zuul['projects'] | dict2items }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.key }}"
+
+    - name: Fetch zuul.items repositories
       tags:
         - bootstrap
       ansible.builtin.git:
         dest: "{{ repo.project.src_dir }}"
         repo: "https://{{ repo.project.canonical_name }}"
         version: "{{ repo.patchset }}"
+        force: true
       loop: "{{ zuul['items'] }}"
       loop_control:
         loop_var: repo
@@ -197,6 +213,16 @@
           ansible-playbook
           -i scenarios/centos-9/zuul_inventory.yml
           pre-ci-play.yml
+
+    - name: Run reproducer preparation job
+      when:
+        - cifmw_job_uri is defined
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -i scenarios/centos-9/zuul_inventory.yml
+          ci_framework/playbooks/01-bootstrap.yml
 
     - name: Run job
       when:
