@@ -109,6 +109,7 @@ or `--skip-tags`:
 
 * `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
 * `packages`: Run all package installation tasks associated to the options you set.
+* `bootstrap_layout`: Run the [reproducer](../reproducers/01-considerations.md) bootstrap steps only.
 
 For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
