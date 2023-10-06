@@ -1,0 +1,40 @@
+---
+- name: "Run ci/playbooks/dump_zuul_data.yml"
+  hosts: controller
+  gather_facts: true
+  tasks:
+    - name: Create zuul-output directory
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters"
+        state: directory
+
+    - name: Slurp Zuul inventory test
+      ansible.builtin.slurp:
+        path: "{{ zuul.executor.log_root }}/zuul-info/inventory.yaml"
+      register: _inventory_yaml
+      delegate_to: localhost
+
+    - name: Save zuul inventory
+      vars:
+        _original_inventory: "{{ _inventory_yaml['content'] | b64decode | from_yaml }}"
+        _localhost_inventory:
+          all:
+            hosts:
+              localhost:
+                ansible_connection: local
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+        content: >-
+          {{
+              _original_inventory |
+              combine(_localhost_inventory, recursive=True) |
+              to_nice_yaml
+          }}
+
+    - name: Save zuul vars
+      vars:
+        _original_inventory: "{{ _inventory_yaml['content'] | b64decode | from_yaml }}"
+      ansible.builtin.copy:
+        content: '{{ _original_inventory.all.vars | to_nice_yaml }}'
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+        mode: "0644"
