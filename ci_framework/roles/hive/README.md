@@ -84,7 +84,6 @@ cifmw_repo_setup_os_release: 'centos'
 cifmw_repo_setup_dist_major_version: 9
 
 cifmw_libvirt_manager_user: root
-cifmw_libvirt_manager_skip_edpm_compute_repos: true
 
 cifmw_opn_host: REDACTED
 cifmw_opn_external_network_iface: eno3
