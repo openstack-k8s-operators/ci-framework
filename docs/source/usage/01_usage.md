@@ -125,6 +125,7 @@ or `--skip-tags`:
 * `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
 * `packages`: Run all package installation tasks associated to the options you set.
 * `bootstrap_layout`: Run the [reproducer](../reproducers/01-considerations.md) bootstrap steps only.
+* `bootstrap_repositories`: Run the [reproducer](../reproducers/01-considerations.md) repositories bootstrap steps only.
 * `infra`: Denotes tasks to prepare host virtualization and Openshift Container Platform when deploy-edpm.yml playbook is run.
 * `build-packages`: Denotes tasks to call the role [pkg_build](../roles/pkg_build.md) when deploy-edpm.yml playbook is run.
 * `build-containers`: Denotes tasks to call the role [build_containers](../roles/build_containers.md) when deploy-edpm.yml playbook is run.

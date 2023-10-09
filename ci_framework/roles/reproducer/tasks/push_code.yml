@@ -1,0 +1,95 @@
+---
+- name: Sync zuul content if available
+  when:
+    - zuul is defined
+    - zuul.items is defined
+    - zuul.projects is defined
+  delegate_to: controller-0
+  delegate_facts: true
+  block:
+    - name: Fetch zuul.items repositories
+      ansible.builtin.git:
+        dest: "{{ repo.project.src_dir }}"
+        repo: "https://{{ repo.project.canonical_name }}"
+        refspec: "pull/{{ repo.change }}/head:{{ job_id }}"
+        version: "{{ job_id }}"
+        force: true
+      loop: "{{ zuul['items'] }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.project.name }}"
+
+    - name: Fetch zuul.projects repositories for dependencies
+      when:
+        - repo.key is match('^github.com')
+        - "repo.key not in (zuul['items'] | map(attribute='project.canonical_name'))"
+      ansible.builtin.git:
+        dest: "{{ repo.value.src_dir }}"
+        repo: "https://{{ repo.key }}"
+        version: "{{ repo.value.commit }}"
+        force: true
+      loop: "{{ zuul['projects'] | dict2items }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.key }}"
+
+- name: Push random code into the proper location
+  vars:
+    repo_base_dir: '/home/zuul/src'
+  block:
+    - name: Sync local repositories to ansible controller
+      delegate_to: localhost
+      when:
+        - item.src is abs or item.src is not match(':')
+      ansible.builtin.command:  # noqa: command-instead-of-module
+        cmd: "rsync -ar {{ item.src }} zuul@controller-0:{{ item.dest }}"
+      loop: "{{ cifmw_reproducer_repositories }}"
+      loop_control:
+        label: "{{ item.src | basename }}"
+
+    - name: Sync remote repositories
+      delegate_to: controller-0
+      delegate_facts: true
+      when:
+        # will match github.com:org/project, but also https://github.com/...
+        - item.src is match(':')
+      ansible.builtin.git:
+        repo: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        version: "{{ item.version | default('HEAD') }}"
+        refspec: "{{ item.refspec | default('omit') }}"
+        force: true
+      loop: "{{ cifmw_reproducer_repositories }}"
+      loop_control:
+        label: "{{ item.src | basename }}"
+
+    - name: Ensure ci-framework is here
+      delegate_to: controller-0
+      block:
+        - name: Check ci-framework availability
+          register: ci_framework_clone
+          ansible.builtin.stat:
+            path: "{{ repo_base_dir }}/github.com/openstack-k8s-operators/ci-framework"
+
+        - name: Clone ci-framework if needed
+          when:
+            - not ci_framework_clone.stat.exists
+          ansible.builtin.git:  # noqa: latest[git]
+            dest: "{{ repo_base_dir }}/github.com/openstack-k8s-operators/ci-framework"
+            repo: "https://github.com/openstack-k8s-operators/ci-framework"
+
+    - name: Ensure install_yamls is here
+      delegate_to: controller-0
+      delegate_facts: true
+      block:
+        - name: Check install_yamls availability
+          register: install_yamls_clone
+          ansible.builtin.stat:
+            path: "{{ repo_base_dir }}/github.com/openstack-k8s-operators/install_yamls"
+
+        - name: Clone install_yamls if needed
+          when:
+            - not install_yamls_clone.stat.exists
+          ansible.builtin.git:  # noqa: latest[git]
+            dest: "{{ repo_base_dir }}/github.com/openstack-k8s-operators/install_yamls"
+            repo: "https://github.com/openstack-k8s-operators/install_yamls"
