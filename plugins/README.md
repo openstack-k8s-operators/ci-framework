@@ -1,4 +1,7 @@
 # action_plugins/ci_make
+
+> **_NOTE:_** This module is deprecated and will be removed in a future version. Please consider using the ci_script module instead.
+
 This wraps `community.general.make` module, mostly. It requires an additional
 parameter, `output_dir`, in order to output the `make` generated command.
 It also adds a new optional parameter, `dry_run`, allowing to NOT run
