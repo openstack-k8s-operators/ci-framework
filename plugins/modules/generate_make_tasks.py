@@ -72,13 +72,12 @@ MAKE_TMPL = """---
   delay: "{{ make_%(target)s_delay | default(omit) }}"
   until: "{{ make_%(target)s_until | default(true) }}"
   register: "make_%(target)s_status"
-  ci_make:
+  ci_script:
     output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
     chdir: "%(chdir)s"
-    target: %(target)s
+    script: "make %(target)s"
     dry_run: "{{ make_%(target)s_dryrun|default(false)|bool }}"
-    params: "{{ make_%(target)s_params|default(omit) }}"
-  environment: "{{ make_%(target)s_env | default({}) }}"
+    extra_args: "{{ dict((make_%(target)s_env|default({})), **(make_%(target)s_params|default({}))) }}"
 """  # noqa
 
 NO_OUTDIR = "Directory %s does not exist. Please create it."

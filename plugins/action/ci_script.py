@@ -27,6 +27,10 @@ options:
         description: The shell script content to be run
         required: true
         type: str
+    extra_args:
+        description: extra {key:value} exported to the environment before running the script.
+        required: false
+        type: dict
     chdir:
         description: Change into this directory on the remote node before running the script.
         type: str
@@ -54,7 +58,7 @@ EXAMPLES = r"""
   register: script_output
   ci_script:
     output_dir: "/home/zuul/ci-framework-data/artifacts"
-    cmd: |
+    script: |
       mkdir /home/zuul/test-dir
       cd /home/zuul/test-dir
       git clone https://github.com/openstack-k8s-operators/ci-framework.git
@@ -92,6 +96,7 @@ stdout_line:
 """
 
 import glob
+import json
 import pathlib
 import re
 import uuid
@@ -99,6 +104,7 @@ import uuid
 
 from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
+from ansible.module_utils import basic
 
 from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
     ansible_encoding,
@@ -109,6 +115,7 @@ set -euo pipefail
 %(opts)s
 exec > >(tee -i %(logpath)s) 2>&1
 %(pushcmd)s
+%(extra_args)s
 %(content)s
 %(popcmd)s
 """
@@ -134,6 +141,15 @@ class ActionModule(ActionBase):
             return "set -x"
         return ""
 
+    # extra_args is a dict and we generate 'export key1="value1"\nexport key2="value2"'
+    @staticmethod
+    def __build_exports(extra_args):
+        _extra_args = ""
+        if extra_args:
+            for k, v in extra_args.items():
+                _extra_args += 'export {key}="{value}"\n'.format(key=k, value=v)
+        return _extra_args.rstrip("\n")
+
     def run(self, tmp=None, task_vars=None):
         super(ActionModule, self).run(tmp, task_vars)
 
@@ -157,10 +173,16 @@ class ActionModule(ActionBase):
         if "cmd" in task_args:
             task_args.pop("cmd")
 
+        # Are we running dry-run?
+        dry_run = False
+        if "dry_run" in task_args:
+            dry_run = basic.boolean(task_args.pop("dry_run"))
+
         fnum = len(glob.glob(f"{output_dir}/ci_script_*"))
         t_name = re.sub(r"([^\x00-\x7F]|\s)+", "_", self._task.name).lower()
         chdir_path = task_args.pop("chdir", None)
         script_template_data = {
+            "extra_args": self.__build_exports(task_args.pop("extra_args", None)),
             "content": task_args.pop("script"),
             "logpath": logs_dir.joinpath(
                 f"ci_script_{fnum:03}_{t_name}.log"
@@ -188,12 +210,14 @@ class ActionModule(ActionBase):
             {"_raw_params": script_path_str, "chdir": output_dir.as_posix()}
         )
 
-        return self._shared_loader_obj.action_loader.get(
-            "ansible.builtin.script",
-            task=file_task,
-            connection=self._connection,
-            play_context=self._play_context,
-            loader=self._loader,
-            templar=self._templar,
-            shared_loader_obj=self._shared_loader_obj,
-        ).run(task_vars=task_vars)
+        if not dry_run:
+            return self._shared_loader_obj.action_loader.get(
+                "ansible.builtin.script",
+                task=file_task,
+                connection=self._connection,
+                play_context=self._play_context,
+                loader=self._loader,
+                templar=self._templar,
+                shared_loader_obj=self._shared_loader_obj,
+            ).run(task_vars=task_vars)
+        return {"command": json.dumps(ansible_encoding.decode_ansible_raw(task_args))}

@@ -20,10 +20,10 @@
       failing:
       > @exit 255
 
-- name: Run ci_make without any params
-  register: no_params
-  ci_make:
-    target: help
+- name: Run ci_script make without any extra_args
+  register: no_extra_args
+  ci_script:
+    script: make help
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
 
@@ -33,78 +33,81 @@
     content: |
       I'm a useless flag in here
 
-- name: Run ci_make with a param
-  register: with_params
-  ci_make:
-    target: help
+- name: Run ci_script make with extra_args
+  register: with_extra_args
+  ci_script:
+    script: make help
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
-    params:
+    extra_args:
       FOO_BAR: starwars
 
 - name: Ensure we have correct output
   ansible.builtin.assert:
     that:
-      - no_params.stdout == 'This is the help thing showing toto'
-      - with_params.stdout == 'This is the help thing showing starwars'
+      - "'This is the help thing showing toto' in no_extra_args.stdout"
+      - "'This is the help thing showing starwars' in with_extra_args.stdout"
 
 - name: Try dry_run parameter
-  ci_make:
+  ci_script:
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
-    params:
-      FOO_BAR: startrek
     dry_run: true
+    script: make
+    extra_args:
+      FOO_BAR: startrek
 
-- name: Test with environment parameters
-  environment:
-    MY_ENV_VAR: startrek
-    SOME_OTHER: jar-jar-binks
-  ci_make:
+
+- name: Test with extra_args
+  ci_script:
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
-    target: help
-    params:
-      FOO_BAR: "${MY_ENV_VAR}"
+    script: make help
+    extra_args:
+      FOO_BAR: startrek
+      SOME_OTHER: jar-jar-binks
 
-- name: Test with environment parameters passed as ansible variables
+
+- name: Test with extra_args passed as ansible variables and special chars /
   block:
     - name: Set env var
       ansible.builtin.set_fact:
         my_env_vars:
-          FOO_BAR: Muad-Dib
+          FOO_BAR: /=8GB /tmp=1GB /home=1GB /var=8GB
           SOME_OTHER: Dune
-    - name: Run ci_make with custom env variable
-      environment: "{{ my_env_vars }}"
-      ci_make:
+        other_env_vars:
+          ONE: 1
+          FOO_BAR: Baz
+    - name: Run ci_script make with custom env variable
+      ci_script:
         chdir: /tmp/project_makefile
         output_dir: /tmp/artifacts
-        target: help
-    - name: Run ci_make with custom env variable and default
-      environment: "{{ my_env_vars | default({}) }}"
-      ci_make:
+        script: make help
+        extra_args: "{{ dict((my_env_vars|default({})), **(other_env_vars|default({}))) }}"
+    - name: Run ci_script make custom env var and default
+      ci_script:
         chdir: /tmp/project_makefile
         output_dir: /tmp/artifacts
-        target: help
+        script: make help
+        extra_args: "{{ my_env_vars | default({}) }}"
 
-- name: Run ci_make with environment parameter and default
-  environment: "{{ other_env_vars | default({'FOO_BAR': 'titi'}) }}"
-  ci_make:
+- name: Run ci_script make with extra_args and default
+  ci_script:
     chdir: /tmp/project_makefile
     output_dir: /tmp/artifacts
-    target: help
+    script: make help
+    extra_args: "{{ other_env_vars | default({'FOO_BAR': 'titi'}) }}"
 
-- name: Run ci_make with a faulty command
+- name: Run ci_script make with a faulty command
   block:
     - name: Run failing target
       register: failing_make
       failed_when:
-        - failing_make.stderr is not match(".*Error 255.*")
-      ci_make:
+        - "'Error 255' not in failing_make.stdout"
+      ci_script:
         chdir: /tmp/project_makefile
         output_dir: /tmp/artifacts
-        target: failing
-
+        script: make failing
 
 - name: Check generated files
   tags:
@@ -113,32 +116,36 @@
     - name: Set files attributes
       ansible.builtin.set_fact:
         files_to_check:
-          "/tmp/artifacts/ci_make_000_run_ci_make_without_any_params.sh":
-            e6ec8bc41f8aa58ef72fb1d8e336dc9c8115d0e4
-          "/tmp/artifacts/ci_make_001_run_ci_make_with_a_param.sh":
-            79fe696cf7e0f3001e99fed22f5a2674f1f8c493
-          "/tmp/artifacts/ci_make_002_try_dry_run_parameter.sh":
-            4909f854ee1fc8e17c608ea0a7a2adb40101c825
-          "/tmp/artifacts/ci_make_003_test_with_environment_parameters.sh":
-            4ca6f838a71ab336f91f8775d684c3d8ccc0a89a
-          "/tmp/artifacts/ci_make_004_run_ci_make_with_custom_env_variable.sh":
-            2447a25f97c34a25c0ab3a6e67baf1d2c8817c78
-          "/tmp/logs/ci_make_000_run_ci_make_without_any_params.log":
-            8dcc15e2dd273dda4f7120efc059274bd8d50a89
-          "/tmp/logs/ci_make_001_run_ci_make_with_a_param.log":
-            fa1fd735445ca641270e630a00303b5816bafff3
-          "/tmp/logs/ci_make_003_test_with_environment_parameters.log":
-            3384b44a202d4f841781dff704276e0ae44484e7
-          "/tmp/logs/ci_make_004_run_ci_make_with_custom_env_variable.log":
-            f17389a98ce38f871c3b69f1ad8b9956b7f95958
-          "/tmp/logs/ci_make_005_run_ci_make_with_custom_env_variable_and_default.log":
-            f17389a98ce38f871c3b69f1ad8b9956b7f95958
-          "/tmp/logs/ci_make_006_run_ci_make_with_environment_parameter_and_default.log":
-            33d4f79ce503647c036a927bbf409189e79b1fd4
-          "/tmp/logs/ci_make_007_run_failing_target.log":
-            88aa7bc8f90b26effa2b0d6cc528530b7bc6f75f
-          "/tmp/artifacts/ci_make_007_run_failing_target.sh":
-            0294daf29cbd1b1a68268ae698d5e74a8c527632
+          "/tmp/artifacts/ci_script_000_run_ci_script_make_without_any_extra_args.sh":
+            e19e15e8c10461c54a40a0ce00296aa887cf7756
+          "/tmp/artifacts/ci_script_001_run_ci_script_make_with_extra_args.sh":
+            4bbb01aa527121b670dbf533cc0fbc6ff725e0ab
+          "/tmp/artifacts/ci_script_002_try_dry_run_parameter.sh":
+            33cca9289d8bcef9fe070d810151ad67b42adc35
+          "/tmp/artifacts/ci_script_003_test_with_extra_args.sh":
+            863730abb0e0edd3edcb025c8fe4d2d12ace9d2a
+          "/tmp/artifacts/ci_script_004_run_ci_script_make_with_custom_env_variable.sh":
+            2b6737616136a7b33dfabe4ef673dccc6c4e9acb
+          "/tmp/artifacts/ci_script_005_run_ci_script_make_custom_env_var_and_default.sh":
+            85ecd67eac4c873e8d3b120035415e7709a25e0f
+          "/tmp/artifacts/ci_script_006_run_ci_script_make_with_extra_args_and_default.sh":
+            0fe9a340527f84628bd2c8f655150403f3afb8d1
+          "/tmp/artifacts/ci_script_007_run_failing_target.sh":
+            7d9c6fab3c87b65b0e6db9f1211d5dcde9f6f8a1
+          "/tmp/logs/ci_script_000_run_ci_script_make_without_any_extra_args.log":
+            6147c30d7f99d803a8a2e5eb357017bf1146cea9
+          "/tmp/logs/ci_script_001_run_ci_script_make_with_extra_args.log":
+            2784a3a2ac54ee7787687153cefb78a920793efa
+          "/tmp/logs/ci_script_003_test_with_extra_args.log":
+            5cd9ccee64ea4d0babe042f72717dc97809e9b7b
+          "/tmp/logs/ci_script_004_run_ci_script_make_with_custom_env_variable.log":
+            7756df69bf6879216075c159e3e1f19b4d98126e
+          "/tmp/logs/ci_script_005_run_ci_script_make_custom_env_var_and_default.log":
+            7da4babbb838e956ab49e06573926c893375e34c
+          "/tmp/logs/ci_script_006_run_ci_script_make_with_extra_args_and_default.log":
+            7756df69bf6879216075c159e3e1f19b4d98126e
+          "/tmp/logs/ci_script_007_run_failing_target.log":
+            a2e12c228875d1606ae9980ac6390f76bc2cd066
 
     - name: Gather files
       register: reproducer_scripts

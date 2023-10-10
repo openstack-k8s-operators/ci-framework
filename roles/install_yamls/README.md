@@ -29,13 +29,12 @@ The created role directory contains multiple task files, similar to
   delay: "{{ make_crc_storage_delay | default(omit) }}"
   until: "{{ make_crc_storage_until | default(true) }}"
   register: "make_crc_storage_status"
-  ci_make:
+  ci_script:
     output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
     chdir: "/home/zuul/src/github.com/openstack-k8s-operators/install_yamls"
-    target: crc_storage
+    script: make crc_storage
     dry_run: "{{ make_crc_storage_dryrun|default(false)|bool }}"
-    params: "{{ make_crc_storage_params|default(omit) }}"
-  environment: "{{ make_crc_storage_env | default({}) }}"
+    extra_args: "{{ dict((make_crc_storage_env|default({})), **(make_crc_storage_params|default({}))) }}"
 ```
 
 The role can be imported and tasks can be executed like this
