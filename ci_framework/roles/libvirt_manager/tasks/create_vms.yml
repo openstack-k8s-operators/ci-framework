@@ -52,7 +52,7 @@
 - name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
   delegate_to: localhost
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] |replace('/24','') }}"
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.blockinfile:
     create: true
     path: "~/.ssh/config"
@@ -71,7 +71,7 @@
 
 - name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"  # noqa: name[template]
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] |replace('/24','') }}"
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.blockinfile:
     create: true
     path: "~/.ssh/config"
@@ -96,15 +96,16 @@
     src: inventory.yml.j2
 
 - name: "Wait for SSH on VMs type {{ vm_type }}"
-  delegate_to: localhost
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.wait_for:
-    host: "{{ vm_ip.item }}"
+    host: "{{ extracted_ip }}"
     port: 22
     delay: 5
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
-    label: "{{ vm_ip.item }}"
+    label: "{{ extracted_ip }}"
 
 - name: "Configure ssh access on type {{ vm_type }}"
   when:
