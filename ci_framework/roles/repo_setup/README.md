@@ -21,6 +21,7 @@ Please explain the role purpose.
 ### Optional parameters for rhos-release
 * `cifmw_repo_setup_rhos_release_rpm`: (String) URL to rhos-release RPM.
 * `cifmw_repo_setup_rhos_release_args`: (String) Parameters to pass down to `rhos-release`.
+* `cifmw_repo_setup_rhos_release_gpg_check`: (Bool) Skips the gpg check during rhos-release rpm installation. Defaults to `True`.
 
 ## Notes
 
