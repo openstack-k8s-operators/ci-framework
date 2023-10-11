@@ -1,6 +1,6 @@
 ---
 - name: Configure networking on all nodes
-  hosts: all
+  hosts: all,!localhost
   gather_facts: false
   become: true
   vars:
@@ -61,17 +61,30 @@
         path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters"
         state: directory
 
-    - name: Copy zuul inventory in the artifacts
-      ansible.builtin.copy:
-        remote_src: true
-        src: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/zuul_inventory.yml"
-        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
-
     - name: Inject CRC hostname
       ansible.builtin.copy:
         dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/crc-hostname.yml"
         content: |-
           cifmw_crc_hostname: crc-0
+
+    - name: Ensure controller-0 knows about remote SSH key
+      block:
+        - name: Inject localhost key
+          ansible.builtin.shell:
+            cmd: >-
+              ssh-keyscan localhost > ~/.ssh/known_hosts
+
+        - name: Loop on all hosts to get their host SSH key
+          ansible.builtin.shell:
+            cmd: >-
+              ssh-keyscan {{ hostvars[item].ansible_host }}
+              >> ~/.ssh/known_hosts
+          loop: >-
+            {{
+              hostvars | dict2items |
+              selectattr("value.ansible_host", "defined") |
+              map(attribute="key")
+            }}
 
 - name: Wait for CRC services
   hosts: crc-0

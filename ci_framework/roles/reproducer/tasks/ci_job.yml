@@ -30,11 +30,30 @@
   delegate_to: controller-0
   remote_user: zuul
   block:
+    - name: Create data directory on controller-0
+      ansible.builtin.file:
+        path: "ci-framework-data/artifacts/parameters"
+        state: directory
+
+    - name: Fetch zuul.items repositories
+      tags:
+        - bootstrap
+      ansible.builtin.git:  # noqa: latest[git]
+        dest: "{{ repo.project.src_dir }}"
+        repo: "https://{{ repo.project.canonical_name }}"
+        refspec: "pull/{{ repo.change }}/head:{{ job_id }}"
+        force: true
+      loop: "{{ zuul['items'] }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.project.name }}"
+
     - name: Fetch zuul.projects repositories for dependencies
       tags:
         - bootstrap
       when:
         - repo.key is match('^github.com')
+        - "repo.key not in (zuul['items'] | map(attribute='project.canonical_name'))"
       ansible.builtin.git:
         dest: "{{ repo.value.src_dir }}"
         repo: "https://{{ repo.key }}"
@@ -44,19 +63,6 @@
       loop_control:
         loop_var: repo
         label: "{{ repo.key }}"
-
-    - name: Fetch zuul.items repositories
-      tags:
-        - bootstrap
-      ansible.builtin.git:
-        dest: "{{ repo.project.src_dir }}"
-        repo: "https://{{ repo.project.canonical_name }}"
-        version: "{{ repo.patchset }}"
-        force: true
-      loop: "{{ zuul['items'] }}"
-      loop_control:
-        loop_var: repo
-        label: "{{ repo.project.name }}"
 
     - name: Ensure ci-framework is here
       tags:
@@ -147,14 +153,14 @@
         chdir: "src/github.com/openstack-k8s-operators/ci-framework"
         cmd: ansible-galaxy collection install -r requirements.yml
 
-    - name: Build zuul_inventory for hook usage
+    - name: Build job inventory for hook usage
       tags:
         - bootstrap
       ansible.builtin.shell:
         cmd: >-
           cat reproducer-inventory/* >
-          src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/zuul_inventory.yml
-        creates: src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/zuul_inventory.yml
+          ci-framework-data/artifacts/zuul_inventory.yml
+        creates: ci-framework-data/artifacts/zuul_inventory.yml
 
     - name: Generate CI job playbook
       tags:
@@ -177,29 +183,38 @@
         dest: "src/github.com/openstack-k8s-operators/ci-framework/pre-ci-play.yml"
         src: "pre-ci-play.yml"
 
-    - name: Check for ansible log file and rotate it
+    - name: Push zuul-params.yml to expected location
+      tags:
+        - bootstrap
       block:
-        - name: Check ansible.log
-          register: ansible_log
-          ansible.builtin.stat:
-            path: ansible.log
+        - name: Get content of zuul-params.yml
+          register: zuul_params
+          ansible.builtin.slurp:
+            path: "{{ job_id }}-params/zuul-params.yml"
 
-        - name: Rotate log if present
-          when:
-            - ansible_log.stat.exists
-          ansible.builtin.shell:
-            cmd: mv ansible.log "ansible.log-$(date +%s)"
+        - name: Push extracted content
+          vars:
+            zuul_params_filtered: >-
+              {{
+                (zuul_params['content'] | b64decode | from_yaml) |
+                dict2items |
+                rejectattr('key', 'equalto', 'cifmw_operator_build_output') |
+                rejectattr('key', 'equalto', 'content_provider_registry_ip') |
+                items2dict
+              }}
+          ansible.builtin.copy:
+            dest: "ci-framework-data/artifacts/parameters/zuul-params.yml"
+            content: "{{ zuul_params_filtered | to_nice_yaml }}"
 
-        - name: Check pre-ci log
-          register: pre_ci_log
-          ansible.builtin.stat:
-            path: ansible-pre-ci.log
-
-        - name: Rotate pre-ci log if present
-          when:
-            - pre_ci_log.stat.exists
-          ansible.builtin.shell:
-            cmd: mv ansible-pre-ci.log "ansible-pre-ci.log-$(date +%s)"
+    - name: Check for ansible logs file and rotate it
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - "ansible.log"
+        - "ansible-pre-ci.log"
+        - "ansible-{{ job_id }}.log"
+        - "ansible-content-provider-bootstrap.log"
 
     - name: Run pre-ci-play
       tags:
@@ -211,25 +226,29 @@
         chdir: "src/github.com/openstack-k8s-operators/ci-framework/"
         cmd: >-
           ansible-playbook
-          -i scenarios/centos-9/zuul_inventory.yml
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
           pre-ci-play.yml
 
-    - name: Run reproducer preparation job
+    - name: Prepare environment for content-provider
       when:
         - cifmw_job_uri is defined
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-content-provider-bootstrap.log"
       ansible.builtin.command:
         chdir: "src/github.com/openstack-k8s-operators/ci-framework"
         cmd: >-
           ansible-playbook
-          -i scenarios/centos-9/zuul_inventory.yml
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
           ci_framework/playbooks/01-bootstrap.yml
 
     - name: Run job
       when:
         - cifmw_reproducer_run_job | bool
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-{{ job_id }}.log"
       ansible.builtin.command:
         chdir: "src/github.com/openstack-k8s-operators/ci-framework"
         cmd: >-
           ansible-playbook
-          -i scenarios/centos-9/zuul_inventory.yml
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
           {{ job_id }}_play.yml
