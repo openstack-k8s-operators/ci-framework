@@ -54,7 +54,11 @@
 - name: Cleanup the devscripts working directory.
   become: true
   ansible.builtin.file:
-    path: "{{ cifmw_devscripts_config.working_dir }}"
+    path: >-
+      {{
+        cifmw_devscripts_config.working_dir |
+        default('/home/dev-scripts')
+      }}
     state: absent
     force: true
 
@@ -63,3 +67,47 @@
   ansible.builtin.include_role:
     name: ci_network
     tasks_from: cleanup-dns.yml
+
+- name: Ensure forwarding and post routing rules are cleaned.
+  when:
+    - cifmw_devscripts_osp_compute_nodes is defined
+    - cifmw_devscripts_osp_compute_nodes | length > 0
+  block:
+    - name: Ensuring post routing rules are cleaned.
+      become: true
+      vars:
+        ext_interface: >-
+          {{
+            ansible_default_ipv4.interface
+            if cifmw_devscripts_config.ip_stack == 'v4'
+            else
+            ansible_default_ipv6.interface
+          }}
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: "POSTROUTING"
+        out_interface: "{{ ext_interface }}"
+        state: absent
+        table: "nat"
+        jump: "MASQUERADE"
+
+    - name: Ensuring forwarding rules are cleaned.
+      become: true
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: "FORWARD"
+        in_interface: "{{ item.name }}"
+        jump: "ACCEPT"
+        state: absent
+      loop: "{{ cifmw_devscripts_extra_networks }}"
+
+- name: Configure firewall settings for all extra networks
+  become: true
+  when: cifmw_devscripts_extra_networks is defined
+  ansible.posix.firewalld:
+    zone: libvirt
+    interface: "{{ item.name }}"
+    state: "disabled"
+    permanent: true
+    immediate: true
+  loop: "{{ cifmw_devscripts_extra_networks }}"

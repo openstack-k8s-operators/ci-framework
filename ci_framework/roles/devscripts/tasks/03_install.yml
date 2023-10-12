@@ -15,87 +15,17 @@
 # under the License.
 
 
-- name: Clone the dev-scripts repository.
+- name: Clone the repository.
   tags:
     - bootstrap
-  ansible.builtin.git:
-    repo: "{{ cifmw_devscripts_repo }}"
-    dest: "{{ cifmw_devscripts_repo_dir }}"
-    depth: 1
-    single_branch: true
-    force: true
-    version: HEAD  # noqa: latest[git]
-  register: clone_out
-  retries: 3
-  delay: 15
-  until: "clone_out is not failed"
+  ansible.builtin.import_tasks: sub_tasks/31_repo.yml
 
-# This is the same patch as proposed upstream with
-# https://github.com/openshift-metal3/dev-scripts/pull/1595
-# Even if it gets merged, the patch here won't fail.
-- name: Patch dev-scripts for libvirt stability
-  when: cifmw_devscripts_restart_virtproxyd | bool
+- name: Ensure required argument files are present
   tags:
     - bootstrap
-  ansible.posix.patch:
-    src: virtproxyd.patch
-    dest: "{{ cifmw_devscripts_repo_dir }}/ocp_install_env.sh"
+  ansible.builtin.import_tasks: sub_tasks/32_params.yml
 
-# Note: Override When external network is being reused.
-- name: Verify dev-scripts vm_setup_vars to reflects external network address
-  tags:
-    - bootstrap
-  when:
-    - "'manage_br_bridge' in cifmw_devscripts_config"
-    - cifmw_devscripts_config['manage_br_bridge'] == 'n'
-  ansible.builtin.replace:
-    path: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"
-    after: "external_network:"
-    regexp: "^    address_v4(.+)$"
-    replace: "    address_v4: {{ ansible_default_ipv4.address }}"
-
-- name: Copy the CI token file in devscript repo directory
-  when: cifmw_devscripts_ci_token_file is defined
-  tags:
-    - bootstrap
-  ansible.builtin.copy:
-    src: "{{ cifmw_devscripts_ci_token_file }}"
-    dest: "{{ cifmw_devscripts_repo_dir }}/ci_token"
-    owner: "{{ cifmw_devscripts_user }}"
-    group: "{{ cifmw_devscripts_user }}"
-    mode: "0600"
-
-- name: Copy the OCP config file.
-  tags:
-    - bootstrap
-  ansible.builtin.template:
-    src: templates/conf_ciuser.sh.j2
-    dest: >-
-      {{ cifmw_devscripts_repo_dir }}/config_{{ cifmw_devscripts_user }}.sh
-
-- name: Copy the user pull secret from cifmw_devscripts_pull_secret var
-  when: cifmw_devscripts_pull_secret is defined
-  tags:
-    - bootstrap
-  ansible.builtin.copy:
-    dest: "{{ cifmw_devscripts_repo_dir }}/pull_secret.json"
-    content: "{{ cifmw_devscripts_pull_secret }}"
-    owner: "{{ cifmw_devscripts_user }}"
-    group: "{{ cifmw_devscripts_user }}"
-    mode: "0644"
-
-- name: Copy the user pull secret from cifmw_devscripts_pull_secret_file var
-  when: cifmw_devscripts_pull_secret_file is defined
-  tags:
-    - bootstrap
-  ansible.builtin.copy:
-    dest: "{{ cifmw_devscripts_repo_dir }}/pull_secret.json"
-    src: "{{ cifmw_devscripts_pull_secret_file }}"
-    owner: "{{ cifmw_devscripts_user }}"
-    group: "{{ cifmw_devscripts_user }}"
-    mode: "0644"
-
-- name: Deploying the OpenShift platform
+- name: Deploy the OpenShift platform
   tags:
     - bootstrap
   ci_make:
