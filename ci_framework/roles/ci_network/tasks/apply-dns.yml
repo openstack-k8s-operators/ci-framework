@@ -1,0 +1,87 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Ensure the package is installed
+  become: true
+  ansible.builtin.package:
+    name: "dnsmasq"
+    state: "present"
+
+- name: Enable local DNS resolution.
+  become: true
+  ansible.builtin.copy:
+    dest: "/etc/NetworkManager/conf.d/00-use-dnsmasq.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [main]
+      dns = dnsmasq
+
+- name: Ensure existing nameservers are DNS forwarders.
+  become: true
+  when: >
+    "'127.0.0.1' not in ansible_dns.nameservers" or
+    "'forwarders' in cifmw_network_local_dns"
+  vars:
+    dns_servers: >-
+      {{
+        cifmw_network_local_dns.forwarders |
+        default(ansible_dns.nameservers)
+      }}
+    servers: "server={{ dns_servers | join('\nserver=') }}"
+  ansible.builtin.copy:
+    dest: "/etc/NetworkManager/dnsmasq.d/99-dns-forwarders.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ servers }}"
+
+- name: Prepare the dns configuration
+  ansible.builtin.set_fact:
+    _dns_config: "{{ cifmw_network_local_dns }}"
+
+- name: Ensure dnsmasq listens on default IPv4 address
+  when: "'listen_addresses' not in cifmw_network_local_dns"
+  vars:
+    data:
+      listen_addresses:
+        - "127.0.0.1"
+        - "{{ ansible_default_ipv4.address }}"
+  ansible.builtin.set_fact:
+    _dns_config: >-
+      {{
+        _dns_config |
+        combine(data, recursive=true)
+      }}
+
+- name: Copy the local dns configuration
+  become: true
+  vars:
+    config: "{{ _dns_config }}"
+  ansible.builtin.template:
+    src: "templates/local_domain.conf.j2"
+    dest: "/etc/NetworkManager/dnsmasq.d/cifmw_local_domain.conf"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Reload the NetworkManager to pick the changes
+  become: true
+  ansible.builtin.service:
+    name: NetworkManager
+    state: "reloaded"

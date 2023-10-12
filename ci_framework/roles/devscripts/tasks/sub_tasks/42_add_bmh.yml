@@ -1,0 +1,58 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Collect extra nodes created via dev-scripts
+  when:
+    - "'num_extra_workers' in cifmw_devscripts_config"
+    - cifmw_devscripts_config.num_extra_workers | int > 0
+  block:
+    - name: Collecting the extra baremetal hosts information.
+      vars:
+        nodes_file: "{{ cifmw_devscripts_repo_dir }}/ocp/{{ cifmw_devscripts_config.cluster_name }}/extra_baremetalhosts.json"
+      ansible.builtin.set_fact:
+        nodes: "{{ lookup('ansible.builtin.file', nodes_file) | from_json }}"
+
+    - name: Add devscripts extra nodes
+      ansible.builtin.include_tasks: _get_node.yml
+      loop: "{{ nodes }}"
+      loop_control:
+        loop_var: node
+
+- name: Ensure the bmh artifacts exists
+  ansible.builtin.file:
+    path: "{{ cifmw_devscripts_artifacts_dir }}/bmh"
+    state: "directory"
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0755"
+
+- name: Create baremetal host object
+  vars:
+    node: "{{ item }}"
+  ansible.builtin.template:
+    src: templates/bmh.yaml.j2
+    dest: "{{ cifmw_devscripts_artifacts_dir }}/bmh/{{ item.name }}.yaml"
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"
+  loop: "{{ cifmw_devscripts_osp_compute_nodes }}"
+
+- name: Apply the baremetal host definitions
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_devscripts_artifacts_dir }}/bmh/"

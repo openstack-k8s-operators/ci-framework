@@ -1,4 +1,5 @@
 # Usage guide
+
 The Framework leverages [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
 content and generate the needed bits in order to deploy EDPM on the selected infrastructure.
 
@@ -6,13 +7,17 @@ The Framework will also ensure we're able to reproduce the exact same run we
 got in CI with a series of artifacts one may download locally, and re-run.
 
 ## Parameters
+
 There are two levels of parameters we may provide:
-- top level
-- role level
+
+* top level
+* role level
 
 ### Top level parameters
+
 The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
+
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
 `~/ci-framework-data`
 * `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook
@@ -33,10 +38,12 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_openshift_skip_tls_verify`: (Boolean) Skip TLS verification to login. Defaults to `false`.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
+* `cifmw_use_devscripts`: (Bool) toggle OpenShift deploying using devscripts role.
 * `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 
 #### Words of caution
+
 If you want to output the content in another location than `~/ci-framework-data`
 (namely set the `cifmw_basedir` to some other location), you will have to update
 the `ansible.cfg`, updating the value of `roles_path` so that it includes
@@ -45,19 +52,23 @@ this new location.
 We cannot do this change runtime unfortunately.
 
 ### Role level parameters
+
 Please refer to the README located within the various roles.
 
 ## Provided playbooks and scenarios
+
 The provided playbooks and scenarios allow to deploy a full stack with
 various options. Please refer to the provided examples and roles if you
 need to know more.
 
 ## Hooks
+
 The framework is able to leverage hooks located in various locations. Using
 proper parameter name, you may run arbitrary playbook or load custom CRDs at
 specific points in the standard run.
 
 Allowed parameter names are:
+
 * `pre_infra`: before bootstrapping the infrastructure
 * `post_infra`: after bootstrapping the infrastructure
 * `pre_package_build`: before building packages against sources
@@ -78,6 +89,7 @@ Since steps may be skipped, we must ensure proper post/pre exists for specific
 steps.
 
 In order to provide a hook, please pass the following as an environment file:
+
 ```YAML
 pre_infra:
     - name: My glorious hook name
@@ -92,6 +104,7 @@ pre_infra:
         type: pod
       source: /path/to/my/glorious.crd
 ```
+
 In the above example, the `foo.yml` is located in
 [ci_framework/hooks/playbooks](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/hooks/playbooks) while
 `glorious.crd` is located in some external path.
@@ -103,6 +116,7 @@ Note that you really should avoid pointing to external resources, in order to
 ensure everything is available for job reproducer.
 
 ## Ansible tags
+
 In order to allow user to run only a subset of tasks while still consuming the
 entry playbook, the Framework exposes tags one may leverage with either `--tags`
 or `--skip-tags`:
@@ -113,6 +127,7 @@ or `--skip-tags`:
 
 For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
+
 ```Bash
 $ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
 $ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]

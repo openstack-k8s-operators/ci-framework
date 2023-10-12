@@ -1,0 +1,52 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Gather MAC address of port connected to baremetal bridge
+  become: true
+  vars:
+    bridge_suffix: >-
+      {{
+        'bm'
+        if (
+          cifmw_devscripts_config.provisioning_network_profile == 'Disabled'
+        )
+        else 'pr'
+      }}
+    vm_name: "{{ node.name | replace('-', '_') }}"
+  ci_script:
+    output_dir: "{{ cifmw_devscripts_output_dir }}"
+    script: >-
+      virsh -q domiflist {{ vm_name }} |
+      grep {{ cifmw_devscripts_config.cluster_name }}{{ bridge_suffix }}
+  register: boot_mac_out
+
+- name: Add node information to openstack compute nodes
+  vars:
+    mac_addr: "{{ boot_mac_out.stdout | split(' ') | last }}"
+    bmh:
+      name: "{{ node.name }}"
+      bmc:
+        address: "{{ node.driver_info.address }}"
+        username: "{{ node.driver_info.username  | b64encode }}"
+        password: "{{ node.driver_info.password | b64encode }}"
+      boot_mode: "UEFI"
+      boot_mac_addr: "{{ mac_addr | trim }}"
+  ansible.builtin.set_fact:
+    cifmw_devscripts_osp_compute_nodes: >-
+      {{
+        cifmw_devscripts_osp_compute_nodes + [bmh]
+      }}

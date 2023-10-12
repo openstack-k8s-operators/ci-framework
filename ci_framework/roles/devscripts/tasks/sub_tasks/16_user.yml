@@ -1,0 +1,57 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create the specified user.
+  become: true
+  ansible.builtin.user:
+    name: "{{ cifmw_devscripts_user }}"
+    state: present
+
+- name: Ensure the devscripts required directories exists.
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: "directory"
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0755"
+  loop:
+    - "{{ cifmw_devscripts_repo_dir }}"
+    - "{{ cifmw_devscripts_config['working_dir'] }}"
+
+- name: Generate SSH keys for accessing OCP cluster
+  community.crypto.openssh_keypair:
+    path: >-
+      {{ cifmw_devscripts_artifacts_dir }}/{{ cifmw_devscripts_user }}_ed25519
+    type: "ed25519"
+  register: cifmw_devscripts_ssh_key
+
+- name: Enable password-less access
+  become: true
+  ansible.posix.authorized_key:
+    user: "{{ cifmw_devscripts_user }}"
+    key: "{{ cifmw_devscripts_ssh_key.public_key }}"
+    state: present
+
+- name: Verify sudoers privileges
+  become: true
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ cifmw_devscripts_user }}"
+    owner: root
+    group: root
+    mode: "0640"
+    content: |
+      {{ cifmw_devscripts_user }}    ALL=(ALL)    NOPASSWD: ALL
