@@ -1,1 +1,0 @@
-../../ci_framework/plugins/README.md
