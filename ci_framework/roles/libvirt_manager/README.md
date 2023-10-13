@@ -23,3 +23,6 @@ Used for checking if:
 * `cifmw_libvirt_manager_installyamls`: (String) install_yamls repository location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`
 * `cifmw_libvirt_manager_dryrun`: (Boolean) Toggle ci_make `dry_run` parameter. Defaults to `false`.
 * `cifmw_libvirt_manager_compute_amount`: (Integer) State the amount of computes you want. Defaults to `1`.
+* `cifmw_libvirt_manager_compute_memory`: (Integer) The amount of memory in GB per compute. Defaults to `4`.
+* `cifmw_libvirt_manager_compute_disksize`: (Integer) The size of the disk in GB per compute. Defaults to `20`.
+* `cifmw_libvirt_manager_compute_cpus`: (Integer) The amount of vCPUs per compute. Defaults to `1`.
