@@ -1,0 +1,73 @@
+---
+- job:
+    name: cifmw-base-multinode-tempest
+    parent: cifmw-podified-multinode-edpm-base-crc
+    timeout: 5400
+    abstract: true
+    nodeset: multinode-centos-9-stream-crc
+    vars:
+      zuul_log_collection: true
+      cifmw_deploy_edpm: false
+      openstack_release: antelope
+      # disable operator build
+      cifmw_operator_build_meta_build: false
+      cifmw_operator_build_operators: []
+      cifmw_tempest_tests_allowed_override_scenario: true
+    extra-vars:
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            range: 192.168.122.0/24
+            mtu: 1500
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/24
+          storage:
+            vlan: 21
+            range: 172.18.0.0/24
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/24
+        instances:
+          controller:
+            networks:
+              default:
+                ip: 192.168.122.11
+          crc:
+            networks:
+              default:
+                ip: 192.168.122.10
+              internal-api:
+                ip: 172.17.0.5
+              storage:
+                ip: 172.18.0.5
+              tenant:
+                ip: 172.19.0.5
+      cifmw_extras:
+        - '@scenarios/centos-9/ci.yml'
+        - '@scenarios/centos-9/multinode-ci.yml'
+        - '@scenarios/centos-9/ceph_backends.yml'
+    pre-run:
+      - ci/playbooks/e2e-prepare.yml
+    run:
+      - ci/playbooks/e2e-run.yml
+    required-projects:
+      - github.com/openstack-k8s-operators/install_yamls
+      - openstack-k8s-operators/ci-framework
+      - openstack-k8s-operators/dataplane-operator
+      - openstack-k8s-operators/infra-operator
+      - openstack-k8s-operators/openstack-baremetal-operator
+      - openstack-k8s-operators/openstack-operator
+      - name: openstack-k8s-operators/repo-setup
+        override-checkout: main
+      - openstack-k8s-operators/edpm-ansible
+
+- job:
+    name: cifmw-multinode-tempest
+    parent: cifmw-base-multinode-tempest
+    files:
+      - ^ci_framework/roles/tempest
+      - ^scenarios/centos-9/multinode-ci.yml
+      - ^scenarios/centos-9/ci.yml
+      - ^scenarios/centos-9/ceph_backends.yml
+      - ^zuul.d/tempest_multinode.yaml
