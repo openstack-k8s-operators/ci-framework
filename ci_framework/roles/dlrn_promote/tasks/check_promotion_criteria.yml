@@ -20,17 +20,15 @@
       ansible.builtin.fail:
         msg: "{{ cifmw_dlrn_promote_criteria_file }} does not exists."
 
-    - name: Copy criteria file
+    - name: Slurp criteria file
       when: criteria_file.stat.exists
-      ansible.builtin.copy:
-        dest: "{{ cifmw_dlrn_promote_workspace }}/"
-        src: "{{ cifmw_dlrn_promote_criteria_file }}"
-        remote_src: true
+      ansible.builtin.slurp:
+        path: "{{ cifmw_dlrn_promote_criteria_file }}"
+      register: criteria_data
 
-    - name: Load criteria for promotion
-      ansible.builtin.include_vars:
-        file: "{{ cifmw_dlrn_promote_workspace }}/{{ cifmw_dlrn_promote_criteria_file | basename }}"
-        name: "criteria"
+    - name: Set fact for criteria
+      ansible.builtin.set_fact:
+        criteria: "{{ criteria_data['content'] | b64decode | from_yaml }}"
 
     - name: Query to match promotion criteria
       ansible.builtin.include_tasks: query_criteria.yml
