@@ -54,16 +54,17 @@ project.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Available plugins
+   :glob:
+
+   plugins/*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Available roles
    :glob:
 
    roles/*
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Available plugins
-
-   plugins_readme.md
 
 Indices and tables
 ==================

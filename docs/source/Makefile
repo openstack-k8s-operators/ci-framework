@@ -49,10 +49,17 @@ clean:
 	rm -rf $(BUILDDIR)/*
 
 .PHONY: html
-html:
+html: plugin_doc
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."
+
+.PHONY: plugin_doc
+plugin_doc:
+	ansible-doc-extractor ./plugins ../../plugins/modules/*.py
+	@echo
+	@echo "Plugin doc generated."
+	@echo
 
 .PHONY: dirhtml
 dirhtml:
