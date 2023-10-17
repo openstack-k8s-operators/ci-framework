@@ -1,0 +1,55 @@
+---
+- name: Prepare the k8s nmstate nncp to apply
+  vars:
+    nmstate_nncp_manifest_name: "{{ hostvars[item].ansible_hostname }}"
+    nmstate_nncp_overrides:
+      metadata:
+        labels:
+          osp/interface: "{{ cifmw_ci_nmstate_network_layout[item].default.iface }}"
+        name: "{{ nmstate_nncp_manifest_name }}"
+      spec:
+        desiredState: "{{ _cifmw_ci_nmstate_configs[item] }}"
+        nodeSelector:
+          kubernetes.io/hostname: "{{ hostvars[item].ansible_hostname }}"
+  ansible.builtin.set_fact:
+    _cifmw_ci_nmstate_k8s_node_config_name: "{{ nmstate_nncp_manifest_name }}"
+    _cifmw_ci_nmstate_k8s_node_config: >-
+      {{
+        cifmw_ci_nmstate_nncp_config_template |
+        combine(nmstate_nncp_overrides, recursive=True)
+      }}
+    cacheable: true
+
+- name: Save k8s nmstate nncp manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_ci_nmstate_manifests_dir }}/{{ item }}-nncp.yaml"
+    content: "{{ _cifmw_ci_nmstate_k8s_node_config | to_nice_yaml }}"
+
+- name: Provision nmstate nncp for the node worker
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    definition: "{{ _cifmw_ci_nmstate_k8s_node_config }}"
+
+- name: Wait for nsmtate nncp to be ready
+  kubernetes.core.k8s_info:
+    api_version: nmstate.io/v1
+    kind: NodeNetworkConfigurationPolicy
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    name: "{{ _cifmw_ci_nmstate_k8s_node_config_name }}"
+  register: _nsmate_instance_nncp_out
+  retries: 6
+  delay: 10
+  until:
+    - _nsmate_instance_nncp_out is defined
+    - _nsmate_instance_nncp_out is not failed
+    - _nsmate_instance_nncp_out.resources | length > 0
+    - _nsmate_instance_nncp_out.resources[0].status.conditions is defined
+    - >-
+      _nsmate_instance_nncp_out.resources[0].status.conditions |
+      selectattr("type", "equalto", "Available") |
+      selectattr("status", "equalto", "True") | length > 0

@@ -1,0 +1,186 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_ci_nmstate_namespace: openshift-nmstate
+  tasks:
+    - name: Add crc hostname with it's IP to /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "192.168.130.11 crc"
+
+    - name: Add the crc host dynamically
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
+    - name: Fetch crc network facts
+      ansible.builtin.setup:
+        gather_subset: network
+      delegate_to: crc
+      delegate_facts: true
+
+    - name: Prepare the networking var for the ci_nmstate role
+      vars:
+        instance_target_mtu: "{{ ansible_default_ipv4.mtu -50 }}"
+      ansible.builtin.set_fact:
+        _ci_nmstate_molecule_instance_target_mtu: "{{ instance_target_mtu }}"
+        cifmw_ci_nmstate_network_layout:
+          instance:
+            default:
+              connection: ci-private-network
+              gw: "{{ ansible_default_ipv4.gateway }}"
+              iface: "{{ ansible_default_ipv4.interface }}"
+              ip4: "{{ ansible_default_ipv4.address + '/' + ansible_default_ipv4.prefix }}"
+              mtu: "{{ instance_target_mtu | string }}" # Set a non-default MTU to test
+              dns:
+                - 1.1.1.1
+                - 1.0.0.1
+          crc:
+            default:
+              connection: ci-private-network
+              gw: "{{ hostvars.crc.ansible_default_ipv4.gateway }}"
+              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+              ip4: >-
+                {{
+                  hostvars.crc.ansible_default_ipv4.address +
+                    '/' + hostvars.crc.ansible_default_ipv4.prefix
+                }}
+              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu }}"
+            test-vlan-connection:
+              connection: test-network-20
+              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}.20"
+              ip4: 172.17.0.5/24
+              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu | string }}"
+              parent_iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+              vlan: 20
+
+    - name: Call the role under test
+      ansible.builtin.include_role:
+        name: "ci_nmstate"
+
+    # Verify the run
+    - name: Fetch files stat results
+      ansible.builtin.stat:
+        path: >-
+          {{
+            [
+              ansible_user_dir,
+              'ci-framework-data',
+              'artifacts',
+              item
+            ] | ansible.builtin.path_join
+          }}
+      register: _ci_nmstate_molecule_stat_out
+      loop:
+        - nmstate/instance-state.yaml
+        - nmstate/instance-final-state.yaml
+        - manifests/nmstate/nmstate-operatorgroup-olm.yaml
+        - manifests/nmstate/nmstate-subscription-olm.yaml
+        - manifests/nmstate/nmstate-nmstate-olm.yaml
+        - manifests/nmstate/crc-nncp.yaml
+
+    - name: Assert that all expected files exist
+      ansible.builtin.assert:
+        that: >-
+          _ci_nmstate_molecule_stat_out.results |
+          map(attribute="stat.exists") |
+          select("equalto", true) |
+          length == (_ci_nmstate_molecule_stat_out.results | length)
+
+    - name: Fetch all files content
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      register: _ci_nmstate_molecule_slurp_out
+      loop: >-
+        {{
+          _ci_nmstate_molecule_stat_out.results |
+          map(attribute="stat.path")
+        }}
+
+    - name: Assert that all files contains proper YAML data
+      ansible.builtin.assert:
+        that: "item.content | b64decode | from_yaml | length > 0"
+      loop: "{{ _ci_nmstate_molecule_slurp_out.results }}"
+      loop_control:
+        label: "{{ item.source }}"
+
+    - name: Wait for nsmtate nncp to be ready
+      kubernetes.core.k8s_info:
+        api_version: nmstate.io/v1
+        kind: NodeNetworkConfigurationPolicy
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        name: "{{ hostvars.crc.ansible_hostname }}"
+      register: _ci_nmstate_molecule_nncp_out
+      failed_when: >-
+        (_ci_nmstate_molecule_nncp_out is not defined) or
+        (_ci_nmstate_molecule_nncp_out is failed) or
+        (_ci_nmstate_molecule_nncp_out.resources | length == 0) or
+        (_ci_nmstate_molecule_nncp_out.resources[0].status.conditions is not defined) or
+        (
+          _ci_nmstate_molecule_nncp_out.resources[0].status.conditions |
+          selectattr("type", "equalto", "Available") |
+          selectattr("status", "equalto", "True") | length == 0
+        )
+
+    - name: Fetch unmanaged node link statuses
+      ansible.builtin.command:
+        cmd: "ip -j link"
+      register: _ci_nmstate_molecule_links_out
+
+    - name: Check that the unmanaged node MTU change was performed
+      vars:
+        iface_link_mtu: >-
+          {{
+            _ci_nmstate_molecule_links_out.stdout |
+            from_json |
+            selectattr("ifname", "equalto", ansible_default_ipv4.interface) |
+            map(attribute="mtu") | first
+          }}
+      ansible.builtin.assert:
+        that: iface_link_mtu == _ci_nmstate_molecule_instance_target_mtu
+
+    - name: Call ci_nmstate cleanup
+      ansible.builtin.import_role:
+        name: ci_nmstate
+        tasks_from: cleanup.yml
+
+    - name: Fetch namespaces
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: Namespace
+      register: _ci_nmstate_molecule_ns_out
+
+    - name: Assert that the nmstate ns is gonne
+      vars:
+        ns_names: >-
+          {{
+            _ci_nmstate_molecule_ns_out.resources |
+            default([]) |
+            map(attribute='metadata.name')
+          }}
+      ansible.builtin.assert:
+        that: "cifmw_ci_nmstate_namespace not in ns_names"
