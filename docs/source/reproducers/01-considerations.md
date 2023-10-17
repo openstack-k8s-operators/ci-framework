@@ -14,6 +14,9 @@ The CRC VM has to be properly set up prior to running the reproducer play. You
 may get to that leveraging either the rhol_crc role from the CI Framework, or
 manually by calling `crc setup && crc start -p pull-secret`.
 
+Note: make sure to create the CRC with proper disk size, e.g. 100G, it won't
+be resized during reproducer create.
+
 Once the CRC VM is properly started, you can then stop it and undefine it as
 follows:
 ```Bash
