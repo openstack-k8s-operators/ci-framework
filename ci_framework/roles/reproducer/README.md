@@ -16,6 +16,7 @@ None
 * `cifmw_reproducer_params`: (Dict) Specific parameters you want to pass to the reproducer. Defaults to `{}`.
 * `cifmw_reproducer_private_nic`: (String) Private NIC for compute and controller. Defaults to `eth1`.
 * `cifmw_reproducer_crc_private_nic`: (String) Private NIC for CRC node. Defaults to `enp2s0`.
+* `cifmw_reproducer_dns_servers`: List of dns servers which should be used by the CRC VM as upstream dns servers. Defaults to 1.1.1.1, 8.8.8.8.
 
 ## Warning
 This role isn't intended to be called outside of the `reproducer.yml` playbook.
