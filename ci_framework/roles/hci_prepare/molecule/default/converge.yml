@@ -1,0 +1,92 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Converge
+  hosts: all
+  vars:
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+    cifmw_path: "/path/to/bin"
+    cifmw_openshift_kubeconfig: "path/to/kubeconfig"
+    cifmw_hci_prepare_dryrun: true
+    cifmw_install_yamls_defaults:
+      NAMESPACE: openstack
+  tasks:
+    - name: Add compute-0 to inventory
+      ansible.builtin.add_host:
+        name: compute-0
+        ansible_connection: local
+        groups: computes
+
+    - name: Ensure minimal dirs exists
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0777"
+      loop:
+        - "{{ cifmw_basedir }}/artifacts/parameters"
+        - /etc/ci/env
+
+    - name: Expected network info
+      vars:
+        file_content:
+          crc_ci_bootstrap_networks_out:
+            compute-0:
+              storage-mgmt:
+                mtu: 9000
+                vlan: 10
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/parameters/network_info.yml"
+        content: "{{ file_content | to_nice_yaml }}"
+
+    - name: Run phase1
+      ansible.builtin.import_role:
+        name: hci_prepare
+        tasks_from: phase1
+
+    - name: Assert mtu and vlan values were set
+      ansible.builtin.assert:
+        that:
+          - cifmw_hci_prepare_storage_mgmt_mtu | int == 9000
+          - cifmw_hci_prepare_storage_mgmt_vlan | int == 10
+
+    - name: Check expected kustomizations
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ cifmw_hci_prepare_dataplane_dir }}/89-storage-mgmt-kustomization.yaml"
+        - "{{ cifmw_hci_prepare_dataplane_dir }}/88-hci-pre-kustomization.yaml"
+      register: phase1_files
+
+    - name: Check if expected files where created
+      ansible.builtin.assert:
+        that: item.stat.exists
+      loop: "{{ phase1_files.results }}"
+
+    - name: Run phase2
+      ansible.builtin.import_role:
+        name: hci_prepare
+        tasks_from: phase2
+
+    - name: Check expected kustomizations - phase 2
+      ansible.builtin.stat:
+        path: "{{ cifmw_hci_prepare_dataplane_dir }}/87-hci-post-kustomization.yaml"
+      register: phase2_files
+
+    - name: Check if expected files where created - phase 2
+      ansible.builtin.assert:
+        that: phase2_files.stat.exists

@@ -1,0 +1,89 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Load parameters
+  ansible.builtin.include_tasks: load_parameters.yml
+  when: not cifmw_hci_prepare_skip_load_parameters | bool
+
+- name: Ensure the kustomizations dirs exists
+  ansible.builtin.file:
+    path: "{{ cifmw_hci_prepare_dataplane_dir }}"
+    state: directory
+
+- name: Prepare EDPM netowork for HCI deployment
+  when:
+    - cifmw_hci_prepare_enable_storage_mgmt
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hci_prepare_dataplane_dir }}/89-storage-mgmt-kustomization.yaml"
+    content: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+      patches:
+      - target:
+          kind: OpenStackDataPlaneNodeSet
+        patch: |-
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_mtu
+            value: {{ cifmw_hci_prepare_storage_mgmt_mtu }}
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_vlan_id
+            value: {{ cifmw_hci_prepare_storage_mgmt_vlan }}
+
+          - op: add
+            path: /spec/nodeTemplate/ansible/ansibleVars/role_networks/-
+            value: StorageMgmt
+
+          - op: add
+            path: /spec/nodeTemplate/ansible/ansibleVars/networks_lower/StorageMgmt
+            value: storage_mgmt
+
+      {% for compute_node in groups['computes'] %}
+          - op: add
+            path: /spec/nodes/edpm-{{ compute_node }}/networks/-
+            value:
+              name: StorageMgmt
+              subnetName: subnet1
+      {% endfor %}
+
+- name: Enable services needed to deploy Ceph
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hci_prepare_dataplane_dir }}/88-hci-pre-kustomization.yaml"
+    content: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+      patches:
+      - target:
+          kind: OpenStackDataPlaneNodeSet
+        patch: |-
+          - op: replace
+            path: /spec/services
+            value:
+              - download-cache
+              - configure-network
+              - validate-network
+              - install-os
+              - ceph-hci-pre
+              - configure-os
+              - run-os
+
+- name: Disable discover_hosts when deploying hci on phase1
+  ansible.builtin.set_fact:
+    cifmw_edpm_deploy_skip_nova_discover_hosts: true
