@@ -13,6 +13,8 @@ network configuration, repository setup and libvirt networks.
 
 * `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the role artifacts.
 * `cifmw_devscripts_ci_token` (str) oAuth token required for accessing console.redhat.com.
+* `cifmw_devscripts_ci_token_file` (str) oAuth token file required for accessing console.redhat.com.
+   We can use `cifmw_devscripts_ci_token` or `cifmw_devscripts_ci_token_file` for passing OAuth token.
 * `cifmw_devscripts_config_overrides` (dict) key/value pairs to be used for overriding the default
   configuration. Refer [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more information.
 * `cifmw_devscripts_crb_repo` (str) Repo URL of code ready builder.
@@ -23,6 +25,8 @@ network configuration, repository setup and libvirt networks.
   containing details about OpenStack compute nodes. Refer
   [section](#supported-keys-in-cifmw_devscripts_osp_compute_nodes) for more information.
 * `cifmw_devscripts_pull_secret` (str) Access secret for pulling OCP component images.
+* `cifmw_devscripts_pull_secret_file` (str) Path to pull-secret for pulling OCP component images.
+  We can use `cifmw_devscripts_pull_secret` or `cifmw_devscripts_pull_secret_file` for passing pull_secrets
 * `cifmw_devscripts_src_dir` (str) The parent folder of dev-scripts repository.
 
 ### Supported keys in cifmw_devscripts_config_overrides
