@@ -32,6 +32,15 @@
   ansible.builtin.include_tasks: configure-tempest.yml
   when: not cifmw_tempest_dry_run | bool
 
+- name: Copy CA bundle to cifmw_tempest_artifacts_basedir
+  ansible.builtin.copy:
+    src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    dest: "{{ cifmw_tempest_artifacts_basedir }}"
+    mode: '0444'
+    owner: "{{ lookup('env', 'USER') }}"
+    group: "{{ lookup('env', 'USER') }}"
+    remote_src: true
+
 - name: Set proper permission for tempest directory
   ansible.builtin.command:
     cmd: "podman unshare chown 42480:42480 -R {{ cifmw_tempest_artifacts_basedir }}"
@@ -55,6 +64,7 @@
     network: host
     volume:
       - "{{ cifmw_tempest_artifacts_basedir }}/:/var/lib/tempest/external_files:Z"
+      - "{{ cifmw_tempest_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
     detach: false
     dns: "{{ cifmw_tempest_dns_servers }}"
     env:
