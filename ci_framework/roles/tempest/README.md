@@ -17,6 +17,8 @@ become - Required to install required rpm packages
 * `cifmw_tempest_tests_allowed`: (List) List of tests to be executed. Setting this will not use the `list_allowed` plugin
 * `cifmw_tempest_tempestconf_profile`: (Dictionary) List of settings to be overwritten in tempest.conf.
 * `cifmw_tempest_concurrency`: (Integer) Tempest concurrency value.
+* `cifmw_tempest_tests_allowed_override_scenario`: (Boolean) Whether to override the scenario `cifmw_tempest_tests_allowed` definition. Default to `false`
+* `cifmw_tempest_tests_skipped_override_scenario`: (Boolean) Whether to override the scenario `cifmw_tempest_tests_skipped` definition. Default to `false`
 
 ## Use of cifmw_tempest_tempestconf_profile
 
