@@ -31,7 +31,7 @@
     src: "{{ kube_pass_file }}"
   register: kubeadmin_password
 
-- name: Loading the kubeconfig information
+- name: Slurp kubeconfig
   vars:
     kube_file: >-
       {{
@@ -43,9 +43,14 @@
           'kubeconfig'
         ) | path_join
       }}
+  register: _kubeconfig
+  ansible.builtin.slurp:
+    path: "{{ kube_file }}"
+
+- name: Loading the kubeconfig information
   ansible.builtin.set_fact:
-    kubeconfig: "{{ kube_file }}"
-    kubeconf: "{{ lookup('ansible.builtin.file', kube_file) | from_yaml }}"
+    kubeconfig: "{{ _kubeconfig['source'] }}"
+    kubeconf: "{{ _kubeconfig['content'] | b64decode | from_yaml }}"
 
 - name: Set the OpenShift platform access information.
   ansible.builtin.set_fact:

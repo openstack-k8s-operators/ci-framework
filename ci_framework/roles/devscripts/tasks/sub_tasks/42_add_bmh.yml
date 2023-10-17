@@ -22,9 +22,22 @@
   block:
     - name: Collecting the extra baremetal hosts information.
       vars:
-        nodes_file: "{{ cifmw_devscripts_repo_dir }}/ocp/{{ cifmw_devscripts_config.cluster_name }}/extra_baremetalhosts.json"
+        nodes_file: >-
+          {{
+            [
+              cifmw_devscripts_repo_dir,
+               'ocp',
+               cifmw_devscripts_config.cluster_name,
+               'extra_baremetalhosts.json'
+            ] | path_join
+          }}
+      register: _bm_info
+      ansible.builtin.slurp:
+        path: "{{ node_files }}"
+
+    - name: Expose nodes as a fact
       ansible.builtin.set_fact:
-        nodes: "{{ lookup('ansible.builtin.file', nodes_file) | from_json }}"
+        nodes: "{{ _bm_info['content'] | b64decode | from_json }}"
 
     - name: Add devscripts extra nodes
       ansible.builtin.include_tasks: _get_node.yml
