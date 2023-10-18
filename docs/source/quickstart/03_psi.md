@@ -1,5 +1,8 @@
 # Create a PSI instance
 
+> ⚠️ Warning
+> This is **deprecated** since it uses nested virtualization. Please refer to [run on your own hardware](./04_non-virt.md) documentation.
+
 ## Steps
 
 1. **Download openrc.sh**
