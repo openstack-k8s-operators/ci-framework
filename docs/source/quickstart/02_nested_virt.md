@@ -1,5 +1,8 @@
 # Virtualized environment setup
 
+> ⚠️ Warning
+> This is **deprecated** - please refer to [run on your own hardware](./04_non-virt.md) documentation.
+
 In this section, you will learn how to set up your local development environment.
 
 > ⚠️ **Warning**
