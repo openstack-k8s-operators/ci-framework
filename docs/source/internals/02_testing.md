@@ -25,7 +25,7 @@ $ pip install pyspelling
 $ pyspelling -c .spellcheck.yml
 # Recover the list of words, paste them in a temporary file
 $ cat docs/dictionary/en-custom.txt >> your_temporary_file
-$ cat temporary_file | tr '[:upper:]' '[:lower:]' | sort -u > en-custom.txt
+$ cat your_temporary_file | tr '[:upper:]' '[:lower:]' | sort -u > docs/dictionary/en-custom.txt
 ```
 That way, you ensure that only unique, lower-case words are added to the list.
 
