@@ -125,6 +125,15 @@ or `--skip-tags`:
 * `bootstrap`: Run all of the package installation tasks as well as the potential system configuration depending on the options you set.
 * `packages`: Run all package installation tasks associated to the options you set.
 * `bootstrap_layout`: Run the [reproducer](../reproducers/01-considerations.md) bootstrap steps only.
+* `infra`: Denotes tasks to prepare host virtualization and Openshift Container Platform when deploy-edpm.yml playbook is run.
+* `build-packages`: Denotes tasks to call the role [pkg_build](../roles/pkg_build.md) when deploy-edpm.yml playbook is run.
+* `build-containers`: Denotes tasks to call the role [build_containers](../roles/build_containers.md) when deploy-edpm.yml playbook is run.
+* `build-operators`: Denotes tasks to call the role [operator_build](../roles/operator_build.md) when deploy-edpm.yml playbook is run.
+* `control-plane`: Deploys the control-plane on OpenShift by creating `OpenStackControlPlane` CRs when deploy-edpm.yml playbook is run.
+* `edpm`: Deploys the data-plane (External Data Plane Management) on RHEL nodes by creating `OpenStackDataPlane` CRs when deploy-edpm.yml playbook is run.
+* `admin-setup`: Denotes tasks to call the role [os_net_setup](../roles/os_net_setup.md) when deploy-edpm.yml playbook is run.
+* `run-tests`: Denotes tasks to call the role [tempest](../roles/tempest.md) when deploy-edpm.yml playbook is run.
+* `logs`: Denotes tasks which generate artifacts via the role [artifacts](../roles/artifacts.md) and when collect logs when deploy-edpm.yml playbook is run.
 
 For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
@@ -133,10 +142,17 @@ over, you'll run the following commands:
 $ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
 $ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
 ```
-
 Running the command twice, with `--tags` and `--skip-tags` as only difference,
 will ensure your environment has the needed directories, packages and
 configurations with the first run, while skip all of those tasks in the
 following runs. That way, you will save time and resources.
+
+If you've already deployed OpenStack but it failed
+during [os_net_setup](../roles/os_net_setup.md) and you've taken steps
+to correct the problem and want to test if they resolved the issue,
+then use:
+```Bash
+ansible-playbook deploy-edpm.yml -K --tags admin-setup
+```
 
 More tags may show up according to the needs.
