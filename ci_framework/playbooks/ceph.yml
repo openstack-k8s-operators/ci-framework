@@ -98,20 +98,30 @@
     # storage_mgmt_network_range: 172.20.0.0/24
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
+    - name: Use ansible_fqdn when ceph_spec_fqdn parameter is true
+      when: ceph_spec_fqdn | default(false)
+      ansible.builtin.set_fact:
+        ceph_hostname_var: 'ansible_fqdn'
+
+    - name: Use ansible_hostname when ceph_spec_fqdn parameter is false
+      when: not (ceph_spec_fqdn | default(false))
+      ansible.builtin.set_fact:
+        ceph_hostname_var: 'ansible_hostname'
+
     - name: Build a dict mapping hostname to its IP which is in management network range
       ansible.builtin.set_fact:
         host_to_ip:
           "{{ host_to_ip | default({}) |
             combine(
               {
-                hostvars[item]['ansible_fqdn'] :
+                hostvars[item][ceph_hostname_var] :
                 hostvars[item][all_addresses] | ansible.utils.ipaddr(ssh_network_range) | first
               }
             )
            }}"
       delegate_to: "{{ item }}"
       when:
-        - hostvars[item]['ansible_fqdn'] is defined
+        - hostvars[item][ceph_hostname_var] is defined
       loop: "{{ groups['edpm'] }}"
   roles:
     - role: cifmw_ceph_spec
@@ -128,7 +138,6 @@
     cifmw_cephadm_spec_ansible_host: /tmp/ceph_spec.yml
     cifmw_cephadm_bootstrap_conf: /tmp/initial_ceph.conf
     cifmw_ceph_client_vars: /tmp/ceph_client.yml
-    cifmw_cephadm_bootstrap_host: "{{ ansible_fqdn }}"
     cifmw_cephadm_default_container: true
     all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
     cifmw_cephadm_pools:

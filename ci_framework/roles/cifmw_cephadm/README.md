@@ -32,10 +32,6 @@ Requires an Ansible user who can become root to install Ceph server.
 The `ceph.yml` playbook defaults these parameters so that they do not
 need to be changed for a typical EDPM deployment.
 
-* `cifmw_cephadm_bootstrap_host`: Set this to the hostname of the first
-  EDPM node. The `cephadm.yml` playbook will do this for you provided
-  the inventory is set correctly.
-
 * `cifmw_cephadm_default_container`: If this is value is `true`, then
   `cephadm bootstrap` is not passed the `--image` parameter and whatever
   default Ceph container defined inside of `cephadm` is used. Otherwise
