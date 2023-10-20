@@ -115,6 +115,20 @@
   ansible.builtin.include_role:
     name: set_openstack_containers
 
+- name: Patch ansible runner image temporarily
+  when:
+    - not cifmw_edpm_prepare_update_os_containers | bool
+    - not cifmw_edpm_prepare_skip_patch_ansible_runner | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc patch csv -n openstack-operators openstack-ansibleee-operator.v0.0.1
+      --type='json' -p='[{
+      "op":"replace", "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
+      "value": {"name": "RELATED_IMAGE_ANSIBLEEE_IMAGE_URL_DEFAULT", "value": "quay.io/openstack-k8s-operators/openstack-ansibleee-runner:latest"}}]'
+
 # Prepare and kustomize the OpenStackControlPlane CR
 - name: Prepare OpenStack control plane CR
   vars:
