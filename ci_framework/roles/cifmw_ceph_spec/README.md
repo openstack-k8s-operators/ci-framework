@@ -27,7 +27,7 @@ None
   Ceph spec data devices (defaults to the path `/dev/ceph_vg/ceph_lv_data`
   which is created by the `cifmw_block_device` role)
 * `cifmw_ceph_spec_path`: path of the rendered spec file (default
-  `/tmp/ceph_spec.yml`)
+  `ci-framework-data/artifacts/ceph_spec/ceph_spec.yml`)
 
 ## Examples
 
