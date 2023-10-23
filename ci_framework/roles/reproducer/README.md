@@ -23,3 +23,37 @@ This role isn't intended to be called outside of the `reproducer.yml` playbook.
 
 ## Examples
 Please follow the [documentation about the overall "reproducer" feature](https://ci-framework.readthedocs.io/en/latest/cookbooks/reproducer.html).
+
+### Push repositories
+#### Local repositories on your laptop
+```YAML
+local_home_dir: "{{ lookup('env', 'HOME') }}"
+local_base_dir: "{{ local_home_dir }}/src/github.com/openstack-k8s-operators"
+remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
+cifmw_reproducer_repositories:
+  - src: "{{ local_base_dir }}/ci-framework"
+    dest: "{{ remote_base_dir }}/ci-framework"
+  - src: "{{ local_base_dir }}/install_yamls"
+    dest: "{{ remote_base_dir }}/install_yamls"
+```
+Notes:
+* `ansible_user_dir` isn't really usable due to the use of `delegate_to` in order to sync those local repositories.
+* You therefore really want to use absolute paths - while the `dest` may be relative with the use of a plain `rsync` command
+
+#### Github code
+```YAML
+remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
+cifmw_reproducer_repositories:
+  # Fetch specific version
+  - src: "https://github.com/cjeanner/ci-framework"
+    dest: "{{ remote_base_dir }}/ci-framework"
+    version: some-version
+  # Fetch a pull-request and checkout the specific content
+  - src: "https://github.com/foo/install_yamls"
+    dest: "{{ remote_base_dir }}/install_yamls"
+    refspec: pull/510/head:my-patch
+    version: my-patch
+  # Just get HEAD
+  - src: "https://github.com/openstack-k8s-operators/openstack-operators"
+    dest: "{{ remote_base_dir }}/openstack-operators"
+```

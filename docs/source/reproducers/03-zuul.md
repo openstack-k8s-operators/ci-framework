@@ -57,6 +57,27 @@ data, avoiding the network overhead will be faster)
 Please ensure your hypervisor provides `sudo` for the user you intend to use,
 with or without password. It must, of course, support virtualization.
 
+### Inject your custom code
+As an option, you're able to inject your custom code by leveraging the
+`cifmw_reproducer_repositories` parameter as described in the
+[reproducer](../roles/reproducer.md) role examples.
+
+For instance, if you're trying to re-run a job against `nova-operators` repository,
+you can override the job code in order to inject your local code and see if it
+fixes the job:
+
+```YAML
+local_home_dir: "{{ lookup('env', 'HOME') }}"
+local_base_dir: "{{ local_home_dir }}/src/github.com/openstack-k8s-operators"
+remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
+cifmw_reproducer_repositories:
+  - src: "{{ local_base_dir }}/nova-operator"
+    dest: "{{ remote_base_dir }}/nova-operator"
+```
+
+Provided you have the right code branch set in your local repository, the reproducer
+will then copy it 1:1 and override the Zuul content.
+
 ### Reproduce the job
 Running this simple ansible-playbook command will deploy everything and run
 the job:
@@ -158,7 +179,30 @@ virtual machine creation by using `--skip-tags TAG`.
 
 In order to do so, the reproducer exposes two tags:
 * bootstrap_layout
+* bootstrap_repositories
 * bootstrap
+
+#### Tag: boostrap_repositories
+This covers only the repositories bootstrap step of the reproducer. This is probably one
+of the most useful tag when you want to iterate on a change on an already deployed layout.
+
+Note: you **must** have an already deployed layout before running only this tag.
+
+##### Usage
+```Bash
+# Reproduce first iteration of your PR that failed on Zuul
+$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=builder1 \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e cifmw_job_uri="YOUR_URI"
+
+# Iterate with the second iteration of your PR that failed on Zuul
+$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=builder1 \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e cifmw_job_uri="YOUR_UPDATE_URI" \
+    --tags bootstrap_repositories
+```
 
 #### Tag: bootstrap_layout
 This covers everything related to "create and manage virtual machines". This is probably the
