@@ -78,18 +78,22 @@
         default({}) |
         combine(
           {
-            item.key: {
-              'interfaces': item.value | ci_nmstate_map_instance_nets_interfaces,
-              'routes': {
-                'config': item.value | ci_nmstate_map_instance_nets_routes,
-              },
-              'dns-resolver': {
-                'config': item.value | ci_nmstate_map_instance_nets_dns,
-              },
-            }
+            item.key: (
+                {
+                  'interfaces': item.value | ci_nmstate_map_instance_nets_interfaces,
+                  'routes': {
+                    'config': item.value | ci_nmstate_map_instance_nets_routes,
+                  },
+                  'dns-resolver': {
+                    'config': item.value | ci_nmstate_map_instance_nets_dns,
+                  },
+                }
+              ) if (item.key not in _custom_instances_config) else
+              (
+                _custom_instances_config[item.key]
+              )
           }
-        ) if (item.key not in _custom_instances_config) else
-        _custom_instances_config[item.key]
+        )
       }}
     cacheable: true
   loop: >-
@@ -123,7 +127,7 @@
       {{
           hostvars | dict2items |
           selectattr("value.ansible_hostname", "defined") |
-          selectattr("key", "in", cifmw_ci_nmstate_network_layout.keys()) |
+          selectattr("key", "in", _cifmw_ci_nmstate_configs.keys()) |
           selectattr("value.ansible_hostname", "in", k8s_nodes_hostnames) |
           map(attribute="key") |
           list
@@ -132,7 +136,7 @@
     _cifmw_ci_nmstate_k8s_hosts: "{{ k8s_hosts }}"
     _cifmw_ci_nmstate_unmanaged_hosts: >-
       {{
-        cifmw_ci_nmstate_network_layout.keys() |
+        _cifmw_ci_nmstate_configs.keys() |
         reject("in", k8s_hosts) |
         list
       }}
