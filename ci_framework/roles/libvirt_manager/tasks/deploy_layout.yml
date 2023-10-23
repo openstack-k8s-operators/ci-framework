@@ -50,6 +50,20 @@
   loop_control:
     label: "{{ item.key }}"
 
+- name: Find all public key in the default user directory
+  ansible.builtin.find:
+    paths: "{{ ansible_user_dir }}/.ssh"
+    file_type: file
+    patterns: '*.pub'
+  register: users_pub_key
+
+- name: Update authorized keys for all users
+  ansible.posix.authorized_key:
+    user: zuul
+    state: present
+    key: '{{ item }}'
+  with_file: "{{ users_pub_key.files | map(attribute='path') }}"
+
 - name: Prepare base image with user and ssh accesses  # noqa: risky-shell-pipe
   when:
     - item.key is not match('^crc.*$')
