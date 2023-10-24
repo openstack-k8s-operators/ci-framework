@@ -29,6 +29,7 @@ No privilege escalation needed.
 * `cifmw_openshift_login_user`: (String) Optional. Login user. If provided, the user that logins. Defaults to `cifmw_openshift_user` and to the logged in user after login.
 * `cifmw_openshift_login_provided_token`: (String) Optional. Initial login token. If provided, that token will be used to authenticate into OpenShift. Defaults to `cifmw_openshift_provided_token`.
 * `cifmw_openshift_login_password`: (String) Optional. Login password. If provided is the password used for login in. Defaults to `cifmw_openshift_password`.
+* `cifmw_openshift_login_password_file`: (String) Optional. Path to a file that contains the plain login password. If provided is the password used for login in.
 * `cifmw_openshift_login_force_refresh`: (Boolean) Disallow reusing already existing token. Defaults to `false`.
 * `cifmw_openshift_login_retries`: (Integer) Number of attempts to retry the login action if it fails. Defaults to `10`.
 * `cifmw_openshift_login_retries_delay`: (Integer) Delay, in seconds, between login retries. Defaults to `20`.

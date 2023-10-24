@@ -14,6 +14,31 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Fetch user password from file in case is not provided by a variable
+  when:
+    - cifmw_openshift_login_password is not defined
+    - cifmw_openshift_password is not defined
+    - >-
+        (cifmw_openshift_login_password_file is defined) or
+        (cifmw_openshift_password_file is defined)
+  block:
+    - name: Check if the password file is present
+      ansible.builtin.stat:
+        path: "{{ cifmw_openshift_login_password_file | default(cifmw_openshift_password_file) }}"
+      register: cifmw_openshift_login_password_file_stat
+
+    - name: Fetch user password content
+      when: cifmw_openshift_login_password_file_stat.stat.exists
+      ansible.builtin.slurp:
+        src: "{{ cifmw_openshift_login_password_file | default(cifmw_openshift_password_file) }}"
+      register: cifmw_openshift_login_password_file_slurp
+
+    - name: Set user password as a fact
+      when: cifmw_openshift_login_password_file_slurp.content is defined
+      ansible.builtin.set_fact:
+        cifmw_openshift_login_password: "{{ cifmw_openshift_login_password_file_slurp.content | b64decode }}"
+        cacheable: true
+
 - name: Set role variables
   ansible.builtin.set_fact:
     cifmw_openshift_login_kubeconfig: >-
