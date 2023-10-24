@@ -1,29 +1,29 @@
 {#
-The ci_job_networking is exposed by the reproducer role. It namely exposes
-the CI job configuration passed down to zuul so that we can ensure we're
-using the same networks.
+This file is mostly used in the validated-architecture context.
+With that VA, we get an OCP cluster deployed, and libvirt_manager
+only takes care of the actual compute (and ansible-controller).
+
+Networks are managed by devscripts role (which deploys OCP), so we have to
+mostly generate all the things on our own.
+
+For now, we'll hardcode most of the things such as subnet and some IPs
 #}
 {% set ns = namespace(
     ip4='',
     gw4='',
     iface=cifmw_reproducer_private_nic,
-    config_nm=false, ip_suffix=0)
+    config_nm=false,
+    ip_suffix=0)
 -%}
 {% if vm_type == 'controller' -%}
+{%   set ns.ip4 = cifmw_reproducer_ctl_ip4 -%}
 {%   set ns.gw4 = cifmw_reproducer_ctl_gw4 -%}
-{%   set ns.ip4 =  ci_job_networking['instances']['controller']['networks']['default']['ip'] %}
-{% elif vm_type == 'crc' -%}
-{%   set ns.ip_suffix = 10 -%}
-{%   set ns.iface = cifmw_reproducer_crc_private_nic -%}
-{%   set ns.gw4 = cifmw_reproducer_crc_gw4 -%}
-{%   set ns.config_nm = true -%}
-{%   set ns.ip4 =  ci_job_networking['instances']['crc']['networks']['default']['ip'] %}
 {% else -%}
 {%   set ns.ip_suffix = 100+vm_id -%}
-{%   set ns.ip4 = ci_job_networking['instances']['compute-' ~ vm_id]['networks']['default']['ip']%}
+{%   set ns.ip4 = '192.168.122.0/24' | ansible.utils.ipmath(ns.ip_suffix) -%}
 {%   set ns.gw4 = cifmw_reproducer_ctl_gw4 -%}
 {% endif -%}
-{% set default_mtu = ci_job_networking.networks['default'].mtu | default('1500') -%}
+{% set default_mtu = 1500 -%}
 {% set vlan_mtu = default_mtu - 4 -%}
 crc_ci_bootstrap_networks_out:
   {{ vm_type }}-{{ vm_id }}:
@@ -32,11 +32,11 @@ crc_ci_bootstrap_networks_out:
       connection: ci-private-network
       ip4: {{ ns.ip4 }}/24
       gw4: {{ ns.gw4 }}
-      dns4: {{ ci_job_networking['instances']['crc']['networks']['default']['ip'] }}
-      mtu: {{ ci_job_networking.networks['default'].mtu | default(default_mtu) }}
+      dns4: {{ cifmw_reproducer_dns_servers }}
+      mtu: {{ default_mtu }}
 {% if vm_type != 'controller' %}
-{% for networking in ci_job_networking.networks | dict2items %}
-{%   if networking.key != 'default' %}
+{% for networking in cifmw_libvirt_manager_networks | dict2items %}
+{%   if networking.value.default is undefined or not networking.value.default | bool %}
     {{ networking.key }}:
       iface: {{ ns.iface }}.{{ networking.value.vlan }}
       connection: {{ networking.key }}

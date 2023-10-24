@@ -50,6 +50,8 @@
     - vm_ips.stdout != ''
 
 - name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
+  when:
+    - inventory_hostname != 'localhost'
   delegate_to: localhost
   vars:
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
@@ -80,8 +82,22 @@
       Host {{ vm_type }}-{{ vm_ip.item }} cifmw-{{ vm_type }}-{{ vm_ip.item }} {{ extracted_ip }}
         Hostname {{ extracted_ip }}
         User zuul
+        IdentityFile ~/.ssh/cifmw_reproducer_key
         StrictHostKeyChecking no
         UserKnownHostsFile /dev/null
+  loop: "{{ vm_ips.results }}"
+  loop_control:
+    loop_var: vm_ip
+    label: "{{ vm_ip.item }}"
+
+- name: Inject nodes in the ansible inventory
+  delegate_to: localhost
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+  ansible.builtin.add_host:
+    name: "{{ vm_type }}-{{ vm_ip.item }}"
+    groups: "{{ vm_type }}"
+    ansible_host: "{{ extracted_ip }}"
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
@@ -178,7 +194,11 @@
 - name: "Inject network configuration file on {{ vm_type }}"
   ansible.builtin.template:
     dest: "{{ cifmw_reproducer_basedir }}/reproducer-network-env/{{ vm_type }}-{{ vm_id }}.yml"
-    src: "network-data.yml.j2"
+    src: >-
+      {{
+        (ci_job_networking is defined)
+        | ternary('ci-network-data.yml.j2', 'network-data.yml.j2')
+      }}
     mode: "0644"
   loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:

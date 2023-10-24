@@ -1,0 +1,51 @@
+{#
+The ci_job_networking is exposed by the reproducer role. It namely exposes
+the CI job configuration passed down to zuul so that we can ensure we're
+using the same networks.
+#}
+{% set ns = namespace(
+    ip4='',
+    gw4='',
+    iface=cifmw_reproducer_private_nic,
+    config_nm=false,
+    ip_suffix=0)
+-%}
+{% set default_mtu = ci_job_networking.networks['default'].mtu | default('1500') -%}
+{% set vlan_mtu = default_mtu - 4 -%}
+{% if vm_type == 'controller' -%}
+{%   set ns.ip4 = ci_job_networking['instances']['controller']['networks']['default']['ip'] %}
+{%   set ns.gw4 = cifmw_reproducer_ctl_gw4 -%}
+{% elif vm_type == 'crc' -%}
+{%   set ns.ip4 =  ci_job_networking['instances']['crc']['networks']['default']['ip'] %}
+{%   set ns.gw4 = cifmw_reproducer_crc_gw4 -%}
+{%   set ns.iface = cifmw_reproducer_crc_private_nic -%}
+{%   set ns.config_nm = true -%}
+{%   set ns.ip_suffix = 10 -%}
+{% else -%}
+{%   set ns.ip4 = ci_job_networking['instances']['compute-' ~ vm_id]['networks']['default']['ip']%}
+{%   set ns.gw4 = cifmw_reproducer_ctl_gw4 -%}
+{%   set ns.ip_suffix = 100+vm_id -%}
+{% endif -%}
+crc_ci_bootstrap_networks_out:
+  {{ vm_type }}-{{ vm_id }}:
+    default:
+      iface: {{ ns.iface }}
+      connection: ci-private-network
+      ip4: {{ ns.ip4 }}/24
+      gw4: {{ ns.gw4 }}
+      dns4: {{ ci_job_networking['instances']['crc']['networks']['default']['ip'] }}
+      mtu: {{ default_mtu }}
+{% if vm_type != 'controller' %}
+{% for networking in ci_job_networking.networks | dict2items %}
+{%   if networking.key != 'default' %}
+    {{ networking.key }}:
+      iface: {{ ns.iface }}.{{ networking.value.vlan }}
+      connection: {{ networking.key }}
+      vlan: {{ networking.value.vlan }}
+      parent_iface: {{ ns.iface }}
+      ip4: {{ networking.value.range | ansible.utils.ipaddr('net') | ansible.utils.ipmath(ns.ip_suffix) }}/24
+      config_nm: {{ ns.config_nm }}
+      mtu: {{ networking.value.mtu | default(vlan_mtu) }}
+{%    endif %}
+{%  endfor %}
+{% endif %}

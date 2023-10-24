@@ -21,6 +21,40 @@
     state: started
     enabled: true
 
+# stabilize libvirt accesses
+# We hit a fair amount of failures with the libvirt sockets over the
+# past iteration. After many tests, it seems that removing the timeout
+# of the virtproxyd service and ensuring it's enabled and started
+# corrects this issue. With this hack, we could successfuly deploy the
+# whole VA-1 layout without any issue.
+- name: Hack in the virtproxyd service
+  become: true
+  block:
+    - name: Create service override directory
+      ansible.builtin.file:
+        path: "/etc/systemd/system/virtproxyd.service.d"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create service override
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/virtproxyd.service.d/override.conf"
+        content: |
+          # Managed by the CI Framework
+          # Remove timeout to service to ensure it's persistent
+          [Service]
+          Environment=
+          Environment=VIRTPROXYD_ARGS=""
+
+    - name: Reload systemctl and start/enable virtproxyd.service
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: virtproxyd.service
+        state: restarted
+        enabled: true
+
 - name: Get libvirt group users
   ansible.builtin.getent:
     database: group
@@ -34,3 +68,18 @@
     name: "{{ cifmw_libvirt_manager_user }}"
     groups: libvirt
     append: true
+
+- name: Allow QEMU on home directory for the storage access
+  become: true
+  ansible.posix.acl:
+    path: "{{ ansible_user_dir }}"
+    entity: "qemu"
+    etype: "user"
+    permissions: rx
+    state: present
+
+- name: Inject system connection parameters in bashrc
+  ansible.builtin.blockinfile:
+    dest: "{{ ansible_user_dir }}/.bashrc"
+    block: |-
+      export LIBVIRT_DEFAULT_URI="qemu:///system"
