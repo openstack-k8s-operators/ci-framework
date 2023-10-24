@@ -1,0 +1,33 @@
+---
+- name: Get devscripts extra_network XML
+  vars:
+    net_name: "{{ cifmw_devscripts_config_overrides.extra_network_names }}"
+  register: _osp_trunk_dump
+  community.libvirt.virt_net:
+    command: "get_xml"
+    name: "{{ net_name }}"
+    uri: "qemu:///system"
+
+- name: Extract static leases from extra_network
+  register: _leases
+  community.general.xml:
+    xmlstring: "{{ _osp_trunk_dump.get_xml }}"
+    xpath: "/network/ip/dhcp/host"
+    content: "attribute"
+
+- name: Ensure inventory directory exists
+  ansible.builtin.file:
+    path: >-
+      {{
+        (cifmw_reproducer_basedir,
+         'reproducer-inventory') |
+         path_join
+      }}
+    state: directory
+
+- name: Generate inventory for devscripts nodes
+  vars:
+    _data: "{{ _leases.matches }}"
+  ansible.builtin.template:
+    src: "devscripts_inventory.yml.j2"
+    dest: "{{ cifmw_reproducer_basedir }}/reproducer-inventory/devscripts-group.yml"
