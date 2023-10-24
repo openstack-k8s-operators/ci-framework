@@ -55,3 +55,24 @@
   ansible.builtin.yum_repository:
     name: "crb"
     state: absent
+
+- name: Remove generated keypair and related accesses
+  block:
+    - name: Get public key
+      register: _pub_key
+      ansible.builtin.slurp:
+        path: >-
+          {{ cifmw_devscripts_artifacts_dir }}/{{ cifmw_devscripts_user }}_ed25519.pub
+
+    - name: Remove key from the authorized_keys
+      ansible.posix.authorized_key:
+        user: "{{ cifmw_devscripts_user }}"
+        key: "{{ _pub_key['content'] | b64decode }}"
+
+    - name: Remove ssh keypair
+      ansible.builtin.file:
+        path: "{{ cifmw_devscripts_artifacts_dir }}/{{ item }}"
+        state: absent
+      loop:
+        - "{{ cifmw_devscripts_user }}_ed25519"
+        - "{{ cifmw_devscripts_user }}_ed25519.pub"
