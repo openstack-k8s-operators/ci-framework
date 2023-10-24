@@ -1,0 +1,39 @@
+---
+- name: Enable CRB repositories (CentOS)
+  when:
+    - ansible_facts['distribution'] == 'CentOS'
+  become: true
+  ansible.builtin.command:
+    cmd: dnf config-manager --set-enabled crb
+
+- name: Enable CRB repositories (RHEL)
+  when:
+    - ansible_facts['distribution'] == 'RedHat'
+  become: true
+  vars:
+    arch: "{{ ansible_facts['architecture'] }}"
+  ansible.builtin.command:
+    cmd: >-
+      subscription-manager repos
+      --enable codeready-builder-for-rhel-9-{{ arch }}-rpms
+
+- name: Install EPEL repositories
+  become: true
+  vars:
+    rhel_uri: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+    pkg: "{{ (ansible_facts['distribution'] == 'RedHat') | ternary(rhel_uri, 'epel-release')}}"
+  ansible.builtin.dnf:
+    name: "{{ pkg }}"
+    disable_gpg_check: "{{ (pkg != 'epel-release') }}"
+
+- name: Deactivate all of EPEL repositories
+  become: true
+  ansible.builtin.shell:  # noqa: command-instead-of-module
+    cmd: sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*
+
+- name: Install packages from EPEL
+  become: true
+  ansible.builtin.dnf:  # noqa: package-latest
+    enablerepo: epel
+    name: "{{ cifmw_reproducer_epel_pkgs }}"
+    state: latest

@@ -135,6 +135,8 @@ or `--skip-tags`:
 * `admin-setup`: Denotes tasks to call the role [os_net_setup](../roles/os_net_setup.md) when deploy-edpm.yml playbook is run.
 * `run-tests`: Denotes tasks to call the role [tempest](../roles/tempest.md) when deploy-edpm.yml playbook is run.
 * `logs`: Denotes tasks which generate artifacts via the role [artifacts](../roles/artifacts.md) and when collect logs when deploy-edpm.yml playbook is run.
+* `devscripts_layout`: Run the [devscripts](../roles/devscripts.md) parts of the [reproducer](../reproducer/04-validated-architecture.md) when dev-scripts is activated.
+* `libvirt_layout`: Run the [libvirt_manager](../roles/libvirt_manager.md) part of the [reproducer](../reproducer/04-validated-architecture.md) when libvirt is activated.
 
 For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:

@@ -1,0 +1,213 @@
+---
+- name: Deploy layout on target host
+  tags:
+    - libvirt_layout
+  ansible.builtin.import_role:
+    name: libvirt_manager
+    tasks_from: deploy_layout
+
+- name: Push generated inventory from hypervisor
+  ansible.builtin.command:  # noqa: command-instead-of-module
+    cmd: >-
+      rsync -r {{ cifmw_reproducer_basedir }}/reproducer-inventory/
+      zuul@controller-0:reproducer-inventory
+
+- name: Slurp ssh key for CRC access
+  when:
+    - _layout.vms.crc is defined
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  register: crc_priv_key
+  ansible.builtin.slurp:
+    path: "{{ ansible_user_dir}}/.crc/machines/crc/id_ecdsa"
+
+- name: Configure CRC services
+  when:
+    - _layout.vms.crc is defined
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  delegate_to: crc-0
+  remote_user: root
+  block:
+    - name: Ensure crc-0 knows about its second NIC
+      when:
+        - cifmw_job_uri is undefined
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: private_net
+        dns4: 127.0.0.1
+        ifname: enp2s0
+        type: ethernet
+        ip4: "{{ cifmw_reproducer_crc_ip4 }}/24"
+        gw4: "{{ cifmw_reproducer_crc_gw4 }}"
+        state: present
+
+    - name: Ensure crc-0 does not get "public" DNS
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "Wired connection 1"
+        dns4_ignore_auto: true
+        state: present
+
+    - name: Configure dns forwarders
+      ansible.builtin.blockinfile:
+        path: "/var/srv/dnsmasq.conf"
+        block: |-
+          {% if cifmw_reproducer_dns_servers %}
+          {% for dns_server in cifmw_reproducer_dns_servers %}server={{ dns_server }}{% endfor %}
+          {% endif %}
+
+    - name: Configure local DNS for CRC pod
+      register: last_modification
+      ansible.builtin.replace:
+        path: "/var/srv/dnsmasq.conf"
+        regexp: "192.168.130.11"
+        replace: "{{ cifmw_reproducer_crc_ip4 }}"
+
+    - name: Reboot CRC node
+      when:
+        - last_modification is changed
+        - cifmw_job_uri is undefined
+      ansible.builtin.reboot:
+
+- name: Get kubeconfig file from crc directory
+  when:
+    - _layout.vms.crc is defined
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  register: _crc_kubeconfig
+  ansible.builtin.slurp:
+    path: "{{ cifmw_reproducer_kubecfg }}"
+
+- name: Configure controller-0
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  delegate_to: controller-0
+  delegate_facts: true
+  remote_user: root
+  block:
+    - name: Gather some facts
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - 'min'
+
+    - name: Ensure controller-0 has an IP in private network
+      when:
+        - cifmw_job_uri is undefined
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: private_net
+        ifname: "{{ cifmw_reproducer_private_nic }}"
+        type: ethernet
+        ip4: "{{ cifmw_reproducer_ctl_ip4 }}/24"
+        gw4: "{{ cifmw_reproducer_ctl_gw4 }}"
+        state: present
+
+    - name: Create kube directory
+      ansible.builtin.file:
+        path: "/home/zuul/.kube"
+        state: directory
+        owner: zuul
+        group: zuul
+        mode: "0755"
+
+    - name: Inject kubeconfig content
+      when:
+        - _devscripts_kubeconfig is defined or _crc_kubeconfig is defined
+      ansible.builtin.copy:
+        dest: "/home/zuul/.kube/config"
+        content: >-
+          {{
+            (cifmw_use_devscripts | default(false) | bool) |
+            ternary(_devscripts_kubeconfig.content, _crc_kubeconfig.content) |
+            b64decode
+          }}
+        owner: zuul
+        group: zuul
+        mode: "0644"
+
+    - name: Inject kubeadmin-password if exists
+      when:
+        - _devscripts_kubeadm is defined
+      ansible.builtin.copy:
+        dest: "/home/zuul/.kube/kubeadmin-password"
+        content: "{{ _devscripts_kubeadm['content'] | b64decode }}"
+        owner: zuul
+        group: zuul
+        mode: "0600"
+
+    - name: Inject devscripts private key if set
+      when:
+        - _devscript_privkey is defined
+      ansible.builtin.copy:
+        dest: "/home/zuul/.ssh/devscripts_key"
+        content: "{{ _devscript_privkey['content'] | b64decode }}"
+        owner: "zuul"
+        group: "zuul"
+        mode: "0400"
+
+    - name: Inject CRC related content if needed
+      when:
+        - _layout.vms.crc is defined
+      block:
+        - name: Inject CRC ssh key
+          ansible.builtin.copy:
+            dest: "/home/zuul/.ssh/crc_key"
+            content: "{{ crc_priv_key['content'] | b64decode }}"
+            mode: "0400"
+            owner: zuul
+            group: zuul
+
+        - name: Inject crc related host entry
+          ansible.builtin.lineinfile:
+            path: /etc/hosts
+            line: >-
+              {{ cifmw_reproducer_crc_ip4 }} api.crc.testing
+              canary-openshift-ingress-canary.apps-crc.testing
+              console-openshift-console.apps-crc.testing
+              default-route-openshift-image-registry.apps-crc.testing
+              downloads-openshift-console.apps-crc.testing
+              oauth-openshift.apps-crc.testing
+
+    - name: RHEL repository setup for ansible-controller
+      when:
+        - ansible_facts['distribution'] == 'RedHat'
+      block:
+        - name: Get rhos-release
+          ansible.builtin.package:
+            name: "{{ cifmw_repo_setup_rhos_release_rpm }}"
+            state: present
+            disable_gpg_check: true
+
+        - name: Enable RHEL repos
+          ansible.builtin.command:
+            cmd: "rhos-release rhel"
+
+        - name: Install internal CA
+          ansible.builtin.package:
+            name: "{{ cifmw_reproducer_internal_ca }}"
+            disable_gpg_check: true
+
+    - name: Install some tools
+      ansible.builtin.package:
+        name:
+          - ansible-core
+          - bash-completion
+          - git-core
+          - make
+          - podman
+          - python3-jmespath
+          - python3-netaddr
+          - python3-pip
+          - tmux
+          - vim
+          - wget
+
+    - name: Install ansible dependencies
+      ansible.builtin.pip:
+        requirements: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/ansible-requirements.txt
