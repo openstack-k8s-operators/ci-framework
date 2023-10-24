@@ -27,6 +27,14 @@ This path should be relative to hook playbook directory.
 * `kustomized_{{ cifmw_kustomize_cr_file_name }}`: Kustomized file which is
 available at *cifmw_kustomize_cr_artifact_dir* to be consumed by the deployment.
 
+## kuttl_openstack_prep.yml
+This hook provides openstack_prep variables for kuttl tests.
+### Input
+None
+### Output
+* `cifmw_kuttl_openstack_prep_vars`: Environment variable to be used during openstack_prep
+step in install_yamls.
+
 ## noop.yml
 Just a dummy hook, mostly used as a demonstrator of the hook workflow.
 
