@@ -1,0 +1,44 @@
+- name: Get crc network info
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Load parameters
+      ansible.builtin.include_vars:
+        dir: "{{ item }}"
+      loop:
+        - "{{ cifmw_basedir }}/artifacts/parameters"
+        - "/etc/ci/env"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Ensure CRC hostname is set
+      ansible.builtin.set_fact:
+        _crc_hostname: "{{ cifmw_crc_hostname | default('crc') }}"
+
+    - name: Ensure that the isolated net was configured for crc
+      ansible.builtin.assert:
+        that:
+          - crc_ci_bootstrap_networks_out is defined
+          - crc_ci_bootstrap_networks_out[_crc_hostname] is defined
+          - crc_ci_bootstrap_networks_out[_crc_hostname]['default'] is defined
+
+    - name: Set facts for further usage within the framework
+      ansible.builtin.set_fact:
+        cifmw_kuttl_openstack_prep_vars:
+          NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.iface }}"
+          NNCP_DNS_SERVER: >-
+            {{
+              crc_ci_bootstrap_networks_out[_crc_hostname].default.ip4 |
+              default(crc_ci_bootstrap_networks_out[_crc_hostname].default.ip) |
+              replace('/24', '')
+            }}
+          NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.mtu }}"
+
+    - name: Save content into artifact directory
+      vars:
+        file_content:
+          cifmw_kuttl_openstack_prep_vars: "{{ cifmw_kuttl_openstack_prep_vars }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/parameters/{{ step }}_{{ hook_name }}.yml"
+        content: "{{ file_content | to_nice_yaml }}"
