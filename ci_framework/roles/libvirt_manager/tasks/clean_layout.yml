@@ -62,3 +62,23 @@
     name: "{{ item }}"
     uri: "qemu:///system"
   loop: "{{ cleanup_nets }}"
+
+- name: Get temporary key status
+  register: _tmp_key
+  ansible.builtin.stat:
+    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
+
+- name: Remove temporary ssh key from authorized_keys
+  when:
+    - _tmp_key.stat.exists
+  block:
+    - name: Get public key
+      register: _pub_key
+      ansible.builtin.slurp:
+        path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
+
+    - name: Remove public key
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user_id }}"
+        key: "{{ _pub_key['content'] | b64decode }}"
+        state: absent
