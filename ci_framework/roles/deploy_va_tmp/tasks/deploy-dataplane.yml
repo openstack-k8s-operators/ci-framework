@@ -1,0 +1,110 @@
+---
+- name: Perform kustomizations to the EDPM Ansible SSH Secret
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage5_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-secret.yaml"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: openstack
+      patches:
+      - target:
+          kind: Secret
+        patch: |-
+          - op: replace
+            path: /data/authorized_keys
+            value: "{{ deploy_va_tmp_pub_key_path }}"
+          - op: replace
+            path: /data/ssh-privatekey
+            value: "{{ deploy_va_tmp_private_key_path }}"
+          - op: replace
+            path: /data/ssh-publickey
+            value: "{{ deploy_va_tmp_pub_key_path }}"
+    include_regexes:
+      - "secret"
+  register: _ci_kustomize_edpm_ssh_secret_out
+
+- name: Create the EDPM Ansible SSH Secret
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_edpm_ssh_secret_out.output_path }}
+
+- name: Prepare the custom repo-setup service
+  vars:
+    repo_setup_manifest_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-custom-repo-setup.yaml"
+  when: cifmw_deploy_va_tmp_repo_setup_service_cr is defined
+  block:
+    - name: Create the repo-setup service for RHEL
+      ansible.builtin.copy:
+        dest: "{{ repo_setup_manifest_path }}"
+        content: "{{ cifmw_deploy_va_tmp_repo_setup_service_cr }}"
+
+    - name: Create the EDPM custom repo setup service
+      ansible.builtin.command:
+        cmd: "oc apply -f {{ repo_setup_manifest_path }}"
+
+    - name: Fetch manifest content
+      ansible.builtin.slurp:
+        src: "{{ repo_setup_manifest_path }}"
+      register: _repo_setup_service_slurp
+
+- name: Kustomize and deploy OpenStackDataPlaneNodeSet
+  vars:
+    deploy_va_tmp_common_nodeset_apply_target: "{{ cifmw_deploy_va_tmp_architecture_stage5_dir }}"
+    deploy_va_tmp_common_nodeset_apply_output: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-nodeset.yaml"
+  ansible.builtin.include_tasks: "common-nodeset-apply.yml"
+
+- name: Perform kustomizations to the EDPM OpenStackDataPlaneNodeSet
+  vars:
+    _custom_repo_setup_name: >-
+      {{
+        ((_repo_setup_service_slurp['content'] | b64decode | from_yaml).metadata.name)
+        if (_repo_setup_service_slurp is defined and _repo_setup_service_slurp.content is defined)
+        else ""
+      }}
+  ansible.builtin.debug:
+    var: _custom_repo_setup_name
+
+- name: Perform kustomizations to the EDPM OpenStackDataPlaneNodeSet
+  vars:
+    _custom_repo_setup_name: >-
+      {{
+        ((_repo_setup_service_slurp['content'] | b64decode | from_yaml).metadata.name)
+        if (_repo_setup_service_slurp is defined and _repo_setup_service_slurp.content is defined)
+        else ""
+      }}
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage5_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-pre-ceph-deployment.yaml"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: {{ (_ci_kustomize_edpm_ssh_secret_out.result | first).metadata.namespace }}
+      patches:
+      - target:
+          kind: OpenStackDataPlaneDeployment
+        patch: |-
+          - op: replace
+            path: /metadata/name
+            value: deployment-pre-ceph
+      {% if _custom_repo_setup_name != '' %}
+          - op: replace
+            path: /spec/servicesOverride/0
+            value: "{{ _custom_repo_setup_name }}"
+      {% endif %}
+    include_regexes:
+      - "deployment"
+  register: _ci_kustomize_edpm_deployment_out
+
+- name: Create the EDPM OpenStackDataPlaneDeployment
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_edpm_deployment_out.output_path }}
+
+- name: Wait for EDPM OpenStackDataPlaneDeployment to be deployed
+  ansible.builtin.command:
+    cmd: >-
+      oc wait
+      -f {{ _ci_kustomize_edpm_deployment_out.output_path }}
+      --for=condition=ready
+      --timeout=900s
