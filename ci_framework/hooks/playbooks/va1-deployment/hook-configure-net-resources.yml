@@ -1,0 +1,287 @@
+- name: Play to fetch facts
+  hosts: ocps,computes
+  gather_facts: true
+
+- name: Build dataset hook
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  vars:
+    _repo_path_va1: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/architecture/validated_arch_1"
+    _repo_path_stage_3: "{{ _repo_path_va1 }}/stage3"
+    _manifests_dir: "{{ ansible_user_dir }}/ci-framework-data/manifests"
+  tasks:
+    - name: Create the interfaces dict
+      vars:
+        host_dedicated_net_iface_list: >-
+            {{
+              hostvars[item.key]['ansible_facts'] |
+              dict2items |
+              selectattr("value.ipv4", "defined") |
+              selectattr("value.device", "defined") |
+              selectattr("value.ipv4.address", "match", "^192\.168\.122\.(.)*$") |
+              map(attribute="value")
+            }}
+      when: "item.key != 'localhost'"
+      ansible.builtin.set_fact:
+        _host_ifaces: >-
+          {{
+            _host_ifaces |
+            default({}) |
+            combine({
+              item.key : (
+                host_dedicated_net_iface_list | first if host_dedicated_net_iface_list | length > 0 else omit
+              )
+            })
+
+          }}
+      loop: "{{ hostvars | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Create dir if not exists
+      ansible.builtin.file:
+        path: "{{ _manifests_dir }}"
+        state: directory
+
+    - name: Perform kustomizations to the nncps
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_3 }}"
+        output_path: "{{ _manifests_dir }}/original-kustomized-nncps.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "_nncp"
+      register: _ci_kustomize_nncp_out
+
+    - name: Set IPs and hostnames in each NNCP
+      vars:
+        _nncp_node_hostname: "{{ hostvars[item]['ansible_facts']['hostname'] }}"
+        _nncp_node_ipv4_data: "{{ hostvars[item]['ansible_default_ipv4'] }}"
+        _nncp_root_data:
+          metadata:
+            labels:
+              osp/interface: "{{ _host_ifaces[item].device }}"
+            name: "{{ _host_ifaces[item].device + '-' + _nncp_node_hostname }}"
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: "{{ _nncp_node_hostname }}"
+            desiredState:
+              routes:
+                config:
+                  - destination: "0.0.0.0/0"
+                    next-hop-address: >-
+                      {{
+                        (_nncp_node_ipv4_data.network + '/' + _nncp_node_ipv4_data.prefix) |
+                        ansible.utils.ipv4('net') |
+                        ansible.utils.ipaddr('1') |
+                        ansible.utils.ipv4('address')
+                      }}
+                    next-hop-interface: "{{ _nncp_node_ipv4_data['interface'] }}"
+              dns-resolver:
+                config:
+                  server:
+                    - "{{ ansible_dns.nameservers | select('match', '^192\\.168\\.111\\.(.)*$') | first }}"
+                  search: "{{ ansible_dns.search }}"
+        _nncp_node_ifaces_list: >-
+          {{
+            _ci_kustomize_nncp_out.result[item_idx]['spec']['desiredState']['interfaces']
+          }}
+        _nncp_node_vlan_ifaces_list: >-
+          {{
+            _nncp_node_ifaces_list | selectattr("type", "equalto", "vlan")
+          }}
+        _nncp_node_base_iface_override:
+          name: "{{ _host_ifaces[item].device }}"
+          ipv4:
+            address:
+              - ip: "{{ _host_ifaces[item].ipv4.address }}"
+                prefix-length: "{{ _host_ifaces[item].ipv4.prefix | int }}"
+        _nncp_node_base_iface: >-
+          {{
+            _ci_kustomize_nncp_out.result[item_idx]['spec']['desiredState']['interfaces'] |
+            selectattr("type", "equalto", "ethernet") | first | default({}) |
+            combine({ 'ipv4':{'address': omit }}, recursive=true) |
+            combine(_nncp_node_base_iface_override, recursive=true)
+          }}
+        _nncp_vlans_mapped_list: >-
+          {% set ifaces_result = [] -%}
+          {% for iface_data in _nncp_node_vlan_ifaces_list | default([]) -%}
+          {%   set iface_name = _host_ifaces[item].device + '.' + (iface_data['vlan']['id'] | string) -%}
+          {%   set override = {'name': iface_name,'vlan':{'base-iface': _host_ifaces[item].device }} -%}
+          {%   set result_iface = iface_data | combine(override, recursive=true) -%}
+          {%   set _ = ifaces_result.append(result_iface) -%}
+          {% endfor -%}
+          {{ ifaces_result }}
+        _nncp_state_interfaces_override:
+          spec:
+            desiredState:
+              interfaces: "{{ [_nncp_node_base_iface] + _nncp_vlans_mapped_list }}"
+
+      ansible.builtin.set_fact:
+        _nncps: >-
+          {{
+            _nncps |
+            default([]) +
+            ([
+              _ci_kustomize_nncp_out.result[item_idx] |
+              combine({'spec': {'desiredState': { 'routes': omit}}}, recursive=True) |
+              combine({'spec': {'desiredState': { 'interfaces': omit}}}, recursive=True) |
+              combine(_nncp_root_data, recursive=True) |
+              combine(_nncp_state_interfaces_override, recursive=True)
+            ])
+          }}
+        cacheable: true
+      loop: "{{ groups['ocps'] }}"
+      loop_control:
+        index_var: item_idx
+
+    - name: Save NNCPs to files
+      # Love Ansible :) No way to dump multiple manifests
+      ansible.builtin.copy:
+        content: "{{ item | to_nice_yaml }}"
+        dest: "{{ _manifests_dir }}/nncp-out-{{ item.metadata.name }}.yaml"
+      loop: "{{ _nncps }}"
+
+    - name: Create NNCPs in OCP
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _manifests_dir }}/nncp-out-{{ item.metadata.name }}.yaml
+      loop: "{{ _nncps }}"
+
+    - name: Wait for nsmtate nncp to be ready
+      kubernetes.core.k8s_info:
+        api_version: nmstate.io/v1
+        kind: NodeNetworkConfigurationPolicy
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        label_selectors:
+          - "osp/interface={{ _host_ifaces[groups['ocps'][0]].device }}"
+      register: _nsmate_instance_nncp_out
+      retries: 30
+      delay: 10
+      until:
+        - _nsmate_instance_nncp_out is defined
+        - _nsmate_instance_nncp_out is not failed
+        - _nsmate_instance_nncp_out.resources | length > 0
+        - _nsmate_instance_nncp_out.resources[0].status.conditions is defined
+        - >-
+          _nsmate_instance_nncp_out.resources[0].status.conditions |
+          selectattr("type", "equalto", "Available") |
+          selectattr("status", "equalto", "True") | length > 0
+
+    - name: Perform kustomizations to the netattachs
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_3 }}"
+        output_path: "{{ _manifests_dir }}/kustomized-netattach.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "netattach_"
+      register: _ci_kustomize_netattach_out
+
+    - name: Perform kustomizations to the netattachs
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_3 }}"
+        output_path: "{{ _manifests_dir }}/kustomized-netattach.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "netattach_"
+      register: _ci_kustomize_netattach_out
+
+    - name: Set the dedicated interface in each netattach
+      vars:
+        _master_iface_name: "{{ _host_ifaces[groups['ocps'][0]].device }}"
+        _netattach_json: "{{ item.spec.config | from_json }}"
+        _netattach_master_split: "{{ _netattach_json.master | split('.') }}"
+        _netattach_vlan: "{{ (_netattach_master_split | last) if (_netattach_master_split | length > 1) else '' }}"
+        _netattach_result: >-
+          {{
+            item |
+            combine(
+              {
+                'spec': {
+                  'config': ((_netattach_json | combine({'master': (_master_iface_name + '.' + _netattach_vlan) | trim('.') })) | to_json)
+                }
+              }, recursive=true
+            )
+          }}
+      ansible.builtin.set_fact:
+        _netattachs: >-
+          {{
+            _netattachs |
+            default([]) +
+            [_netattach_result]
+          }}
+        cacheable: true
+      loop: "{{ _ci_kustomize_netattach_out.result }}"
+
+    - name: Save netattachs to files
+      # Love Ansible :) No way to dump multiple manifests
+      register: _netattachs_save_out
+      ansible.builtin.copy:
+        content: "{{ item | to_nice_yaml }}"
+        dest: "{{ _manifests_dir }}/netattach-out-{{ item.metadata.name }}.yaml"
+      loop: "{{ _netattachs }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Create netattachs in OCP
+      when: _netattachs_save_out.changed
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _manifests_dir }}/netattach-out-{{ item.metadata.name }}.yaml
+      loop: "{{ _netattachs }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Perform kustomizations to the l2advertisements
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_3 }}"
+        output_path: "{{ _manifests_dir }}/kustomized-l2advertisements.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "_l2advertisement"
+      register: _ci_kustomize_l2advertisements_out
+
+    - name: Set the dedicated interface in each l2advertisement
+      vars:
+        _master_iface_name: "{{ _host_ifaces[groups['ocps'][0]].device }}"
+        _l2advertisement_iface_split: "{{ item.spec.interfaces | first | default('') | split('.') }}"
+        _l2advertisement_iface_vlan: "{{ (_l2advertisement_iface_split | last) if (_l2advertisement_iface_split | length > 1) else '' }}"
+        _l2advertisement_result: >-
+          {{
+            item |
+            combine(
+              {
+                'spec': {
+                  'interfaces': [(_master_iface_name + '.' + _l2advertisement_iface_vlan) | trim('.')]
+                }
+              }, recursive=true
+            )
+          }}
+      ansible.builtin.set_fact:
+        _l2advertisements: >-
+          {{
+            _l2advertisements |
+            default([]) +
+            [_l2advertisement_result]
+          }}
+        cacheable: true
+      loop: "{{ _ci_kustomize_l2advertisements_out.result }}"
+
+    - name: Save l2advertisements to files
+      # Love Ansible :) No way to dump multiple manifests
+      register: _l2advertisements_save_out
+      ansible.builtin.copy:
+        content: "{{ item | to_nice_yaml }}"
+        dest: "{{ _manifests_dir }}/l2advertisement-out-{{ item.metadata.name }}.yaml"
+      loop: "{{ _l2advertisements }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Create l2advertisement in OCP
+      when: _l2advertisements_save_out.changed
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _manifests_dir }}/l2advertisement-out-{{ item.metadata.name }}.yaml
+      loop: "{{ _l2advertisements }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"

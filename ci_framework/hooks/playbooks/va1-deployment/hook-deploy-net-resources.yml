@@ -1,0 +1,182 @@
+- name: Deploy third-party dependencies
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  vars:
+    _repo_path_va1: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/architecture/validated_arch_1"
+    _repo_path_stage_1: "{{ _repo_path_va1 }}/stage1"
+  tasks:
+    - name: Create dir if not exists
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/ci-framework-data/manifests"
+        state: directory
+
+    - name: Perform kustomizations to the 3rd party namespaces
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_1 }}"
+        sort_ascending: false
+        include_regexes:
+          - "_namespace"
+      register: _ci_kustomize_ns_out
+
+    - name: Create 3rd party namespaces
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _ci_kustomize_ns_out.output_path }}
+
+    - name: Perform kustomizations to the 3rd party OperatorGroups
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_1 }}"
+        sort_ascending: false
+        include_regexes:
+          - "_operatorgroup"
+      register: _ci_kustomize_operatorgroup_out
+
+    - name: Create 3rd party OperatorGroups
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _ci_kustomize_operatorgroup_out.output_path }}
+
+    - name: Perform kustomizations to the 3rd party Subscriptions
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_1 }}"
+        output_path: "{{ ansible_user_dir }}/ci-framework-data/manifests/subs-out.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "_subscription"
+      register: _ci_kustomize_subscription_out
+
+    - name: Create 3rd party Subscriptions
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _ci_kustomize_subscription_out.output_path }}
+
+    - name: Get Subscription statuses
+      ansible.builtin.command:
+        cmd: "oc get -f {{ ansible_user_dir }}/ci-framework-data/manifests/subs-out.yaml -o yaml"
+      register: _csvs_out
+      changed_when: false
+      until:
+        - _csvs_out.stdout is defined
+        - >-
+          (_csvs_out.stdout | from_yaml)['items'] |
+          default([]) |
+          selectattr("status.currentCSV", "defined") |
+          length == (_ci_kustomize_subscription_out.result | length)
+      delay: 5
+      retries: 30
+
+    - name: Wait for the CSVs to be ready
+      vars:
+        _namespaces: >-
+          {{
+            (_csvs_out.stdout | from_yaml)['items'] |
+            selectattr("metadata.namespace", "defined") |
+            map(attribute="metadata.namespace")
+          }}
+        _csvs: >-
+          {{
+            (_csvs_out.stdout | from_yaml)['items'] |
+            selectattr("status.currentCSV", "defined") |
+            map(attribute="status.currentCSV")
+          }}
+      ansible.builtin.command:
+        cmd: >-
+          oc get ClusterServiceVersion
+          {{ item.value }}
+          -n "{{ item.key }}"
+          -o jsonpath='{.status.phase}'
+      changed_when: false
+      loop: "{{ dict(_namespaces | zip(_csvs) | list ) | dict2items }}"
+      register: _csv_out
+      retries: 30
+      delay: 10
+      until:
+        - _csv_out is defined
+        - _csv_out.failed is false
+        - _csv_out.stdout_lines | length > 0
+        - "(_csv_out.stdout_lines[0] | lower) == 'succeeded'"
+
+    - name: Perform kustomizations to the 3rd party CRs
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_1 }}"
+        sort_ascending: false
+        include_regexes:
+          - "_deploy"
+      register: _ci_kustomize_crs_out
+
+    - name: Create 3rd party CRs
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _ci_kustomize_crs_out.output_path }}
+
+    - name: Wait for nsmtate resources to be ready
+      vars:
+        _nmstate_ns: >-
+          {{
+            _ci_kustomize_ns_out.result |
+            selectattr("metadata.name", "search", "nmstate") |
+            map(attribute="metadata.name") | first | default("")
+          }}
+      when: "_nmstate_ns | length > 0"
+      block:
+        - name: Wait for nsmtate Deployments to be ready
+          kubernetes.core.k8s_info:
+            kind: Deployment
+            label_selectors:
+              - "component=kubernetes-nmstate-webhook"
+            namespace: "{{ _nmstate_ns }}"
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            wait: true
+            wait_sleep: 10
+            wait_timeout: 300
+            wait_condition:
+              type: Available
+              status: "True"
+
+        - name: Wait for nsmtate DaemonSet to be ready
+          kubernetes.core.k8s_info:
+            kind: DaemonSet
+            label_selectors:
+              - "app=kubernetes-nmstate"
+            namespace: "{{ _nmstate_ns }}"
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+          register: _nsmate_daemonset_out
+          retries: 30
+          delay: 10
+          until:
+            - _nsmate_daemonset_out is defined
+            - _nsmate_daemonset_out is not failed
+            - _nsmate_daemonset_out.resources | length > 0
+            - _nsmate_daemonset_out.resources[0].status.numberAvailable is defined
+            - _nsmate_daemonset_out.resources[0].status.desiredNumberScheduled is defined
+            - >-
+              _nsmate_daemonset_out.resources[0].status.numberAvailable ==
+              _nsmate_daemonset_out.resources[0].status.desiredNumberScheduled
+
+    - name: Wait for Metallb resources to be ready
+      vars:
+        _metallb_ns: >-
+          {{
+            _ci_kustomize_crs_out.result |
+            selectattr("kind", "equalto", "MetalLB") |
+            map(attribute="metadata.namespace") | first | default("")
+          }}
+      when: "_metallb_ns | length > 0"
+      kubernetes.core.k8s_info:
+        kind: DaemonSet
+        label_selectors:
+          - "component=speaker"
+        namespace: "{{ _metallb_ns }}"
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+      register: _metallb_daemonset_out
+      retries: 30
+      delay: 10
+      until:
+        - _metallb_daemonset_out is defined
+        - _metallb_daemonset_out is not failed
+        - _metallb_daemonset_out.resources | length > 0
+        - _metallb_daemonset_out.resources[0].status.numberAvailable is defined
+        - _metallb_daemonset_out.resources[0].status.desiredNumberScheduled is defined
+        - >-
+          _metallb_daemonset_out.resources[0].status.numberAvailable ==
+          _metallb_daemonset_out.resources[0].status.desiredNumberScheduled

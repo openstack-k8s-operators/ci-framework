@@ -1,0 +1,73 @@
+- name: Deploy third-party dependencies
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  vars:
+    _repo_path_va1: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/architecture/validated_arch_1"
+    _repo_path_stage_4: "{{ _repo_path_va1 }}/stage4"
+    _manifests_dir: "{{ ansible_user_dir }}/ci-framework-data/manifests"
+  tasks:
+    - name: Prepare storage in CRC
+      vars:
+        make_crc_storage_env:
+          STORAGE_CLASS: local-storage
+        make_crc_storage_retries: 10
+        make_crc_storage_delay: 2
+        make_crc_storage_until: "make_crc_storage_status is not failed"
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_crc_storage'
+
+    - name: Create dir if not exists
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/ci-framework-data/manifests"
+        state: directory
+
+    - name: Perform kustomizations to the opestack secret and netconfig
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_4 }}"
+        output_path: "{{ _manifests_dir }}/netconfig-ns-out.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "secret|netconfig"
+      register: _ci_kustomize_ctrl_common_out
+
+    - name: Create opestack secret and netconfig
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _ci_kustomize_ctrl_common_out.output_path }}
+
+    - name: Perform kustomizations to the openstack OpenStackControlPlane
+      ci_kustomize:
+        target_path: "{{ _repo_path_stage_4 }}"
+        output_path: "{{ _manifests_dir }}/controlplane-out.yaml"
+        sort_ascending: false
+        include_regexes:
+          - "controlplane"
+        kustomizations: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: openstack
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+            patch: |-
+              - op: replace
+                path: /spec/storageClass
+                value: local-storage
+      register: _ci_kustomize_osp_controlplane_out
+
+    - name: Create openstack OpenStackControlPlane
+      ansible.builtin.command:
+        cmd: oc apply -f {{ _ci_kustomize_osp_controlplane_out.output_path }}
+
+    - name: Wait for OpenStack controlplane to be deployed
+      ansible.builtin.command:
+        cmd: >-
+          oc wait
+          -f {{ _ci_kustomize_osp_controlplane_out.output_path }}
+          --for=condition=ready
+          --timeout=600s
