@@ -1,0 +1,134 @@
+---
+
+- name: Perform kustomizations to the EDPM OpenStackDataPlaneNodeSet
+  vars:
+    env_dns: "{{ ansible_dns.nameservers | select('match', '^192\\.168\\.111\\.(.)*$') | first }}"
+    dns_servers: "{{ (([env_dns] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
+  ci_kustomize:
+    target_path: "{{ deploy_va_tmp_common_nodeset_apply_target }}"
+    output_path: "{{ deploy_va_tmp_common_nodeset_apply_output }}"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      patches:
+      - target:
+          kind: OpenStackDataPlaneNodeSet
+        patch: |-
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/neutron_public_interface_name
+            value: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('') }}"
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/edpm_sshd_allowed_ranges
+            value:
+              - 192.168.111.0/24
+              - 192.168.122.0/24
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0'].default.mtu | default(1500) }}
+
+      {% if 'tenant' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/tenant_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['tenant'].mtu | default(1500) }}
+      {% endif %}
+
+      {% if 'storage' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/storage_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage'].mtu | default(1500) }}
+      {% endif %}
+
+      {% if 'storage-mgmt' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu | default(1500) }}
+      {% endif %}
+
+      {% if 'internal-api' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/internal_api_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['internal-api'].mtu | default(1500) }}
+      {% endif %}
+
+      {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
+          - op: replace
+            path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
+            value: >-
+              {{
+                crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                ansible.utils.ipaddr('address')
+              }}
+
+          - op: replace
+            path: /spec/nodes/edpm-{{ compute_node }}/networks/0/fixedIP
+            value: >-
+              {{
+                crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                ansible.utils.ipaddr('address')
+              }}
+      {% endfor %}
+
+      {% for compute_node in groups['computes'] %}
+          - op: replace
+            path: /spec/nodes/edpm-{{ compute_node }}/networks/0/defaultRoute
+            value: false
+      {% endfor %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
+            value: |-
+                {%- raw %}
+                ---
+                {% set mtu_list = [ctlplane_mtu] %}
+                {% for network in role_networks %}
+                {{ mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) }}
+                {%- endfor %}
+                {% set min_viable_mtu = mtu_list | max %}
+                network_config:
+                - type: ovs_bridge
+                  name: {{ neutron_physical_bridge_name }}
+                  mtu: 1500
+                  use_dhcp: false
+                  dns_servers: {{ ctlplane_dns_nameservers }}
+                  domain: {{ dns_search_domains }}
+                  addresses:
+                  - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_subnet_cidr }}
+                  routes: {{ ctlplane_host_routes }}
+                  members:
+                  - type: interface
+                    name: eth1
+                    mtu: 1500
+                    # force the MAC address of the bridge to this interface
+                    primary: true
+                {% for network in role_networks %}
+                  - type: vlan
+                    mtu: 1496
+                    vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                    addresses:
+                    - ip_netmask:
+                        {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+                    routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
+                {% endfor %}
+                {% endraw %}
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleUser
+            value: "{{ hostvars['compute-0'].ansible_user }}"
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_dns_nameservers
+            value:
+      {% for dns_server in dns_servers %}
+              - "{{ dns_server }}"
+      {% endfor %}
+    include_regexes:
+      - "nodeset"
+  register: _ci_kustomize_edpm_node_set_out
+
+- name: Create the EDPM OpenStackDataPlaneNodeSet
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_edpm_node_set_out.output_path }}

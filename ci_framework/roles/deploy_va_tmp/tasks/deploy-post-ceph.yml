@@ -1,0 +1,237 @@
+---
+- name: Kustomize the Nova Migration Key
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage6_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-nova-migration-secret.yaml"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: openstack
+      patches:
+      - target:
+          kind: Secret
+        patch: |-
+          - op: replace
+            path: /data/ssh-privatekey
+            value: "{{ deploy_va_tmp_private_key_path }}"
+          - op: replace
+            path: /data/ssh-publickey
+            value: "{{ deploy_va_tmp_pub_key_path }}"
+    include_regexes:
+      - "nova_migration"
+  register: _ci_kustomize_nova_migration_key_out
+
+- name: Create the Nova migration key in OCP
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_nova_migration_key_out.output_path }}
+
+- name: Kustomize the image conversion PVC
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage6_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-image-conversion-pvc.yaml"
+    include_regexes:
+      - "image_conversion"
+  register: _ci_kustomize_image_conversion_out
+
+- name: Create the image conversion PVC
+  when: _ci_kustomize_image_conversion_out.result | length > 0
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_image_conversion_out.output_path }}
+
+- name: Read Ceph secret CM
+  ansible.builtin.slurp:
+    path: "/tmp/k8s_ceph_secret.yml"
+  register: _ceph_secret_slurp
+
+- name: Retrieve FSID
+  vars:
+    fsid_regex: "fsid\\s?=\\s?([a-zA-Z0-9-]*)"
+  ansible.builtin.set_fact:
+    _ceph_fsid: >-
+      {{
+        (
+          _ceph_secret_slurp.content |
+          b64decode |
+          from_yaml
+        ).data['ceph.conf'] |
+        b64decode |
+        regex_search(fsid_regex,'\1') |
+        first
+      }}
+
+- name: Kustomize the Nova Ceph CM
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage6_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-nova-ceph.yaml"
+    include_regexes:
+      - "nova_ceph"
+  register: _ci_kustomize_nova_ceph_cm_out
+
+- name: Save Nova Ceph CM
+  ansible.builtin.copy:
+    content: >-
+      {{
+        (
+          _ci_kustomize_nova_ceph_cm_out.result |
+          selectattr('kind', 'equalto', 'ConfigMap') |
+          first
+        ).data['03-ceph-nova.conf']
+      }}
+    dest: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-nova-ceph-config.ini"
+
+- name: Set fsid in Ceph config for the controlplane
+  community.general.ini_file:
+    path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-nova-ceph-config.ini"
+    section: libvirt
+    option: rbd_secret_uuid
+    value: "{{ _ceph_fsid }}"
+
+- name: Load the Ceph Nova CM
+  ansible.builtin.slurp:
+    path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-nova-ceph-config.ini"
+  register: _ci_ceph_nova_config_out
+
+- name: Save the updated Nova Ceph CM config
+  vars:
+    _ceph_nova_override:
+      data:
+         03-ceph-nova.conf: "{{ _ci_ceph_nova_config_out.content | b64decode }}"
+    _cr_content: >-
+      {{
+        (
+          (_ci_kustomize_nova_ceph_cm_out.result | first) |
+          combine(_ceph_nova_override, recursive=true)
+        )
+      }}
+  ansible.builtin.copy:
+    dest: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-nova-ceph-config-map.yaml"
+    content: "{{ _cr_content | to_nice_yaml }}"
+
+- name: Save the remaining Service manifest
+  ansible.builtin.copy:
+    dest: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-nova-ceph-service.yaml"
+    content: >-
+      {{
+        (
+          _ci_kustomize_nova_ceph_cm_out.result |
+          rejectattr('kind', 'equalto', 'ConfigMap') |
+          first
+        ) | to_nice_yaml
+      }}
+
+- name: Create the Nova Ceph CM in OCP
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-nova-ceph-config-map.yaml"
+
+- name: Create the Nova Ceph Service in OCP
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-nova-ceph-service.yaml"
+
+- name: Perform kustomizations to the openstack OpenStackControlPlane for Ceph
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage6_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-ceph-controlplane.yaml"
+    include_regexes:
+      - "controlplane"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: openstack
+      patches:
+      - target:
+          kind: OpenStackControlPlane
+        patch: |-
+          - op: replace
+            path: /spec/storageClass
+            value: {{ cifmw_deploy_va_tmp_storage_class }}
+  register: _ci_kustomize_osp_post_ceph_controlplane_out
+
+- name: Save ControlPlane Cinder configuration
+  ansible.builtin.copy:
+    content: >-
+      {{
+        (
+          _ci_kustomize_osp_post_ceph_controlplane_out.result | first
+        ).spec.cinder.template.cinderVolumes.ceph.customServiceConfig
+      }}
+    dest: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-ctrlplane-cinder-config.ini"
+
+- name: Set fsid in Ceph config for the controlplane
+  community.general.ini_file:
+    path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-ctrlplane-cinder-config.ini"
+    section: ceph
+    option: rbd_secret_uuid
+    value: "{{ _ceph_fsid }}"
+
+- name: Load the updated CR
+  ansible.builtin.slurp:
+    path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-osp-ctrlplane-cinder-config.ini"
+  register: _ci_ceph_controlplane_config_out
+
+- name: Set the updated Ceph config the in ControlPlane CR
+  vars:
+    _cinder_override:
+      spec:
+        cinder:
+          template:
+            cinderVolumes:
+              ceph:
+                customServiceConfig: "{{ _ci_ceph_controlplane_config_out.content | b64decode }}"
+    _cr_content: >-
+      {{
+        (_ci_kustomize_osp_post_ceph_controlplane_out.result | first) |
+        combine(_cinder_override, recursive=true)
+      }}
+  ansible.builtin.copy:
+    dest: "{{ _ci_kustomize_osp_post_ceph_controlplane_out.output_path }}"
+    content: "{{ _cr_content | to_nice_yaml }}"
+
+- name: Create the Controlplane CR in OCP
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ _ci_kustomize_osp_post_ceph_controlplane_out.output_path }}"
+
+- name: Hack to allow OCP to switch the status of the controlplane resource to progressing
+  ansible.builtin.pause:
+    seconds: 10
+
+- name: Wait for OpenStack controlplane to be updated
+  ansible.builtin.command:
+    cmd: >-
+      oc wait
+      -f {{ _ci_kustomize_osp_post_ceph_controlplane_out.output_path }}
+      --for=condition=ready
+      --timeout=600s
+
+- name: Kustomize and deploy OpenStackDataPlaneNodeSet
+  vars:
+    deploy_va_tmp_common_nodeset_apply_target: "{{ cifmw_deploy_va_tmp_architecture_stage6_dir }}"
+    deploy_va_tmp_common_nodeset_apply_output: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-edpm-ceph-nodeset.yaml"
+  ansible.builtin.include_tasks: "common-nodeset-apply.yml"
+
+- name: Kustomize the post Ceph OpenStackDataPlaneDeployment
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage6_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage6-out-edpm-ceph-daplanedeployment.yaml"
+    include_regexes:
+      - "dataplanedeployment"
+  register: _ci_kustomize_ceph_dataplanedeployment_out
+
+- name: Create the post Ceph EDPM OpenStackDataPlaneDeployment
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_ceph_dataplanedeployment_out.output_path }}
+
+- name: Wait for EDPM OpenStackDataPlaneDeployment to be deployed
+  ansible.builtin.command:
+    cmd: >-
+      oc wait
+      -f {{ _ci_kustomize_ceph_dataplanedeployment_out.output_path }}
+      --for=condition=ready
+      --timeout=900s
+
+- name: Force Nova to discover all compute hosts
+  ansible.builtin.command:
+    cmd: >-
+      oc rsh
+      nova-cell0-conductor-0 nova-manage cell_v2 discover_hosts --verbose
