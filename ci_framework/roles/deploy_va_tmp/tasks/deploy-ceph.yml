@@ -1,0 +1,60 @@
+---
+- name: Hack to patch Ceph cifmw_cephadm till 714PR is in
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/be366c43a9bc41904d23f43a9bf414889e418e7e/ci_framework/roles/cifmw_cephadm/tasks/rgw.yml
+    dest: "{{
+      [
+        (role_path | dirname),
+        'cifmw_cephadm',
+        'tasks',
+        'rgw.yml'
+      ] | ansible.builtin.path_join
+    }}"
+    force: true
+
+- name: Create the Ceph inventory IPs
+  ansible.builtin.set_fact:
+    ceph_ips: "{{
+      (ceph_ips | default([])) + ['192.168.122.%d' | format(item)]
+    }}"
+  loop: "{{ range(100, (100 + groups['computes'] | length)) | list }}"
+  loop_control:
+    label: "{{ '192.168.122.%d' | format(item) }}"
+- name: Create the Ceph inventory IPs
+  ansible.builtin.copy:
+    content: |-
+      localhost ansible_connection=local
+      [edpm]
+      {% for ip in ceph_ips %}
+      {{ ip }}
+      {% endfor %}
+    dest: ceph_inventory.yml
+    force: true
+
+- name: Create the Ceph overrides
+  vars:
+    overrides_content:
+      storage_network_range: 172.18.0.0/24
+      storage_mgmt_network_range: 172.20.0.0/24
+      cifmw_cephadm_default_container: false
+      cifmw_cephadm_container_ns: registry-proxy.engineering.redhat.com/rh-osbs
+      cifmw_cephadm_container_image: rhceph
+      cifmw_cephadm_container_tag: 6-115
+      cifmw_cephadm_ceph_spec_fqdn: false
+  ansible.builtin.copy:
+    content: "{{ overrides_content | to_nice_yaml }}"
+    dest: ceph_overrides.yml
+    force: true
+
+- name: Run the Ceph playbook
+  environment:
+    ANSIBLE_REMOTE_USER: zuul
+    ANSIBLE_SSH_PRIVATE_KEY: "{{ ansible_user_dir}}/.ssh/id_ed25519"
+    ANSIBLE_HOST_KEY_CHECKING: false
+    ANIBLE_GATHERING: implicit
+  ansible.builtin.command:
+    cmd: "ansible-playbook -i ceph_inventory.yml -e @ceph_overrides.yml ci_framework/playbooks/ceph.yml"
+
+- name: Create the Ceph secret
+  ansible.builtin.command:
+    cmd: oc apply -f /tmp/k8s_ceph_secret.yml

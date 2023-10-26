@@ -1,0 +1,78 @@
+---
+- name: Perform kustomizations to the opestack namespaces
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage2_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage2-out-namespaces.yaml"
+    include_regexes:
+      - "namespaces"
+  register: _ci_kustomize_osp_ns_out
+
+- name: Create opstack namespaces
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_osp_ns_out.output_path }}
+
+- name: Perform kustomizations to the openstack OperatorGroups
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage2_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage2-out-operatorgroup.yaml"
+    include_regexes:
+      - "group"
+  register: _ci_kustomize_osp_operatorgroup_out
+
+- name: Create openstack OperatorGroup
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_osp_operatorgroup_out.output_path }}
+
+- name: Perform kustomizations to the openstack CatalogSource
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage2_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage2-out-catalogsource.yaml"
+    include_regexes:
+      - "catalogsource"
+  register: _ci_kustomize_osp_catalogsource_out
+
+- name: Create the openstack CatalogSource
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_osp_catalogsource_out.output_path }}
+
+- name: Perform kustomizations to the openstack Subscription
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage2_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage2-out-subscription.yaml"
+    include_regexes:
+      - "subscription"
+  register: _ci_kustomize_osp_subscription_out
+
+- name: Create the openstack party Subscription
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_osp_subscription_out.output_path }}
+
+- name: Get Subscription status
+  ansible.builtin.command:
+    cmd: "oc get -f {{ _ci_kustomize_osp_subscription_out.output_path }} -o yaml"
+  register: _sub_out
+  changed_when: false
+  until:
+    - _sub_out.stdout is defined
+    - ((_sub_out.stdout | from_yaml)['status']).currentCSV is defined
+  delay: 10
+  retries: 30
+
+- name: Wait for the CSVs to be ready
+  vars:
+    _sub_yaml: "{{ _sub_out.stdout | from_yaml }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      {{ _sub_yaml.status.currentCSV }}
+      -n "{{ _sub_yaml.metadata.namespace }}"
+      -o jsonpath='{.status.phase}'
+  changed_when: false
+  register: _csv_out
+  retries: 30
+  delay: 10
+  until:
+    - _csv_out is defined
+    - _csv_out.failed is false
+    - _csv_out.stdout_lines | length > 0
+    - "(_csv_out.stdout_lines[0] | lower) == 'succeeded'"
