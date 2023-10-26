@@ -1,0 +1,282 @@
+---
+- name: Fetch SSH key paths
+  ansible.builtin.find:
+    paths: "{{ansible_user_dir }}/.ssh"
+    patterns: 'id_*'
+  register: _ssh_keys_find
+
+- name: Fetch SSH key paths
+  ansible.builtin.debug:
+    var: _ssh_keys_find
+
+- name: Ensure keys are present
+  ansible.builtin.assert:
+    that:
+      - _ssh_keys_find.files is defined
+      - _ssh_keys_find.files | length > 1
+
+- name: Fetch keys
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: >-
+    {{
+      _ssh_keys_find.files |
+      map(attribute="path")
+    }}
+  register: _keys_slurp
+
+- name: Perform kustomizations to the EDPM Ansible SSH Secret
+  vars:
+    _pub_key_content: >-
+      {{
+        (
+          _keys_slurp.results |
+          selectattr("source", "match", "(.)*\.pub$") |
+          first
+        ).content
+      }}
+    _key_content: >-
+      {{
+        (
+          _keys_slurp.results |
+          selectattr("source", "match", ".*(?<!\.pub)$") |
+          first
+        ).content
+      }}
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage5_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-secret.yaml"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: openstack
+      patches:
+      - target:
+          kind: Secret
+        patch: |-
+          - op: replace
+            path: /data/authorized_keys
+            value: "{{ _pub_key_content }}"
+          - op: replace
+            path: /data/ssh-privatekey
+            value: "{{ _key_content }}"
+          - op: replace
+            path: /data/ssh-publickey
+            value: "{{ _pub_key_content }}"
+    include_regexes:
+      - "secret"
+  register: _ci_kustomize_edpm_ssh_secret_out
+
+- name: Create the EDPM Ansible SSH Secret
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_edpm_ssh_secret_out.output_path }}
+
+- name: Prepare the custom repo-setup service
+  vars:
+    repo_setup_manifest_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-custom-repo-setup.yaml"
+  when: cifmw_repo_setup_custom_service is defined
+  block:
+
+    - name: Create the repo-setup service for RHEL
+      ansible.builtin.copy:
+        dest: "{{ repo_setup_manifest_path }}"
+        content: "{{ cifmw_repo_setup_custom_service }}"
+
+    - name: Create the EDPM custom repo setup service
+      ansible.builtin.command:
+        cmd: "oc apply -f {{ repo_setup_manifest_path }}"
+
+    - name: Fetch manifest content
+      ansible.builtin.slurp:
+        src: "{{ repo_setup_manifest_path }}"
+      register: _repo_setup_service_slurp
+
+- name: Perform kustomizations to the EDPM OpenStackDataPlaneNodeSet
+  vars:
+    env_dns: "{{ ansible_dns.nameservers | select('match', '^192\\.168\\.111\\.(.)*$') | first }}"
+    dns_servers: "{{ (([env_dns] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage5_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-nodeset.yaml"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: {{ (_ci_kustomize_edpm_ssh_secret_out.result | first).metadata.namespace }}
+      patches:
+      - target:
+          kind: OpenStackDataPlaneNodeSet
+        patch: |-
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/neutron_public_interface_name
+            value: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('') }}"
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/edpm_sshd_allowed_ranges
+            value:
+              - 192.168.111.0/24
+              - 192.168.122.0/24
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0'].default.mtu | default(1500) }}
+
+      {% if 'tenant' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/tenant_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['tenant'].mtu | default(1500) }}
+      {% endif %}
+
+      {% if 'storage' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/storage_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage'].mtu | default(1500) }}
+      {% endif %}
+
+      {% if 'storage-mgmt' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu | default(1500) }}
+      {% endif %}
+
+      {% if 'internal-api' in crc_ci_bootstrap_networks_out['compute-0'] %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/internal_api_mtu
+            value: {{ crc_ci_bootstrap_networks_out['compute-0']['internal-api'].mtu | default(1500) }}
+      {% endif %}
+
+      {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
+          - op: replace
+            path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
+            value: >-
+              {{
+                crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                ansible.utils.ipaddr('address')
+              }}
+
+          - op: replace
+            path: /spec/nodes/edpm-{{ compute_node }}/networks/0/fixedIP
+            value: >-
+              {{
+                crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                ansible.utils.ipaddr('address')
+              }}
+      {% endfor %}
+
+      {% for compute_node in groups['computes'] %}
+          - op: replace
+            path: /spec/nodes/edpm-{{ compute_node }}/networks/0/defaultRoute
+            value: false
+      {% endfor %}
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
+            value: |-
+                {%- raw %}
+                ---
+                {% set mtu_list = [ctlplane_mtu] %}
+                {% for network in role_networks %}
+                {{ mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) }}
+                {%- endfor %}
+                {% set min_viable_mtu = mtu_list | max %}
+                network_config:
+                - type: ovs_bridge
+                  name: {{ neutron_physical_bridge_name }}
+                  mtu: 1500
+                  use_dhcp: false
+                  dns_servers: {{ ctlplane_dns_nameservers }}
+                  domain: {{ dns_search_domains }}
+                  addresses:
+                  - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_subnet_cidr }}
+                  routes: {{ ctlplane_host_routes }}
+                  members:
+                  - type: interface
+                    name: eth1
+                    mtu: 1500
+                    # force the MAC address of the bridge to this interface
+                    primary: true
+                {% for network in role_networks %}
+                  - type: vlan
+                    mtu: 1496
+                    vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                    addresses:
+                    - ip_netmask:
+                        {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+                    routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
+                {% endfor %}
+                {% endraw %}
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleUser
+            value: "{{ hostvars['compute-0'].ansible_user }}"
+
+          - op: replace
+            path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_dns_nameservers
+            value:
+      {% for dns_server in dns_servers %}
+              - "{{ dns_server }}"
+      {% endfor %}
+    include_regexes:
+      - "nodeset"
+  register: _ci_kustomize_edpm_node_set_out
+
+- name: Create the EDPM OpenStackDataPlaneNodeSet
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_edpm_node_set_out.output_path }}
+
+- name: Perform kustomizations to the EDPM OpenStackDataPlaneNodeSet
+  vars:
+    _custom_repo_setup_name: >-
+      {{
+        ((_repo_setup_service_slurp['content'] | b64decode | from_yaml).metadata.name)
+        if (_repo_setup_service_slurp is defined and _repo_setup_service_slurp.content is defined)
+        else ""
+      }}
+  ansible.builtin.debug:
+    var: _custom_repo_setup_name
+
+- name: Perform kustomizations to the EDPM OpenStackDataPlaneNodeSet
+  vars:
+    _custom_repo_setup_name: >-
+      {{
+        ((_repo_setup_service_slurp['content'] | b64decode | from_yaml).metadata.name)
+        if (_repo_setup_service_slurp is defined and _repo_setup_service_slurp.content is defined)
+        else ""
+      }}
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage5_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage5-out-edpm-pre-ceph-deployment.yaml"
+    kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: {{ (_ci_kustomize_edpm_ssh_secret_out.result | first).metadata.namespace }}
+      patches:
+      - target:
+          kind: OpenStackDataPlaneDeployment
+        patch: |-
+          - op: replace
+            path: /metadata/name
+            value: deployment-pre-ceph
+      {% if _custom_repo_setup_name != '' %}
+          - op: replace
+            path: /spec/servicesOverride/0
+            value: "{{ _custom_repo_setup_name }}"
+      {% endif %}
+    include_regexes:
+      - "deployment"
+  register: _ci_kustomize_edpm_deployment_out
+
+- name: Create the EDPM OpenStackDataPlaneDeployment
+  ansible.builtin.command:
+    cmd: oc apply -f {{ _ci_kustomize_edpm_deployment_out.output_path }}
+
+- name: Wait for EDPM OpenStackDataPlaneDeployment to be deployed
+  ansible.builtin.command:
+    cmd: >-
+      oc wait
+      -f {{ _ci_kustomize_edpm_deployment_out.output_path }}
+      --for=condition=ready
+      --timeout=900s
