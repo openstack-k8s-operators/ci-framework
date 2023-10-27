@@ -4,7 +4,6 @@ Used for checking if:
     - there's SVM/VMX virtualization, enable it if not
     - install libvirt packages and dependencies and add group and user to libvirt group if necessary,
 
-
 ## Privilege escalation
 
 `become` - Required in:
@@ -14,6 +13,7 @@ Used for checking if:
     - `polkit_rules.yml`: Add polkit rules under `/etc/`.
 
 ## Parameters
+
 * `cifmw_libvirt_manager_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_libvirt_manager_enable_virtualization_module`: (Boolean) If `true` it will enable the virtualization module in case it's not already and if the hosts allow it. Defaults to `false`.
 * `cifmw_libvirt_manager_user`: (String) User used for libvirt. Default: the one in the environment variable `USER`.
@@ -26,3 +26,4 @@ Used for checking if:
 * `cifmw_libvirt_manager_compute_memory`: (Integer) The amount of memory in GB per compute. Defaults to `4`.
 * `cifmw_libvirt_manager_compute_disksize`: (Integer) The size of the disk in GB per compute. Defaults to `20`.
 * `cifmw_libvirt_manager_compute_cpus`: (Integer) The amount of vCPUs per compute. Defaults to `1`.
+* `cifmw_libvirt_manager_apply_virtproxy_patch` (Boolean) Apply patch virtproxy patch for improved libvirt stability. This is set to `true` by default.
