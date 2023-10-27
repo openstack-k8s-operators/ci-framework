@@ -21,6 +21,8 @@ network configuration, repository setup and libvirt networks.
   configuration. Refer [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more information.
 * `cifmw_devscripts_crb_repo` (str) Repo URL of code ready builder.
 * `cifmw_devscripts_dry_run` (bool) If enabled, the workflow is evaluated.
+* `cifmw_devscripts_restart_virtproxyd` (bool) Optional, if libvirt's virtproxy service should be restarted via
+  a dev-scripts patch. By default this is enabled for stability.
 * `cifmw_devscripts_make_target` (str) Optional, the target to be used with dev-scripts.
 * `cifmw_devscripts_ocp_version` (str) The version of OpenShift to be deployed.
 * `cifmw_devscripts_osp_compute_nodes` (list) A list of nodes which has key/value pairs
