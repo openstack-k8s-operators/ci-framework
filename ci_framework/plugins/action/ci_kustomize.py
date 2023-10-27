@@ -82,6 +82,18 @@ options:
       the ones from filesystem.
     type: bool
     default: true
+  skip_regexes:
+    description:
+    - List of regexes to filter out the discovered manifests and kustomizations.
+    type: list
+    elements: str
+    default: []
+  include_regexes:
+    description:
+    - List of regexes to filter in the discovered manifests and kustomizations.
+    type: list
+    elements: str
+    default: []
 """
 
 EXAMPLES = r"""
@@ -321,6 +333,8 @@ class CifmwKustomizeWrapper:
         tools_search_path: str = None,
         preserve_workspace: bool = False,
         sort_ascending: bool = True,
+        skip_regexes: typing.List[str] = None,
+        include_regexes: typing.List[str] = None,
     ):
         self.__validate_inputs(target_path, output_path, kustomizations_paths)
 
@@ -350,6 +364,8 @@ class CifmwKustomizeWrapper:
         self.__kustomization_files_goes_first = kustomization_files_goes_first
         self.__preserve_workspace = preserve_workspace
         self.__sort_ascending = sort_ascending
+        self.__skip_regexes = skip_regexes or []
+        self.__include_regexes = include_regexes or []
         self.__input_kustomizations = self.__parse_kustomizations_input(kustomizations)
         self.__kustomize_cmd = self.__create_kustomize_build_command(
             self.__target_workspace_file, tools_search_path=tools_search_path
@@ -406,7 +422,10 @@ class CifmwKustomizeWrapper:
     def __copy_input_to_workspace(self):
         if self.target_path.is_dir():
             manifests_contents = self.__get_manifests_paths_from_dir_candidates(
-                self.target_path, skip_paths=[self.output_path]
+                self.target_path,
+                skip_paths=[self.output_path],
+                skip_regexes=self.__skip_regexes,
+                include_regexes=self.__include_regexes,
             )
             # Fetch all the individual manifests from the target dir and dump
             # them into a single file
@@ -598,10 +617,19 @@ class CifmwKustomizeWrapper:
 
     @classmethod
     def __get_manifests_paths_from_dir_candidates(
-        cls, base_dir: pathlib.Path, skip_paths: pathlib.Path = None
+        cls,
+        base_dir: pathlib.Path,
+        skip_paths: pathlib.Path = None,
+        skip_regexes: typing.List[str] = None,
+        include_regexes: typing.List[str] = None,
     ) -> typing.Dict[pathlib.Path, typing.List[typing.Any]]:
         resulting_files_content = {}
-        for file_path in cls.__get_yaml_files_in_path(base_dir, skip_paths=skip_paths):
+        for file_path in cls.__get_yaml_files_in_path(
+            base_dir,
+            skip_paths=skip_paths,
+            skip_regexes=skip_regexes,
+            include_regexes=include_regexes,
+        ):
             file_content = file_path.read_text(encoding="utf-8")
             try:
                 yaml_content = list(yaml.load_all(file_content, Loader=yaml.Loader))
@@ -630,7 +658,11 @@ class CifmwKustomizeWrapper:
 
     @classmethod
     def __get_yaml_files_in_path(
-        cls, path: pathlib.Path, skip_paths: pathlib.Path = None
+        cls,
+        path: pathlib.Path,
+        skip_paths: pathlib.Path = None,
+        skip_regexes: typing.List[str] = None,
+        include_regexes: typing.List[str] = None,
     ) -> typing.List[pathlib.Path]:
         avoid_paths = skip_paths or []
         results = []
@@ -655,14 +687,33 @@ class CifmwKustomizeWrapper:
                 ]
             )
 
-        return results
+        # If include_regexes are given output only files that match a regex
+        if include_regexes:
+            results = [
+                path
+                for path in list(results)
+                if any(
+                    re.search(regex, str(path.absolute())) for regex in include_regexes
+                )
+            ]
+
+        # Skip paths that matches skip_regexes
+        return [
+            path
+            for path in results
+            if not any(re.search(regex, str(path.absolute())) for regex in skip_regexes)
+        ]
 
     def __get_all_yamls_in_scan_paths(self) -> typing.List[pathlib.Path]:
         return sorted(
             [
                 f
                 for f_ in [
-                    self.__get_yaml_files_in_path(path)
+                    self.__get_yaml_files_in_path(
+                        path,
+                        skip_regexes=self.__skip_regexes,
+                        include_regexes=self.__include_regexes,
+                    )
                     for path in self.__kustomization_scan_paths
                 ]
                 for f in f_
@@ -738,6 +789,8 @@ class ActionModule(ActionBase):
         )
         preserve_workspace = self._task.args.get("preserve_workspace", False)
         sort_ascending = self._task.args.get("sort_ascending", True)
+        skip_regexes = self._task.args.get("skip_regexes", None)
+        include_regexes = self._task.args.get("include_regexes", None)
         final_environment = {}
         self._compute_environment_string(final_environment)
 
@@ -751,6 +804,8 @@ class ActionModule(ActionBase):
                 tools_search_path=final_environment.get("PATH", None),
                 preserve_workspace=preserve_workspace,
                 sort_ascending=sort_ascending,
+                skip_regexes=skip_regexes,
+                include_regexes=include_regexes,
             ) as kustomize:
                 kustomize_result = kustomize.kustomize()
                 result.update(dataclasses.asdict(kustomize_result))
