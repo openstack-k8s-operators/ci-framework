@@ -14,21 +14,39 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
 # This task requires
 #   vm_name         Domain name to which the interface needs to be attached.
-#   interface_name  source of the device
-#   interface_type  bridge or network
+#   network
+#     name          Name of the network bridge
+#     cidr          network notation
+#     mtu           MTU applied on the interface.
+#     static_ip     boolean if static address is required.
+
+
+- name: Generate a random MAC address
+  ansible.builtin.set_fact:
+    _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
+
+- name: Reserve an IP address
+  when: network.static_ip | bool
+  vars:
+    mac_address: "{{ _lm_mac_address }}"
+  ansible.builtin.import_tasks: reserve_ip.yml
 
 - name: Attach interface to the virtual machine.
-  ci_script:
-    output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
-    script: >-
+  vars:
+    _net_name: >
+      {{
+        (network.static_ip | bool) |
+        ternary(network.name, 'cifmw-net_' + network.name)
+      }}
+  ansible.builtin.command:
+    cmd: >-
       virsh -c qemu:///system
       attach-interface "{{ vm_name }}"
-      --source "{{ interface_name }}"
-      --type "{{ interface_type }}"
-      --mac "{{ '0A:02' | community.general.random_mac }}"
+      --source "{{ _net_name }}"
+      --type bridge
+      --mac "{{ _lm_mac_address }}"
       --model virtio
       --config
       --persistent
