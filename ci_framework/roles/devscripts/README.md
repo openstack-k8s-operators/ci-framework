@@ -12,9 +12,11 @@ network configuration, repository setup and libvirt networks.
 ## Parameters
 
 * `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the role artifacts.
-* `cifmw_devscripts_ci_token` (str) oAuth token required for accessing console.redhat.com.
-* `cifmw_devscripts_ci_token_file` (str) oAuth token file required for accessing console.redhat.com.
-   We can use `cifmw_devscripts_ci_token` or `cifmw_devscripts_ci_token_file` for passing OAuth token.
+* `cifmw_devscripts_ci_token` (str) oAuth token required for accessing
+  [openshift-console](https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/).
+* `cifmw_devscripts_ci_token_file` (str) oAuth token required for accessing
+  [openshift-console](https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/).
+  We can use `cifmw_devscripts_ci_token` or `cifmw_devscripts_ci_token_file` for passing OAuth token.
 * `cifmw_devscripts_config_overrides` (dict) key/value pairs to be used for overriding the default
   configuration. Refer [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more information.
 * `cifmw_devscripts_crb_repo` (str) Repo URL of code ready builder.
@@ -130,9 +132,6 @@ Additional information can be found [here](https://github.com/metal3-io/baremeta
   cifmw_devscripts_ci_token: REDACTED
   cifmw_devscripts_pull_secret: |
     REDACTED
-  cifmw_devscripts_dns_entries:
-    api: REDACTED
-    ingress: REDACTED
 
   cifmw_devscripts_src_dir: "/home/ciuser/src/dev-scripts"
 
@@ -150,9 +149,6 @@ Additional information can be found [here](https://github.com/metal3-io/baremeta
   cifmw_devscripts_ci_token: REDACTED
   cifmw_devscripts_pull_secret: |
     REDACTED
-  cifmw_devscripts_dns_entries:
-    api: REDACTED
-    ingress: REDACTED
 
   cifmw_devscripts_ocp_version: '4.13.13'
 
@@ -173,9 +169,6 @@ Additional information can be found [here](https://github.com/metal3-io/baremeta
   cifmw_devscripts_ci_token: REDACTED
   cifmw_devscripts_pull_secret: |
     REDACTED
-  cifmw_devscripts_dns_entries:
-    api: REDACTED
-    ingress: REDACTED
 
   cifmw_devscripts_ocp_version: '4.13.13'
 
