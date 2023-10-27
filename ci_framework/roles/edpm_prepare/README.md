@@ -14,5 +14,5 @@ This role doesn't need privilege escalation.
 * `cifmw_edpm_prepare_oc_delay`: (Integer) Delay, in seconds, between failed oc call retries. Defaults to `30`.
 * `cifmw_edpm_prepare_update_os_containers`: (Boolean) Updates the openstack services containers env variable. Defaults to `false`.
 * `cifmw_edpm_prepare_timeout`: (Integer) Time, in minutes to wait for the deployment to be ready. Defaults to `30`.
-* `cifmw_edpm_prepare_verify_tls`: (Boolean) In case of TLS enabled for OpenStack endpoint, validates against the CA. Defaults to `true`.
+* `cifmw_edpm_prepare_verify_tls`: (Boolean) In case of TLS enabled for OpenStack endpoint, validates against the CA. Defaults to `false`.
 * `cifmw_edpm_prepare_skip_patch_ansible_runner`: (Boolean) Intentionally skips setting ansible runner image to `latest` from quay.io. Defaults to `False`.
