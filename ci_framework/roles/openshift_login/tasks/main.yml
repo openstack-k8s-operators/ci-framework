@@ -52,14 +52,28 @@
   delay: "{{ cifmw_openshift_login_retries_delay }}"
 
 - name: Set OpenShift user, context and API facts
+  vars:
+    # In OCP kube:admin user, the one in the cluster
+    # can maps to the OAuth enabled user kubeadmin.
+    # whoami, the way we use to return the user always
+    # returns kube:admin for that user, but that username
+    # cannot be used to login using OAuth. This behaviour
+    # is hardcoded inside OCP itself:
+    # https://github.com/openshift/library-go/blob/master/pkg/authentication/bootstrapauthenticator/bootstrap.go#L24-L26
+    _oauth_user: >-
+      {{
+        cifmw_openshift_login_user_out.stdout
+        if (cifmw_openshift_login_user_out.stdout != 'kube:admin')
+        else 'kubeadmin'
+      }}
   ansible.builtin.set_fact:
     cifmw_openshift_login_api: "{{ cifmw_openshift_login_api_out.stdout }}"
     cifmw_openshift_login_context: "{{ cifmw_openshift_login_context_out.stdout }}"
-    cifmw_openshift_login_user: "{{ cifmw_openshift_login_user_out.stdout }}"
+    cifmw_openshift_login_user: "{{ _oauth_user }}"
     cifmw_openshift_kubeconfig: "{{ cifmw_openshift_login_kubeconfig }}"
     cifmw_openshift_api: "{{ cifmw_openshift_login_api_out.stdout }}"
     cifmw_openshift_context: "{{ cifmw_openshift_login_context_out.stdout }}"
-    cifmw_openshift_user: "{{ cifmw_openshift_login_user_out.stdout }}"
+    cifmw_openshift_user: "{{ _oauth_user }}"
     cifmw_openshift_token: "{{ cifmw_openshift_login_token | default(omit) }}"
     cifmw_install_yamls_environment: >-
       {{  ( cifmw_install_yamls_environment |
