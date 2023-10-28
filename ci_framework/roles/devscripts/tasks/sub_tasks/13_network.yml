@@ -15,40 +15,22 @@
 # under the License.
 
 
-- name: Gather external interface name.
-  ansible.builtin.set_fact:
-    iface_name: "{{ ansible_default_ipv4.interface }}"
+- name: Ensure the default network is removed.
+  vars:
+    net_name: "default"
+  ansible.builtin.include_role:
+    name: libvirt_manager
+    tasks_from: delete_network.yml
+
+- name: Configure virthost networking infra.
+  when:
+    - cifmw_ci_nmstate_instance_config is defined
+    - "inventory_hostname in cifmw_ci_nmstate_instance_config"
+  ansible.builtin.include_role:
+    name: ci_nmstate
 
 - name: Configure local DNS
   when: cifmw_network_local_dns is defined
   ansible.builtin.include_role:
     name: ci_network
     tasks_from: apply-dns.yml
-
-- name: Ensure the baremetal bridge is configured.
-  become: true
-  when:
-    - "'manage_br_bridge' in cifmw_devscripts_config"
-    - cifmw_devscripts_config['manage_br_bridge'] == 'n'
-    - ansible_default_ipv4['type'] != 'bridge'
-  block:
-    - name: "Ensure no ifcfg script for interface {{ iface_name }}"
-      ansible.builtin.file:
-        path: "/etc/sysconfig/network-scripts/ifcfg-{{ iface_name }}"
-        state: absent
-
-    - name: Ensure external bridge exists
-      community.general.nmcli:
-        conn_name: "{{ cifmw_devscripts_config['cluster_name'] }}bm"
-        ifname: "{{ cifmw_devscripts_config['cluster_name'] }}bm"
-        state: present
-        stp: false
-        type: "bridge"
-
-    - name: Add the external interface to the bridge
-      become: true
-      ansible.builtin.script:
-        cmd: >-
-          files/add_bridge_port.sh
-          "{{ cifmw_devscripts_config['cluster_name'] }}bm"
-          "{{ iface_name }}"
