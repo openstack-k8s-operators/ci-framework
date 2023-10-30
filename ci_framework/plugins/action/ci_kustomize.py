@@ -192,6 +192,7 @@ import yaml
 
 
 from ansible.plugins.action import ActionBase
+from ansible.parsing.yaml.dumper import AnsibleDumper
 
 
 @dataclasses.dataclass
@@ -721,6 +722,22 @@ class CifmwKustomizeWrapper:
         )
 
 
+# Ansible raw input args can contain AnsibleUnicodes nested
+# in dicts, this ensures we work with plain python types
+def decode_ansible_raw_iterable(data):
+    if isinstance(data, list):
+        return [decode_ansible_raw_iterable(_data) for _data in data]
+    if isinstance(data, dict):
+        return yaml.load(
+            yaml.dump(
+                data, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True
+            ),
+            Loader=yaml.Loader,
+        )
+
+    return data
+
+
 class ActionModule(ActionBase):
     def run(self, tmp=None, task_vars=None):
         if task_vars is None:
@@ -730,7 +747,9 @@ class ActionModule(ActionBase):
         del tmp
 
         target_path = self._task.args.get("target_path", None)
-        kustomizations = self._task.args.get("kustomizations", None)
+        kustomizations = decode_ansible_raw_iterable(
+            self._task.args.get("kustomizations", None)
+        )
         kustomizations_paths = self._task.args.get("kustomizations_paths", None)
         output_path = self._task.args.get("output_path", None)
         kustomization_files_goes_first = self._task.args.get(
