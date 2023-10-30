@@ -31,37 +31,45 @@
     uri: "qemu:///system"
   loop: "{{ cleanup_vms }}"
 
-- name: Get network list
-  register: nets_list
-  community.libvirt.virt_net:
-    command: list_nets
-    uri: "qemu:///system"
+- name: "Clean networks (please use -e libvirt_network_clean=true to run this)"
+  when:
+    - libvirt_network_clean | default(false) | bool
+  block:
+    - name: Get network list
+      register: nets_list
+      community.libvirt.virt_net:
+        command: list_nets
+        uri: "qemu:///system"
 
-- name: Filter out target nets
-  ansible.builtin.set_fact:
-    cleanup_nets: "{{ nets_list.list_nets | select('match', '^cifmw-.*$') }}"
+    - name: Filter out target nets
+      ansible.builtin.set_fact:
+        cleanup_nets: >-
+          {{
+            nets_list.list_nets |
+            select('match', '^cifmw-.*$')
+          }}
 
-- name: Expose cleanup list
-  ansible.builtin.debug:
-    var: cleanup_nets
+    - name: Expose cleanup list
+      ansible.builtin.debug:
+        var: cleanup_nets
 
-- name: Destroy networks
-  register: net_destroy
-  community.libvirt.virt_net:
-    command: destroy
-    name: "{{ item }}"
-    uri: "qemu:///system"
-  loop: "{{ cleanup_nets }}"
-  failed_when:
-    - net_destroy.rc is defined
-    - net_destroy.rc > 1
+    - name: Destroy networks
+      register: net_destroy
+      community.libvirt.virt_net:
+        command: destroy
+        name: "{{ item }}"
+        uri: "qemu:///system"
+      loop: "{{ cleanup_nets }}"
+      failed_when:
+        - net_destroy.rc is defined
+        - net_destroy.rc > 1
 
-- name: Undefine networks
-  community.libvirt.virt_net:
-    command: undefine
-    name: "{{ item }}"
-    uri: "qemu:///system"
-  loop: "{{ cleanup_nets }}"
+    - name: Undefine networks
+      community.libvirt.virt_net:
+        command: undefine
+        name: "{{ item }}"
+        uri: "qemu:///system"
+      loop: "{{ cleanup_nets }}"
 
 - name: Get temporary key status
   register: _tmp_key
@@ -82,3 +90,13 @@
         user: "{{ ansible_user_id }}"
         key: "{{ _pub_key['content'] | b64decode }}"
         state: absent
+
+- name: Remove related directories
+  tags:
+    - libvirt_manager_data
+  ansible.builtin.file:
+    path: "{{ cifmw_libvirt_manager_basedir }}/{{ item }}"
+    state: absent
+  loop:
+    - workload
+    - images
