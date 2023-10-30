@@ -31,21 +31,52 @@
       {% endfor -%}
       {{ expected }}
 
-- name: "[{{ kustomize_tc_name }}] Assert that the expected number of kustomization has been applied" # noqa: name[template]
-  when: "kustomize_tc_should_apply_kustomizations_count is defined"
+- name: "[{{ kustomize_tc_name }}] Assert that the expected number of resources has been outputed" # noqa: name[template]
+  when: "kustomize_tc_should_output_count is defined"
   ansible.builtin.assert:
-    that: "output['count'] == (kustomize_tc_should_apply_kustomizations_count | int)"
+    that: "output['result'] | length == (kustomize_tc_should_output_count | int)"
     quiet: true
 
-- name: "[{{ kustomize_tc_name }}] Assert that the expected kustomization files have been discovered" # noqa: name[template]
+- name: "[{{ kustomize_tc_name }}] Set the expected kustomization files" # noqa: name[template]
   vars:
-    kustomizations_paths: >-
+    _kustomizations_all_paths: >-
       {{
         (_ci_kustomize_extra_kustomizations.keys() | list) +
         (_ci_kustomize_kustomizations.keys() | list)
       }}
+  ansible.builtin.set_fact:
+    _ci_kustomize_expected_kustomization_files: >-
+      {% set included_paths = [] if kustomize_tc_include_regexes is defined else _kustomizations_all_paths -%}
+      {% for include_regex in kustomize_tc_include_regexes | default([]) -%}
+      {%   for kustomization_path in _kustomizations_all_paths -%}
+      {%     if (kustomization_path | regex_search(include_regex)) -%}
+      {%       set _ = included_paths.append(kustomization_path) -%}
+      {%     endif -%}
+      {%   endfor -%}
+      {% endfor -%}
+      {% set expected_paths = included_paths | list | unique -%}
+      {% for kustomization_path in included_paths -%}
+      {%   set should_skip = false -%}
+      {%   for skip_regex in kustomize_tc_skip_regexes | default([]) -%}
+      {%     if (kustomization_path | regex_search(skip_regex)) -%}
+      {%       set _ = expected_paths.remove(kustomization_path) -%}
+      {%     endif -%}
+      {%   endfor -%}
+      {% endfor -%}
+      {{ expected_paths }}
+    cacheable: true
+
+- name: "[{{ kustomize_tc_name }}] Assert that the expected number of kustomization has been applied" # noqa: name[template]
+  when: "kustomize_tc_should_apply_kustomizations_count is defined"
   ansible.builtin.assert:
-    that: "(output['kustomizations_paths'] | sort) == (kustomizations_paths | sort)" # noqa: name[template]
+    that:
+      - "output['count'] == (kustomize_tc_should_apply_kustomizations_count | int)"
+      - " output['count'] >= (_ci_kustomize_expected_kustomization_files | length)"
+    quiet: true
+
+- name: "[{{ kustomize_tc_name }}] Assert that the expected kustomization files have been discovered" # noqa: name[template]
+  ansible.builtin.assert:
+    that: "(output['kustomizations_paths'] | sort) == (_ci_kustomize_expected_kustomization_files | sort)" # noqa: name[template]
     quiet: true
 
 - name: "[{{ kustomize_tc_name }}] Assert the output points to an output path" # noqa: name[template]
