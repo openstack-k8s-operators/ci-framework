@@ -1,0 +1,53 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# The below tasks reserves an IP from the dhcp range and assigns it to the
+# specified mac address and vm
+
+# The below information are required
+#   vm_name       Name of the virtual machine/domain
+#   mac_address   Associated MAC address
+#   network
+#     name        virtual network name
+#     cidr        network notation
+
+# The nth host is determined by looking to the vm_name
+#   master          20
+#   worker          23
+#   extraworker     26
+#   compute         26      # Has the same index of extraworker
+
+
+- name: Generate the IP address
+  vars:
+    _vm_name: "{{ vm_name | replace('-', '_') | split('_') }}"
+    _ip_index: >-
+      {{
+        cifmw_libvirt_manager_vm_net_ip_set[_vm_name[1]] +
+        _vm_name[2] | int
+      }}
+  ansible.builtin.set_fact:
+    _lm_ip_address: "{{ network.cidr | ansible.utils.nthhost(_ip_index) }}"
+
+- name: Reserve static IP address for the node.
+  community.libvirt.virt_net:
+    command: modify
+    name: "{{ network.name }}"
+    uri: "qemu:///system"
+    xml: |
+      <host mac='{{ mac_address }}' name='{{ vm_name }}' ip='{{ _lm_ip_address }}'>
+        <lease expiry='60' unit='minutes'/>
+      </host>
