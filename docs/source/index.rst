@@ -19,17 +19,17 @@ project.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Usage
-   :glob:
-
-   usage/*
-
-.. toctree::
-   :maxdepth: 1
    :caption: Reproducers
    :glob:
 
    reproducers/*
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Usage
+   :glob:
+
+   usage/*
 
 .. toctree::
    :maxdepth: 1
@@ -65,6 +65,14 @@ project.
    :glob:
 
    roles/*
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Deprecated documentation
+   :glob:
+
+   deprecated/*
+
 
 Indices and tables
 ==================

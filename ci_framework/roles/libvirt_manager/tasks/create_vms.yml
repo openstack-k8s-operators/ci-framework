@@ -38,7 +38,9 @@
   vars:
     _fixed_net_name: >-
       {{
-        _fixed_ip_nets | dict2items | map(attribute='key')
+        _fixed_ip_nets | dict2items |
+        map(attribute='key') |
+        map('regex_replace', '^', 'cifmw-')
       }}
     _vals: >-
       {{
@@ -60,6 +62,12 @@
         (macs | default([]) + _macs) |
         selectattr('network', 'in', _fixed_net_name)
       }}
+    ocpbm_nics: >-
+      {{
+        (ocpbm_nics | default([]) + _macs) |
+        selectattr('network', 'equalto', 'ocpbm') |
+        selectattr('host', 'match', '.*' ~ vm_type ~ '.*')
+      }}
   loop: "{{ _vm_ports.results }}"
   loop_control:
     index_var: index
@@ -67,9 +75,10 @@
 - name: Fix IPs for selected networks and VMs
   vars:
     vm_name: "cifmw-{{ mac_node.host }}"
+    net_name: "{{ mac_node.network | replace('cifmw-', '') }}"
     network:
-      cidr: "{{ _fixed_ip_nets[mac_node.network]['range'] }}"
-      name: "{{ mac_node.network }}"
+      cidr: "{{ _fixed_ip_nets[net_name]['range'] }}"
+      name: "{{ net_name }}"
     mac_address: "{{ mac_node.mac }}"
   ansible.builtin.include_tasks: reserve_ip.yml
   loop: "{{ macs }}"
@@ -92,11 +101,11 @@
   ansible.builtin.shell:
     cmd: >-
       virsh -c qemu:///system -q
-      domifaddr cifmw-{{ vm_type }}-{{ vm_id }} | head -1
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+      domifaddr cifmw-{{ nic.host }} | grep "{{ nic.mac }}"
+  loop: "{{ ocpbm_nics }}"
   loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
+    loop_var: nic
+    label: "{{ nic.host }}"
   retries: 20
   delay: 5
   until:
@@ -112,9 +121,9 @@
   ansible.builtin.blockinfile:
     create: true
     path: "~/.ssh/config"
-    marker: "## {mark} {{ vm_type }}-{{ vm_ip.item }}"
+    marker: "## {mark} {{ vm_ip.nic.host }}"
     block: |-
-      Host {{ vm_type }}-{{ vm_ip.item }} cifmw-{{ vm_type }}-{{ vm_ip.item }} {{ extracted_ip }}
+      Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ inventory_hostname }}
         Hostname {{ extracted_ip }}
         User zuul
@@ -123,7 +132,7 @@
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
-    label: "{{ vm_ip.item }}"
+    label: "{{ vm_ip.nic.host }}"
 
 - name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"  # noqa: name[template]
   vars:
@@ -131,9 +140,9 @@
   ansible.builtin.blockinfile:
     create: true
     path: "~/.ssh/config"
-    marker: "## {mark} {{ vm_type }}-{{ vm_ip.item }}"
+    marker: "## {mark} {{ vm_ip.nic.host }}"
     block: |-
-      Host {{ vm_type }}-{{ vm_ip.item }} cifmw-{{ vm_type }}-{{ vm_ip.item }} {{ extracted_ip }}
+      Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         Hostname {{ extracted_ip }}
         User zuul
         IdentityFile ~/.ssh/cifmw_reproducer_key
@@ -142,20 +151,20 @@
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
-    label: "{{ vm_ip.item }}"
+    label: "{{ vm_ip.nic.host }}"
 
 - name: Inject nodes in the ansible inventory
   delegate_to: localhost
   vars:
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.add_host:
-    name: "{{ vm_type }}-{{ vm_ip.item }}"
+    name: "{{ vm_ip.nic.host }}"
     groups: "{{ vm_type }}"
     ansible_host: "{{ extracted_ip }}"
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
-    label: "{{ vm_ip.item }}"
+    label: "{{ vm_ip.nic.host }}"
 
 - name: "Create group inventory for {{ vm_type }}"
   vars:

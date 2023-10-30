@@ -1,4 +1,9 @@
 # On your own hardware
+
+## ⚠️ Deprecated
+This is deprecated since it uses nested virtualization. Please refer to
+[Validated Architecture reproducer](../reproducers/04-validated-architecture.md) documentation.
+
 While nested virtualization is a clean way to run tests, you may want to get
 some better speed and easier access to the resources.
 
@@ -12,7 +17,7 @@ access to libvirtd. Verify you have `git` and `make` installed.
 In order to do so, some steps should be done beforehand.
 
 ### 0. Ensure you meet the requirements
-Please check [this page](./01_requirements.md) first.
+Please check [this page](../quickstart/01_requirements.md) first.
 
 ### 1. Get the project and its dependencies
 ```Bash
