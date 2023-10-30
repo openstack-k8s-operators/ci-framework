@@ -50,16 +50,17 @@
     user: "{{ ansible_user_id }}"
     key: "{{ pub_ssh_key['content'] | b64decode }}"
 
-- name: Prepare base image with user and ssh accesses  # noqa: risky-shell-pipe
+- name: Prepare disk image with SSH and growing volume
   when:
     - item.key is not match('^crc.*$')
   vars:
     _admin_user: "{{ item.value.admin_user | default('root') }}"
+    _root_part: "{{ item.value.root_part_id | default('1') }}"
   ansible.builtin.shell:
     cmd: >-
       virt-sysprep -a "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}"
       --selinux-relabel
-      --firstboot-command "growpart /dev/sda 1"
+      --firstboot-command "growpart /dev/sda {{ _root_part }}"
       --firstboot-command "xfs_growfs /"
       --root-password "password:{{ item.value.password | default('fooBar') }}"
       --ssh-inject {{ _admin_user }}:file:{{ ansible_user_dir }}/.ssh/authorized_keys
@@ -75,8 +76,7 @@
     cifmw_reproducer_network_data: {}
     _fixed_ip_nets: >-
       {{
-        cifmw_libvirt_manager_networks | default({}) |
-        dict2items |
+        cifmw_libvirt_manager_networks | dict2items |
         selectattr('value.static_ip', 'defined') |
         selectattr('value.static_ip', '==', true) |
         items2dict
@@ -87,6 +87,7 @@
     vm_type: "{{ vm_data.key }}"
     pub_key: "{{ pub_ssh_key.content | b64decode }}"
     priv_key: "{{ priv_ssh_key.content | b64decode }}"
+    _admin_user: "{{ item.value.admin_user | default('root') }}"
   ansible.builtin.include_tasks:
     file: create_vms.yml
   loop: "{{ _layout.vms | dict2items }}"

@@ -1,7 +1,8 @@
 # Create a PSI instance
 
-> ⚠️ Warning
-> This is **deprecated** since it uses nested virtualization. Please refer to [run on your own hardware](./04_non-virt.md) documentation.
+## ⚠️ Deprecated
+This is **deprecated** since it uses nested virtualization. Please refer to
+[Validated Architecture reproducer](../reproducers/04-validated-architecture.md) documentation.
 
 ## Steps
 
@@ -13,7 +14,7 @@ source openrc.sh
 
 2. **Create VM**
 
-Find a flavor satisfying [preferred requirements](./01_requirements.md)
+Find a flavor satisfying [preferred requirements](../quickstart/01_requirements.md)
 
 ```
 openstack flavor list -c Name -c RAM -c Disk -c VCPUs -f value | \
@@ -74,4 +75,4 @@ python3 -m pip install --user ansible jmespath
 
 6. **Continue with Quickstart**
 
-Continue with ci-framework deployment as described by the [Virtualized environment setup section](./02_nested_virt.md).
+Continue with ci-framework deployment as described by the [Virtualized environment setup section](./99_nested_virt.md).
