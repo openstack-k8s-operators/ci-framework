@@ -1,0 +1,62 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Ensure repos are enabled in the system using rhsm.
+  become: true
+  tags:
+    - bootstrap
+    - packages
+  when: ansible_distribution == 'RedHat'
+  block:
+    - name: Check rhsm status
+      ansible.builtin.command:
+        cmd: "subscription-manager status"
+
+    - name: Gather the repos to be enabled
+      ansible.builtin.set_fact:
+        _repos: >-
+          {{
+            cifmw_ci_setup_rhel_rhsm_default_repos +
+            (cifmw_ci_setup_rhel_rhsm_extra_repos | default([]))
+          }}
+
+    - name: Enabling the required repositories.
+      community.general.rhsm_repository:
+        name: "{{ item }}"
+        state: "{{ rhsm_repo_state | default('enabled') }}"
+      loop: "{{ _repos }}"
+  rescue:
+    - name: RHSM unavailable
+      ansible.builtin.debug:
+        msg: "The system is not registered with Red Hat."
+
+- name: Ensure the repos are enabled in the system using yum
+  become: true
+  tags:
+    - bootstrap
+    - packages
+  when:
+    - cifmw_ci_setup_yum_repos is defined
+    - cifmw_ci_setup_yum_repos | length > 0
+  ansible.builtin.yum_repository:
+    name: "{{ item.name }}"
+    baseurl: "{{ item.baseurl }}"
+    description: "{{ item.description | default(item.name) }}"
+    gpgcheck: "{{ item.gpgcheck | default(false) }}"
+    enabled: true
+    state: "{{ yum_repo_state | default('present') }}"
+  loop: "{{ cifmw_ci_setup_yum_repos }}"
