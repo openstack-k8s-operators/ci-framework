@@ -22,31 +22,56 @@
 #     mtu           MTU applied on the interface.
 #     static_ip     boolean if static address is required.
 
+- name: Check ports attached to the domain
+  block:
+    - name: Dump domain xml
+      register: _domain_xml
+      community.libvirt.virt:
+        command: "get_xml"
+        name: "{{ vm_name }}"
 
-- name: Generate a random MAC address
-  ansible.builtin.set_fact:
-    _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
+    - name: Extract networks from XML
+      register: _extracted_xml
+      community.general.xml:
+        xmlstring: "{{ _domain_xml.get_xml}}"
+        xpath: "/domain/devices/interface/source"
+        content: "attribute"
 
-- name: Reserve an IP address
-  when: network.static_ip | bool
+- name: Attach new port if needed
   vars:
-    mac_address: "{{ _lm_mac_address }}"
-  ansible.builtin.import_tasks: reserve_ip.yml
-
-- name: Attach interface to the virtual machine.
-  vars:
-    _net_name: >
+    _net_name: "cifmw-{{ network.name}}"
+    _attached_nets: >-
       {{
-        (network.static_ip | bool) |
-        ternary(network.name, 'cifmw-net_' + network.name)
+        _extracted_xml.matches |
+        selectattr('source.bridge', 'equalto', _net_name)
       }}
-  ansible.builtin.command:
-    cmd: >-
-      virsh -c qemu:///system
-      attach-interface "{{ vm_name }}"
-      --source "{{ _net_name }}"
-      --type bridge
-      --mac "{{ _lm_mac_address }}"
-      --model virtio
-      --config
-      --persistent
+  when:
+    - _attached_nets | length == 0
+  block:
+    - name: Generate a random MAC address
+      ansible.builtin.set_fact:
+        _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
+
+    - name: Reserve an IP address
+      when: network.static_ip | bool
+      vars:
+        mac_address: "{{ _lm_mac_address }}"
+      ansible.builtin.import_tasks: reserve_ip.yml
+
+    - name: Attach interface to the virtual machine.
+      vars:
+        _net_name: >
+          {{
+            (network.static_ip | bool) |
+            ternary(network.name, 'cifmw-net_' + network.name)
+          }}
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system
+          attach-interface "{{ vm_name }}"
+          --source "{{ _net_name }}"
+          --type bridge
+          --mac "{{ _lm_mac_address }}"
+          --model virtio
+          --config
+          --persistent
