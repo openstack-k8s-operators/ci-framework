@@ -9,6 +9,14 @@ libvirt/kvm virtual machines.
 Yes, requires privilege escalation to install dependant packages on the system. Along with performing
 network configuration, repository setup and libvirt networks.
 
+## Exposed tags
+
+* `devscripts_prepare`: Selects tasks related to "preparing the host" and building the various
+needed files.
+* `devscripts_deploy`: Overlaps with the previous tag, and adds the actual deployment of devscripts
+managed services.
+* `devscripts_post`: Only runs the post-installation tasks.
+
 ## Parameters
 
 * `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the role artifacts.
