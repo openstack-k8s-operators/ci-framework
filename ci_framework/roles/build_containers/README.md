@@ -30,3 +30,7 @@ become - Required to install and execute tcib
 * `cifmw_build_containers_repo_dir`: (String) Define a custom directory containing the repo files.
 * `cifmw_build_containers_image_tag`: (String) Image tag suffix. Default to `current-podified`.
 * `cifmw_build_containers_containers_base_image`: (String) Base image name, with optional version. Can be 'centos:8', base name image will be 'centos' but 'centos:8' will be pulled to build the base image. Default to `centos:stream9`.
+* `cifmw_build_containers_hotfix_images`: (List) The fully qualified name of the container image.
+* `cifmw_build_containers_hotfix_rpms_paths`: (List) The full path to a directory where RPMs exist.
+* `cifmw_build_containers_hotfix_tag`: (String) The tag of the container image.
+* `cifmw_build_containers_run_hotfix`: (boolean) conditional variable for executing build_containers.
