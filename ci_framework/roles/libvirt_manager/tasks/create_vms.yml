@@ -23,6 +23,60 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
+- name: Fetch per-vm ports
+  register: _vm_ports
+  ansible.builtin.command:
+    cmd: >-
+      virsh -c qemu:///system -q
+      domiflist cifmw-{{ vm_type }}-{{ vm_id }}
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: Format port list to something more consumable
+  vars:
+    _fixed_net_name: >-
+      {{
+        _fixed_ip_nets | dict2items | map(attribute='key')
+      }}
+    _vals: >-
+      {{
+        item.stdout_lines |
+        product([' ' ~ vm_type ~ '-' ~ index]) |
+        map('join') |
+        map('split')
+      }}
+    _macs: >-
+      {{
+        _vals |
+        map('zip', ['nic', 'type', 'network', 'driver', 'mac', 'host' ]) |
+        map('map', 'reverse') |
+        map('community.general.dict')
+      }}
+  ansible.builtin.set_fact:
+    macs: >-
+      {{
+        (macs | default([]) + _macs) |
+        selectattr('network', 'in', _fixed_net_name)
+      }}
+  loop: "{{ _vm_ports.results }}"
+  loop_control:
+    index_var: index
+
+- name: Fix IPs for selected networks and VMs
+  vars:
+    vm_name: "cifmw-{{ mac_node.host }}"
+    network:
+      cidr: "{{ _fixed_ip_nets[mac_node.network]['range'] }}"
+      name: "{{ mac_node.network }}"
+    mac_address: "{{ mac_node.mac }}"
+  ansible.builtin.include_tasks: reserve_ip.yml
+  loop: "{{ macs }}"
+  loop_control:
+    loop_var: mac_node
+    label: "{{ mac_node.host }}"
+
 - name: "Start VMs for type {{ vm_type }}"
   community.libvirt.virt:
     state: running
