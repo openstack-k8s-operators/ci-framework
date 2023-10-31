@@ -256,3 +256,53 @@
   loop: "{{ _l2advertisements }}"
   loop_control:
     label: "{{ item.metadata.name }}"
+
+- name: Perform kustomizations to the ipaddresspools
+  ci_kustomize:
+    target_path: "{{ cifmw_deploy_va_tmp_architecture_stage3_dir }}"
+    output_path: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage3-out-ipaddresspools.yaml"
+    sort_ascending: false
+    include_regexes:
+      - "_ipaddresspools"
+  register: _ci_kustomize_ipaddresspools_out
+
+- name: Set the dedicated subnet in each ipaddresspool
+  vars:
+    _ipaddresspools_addresses: "{{ item.spec.addresses | first | default('') }}"
+    _ipaddresspools_result: >-
+      {{
+        item |
+        combine(
+          {
+            'spec': {
+              'addresses': [ _ipaddresspools_addresses ]
+            }
+          }, recursive=true
+        )
+      }}
+  ansible.builtin.set_fact:
+    _ipaddresspools: >-
+      {{
+        _ipaddresspools |
+        default([]) +
+        [_ipaddresspools_result]
+      }}
+    cacheable: true
+  loop: "{{ _ci_kustomize_ipaddresspools_out.result }}"
+
+- name: Save ipaddresspools to files
+  register: _ipaddresspools_save_out
+  ansible.builtin.copy:
+    content: "{{ item | to_nice_yaml }}"
+    dest: "{{ cifmw_deploy_va_tmp_manifests_dir }}/stage3-out-ipaddresspools-{{ item.metadata.name }}.yaml"
+  loop: "{{ _ipaddresspools }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Create ipaddresspools in OCP
+  when: _ipaddresspools_save_out.changed
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_deploy_va_tmp_manifests_dir }}/stage3-out-ipaddresspools-{{ item.metadata.name }}.yaml"
+  loop: "{{ _ipaddresspools }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
