@@ -10,6 +10,7 @@ All the documentation can be checked on [ReadTheDocs](https://ci-framework.readt
 * Font: [borg9](https://www.1001freefonts.com/borg-9.font) - [Creative Commons Zero license](https://creativecommons.org/publicdomain/zero/1.0/)
 * Logo: [Cloud Acceleration SVG Vector](https://www.svgrepo.com/svg/530455/cloud-acceleration) - [Creative Commons Zero license](https://creativecommons.org/publicdomain/zero/1.0/)
 
+
 ### Code
 Copyright 2023.
 
