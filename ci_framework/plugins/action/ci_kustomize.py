@@ -367,9 +367,13 @@ class CifmwKustomizeWrapper:
         self.__target_workspace_file = self.__workspace_dir.joinpath(
             self.__CI_KUSTOMIZE_DEFAULT_RESULT_FILE_NAME
         )
-        self.__kustomization_scan_paths = [target_base_path] + [
+        self.__kustomization_scan_paths = [
             pathlib.Path(path) for path in (kustomizations_paths or [])
         ]
+        self.__run_kustomize_in_target_directory_first = run_kustomize_in_target_directory_first
+        if not self.__run_kustomize_in_target_directory_first:
+            self.__kustomization_scan_paths.insert(0, target_base_path)
+
         self.__kustomization_files_goes_first = kustomization_files_goes_first
         self.__preserve_workspace = preserve_workspace
         self.__sort_ascending = sort_ascending
