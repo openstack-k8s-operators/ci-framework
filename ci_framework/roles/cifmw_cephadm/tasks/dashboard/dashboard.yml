@@ -1,0 +1,112 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get ceph_cli
+  ansible.builtin.include_tasks: ceph_cli.yml
+  vars:
+    mount_spec: true
+    sensitive_data: true
+    mount_certs: "{{ (cifmw_cephadm_dashboard_protocol == 'https' and cifmw_cephadm_dashboard_crt | length > 0 and cifmw_cephadm_dashboard_key | length > 0) | bool }}"
+
+- name: Configure the Ceph Dashboard port
+  become: true
+  block:
+    - name: "set the dashboard port ({{ cifmw_cephadm_dashboard_port }})"
+      command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/server_port {{ cifmw_cephadm_dashboard_port }}"
+      changed_when: false
+    - name: "set the dashboard SSL port ({{ cifmw_cephadm_dashboard_port }})"
+      command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/ssl_server_port {{ cifmw_cephadm_dashboard_port }}"
+      run_once: true
+
+- name: disable SSL for dashboard
+  become: true
+  command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/ssl false"
+  when: cifmw_cephadm_dashboard_protocol == "http"
+
+- name: Configure SSL key/cert for the Ceph Dashboard if provided
+  become: true
+  block:
+    - name: enable SSL for dashboard
+      command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/ssl true"
+      run_once: true
+
+    - name: import dashboard certificate file
+      command: "{{ cifmw_cephadm_ceph_cli }} config-key set mgr/dashboard/crt -i {{ cifmw_cephadm_dashboard_crt }}"
+      changed_when: false
+
+    - name: import dashboard certificate key
+      command: "{{ cifmw_cephadm_ceph_cli }} config-key set mgr/dashboard/key -i {{ cifmw_cephadm_dashboard_key }}"
+      changed_when: false
+  when: cifmw_cephadm_dashboard_protocol == "https" and
+        cifmw_cephadm_dashboard_crt | length > 0 and
+        cifmw_cephadm_dashboard_key | length > 0
+
+- include_tasks: configure_dashboard_backends.yml
+  with_items: "{{ groups['edpm'] }}"
+  vars:
+    dashboard_backend: '{{ item }}'
+
+- name: Restart the Ceph dashboard
+  become: true
+  block:
+    - name: disable mgr dashboard module (restart)
+      command: "{{ cifmw_cephadm_ceph_cli }} mgr module disable dashboard"
+    - name: enable mgr dashboard module (restart)
+      command: "{{ cifmw_cephadm_ceph_cli }} mgr module enable dashboard"
+
+      #ToDo : skipped dashboard admin user creation task for CI, we shall add it if needed. 
+- name: Configure Monitoring Stack
+  become: true
+  block:
+    - name: get Grafana instance(s) addresses
+      set_fact:
+        grafana_server_addrs: "{{ (grafana_server_addrs | default([])) | union(hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network)) }}"
+      loop: "{{ groups['edpm'] | list }}"
+    - name: set grafana api user
+      command: "{{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-username {{ cifmw_cephadm_grafana_admin_user }}"
+    - name: set grafana api password
+      command: "{{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-password -i -"
+      args:
+        stdin: "{{ cifmw_cephadm_grafana_admin_password }}"
+        stdin_add_newline: no
+    - name: disable ssl verification for grafana
+      command: "{{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-ssl-verify False"
+      changed_when: false
+      when:
+        - cifmw_cephadm_dashboard_protocol == "https"
+    - name: set alertmanager host
+      command: |
+        {{ cifmw_cephadm_ceph_cli }} dashboard set-alertmanager-api-host http://{{ grafana_server_addrs | first }}:9093
+    - name: set prometheus host
+      command: |
+        {{ cifmw_cephadm_ceph_cli }} dashboard set-prometheus-api-host \
+        http://{{ grafana_server_addrs | first }}:{{ cifmw_cephadm_prometheus_port }}
+    - name: config grafana api url vip
+      command: |
+        {{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-url \
+        {{ cifmw_cephadm_dashboard_protocol }}://{{ cifmw_cephadm_dashboard_frontend_vip }}:{{ cifmw_cephadm_grafana_port }}
+      changed_when: false
+      when:
+        - cifmw_cephadm_dashboard_frontend_vip is defined
+        - cifmw_cephadm_dashboard_frontend_vip | length > 0
+
+- name: Restart the Ceph dashboard
+  become: true
+  block:
+    - name: disable mgr dashboard module (restart)
+      command: "{{ cifmw_cephadm_ceph_cli }} mgr module disable dashboard"
+    - name: enable mgr dashboard module (restart)
+      command: "{{ cifmw_cephadm_ceph_cli }} mgr module enable dashboard"
