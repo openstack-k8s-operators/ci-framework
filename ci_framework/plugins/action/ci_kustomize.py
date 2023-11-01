@@ -75,6 +75,13 @@ options:
       the ones from filesystem.
     type: bool
     default: true
+  run_kustomize_in_target_directory_first:
+    description:
+    - If true, execute kustomize within the I(target_path) directory first. 
+    Any subsequent kustomizations will be applied on the result within the
+    scope of the workspace.
+    type: bool
+    default: false
   sort_ascending:
     description:
     - If true, file Kustomizations are ordered by ascending order of the file
@@ -331,6 +338,7 @@ class CifmwKustomizeWrapper:
         kustomizations_paths: typing.List[typing.Union[str, os.PathLike]] = None,
         output_path: typing.Union[str, os.PathLike] = None,
         kustomization_files_goes_first: bool = True,
+        run_kustomize_in_target_directory_first: bool = True,
         tools_search_path: str = None,
         preserve_workspace: bool = False,
         sort_ascending: bool = True,
@@ -552,20 +560,14 @@ class CifmwKustomizeWrapper:
 
         raise CifmwKustomizeException("Cannot find oc nor kustomize in PATH")
 
-    def __apply_kustomization(
-        self, kustomization_content: typing.Dict[str, typing.Any], index: int
+    def __run_kustomize_subprocess(
+        self, current_working_dir: typing.Union[str, os.PathLike]
     ):
-        kustomization_path = self.__workspace_dir.joinpath("kustomization.yaml")
-        with kustomization_path.open(
-            "w", encoding=self.__CI_KUSTOMIZE_ENCODING
-        ) as kustomization_file:
-            yaml.dump(kustomization_content, kustomization_file)
-
         run_result = subprocess.run(
             self.__kustomize_cmd,
             encoding="utf-8",
             capture_output=True,
-            cwd=self.__workspace_dir,
+            cwd=current_working_dir,
             check=False,
         )
         if run_result.returncode:
@@ -577,6 +579,17 @@ class CifmwKustomizeWrapper:
                 kustomization_content,
                 kustomization_path,
             )
+
+    def __apply_kustomization(
+        self, kustomization_content: typing.Dict[str, typing.Any], index: int
+    ):
+        kustomization_path = self.__workspace_dir.joinpath("kustomization.yaml")
+        with kustomization_path.open(
+            "w", encoding=self.__CI_KUSTOMIZE_ENCODING
+        ) as kustomization_file:
+            yaml.dump(kustomization_content, kustomization_file)
+
+        self.__run_kustomize_subprocess(self.__workspace_dir)
 
         kustomization_path.rename(kustomization_path.with_suffix(f".{index}.yml"))
 
@@ -746,7 +759,10 @@ class CifmwKustomizeWrapper:
             sha1_file(self.output_path) if self.output_path.exists() else None
         )
 
-        self.__copy_input_to_workspace()
+        if self.__run_kustomize_in_target_directory_first:
+            self.__run_kustomize_subprocess(self.target_path)
+        else:
+            self.__copy_input_to_workspace()
 
         kustomizations, discovered_files = self.__create_kustomization_list()
         for index, kustomization in enumerate(kustomizations):
@@ -806,6 +822,9 @@ class ActionModule(ActionBase):
         kustomization_files_goes_first = self._task.args.get(
             "kustomization_files_goes_first", True
         )
+        run_kustomize_in_target_directory_first = self._task.args.get(
+            "run_kustomize_in_target_directory_first", False
+        )
         preserve_workspace = self._task.args.get("preserve_workspace", False)
         sort_ascending = self._task.args.get("sort_ascending", True)
         skip_regexes = self._task.args.get("skip_regexes", None)
@@ -820,6 +839,7 @@ class ActionModule(ActionBase):
                 kustomizations_paths=kustomizations_paths,
                 output_path=output_path,
                 kustomization_files_goes_first=kustomization_files_goes_first,
+                run_kustomize_in_target_directory_first=run_kustomize_in_target_directory_first,
                 tools_search_path=final_environment.get("PATH", None),
                 preserve_workspace=preserve_workspace,
                 sort_ascending=sort_ascending,
