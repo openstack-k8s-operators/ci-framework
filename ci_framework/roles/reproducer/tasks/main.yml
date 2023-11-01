@@ -36,6 +36,35 @@
     - cifmw_job_uri is defined
   ansible.builtin.import_tasks: ci_data.yml
 
+- name: Deploy CRC if needed
+  when:
+    - cifmw_libvirt_manager_configuration.vms.crc is defined
+  block:
+    - name: Check for CRC availability in known path
+      register: _crc_available
+      vars:
+        _img: >-
+          {{
+            (cifmw_libvirt_manager_configuration.vms.crc.image_local_dir,
+             cifmw_libvirt_manager_configuration.vms.crc.disk_file_name) |
+             path_join
+          }}
+      ansible.builtin.stat:
+        path: "{{ _img }}"
+
+    - name: Prepare CRC for later usage
+      when:
+        - not _crc_available.stat.exists
+      block:
+        - name: Deploy CRC
+          ansible.builtin.import_role:
+            name: rhol_crc
+
+        - name: Ensure CRC is stopped
+          ansible.builtin.import_role:
+            name: rhol_crc
+            tasks_from: undefine.yml
+
 - name: Deploy layout on target host
   tags:
     - bootstrap
@@ -93,7 +122,9 @@
         path: "/var/srv/dnsmasq.conf"
         block: |-
           {% if cifmw_reproducer_dns_servers %}
-          {% for dns_server in cifmw_reproducer_dns_servers %}server={{ dns_server }}{% endfor %}
+          {%   for dns_server in cifmw_reproducer_dns_servers %}
+          server={{ dns_server }}
+          {%   endfor %}
           {% endif %}
 
     - name: Configure local DNS for CRC pod

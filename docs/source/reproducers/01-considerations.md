@@ -10,32 +10,9 @@ configuration, but it **wasn't tested** (yet).
 
 ## Prerequisites
 ### CRC
-The CRC VM has to be properly set up prior to running the reproducer play. You
-may get to that leveraging either the rhol_crc role from the CI Framework, or
-manually by calling `crc setup && crc start -p pull-secret`.
-
-Note: make sure to create the CRC with proper disk size, e.g. 100G, it won't
-be resized during reproducer create.
-
-Once the CRC VM is properly started, you can then stop it and undefine it as
-follows:
-```Bash
-$ virsh -c qemu:///system destroy crc
-$ virsh -c qemu:///system undefine crc
-```
-
-Since most of the ranges are hard-coded for now, please ensure no network is
-pre-existing:
-```Bash
-$ virsh -c qemu:///system net-list --all
-$ virsh -c qemu:///system net-destroy <NETWORK>
-$ virsh -c qemu:///system net-undefine <NETWORK>
-```
-
-You then have to ensure you have the following content on the target hypervisor:
-- ~/.crc/machine/crc/crc.qcow2
-- ~/.crc/machine/crc/id_*
-- ~/.crc/machine/crc/kubeconfig
+For now, you have to ensure your `pull-secret` is present on the target host (in the case
+of a remote deployment). A proper way to copy and manage it is in the pipe, but for now,
+this is your responsibility to get it on the remote node.
 
 ### Ssh authorized_keys
 On the target hypervisor, you have to ensure the ~/.ssh/authorized_keys has all
