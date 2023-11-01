@@ -1,19 +1,6 @@
 ---
-- name: Gather ssh host keys hook
-  hosts: localhost
-  gather_facts: false
-  connection: local
-  tasks:
-    - name: Ensure we know compute host keys
-      ansible.builtin.shell:
-        cmd: |
-          ssh-keyscan {{ hostvars[item].ansible_host }} >> ~/.ssh/known_hosts
-      loop: "{{ hostvars.keys() }}"
-      loop_control:
-        label: "{{ item }}"
-
 - name: Push repositories hook
-  hosts: all
+  hosts: all,!crcs,!crc
   gather_facts: true
   tasks:
     - name: Copy repositories from controller to compute
@@ -65,6 +52,12 @@
       ansible.builtin.set_fact:
         cifmw_edpm_prepare_extra_vars:
           NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.iface }}"
+          NNCP_DNS_SERVER: >-
+            {{
+              crc_ci_bootstrap_networks_out[_crc_hostname].default.ip4 |
+              default(crc_ci_bootstrap_networks_out[_crc_hostname].default.ip) |
+              replace('/24', '')
+            }}
           NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out[_crc_hostname].default.mtu }}"
 
     - name: Ensure the kustomizations dirs exists
@@ -109,7 +102,12 @@
             dns_servers: "{{ ((['192.168.122.10'] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
             edpm_install_yamls_vars:
               SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_ed25519"
-              DATAPLANE_COMPUTE_IP: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.ip | ansible.utils.ipaddr('address') }}"
+              DATAPLANE_COMPUTE_IP: >-
+                {{
+                  crc_ci_bootstrap_networks_out['compute-0'].default.ip4 |
+                  default(crc_ci_bootstrap_networks_out['compute-0'].default.ip) |
+                  ansible.utils.ipaddr('address')
+                }}
               DATAPLANE_SSHD_ALLOWED_RANGES: "['0.0.0.0/0']"
               DATAPLANE_TOTAL_NODES: "{{ computes_len | int }}"
               DATAPLANE_SINGLE_NODE: "{{ (computes_len | int > 1) | ternary('false', 'true') }}"
@@ -160,11 +158,21 @@
               {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
                   - op: replace
                     path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
-                    value: {{ crc_ci_bootstrap_networks_out[compute_node].default.ip  | ansible.utils.ipaddr('address') }}
+                    value: >-
+                      {{
+                        crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                        default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                        ansible.utils.ipaddr('address')
+                      }}
 
                   - op: replace
                     path: /spec/nodes/edpm-{{ compute_node }}/networks/0/fixedIP
-                    value: {{ crc_ci_bootstrap_networks_out[compute_node].default.ip  | ansible.utils.ipaddr('address') }}
+                    value: >-
+                      {{
+                        crc_ci_bootstrap_networks_out[compute_node].default.ip4 |
+                        default(crc_ci_bootstrap_networks_out[compute_node].default.ip) |
+                        ansible.utils.ipaddr('address')
+                      }}
               {% endfor %}
 
                   - op: add
@@ -176,42 +184,6 @@
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
-                    value: |-
-                        {%- raw %}
-                        ---
-                        {% set mtu_list = [ctlplane_mtu] %}
-                        {% for network in role_networks %}
-                        {{ mtu_list.append(lookup("vars", networks_lower[network] ~ "_mtu")) }}
-                        {%- endfor %}
-                        {% set min_viable_mtu = mtu_list | max %}
-                        network_config:
-                        - type: ovs_bridge
-                          name: {{ neutron_physical_bridge_name }}
-                          mtu: {{ min_viable_mtu }}
-                          use_dhcp: false
-                          dns_servers: {{ ctlplane_dns_nameservers }}
-                          domain: {{ dns_search_domains }}
-                          addresses:
-                          - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_subnet_cidr }}
-                          members:
-                          - type: interface
-                            name: nic2
-                            mtu: {{ min_viable_mtu }}
-                            # force the MAC address of the bridge to this interface
-                            primary: true
-                        {% for network in role_networks %}
-                          - type: vlan
-                            mtu: 1496
-                            vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
-                            addresses:
-                            - ip_netmask:
-                                {{ lookup("vars", networks_lower[network] ~ "_ip") }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
-                            routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
-                        {% endfor %}
-                        {% endraw %}
-
-                  - op: replace
-                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_override
                     value: |-
                         {%- raw %}
                         ---
