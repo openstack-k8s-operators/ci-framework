@@ -145,7 +145,7 @@ class ActionModule(ActionBase):
 
         logs_dir = output_dir.parent.joinpath("logs")
         if not logs_dir.is_dir():
-            raise AnsibleActionFail(f"logs dir, {logs_dir} doesn't exist")
+            logs_dir.mkdir()
 
         # Remove cmd if not passed, we are going to use _raw_params
         # to pass the cmd we create here
