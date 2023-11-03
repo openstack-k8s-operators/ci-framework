@@ -15,46 +15,62 @@
     name: "{{ cifmw_ci_setup_packages }}"
     state: latest
 
+- name: Gather version of openshift client
+  register: _oc_version
+  environment: >-
+    {{
+      {'PATH': cifmw_path}
+      if cifmw_path is defined else
+      {}
+    }}
+  ansible.builtin.command:
+    cmd: "oc version --client -o yaml"
+  changed_when: false
+  failed_when: false
+
 - name: Install openshift client
   tags:
     - bootstrap
     - packages
+  when: >-
+    _oc_version.rc != 0 or
+    (
+      ((_oc_version.stdout | from_yaml).releaseClientVersion | split('.') | first | int) >=
+      cifmw_ci_setup_openshift_minimum_version
+    )
   block:
-    - name: Gather version of openshift client if it exists
-      register: oc_version
-      environment:
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: "oc version -o yaml"
-
-    - name: Check if version of openshift client is supported
-      vars:
-        oc_version_data: "{{ oc_version.stdout | from_yaml }}"
-        oc_major_version: "{{ oc_version_data.releaseClientVersion | split('.') | first }}"
-      ansible.builtin.assert:
-        that:
-          - oc_major_version | int >= cifmw_ci_setup_openshift_minimum_version
-  rescue:
     - name: Ensure openshift client install path is present
       ansible.builtin.file:
-        path: "{{ cifmw_ci_setup_openshift_client_install_path }}"
+        path: "{{ cifmw_ci_setup_oc_install_path }}"
         state: directory
         mode: "0755"
 
     - name: Install openshift client
       ansible.builtin.unarchive:
         src: "{{ cifmw_ci_setup_openshift_client_download_uri }}/{{ cifmw_ci_setup_openshift_client_version }}/openshift-client-linux.tar.gz"
-        dest: "{{ cifmw_ci_setup_openshift_client_install_path }}"
+        dest: "{{ cifmw_ci_setup_oc_install_path }}"
         remote_src: true
         mode: "0755"
-        creates: "{{ cifmw_ci_setup_openshift_client_install_path }}/oc"
+        creates: "{{ cifmw_ci_setup_oc_install_path }}/oc"
+
+- name: Add the OC path to cifmw_path if needed
+  vars:
+    _cifmw_paths_list: >-
+      {{
+        cifmw_path | split(':')
+        if cifmw_path is defined else []
+      }}
+  when: cifmw_ci_setup_oc_install_path not in _cifmw_paths_list
+  ansible.builtin.set_fact:
+    cifmw_path: "{{ cifmw_ci_setup_oc_install_path }}:{{ ansible_env.PATH }}"
+    cacheable: true
 
 - name: Inject oc completion in local profile
   block:
     - name: Create completion file
       ansible.builtin.shell:  # noqa: risky-shell-pipe
         cmd: >-
-          {{ cifmw_ci_setup_openshift_client_install_path }} completion bash |
+          {{ cifmw_ci_setup_oc_install_path }}/oc completion bash |
           tee -a ~/.oc_completion
         creates: "{{ ansible_user_dir }}/.oc_completion"
 
