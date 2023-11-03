@@ -1,0 +1,58 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+# to-do: fix the exception rule
+- name: Gather the list of linux bridges configured in nmstate
+  when:
+    - cifmw_ci_nmstate_instance_config is defined
+    - "inventory_hostname in cifmw_ci_nmstate_instance_config"
+  block:
+    - name: Collect the interfaces of type bridge  # noqa: jinja[invalid]
+      vars:
+        _query: "[?type=='linux-bridge'].name"
+      ansible.builtin.set_fact:
+        _bridges: >-
+          {{
+            cifmw_ci_nmstate_instance_config[inventory_hostname]['interfaces'] |
+            community.general.json_query(_query)
+          }}
+    - name: Add the details to extra networks
+      vars:
+        _nets_data:
+          name: "{{ item }}"
+          mtu: "{{ ansible_facts[item]['mtu'] }}"
+          cidr: >-
+            {{
+              ansible_facts[item]['ipv4']['network'] +
+              '/' +
+              ansible_facts[item]['ipv4']['network']
+            }}
+          static_ip: false
+      when:
+        - _bridges is defined
+        - "not item.endswith('bm')"
+        - "not item.endswith('pr')"
+      ansible.builtin.set_fact:
+        cifmw_devscripts_extra_networks: >-
+          {{
+            (
+              cifmw_devscripts_extra_networks |
+              default([])
+            ) + [_nets_data]
+          }}
+        cacheable: true
+      loop: "{{ _bridges }}"
