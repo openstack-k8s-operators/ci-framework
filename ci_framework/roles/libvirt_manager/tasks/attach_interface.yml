@@ -22,7 +22,7 @@
 #     mtu           MTU applied on the interface.
 #     static_ip     boolean if static address is required.
 
-- name: Check ports attached to the domain
+- name: "Check ports attached to the domain {{ vm_name }}"
   block:
     - name: Dump domain xml
       register: _domain_xml
@@ -48,17 +48,19 @@
   when:
     - _attached_nets | length == 0
   block:
-    - name: Generate a random MAC address
+    - name: "Generate a random MAC address for {{ vm_name }}"
       ansible.builtin.set_fact:
         _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
 
-    - name: Reserve an IP address
+    - name: "Reserve an IP address for {{ vm_name }}"
       when: network.static_ip | bool
       vars:
         mac_address: "{{ _lm_mac_address }}"
       ansible.builtin.import_tasks: reserve_ip.yml
 
-    - name: Attach interface to the virtual machine.
+    - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
+      when:
+        - _lm_mac_address is defined
       vars:
         _net_name: >
           {{
@@ -69,7 +71,7 @@
         cmd: >-
           virsh -c qemu:///system
           attach-interface "{{ vm_name }}"
-          --source "{{ _net_name }}"
+          --source "cifmw-{{ _net_name }}"
           --type bridge
           --mac "{{ _lm_mac_address }}"
           --model virtio
