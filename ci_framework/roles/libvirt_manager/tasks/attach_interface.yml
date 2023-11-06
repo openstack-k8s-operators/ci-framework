@@ -33,13 +33,17 @@
     - name: Extract networks from XML
       register: _extracted_xml
       community.general.xml:
-        xmlstring: "{{ _domain_xml.get_xml}}"
+        xmlstring: "{{ _domain_xml.get_xml }}"
         xpath: "/domain/devices/interface/source"
         content: "attribute"
 
 - name: Attach new port if needed
   vars:
-    _net_name: "cifmw-{{ network.name}}"
+    _net_name: >-
+      {{
+        (cifmw_libvirt_manager_net_prefix_add | bool) |
+        ternary('cifmw-' + network.name, network.name)
+      }}
     _attached_nets: >-
       {{
         _extracted_xml.matches |
@@ -59,19 +63,12 @@
       ansible.builtin.import_tasks: reserve_ip.yml
 
     - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
-      when:
-        - _lm_mac_address is defined
-      vars:
-        _net_name: >
-          {{
-            (network.static_ip | bool) |
-            ternary(network.name, 'cifmw-net_' + network.name)
-          }}
+      when: _lm_mac_address is defined
       ansible.builtin.command:
         cmd: >-
           virsh -c qemu:///system
           attach-interface "{{ vm_name }}"
-          --source "cifmw-{{ _net_name }}"
+          --source "{{ _net_name }}"
           --type bridge
           --mac "{{ _lm_mac_address }}"
           --model virtio
