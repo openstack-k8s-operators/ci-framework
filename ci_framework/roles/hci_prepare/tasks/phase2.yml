@@ -60,6 +60,23 @@
         output_dir: "{{ cifmw_hci_prepare_basedir }}/artifacts"
         script: "oc apply -f {{ cifmw_hci_prepare_basedir }}/artifacts/dpservice-nova-custom-ceph.yml"
 
+    - name: Create Nova SSH Migration Key
+      ci_script:
+        output_dir: "{{ cifmw_hci_prepare_basedir }}/artifacts"
+        script: |
+          function create_migration_key {
+            pushd "$(mktemp -d)"
+            ssh-keygen -f ./id -t ed25519 -N ''
+            oc create secret generic nova-migration-ssh-key \
+              -n openstack \
+              --from-file=ssh-privatekey=id \
+              --from-file=ssh-publickey=id.pub \
+              --type kubernetes.io/ssh-auth
+            rm id*
+            popd
+          }
+          oc get secret nova-migration-ssh-key -n openstack || create_migration_key
+
 - name: Create configuration to finish HCI deployment
   ansible.builtin.copy:
     dest: "{{ cifmw_hci_prepare_dataplane_dir }}/87-hci-post-kustomization.yaml"
