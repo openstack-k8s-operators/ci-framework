@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_env_op_images_dir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+    cifmw_env_op_images_file: operator_images.yaml
+    cifmw_env_op_images_dryrun: true
+    cifmw_install_yamls_environment:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig  }}"
+      BMO_SETUP: false
+      NETWORK_ISOLATION: false
+    cifmw_install_yamls_defaults:
+      OPERATOR_NAMESPACE: openstack-operators
+
+  pre_tasks:
+    - name: Make download_tools
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_download_tools'
+
+    - name: Wait for openstack-operator to be deployed
+      vars:
+        make_openstack_wait_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path}) }}"
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_openstack_wait'
+
+  tasks:
+    - name: Gather operator images from setup
+      ansible.builtin.include_role:
+        name: env_op_images
+
+    - name: Read YAML file
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_env_op_images_dir }}/artifacts/{{ cifmw_env_op_images_file }}"
+
+    - name: Verify entries under cifmw_csv_images key
+      ansible.builtin.assert:
+        that:
+          - "cifmw_csv_images is defined"
+          - "cifmw_csv_images | length > 0"
+        fail_msg: "cifmw_csv_images are missing."
+
+    - name: Verify entries under cifmw_openstack_operator_index_image key
+      ansible.builtin.assert:
+        that:
+          - "cifmw_openstack_operator_index_image is defined"
+          - "cifmw_openstack_operator_index_image | length > 0"
+        fail_msg: "cifmw_openstack_operator_index_image key is missing or empty."

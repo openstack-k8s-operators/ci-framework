@@ -1,0 +1,102 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directory is present
+  ansible.builtin.file:
+    path: "{{ cifmw_env_op_images_dir }}/{{ item }}"
+    state: directory
+  loop:
+    - artifacts
+    - logs
+
+- name: Check if OpenStackControlPlane is setup
+  when:
+    - cifmw_openshift_kubeconfig is defined
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: oc get OpenStackControlPlane -o=jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}'
+  register: openstack_installed
+  failed_when: false
+
+- name: Get openstack operator images
+  when:
+    - ( openstack_installed.stdout is defined and
+        openstack_installed.rc == 0 and
+        openstack_installed.stdout == "True"
+      ) or
+      cifmw_env_op_images_dryrun
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  block:
+    - name: Get images from the csv
+      ansible.builtin.shell: |
+        csv_name=$(oc get csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} -l operators.coreos.com/openstack-operator.openstack-operators -o=jsonpath='{.items[*].metadata.name}')
+        oc get csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} ${csv_name} -o=jsonpath='{.spec.install.spec.deployments[*].spec.template.spec.containers[?(@.name=="manager")].env}'
+      register: csv_images
+
+    - name: Extract env variable name and images
+      ansible.builtin.set_fact:
+        cifmw_openstack_service_images_content: "{{ cifmw_openstack_service_images_content | default({}) | combine({(item | from_json).name: (item | from_json).value}) }}"
+      loop: "{{ csv_images.stdout| regex_findall('\\{[^}]+\\}') }}"
+
+    - name: Get all the pods in openstack-operator namespace
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}"
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        field_selectors:
+          - status.phase=Running
+      register: pod_list
+
+    - name: Retrieve openstack-operator-index pod
+      vars:
+        selected_pod: "{{ pod_list.resources| selectattr('metadata.generateName', 'equalto', 'openstack-operator-index-') | list | first }}"
+      ansible.builtin.set_fact:
+        cifmw_install_yamls_vars_content:
+          OPENSTACK_IMG: "{{ selected_pod.status.containerStatuses[0].imageID }}"
+
+    - name: Get operator images and pods
+      when: not cifmw_env_op_images_dryrun
+      vars:
+        selected_pod: "{{ pod_list.resources | selectattr('metadata.generateName', 'contains', 'rabbitmq-cluster-operator-') | list | first }}"
+      ansible.builtin.set_fact:
+        cifmw_openstack_operator_images_content:
+          RABBITMQ_OP_IMG: "{{ selected_pod.status.containerStatuses[0].imageID }}"
+        selected_pods: "{{ pod_list.resources |
+                           rejectattr('metadata.generateName', 'contains', 'openstack-operator-index-') |
+                           rejectattr('metadata.generateName', 'contains', 'rabbitmq-cluster-operator-')
+                        }}"
+
+    - name: Add operator images to the dictionary
+      when: not cifmw_env_op_images_dryrun
+      ansible.builtin.set_fact:
+        cifmw_openstack_operator_images_content: "{{ cifmw_openstack_operator_images_content | combine({ item.metadata.labels['openstack.org/operator-name'] | upper ~ '_OP_IMG': item.status.containerStatuses[1].imageID}) }}"
+      loop: "{{ selected_pods }}"
+
+    - name: Write images to file
+      vars:
+        _content:
+          cifmw_openstack_operator_index_image: "{{ cifmw_install_yamls_vars_content | default({}) }}"
+          cifmw_operator_images: "{{ cifmw_openstack_operator_images_content | default({}) }}"
+          cifmw_csv_images: "{{ cifmw_openstack_service_images_content | default({}) }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_env_op_images_dir }}/artifacts/{{ cifmw_env_op_images_file }}"
+        content: "{{ _content | to_nice_yaml }}"
