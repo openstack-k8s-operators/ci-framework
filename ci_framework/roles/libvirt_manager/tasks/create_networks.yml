@@ -15,39 +15,53 @@
 # under the License.
 
 
-- name: Ensure networks are defined
-  community.libvirt.virt_net:
-    command: define
-    name: "cifmw-{{ item.key }}"
-    xml: "{{ item.value | replace(item.key, 'cifmw-' ~ item.key) }}"
-    uri: "qemu:///system"
+- name: Define the localized variables for performing the tasks here.
+  vars:
+    data:
+      name: >-
+        {{
+          (cifmw_libvirt_manager_net_prefix_add | bool) |
+          ternary('cifmw-' + item.key, item.key)
+        }}
+      xml: >-
+        {{
+          (cifmw_libvirt_manager_net_prefix_add | bool) |
+          ternary(
+            item.value | replace(item.key, 'cifmw-' ~ item.key),
+            item.value
+          )
+        }}
+  ansible.builtin.set_fact:
+    networks: "{{ (networks | default([])) + [data] }}"
   loop: "{{ _layout.networks | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
+
+- name: Ensure networks are defined
+  community.libvirt.virt_net:
+    command: define
+    name: "{{ item.name }}"
+    xml: "{{ item.xml }}"
+    uri: "qemu:///system"
+  loop: "{{ networks }}"
 
 - name: Ensure networks are created/started
   community.libvirt.virt_net:
     command: create
-    name: "cifmw-{{ item.key }}"
+    name: "{{ item.name }}"
     uri: "qemu:///system"
-  loop: "{{ _layout.networks | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
+  loop: "{{ networks }}"
 
 - name: Ensure networks are active
   community.libvirt.virt_net:
     state: active
-    name: "cifmw-{{ item.key }}"
+    name: "{{ item.name }}"
     uri: "qemu:///system"
-  loop: "{{ _layout.networks | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
+  loop: "{{ networks }}"
 
 - name: Ensure networks enabled to autostart
   community.libvirt.virt_net:
     autostart: true
-    name: "cifmw-{{ item.key }}"
+    name: "{{ item.name }}"
     uri: "qemu:///system"
-  loop: "{{ _layout.networks | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
+  loop: "{{ networks }}"

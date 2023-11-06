@@ -14,6 +14,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+
 - name: Gather the configurations to be passed to dev-scripts.
   ansible.builtin.set_fact:
     cifmw_devscripts_config: >-
@@ -23,7 +24,7 @@
       }}
     cacheable: true
 
-- name: Check for Devscripts repo directory
+- name: Gather the dev-scripts repo directory information.
   ansible.builtin.stat:
     path: "{{ cifmw_devscripts_repo_dir }}"
   register: devscript_repodir
@@ -97,7 +98,7 @@
         state: absent
       loop: "{{ cifmw_devscripts_extra_networks }}"
 
-- name: Configure firewall settings for all extra networks
+- name: Clear firewall settings for all extra networks
   become: true
   when: cifmw_devscripts_extra_networks is defined
   ansible.posix.firewalld:
@@ -106,4 +107,12 @@
     state: "disabled"
     permanent: true
     immediate: true
+  loop: "{{ cifmw_devscripts_extra_networks }}"
+
+- name: Remove all the virtual networks created by this role.
+  when: cifmw_devscripts_extra_networks is defined
+  community.libvirt.virt_net:
+    name: "{{ item }}"
+    state: absent
+    uri: "qemu:///system"
   loop: "{{ cifmw_devscripts_extra_networks }}"
