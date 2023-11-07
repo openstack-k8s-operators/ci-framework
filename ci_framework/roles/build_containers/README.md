@@ -34,3 +34,4 @@ become - Required to install and execute tcib
 * `cifmw_build_containers_hotfix_rpms_paths`: (List) The full path to a directory where RPMs exist.
 * `cifmw_build_containers_hotfix_tag`: (String) The tag of the container image.
 * `cifmw_build_containers_run_hotfix`: (boolean) conditional variable for executing build_containers.
+* `cifmw_build_containers_install_from_source`: (boolean) Install tcib from RPM.
