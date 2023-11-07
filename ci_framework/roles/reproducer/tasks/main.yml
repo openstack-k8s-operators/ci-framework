@@ -65,161 +65,68 @@
             name: rhol_crc
             tasks_from: undefine.yml
 
-- name: Deploy layout on target host
+- name: Consile libvirt_manager
+  when:
+    - cifmw_use_libvirt | default(false) | bool
   tags:
     - bootstrap
     - bootstrap_layout
-  ansible.builtin.import_role:
-    name: libvirt_manager
-    tasks_from: deploy_layout
+  ansible.builtin.import_tasks: libvirt_layout.yml
 
-- name: Push generated inventory from hypervisor
+- name: Run CI job if instructed
+  when:
+    - cifmw_job_uri is defined
   tags:
     - bootstrap
-    - bootstrap_layout
-  ansible.builtin.command:  # noqa: command-instead-of-module
-    cmd: >-
-      rsync -r {{ cifmw_reproducer_basedir }}/reproducer-inventory/
-      zuul@controller-0:reproducer-inventory
-
-- name: Slurp ssh key for CRC access
-  tags:
-    - bootstrap
-    - bootstrap_layout
-  register: crc_priv_key
-  ansible.builtin.slurp:
-    path: "{{ ansible_user_dir}}/.crc/machines/crc/id_ecdsa"
-
-- name: Configure CRC services
-  tags:
-    - bootstrap
-    - bootstrap_layout
-  delegate_to: crc-0
-  remote_user: root
-  block:
-    - name: Ensure crc-0 knows about its second NIC
-      when:
-        - cifmw_job_uri is undefined
-      community.general.nmcli:
-        autoconnect: true
-        conn_name: private_net
-        dns4: 127.0.0.1
-        ifname: enp2s0
-        type: ethernet
-        ip4: "{{ cifmw_reproducer_crc_ip4 }}/24"
-        gw4: "{{ cifmw_reproducer_crc_gw4 }}"
-        state: present
-
-    - name: Ensure crc-0 does not get "public" DNS
-      community.general.nmcli:
-        autoconnect: true
-        conn_name: "Wired connection 1"
-        dns4_ignore_auto: true
-        state: present
-
-    - name: Configure dns forwarders
-      ansible.builtin.blockinfile:
-        path: "/var/srv/dnsmasq.conf"
-        block: |-
-          {% if cifmw_reproducer_dns_servers %}
-          {%   for dns_server in cifmw_reproducer_dns_servers %}
-          server={{ dns_server }}
-          {%   endfor %}
-          {% endif %}
-
-    - name: Configure local DNS for CRC pod
-      register: last_modification
-      ansible.builtin.replace:
-        path: "/var/srv/dnsmasq.conf"
-        regexp: "192.168.130.11"
-        replace: "{{ cifmw_reproducer_crc_ip4 }}"
-
-    - name: Reboot CRC node
-      when:
-        - last_modification is changed
-        - cifmw_job_uri is undefined
-      ansible.builtin.reboot:
-
-- name: Get kubeconfig file from crc directory
-  tags:
-    - bootstrap
-    - bootstrap_layout
-  register: kubeconfig
-  ansible.builtin.slurp:
-    path: "{{ cifmw_reproducer_kubecfg }}"
-
-- name: Configure controller-0
-  tags:
-    - bootstrap
-    - bootstrap_layout
   delegate_to: controller-0
   remote_user: root
   block:
-    - name: Ensure controller-0 has an IP in private network
+    - name: Push zuul-params.yml to expected location
+      tags:
+        - bootstrap
+      block:
+        - name: Get content of zuul-params.yml
+          register: zuul_params
+          ansible.builtin.slurp:
+            path: "{{ job_id }}-params/zuul-params.yml"
+
+        - name: Push extracted content
+          vars:
+            zuul_params_filtered: >-
+              {{
+                (zuul_params['content'] | b64decode | from_yaml) |
+                dict2items |
+                rejectattr('key', 'equalto', 'cifmw_operator_build_output') |
+                rejectattr('key', 'equalto', 'content_provider_registry_ip') |
+                items2dict
+              }}
+          ansible.builtin.copy:
+            dest: "ci-framework-data/artifacts/parameters/zuul-params.yml"
+            content: "{{ zuul_params_filtered | to_nice_yaml }}"
+
+    - name: Prepare environment for content-provider
       when:
-        - cifmw_job_uri is undefined
-      community.general.nmcli:
-        autoconnect: true
-        conn_name: private_net
-        ifname: "{{ cifmw_reproducer_private_nic }}"
-        type: ethernet
-        ip4: "{{ cifmw_reproducer_ctl_ip4 }}/24"
-        gw4: "{{ cifmw_reproducer_ctl_gw4 }}"
-        state: present
+        - cifmw_job_uri is defined
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-content-provider-bootstrap.log"
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+          ci_framework/playbooks/01-bootstrap.yml
 
-    - name: Create kube directory
-      ansible.builtin.file:
-        path: "/home/zuul/.kube"
-        state: directory
-        owner: zuul
-        group: zuul
-        mode: "0755"
-
-    - name: Inject kubeconfig content
-      ansible.builtin.copy:
-        dest: "/home/zuul/.kube/config"
-        content: "{{ kubeconfig.content | b64decode }}"
-        owner: zuul
-        group: zuul
-        mode: "0644"
-
-    - name: Inject CRC ssh key
-      ansible.builtin.copy:
-        dest: "/home/zuul/.ssh/crc_key"
-        content: "{{ crc_priv_key['content'] | b64decode }}"
-        mode: "0400"
-        owner: zuul
-        group: zuul
-
-    - name: Inject crc related host entry
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        line: >-
-          {{ cifmw_reproducer_crc_ip4 }} api.crc.testing
-          canary-openshift-ingress-canary.apps-crc.testing
-          console-openshift-console.apps-crc.testing
-          default-route-openshift-image-registry.apps-crc.testing
-          downloads-openshift-console.apps-crc.testing
-          oauth-openshift.apps-crc.testing
-
-    - name: Install some tools
-      ansible.builtin.package:
-        name:
-          - ansible-core
-          - bash-completion
-          - git-core
-          - make
-          - podman
-          - python3-jmespath
-          - python3-netaddr
-          - python3-pip
-          - tmux
-          - vim
-          - wget
-
-    - name: Install ansible dependencies
-      ansible.builtin.pip:
-        requirements: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/ansible-requirements.txt
+    - name: Run job
+      when:
+        - cifmw_reproducer_run_job | bool
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-{{ job_id }}.log"
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+          {{ job_id }}_play.yml
 
 - name: Push local code
   tags:
