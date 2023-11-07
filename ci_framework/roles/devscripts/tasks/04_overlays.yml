@@ -1,0 +1,57 @@
+---
+- name: Get OCP related nodes
+  register: _current_vms
+  community.libvirt.virt:
+    command: "list_vms"
+    uri: "qemu:///system"
+
+- name: Stop OCP Masters
+  failed_when: false
+  vars:
+    matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
+  community.libvirt.virt:
+    command: "destroy"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+- name: Get OCP Masters XMLs
+  vars:
+    matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
+  register: _ocp_xmls
+  community.libvirt.virt:
+    command: "get_xml"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+- name: Undefine OCP Master VMs
+  vars:
+    matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
+  community.libvirt.virt:
+    command: "undefine"
+    flags:
+      - "keep_nvram"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+- name: Dump OCP Masters XMLs in file
+  ansible.builtin.copy:
+    dest: "{{ cifmw_devscripts_config.working_dir }}/{{ ocp_node.item }}.xml"
+    content: "{{ ocp_node.get_xml }}"
+  loop: "{{ _ocp_xmls.results }}"
+  loop_control:
+    loop_var: "ocp_node"
+    label: "{{ ocp_node.item }}"
+
+- name: Set matching VM name in XMLs
+  community.general.xml:
+    path: "{{ cifmw_devscripts_config.working_dir }}/{{ ocp_node.item }}.xml"
+    xpath: "/domain/name"
+    value: "cifmw-ocp-{{ ocp_id }}"
+  loop: "{{ _ocp_xmls.results }}"
+  loop_control:
+    loop_var: "ocp_node"
+    label: "{{ ocp_node.item }}"
+    index_var: "ocp_id"
