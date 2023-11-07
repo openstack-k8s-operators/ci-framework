@@ -19,6 +19,8 @@
   ansible.builtin.import_tasks: create_networks.yml
 
 - name: Ensure images are present
+  when:
+    - item.key is not match('.*(ocp|crc).*')
   vars:
     image_data: "{{ item.value }}"
   ansible.builtin.include_tasks:
@@ -31,7 +33,8 @@
   delegate_facts: true
   ansible.builtin.command:
     cmd: >-
-      ssh-keygen -t ed25519 -f {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key -P '' -q
+      ssh-keygen -t ed25519
+      -f {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key -P '' -q
     creates: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
 
 - name: Slurp public key for later use
@@ -51,16 +54,17 @@
     user: "{{ ansible_user_id }}"
     key: "{{ pub_ssh_key['content'] | b64decode }}"
 
-- name: Prepare base image with user and ssh accesses  # noqa: risky-shell-pipe
+- name: Prepare disk image with SSH and growing volume  # noqa: risky-shell-pipe
   when:
-    - item.key is not match('^crc.*$')
+    - item.key is not match('^(crc|ocp).*$')
   vars:
     _admin_user: "{{ item.value.admin_user | default('root') }}"
+    _root_part: "{{ item.value.root_part_id | default('1') }}"
   ansible.builtin.shell:
     cmd: >-
       virt-sysprep -a "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}"
       --selinux-relabel
-      --firstboot-command "growpart /dev/sda 1"
+      --firstboot-command "growpart /dev/sda {{ _root_part }}"
       --firstboot-command "xfs_growfs /"
       --root-password "password:{{ item.value.password | default('fooBar') }}"
       --ssh-inject {{ _admin_user }}:file:{{ ansible_user_dir }}/.ssh/authorized_keys
@@ -88,6 +92,7 @@
     vm_type: "{{ vm_data.key }}"
     pub_key: "{{ pub_ssh_key.content | b64decode }}"
     priv_key: "{{ priv_ssh_key.content | b64decode }}"
+    _admin_user: "{{ item.value.admin_user | default('root') }}"
   ansible.builtin.include_tasks:
     file: create_vms.yml
   loop: "{{ _layout.vms | dict2items }}"
