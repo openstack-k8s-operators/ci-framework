@@ -69,6 +69,10 @@ need to be changed for a typical EDPM deployment.
    used as entry point to reach the `ganesha backends` through an `haproxy`
    instance where proxy-protocol is enabled.
 
+* `cifmw_cephadm_ceph_spec_fqdn`: When true, the Ceph spec should use
+  a fully qualified domain name (e.g. server1.bar.com). When false, the
+  Ceph spec should use a short hostname (e.g. server1).
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
