@@ -8,7 +8,7 @@ become - Required to install and execute tcib
 
 * `cifmw_build_containers_tcib_src`: (String) Repository of tcib to be installed
 * `cifmw_build_containers_basedir`: (String) Directory where we will hold all tcib files. Default to `cifmw_basedir/artifacts/containers_build` which defaults to `~/ci-framework-data/`.
-* `cifmw_build_containers_authfile_path`: (String) Authorization file to push containers to registry. Default to `${XDG_RUNTIME_DIR}/containers/auth.json`.
+* `cifmw_build_containers_authfile_path`: (String or Null) Authorization file to push containers to registry. Default to `${XDG_RUNTIME_DIR}/containers/auth.json`.
 * `cifmw_build_containers_push_containers`: (Boolean) Whether push containers after build or not. Default to `false`.
 * `cifmw_build_containers_timestamper_cmd`: (String) Timestamp to be added in the logs
 * `cifmw_build_containers_container_name_prefix`: (String) Prefix to be added in the name of the containers. Default to `openstack`.
