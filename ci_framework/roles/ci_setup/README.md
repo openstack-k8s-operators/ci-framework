@@ -15,6 +15,7 @@ Ensure you have the needed directories and packages for the rest of the tasks.
   stable release of the client.
 - `cifmw_ci_setup_rhel_rhsm_default_repos` (List) List of repos to be enabled via Red Hat Subscription Manager.
 - `cifmw_ci_setup_yum_repos` (list) List of dicts holding information on the repos to be enabled.
+- `cifmw_ci_setup_oc_install_path`: (String) Path where the OCP client binary should be placed. Defaults to `~/bin`.
 
 ## Example of cifmw_ci_setup_yum_repos
 
