@@ -40,8 +40,9 @@ managed services.
 * `cifmw_devscripts_pull_secret_file` (str) Path to pull-secret for pulling OCP component images.
   We can use `cifmw_devscripts_pull_secret` or `cifmw_devscripts_pull_secret_file` for passing pull_secrets
 * `cifmw_devscripts_src_dir` (str) The parent folder of dev-scripts repository.
-* `cifmw_devscripts_use_layers`: (bool) Toggle overlay support. Specifically, this boolean will instruct the role to
+* `cifmw_devscripts_use_layers` (bool) Toggle overlay support. Specifically, this boolean will instruct the role to
   shutdown the whole OCP cluster, dump the XML, undefine the nodes, and prevents running the "post" tasks. Defaults to `false`.
+* `cifmw_devscripts_remove_default_net` (bool) Remove the default virtual network. Defaults to `false`.
 
 ### Supported keys in cifmw_devscripts_config_overrides
 
