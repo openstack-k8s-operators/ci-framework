@@ -9,7 +9,7 @@ the playbook doesn't reload your environment, mostly because we're using the `lo
 In order to solve this issue, please logout and re-login your account.
 
 ### Spice graphics are not supported with this QEMU
-This graphic driver/feature isn't supported on CentOS Stream 9. In case you would like to use it with Fedora,
+This graphic driver/feature isn't supported on CentOS Stream 9 and Red Hat Enterprise Linux 9. In case you would like to use it with Fedora,
 the following to the initial `make` command:
 ```Bash
 make local_env_create LOCAL_ENV_OPTS="-K -e cifmw_local_env_vm_graphics=spice"
