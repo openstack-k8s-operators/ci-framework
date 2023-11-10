@@ -20,7 +20,7 @@ openstack flavor list -c Name -c RAM -c Disk -c VCPUs -f value | \
           awk '$2>32768 && $3>100 && $4>12'
 ```
 
-Currently ci-framework is running on CentOS stream 9. To find a Centos stream 9 image
+Currently ci-framework is running on CentOS Stream 9. To find a Centos Stream 9 image
 
 ```
 openstack image list | grep -i centos

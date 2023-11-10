@@ -6,7 +6,7 @@
 In this section, you will learn how to set up your local development environment.
 
 > ⚠️ **Warning**
-> For now, the ci-framework is only supported on CentOS machines. More platforms will be supported in the future.
+> For now, the ci-framework is only supported on CentOS Stream 9 and Red Hat Enterprise Linux 9.2 machines. More platforms will be supported in the future.
 
 ## Pre-setup
 
