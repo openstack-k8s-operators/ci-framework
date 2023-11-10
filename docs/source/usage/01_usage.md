@@ -19,17 +19,18 @@ The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
 
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
-`~/ci-framework-data`
-* `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook
+`~/ci-framework-data`.
+* `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook.
 in the multinode layout, especially for the reproducer case.
-* `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes
+* `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes.
 provisioned with virtual baremetal vs pre-provisioned VM.
-* `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
+* `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`.
 * `cifmw_manifests`: Directory where k8s related manifests will be places. Defaults to
-`{{ cifmw_basedir }}/manifests`
-* `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`
-* `cifmw_use_libvirt`: (Bool) toggle libvirt support
-* `cifmw_use_crc`: (Bool) toggle rhol/crc usage
+`{{ cifmw_basedir }}/manifests`.
+* `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`.
+* `cifmw_use_libvirt`: (Bool) toggle libvirt support.
+* `cifmw_use_crc`: (Bool) toggle rhol/crc usage.
+* `cifmw_use_devscripts`: (Bool) toggle devscripts usage.
 * `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided. If provided will be the kubeconfig to use and update after login.
 * `cifmw_openshift_api`: (String) Path to the kubeconfig file. If provided will be the API to authenticate against.
 * `cifmw_openshift_user`: (String) Login user. If provided, the user that logins.
@@ -40,7 +41,7 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
 * `cifmw_use_devscripts`: (Bool) toggle OpenShift deploying using devscripts role.
-* `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment
+* `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment.
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 * `cifmw_config_network`: (Bool) toggle networking deployment based on CI-framework instead of install_yamls. Default to false.
 

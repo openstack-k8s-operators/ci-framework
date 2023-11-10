@@ -17,6 +17,7 @@ None
 * `cifmw_reproducer_private_nic`: (String) Private NIC for compute and controller. Defaults to `eth1`.
 * `cifmw_reproducer_crc_private_nic`: (String) Private NIC for CRC node. Defaults to `enp2s0`.
 * `cifmw_reproducer_dns_servers`: List of dns servers which should be used by the CRC VM as upstream dns servers. Defaults to 1.1.1.1, 8.8.8.8.
+* `cifmw_reproducer_hp_rhos_release`: (Bool) Allows to consume rhos-release on the hypervisor. Defaults to `false`.
 
 ## Warning
 This role isn't intended to be called outside of the `reproducer.yml` playbook.
