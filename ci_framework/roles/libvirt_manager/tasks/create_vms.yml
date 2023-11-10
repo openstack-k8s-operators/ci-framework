@@ -204,8 +204,9 @@
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.blockinfile:
     create: true
-    path: "~/.ssh/config"
+    path: "{{ lookup('env', 'HOME') }}/.ssh/config"
     marker: "## {mark} {{ vm_ip.nic.host }}"
+    mode: "0600"
     block: |-
       Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ inventory_hostname }}
@@ -223,13 +224,14 @@
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.blockinfile:
     create: true
-    path: "~/.ssh/config"
+    path: "{{ ansible_user_dir }}/.ssh/config"
     marker: "## {mark} {{ vm_ip.nic.host }}"
+    mode: "0600"
     block: |-
       Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         Hostname {{ extracted_ip }}
         User zuul
-        IdentityFile ~/.ssh/cifmw_reproducer_key
+        IdentityFile {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
         StrictHostKeyChecking no
         UserKnownHostsFile /dev/null
   loop: "{{ vm_ips.results }}"
@@ -274,9 +276,9 @@
   when:
     - vm_type is not match('^crc.*$')
   delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  remote_user: "{{ _init_admin_user }}"
   ansible.posix.authorized_key:
-    user: "{{ vm_data.value.admin_user | default('root') }}"
+    user: "{{ _init_admin_user }}"
     state: present
     key: "{{ pub_key }}"
   loop: "{{ vm_ips.results }}"
@@ -288,7 +290,7 @@
   when:
     - vm_type is not match('^(crc|ocp).*$')
   delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  remote_user: "{{ _init_admin_user }}"
   ansible.builtin.shell:
     executable: /bin/bash
     cmd: |-
@@ -310,7 +312,7 @@
   when:
     - vm_type is match('^controller.*$')
   delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
     dest: "/home/zuul/.ssh/id_ed25519"
     content: "{{ priv_key }}"
@@ -326,7 +328,7 @@
   when:
     - vm_type is match('^controller.*$')
   delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ vm_data.value.admin_user | default('root') }}"
+  remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
     dest: "/home/zuul/.ssh/id_ed25519.pub"
     content: "{{ pub_key }}"

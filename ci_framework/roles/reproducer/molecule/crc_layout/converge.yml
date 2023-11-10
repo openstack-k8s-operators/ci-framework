@@ -1,0 +1,173 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_basedir: "/opt/basedir"
+    cifmw_install_yamls_repo: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_libvirt_manager_networks:
+      osp_trunk:
+        default: true
+        range: "192.168.140.0/24"
+        mtu: 1500
+        static_ip: true
+      internal-api:
+        range: "172.20.0.0/24"
+        vlan: 20
+      storage:
+        range: "172.21.0.0/24"
+        vlan: 21
+      tenant:
+        range: "172.22.0.0/24"
+        vlan: 22
+      storage-mgmt:
+        range: "172.23.0.0/24"
+        vlan: 23
+    cifmw_use_libvirt: true
+    cifmw_reproducer_crc_ip4: "{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(10) }}"
+    cifmw_reproducer_crc_gw4: "{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}"
+    cifmw_libvirt_manager_configuration:
+      vms:
+        compute:
+          amount: 1
+          image_url: "{{ cifmw_discovered_image_url }}"
+          sha256_image_name: "{{ cifmw_discovered_hash }}"
+          image_local_dir: "{{ cifmw_basedir }}/images/"
+          disk_file_name: "centos-stream-9.qcow2"
+          disksize: 50
+          memory: 4
+          cpus: 2
+          nets:
+            - public
+            - osp_trunk
+        controller:
+          image_url: "{{ cifmw_discovered_image_url }}"
+          sha256_image_name: "{{ cifmw_discovered_hash }}"
+          image_local_dir: "{{ cifmw_basedir }}/images/"
+          disk_file_name: "centos-stream-9.qcow2"
+          disksize: 50
+          memory: 4
+          cpus: 2
+          nets:
+            - public
+            - osp_trunk
+        crc:
+          admin_user: core
+          image_local_dir: "{{ ansible_user_dir }}/.crc/machines/crc/"
+          disk_file_name: "crc.qcow2"
+          disksize: 150
+          memory: 20
+          cpus: 12
+          nets:
+            - public
+            - osp_trunk
+      networks:
+        public: |-
+          <network>
+            <name>public</name>
+            <forward mode='nat'/>
+            <bridge name='public' stp='on' delay='0'/>
+            <mac address='52:54:00:6a:f2:dc'/>
+            <ip family='ipv4' address='192.168.100.1' prefix='24'>
+              <dhcp>
+                <range start='192.168.100.10' end='192.168.100.100'/>
+              </dhcp>
+            </ip>
+          </network>
+        osp_trunk: |-
+          <network>
+            <name>osp_trunk</name>
+            <forward mode='nat'/>
+            <bridge name='osp_trunk' stp='on' delay='0'/>
+            <mac address='52:54:00:fd:be:d0'/>
+            <ip family='ipv4' address='{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
+            </ip>
+          </network>
+  roles:
+    - role: reproducer
+
+  tasks:
+    - name: Validate content on the controller-0 node
+      delegate_to: controller-0
+      block:
+        - name: Ensure we have appropriate credentials for OpenShift accesses
+          register: _kubeconfig
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/.kube/config"
+
+        - name: Ensure we have needed inventory files
+          register: _inventory_files
+          ansible.builtin.find:
+            paths: "{{ ansible_user_dir }}/reproducer-inventory/"
+            patterns:
+              - "*-group.yml"
+
+        - name: Ensure we have CRC ssh key
+          register: _crc_key
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/.ssh/crc_key"
+
+        - name: Ensure we can ping compute-0 on osp_trunk net
+          register: _cmp0_ping
+          failed_when: false
+          vars:
+            _ip: >-
+              {{ cifmw_libvirt_manager_networks.osp_trunk.range |
+                 ansible.utils.nthhost(100) }}
+          ansible.builtin.command:
+            cmd: "ping -c1 -w1 {{ _ip }}"
+
+        - name: Ensure we can ping crc-0 on osp_trunk net
+          register: _crc_ping
+          failed_when: false
+          vars:
+            _ip: >-
+              {{ cifmw_libvirt_manager_networks.osp_trunk.range |
+                 ansible.utils.nthhost(10) }}
+          ansible.builtin.command:
+            cmd: "ping -c1 -w1 {{ _ip }}"
+
+    - name: Assert all of the tests
+      vars:
+        _inventory_content: >-
+          {{
+            _inventory_files.files |
+            map(attribute='path') |
+            map('basename') | sort
+          }}
+        _expected_files: >-
+          {{
+            ['all-group.yml',
+             'compute-group.yml',
+             'controller-group.yml',
+             'crc-group.yml'] | sort
+          }}
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _kubeconfig.stat.exists | bool
+          - _crc_key.stat.exists | bool
+          - _inventory_files.matched == 4
+          - _inventory_content == _expected_files
+          - _crc_ping.rc == 0
+          - _cmp0_ping.rc == 0
+
+#  TODO: Add some more files from the reproducer itself, especially
+#  network related content and add related checks here.
