@@ -1,0 +1,26 @@
+---
+- name: Ensure we have needed repositories
+  ansible.builtin.import_role:
+    name: ci_setup
+    tasks_from: repos.yml
+
+- name: Install EPEL
+  become: true
+  vars:
+    rhel_uri: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+    pkg: "{{ (ansible_facts['distribution'] == 'RedHat') | ternary(rhel_uri, 'epel-release')}}"
+  ansible.builtin.dnf:
+    name: "{{ pkg }}"
+    disable_gpg_check: "{{ (pkg != 'epel-release') }}"
+
+- name: Deactivate all of EPEL repositories
+  become: true
+  ansible.builtin.shell:  # noqa: command-instead-of-module
+    cmd: sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*
+
+- name: Install packages from EPEL
+  become: true
+  ansible.builtin.dnf:  # noqa: package-latest
+    enablerepo: epel
+    name: "{{ cifmw_ci_setup_epel_pkgs }}"
+    state: latest

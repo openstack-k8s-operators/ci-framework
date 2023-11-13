@@ -1,0 +1,61 @@
+---
+- name: Slurp ssh key for CRC access
+  register: crc_priv_key
+  ansible.builtin.slurp:
+    path: "{{ ansible_user_dir}}/.crc/machines/crc/id_ecdsa"
+
+- name: Configure CRC services
+  delegate_to: crc-0
+  remote_user: core
+  block:
+    - name: Ensure crc-0 knows about its second NIC
+      become: true
+      when:
+        - cifmw_job_uri is undefined
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: private_net
+        dns4: 127.0.0.1
+        ifname: enp2s0
+        type: ethernet
+        ip4: "{{ cifmw_reproducer_crc_ip4 }}/24"
+        gw4: "{{ cifmw_reproducer_crc_gw4 }}"
+        state: present
+
+    - name: Ensure crc-0 does not get "public" DNS
+      become: true
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "Wired connection 1"
+        dns4_ignore_auto: true
+        state: present
+
+    - name: Configure dns forwarders
+      become: true
+      ansible.builtin.blockinfile:
+        path: "/var/srv/dnsmasq.conf"
+        block: |-
+          {% if cifmw_reproducer_dns_servers %}
+          {% for dns_server in cifmw_reproducer_dns_servers %}
+          server={{ dns_server }}
+          {% endfor %}
+          {% endif %}
+    - name: Configure local DNS for CRC pod
+      become: true
+      register: last_modification
+      ansible.builtin.replace:
+        path: "/var/srv/dnsmasq.conf"
+        regexp: "192.168.130.11"
+        replace: "{{ cifmw_reproducer_crc_ip4 }}"
+
+    - name: Reboot CRC node
+      become: true
+      when:
+        - last_modification is changed
+        - cifmw_job_uri is undefined
+      ansible.builtin.reboot:
+
+- name: Get kubeconfig file from crc directory
+  register: _crc_kubeconfig
+  ansible.builtin.slurp:
+    path: "{{ cifmw_reproducer_kubecfg }}"
