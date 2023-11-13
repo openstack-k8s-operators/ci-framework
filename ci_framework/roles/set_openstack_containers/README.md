@@ -16,6 +16,7 @@ The role will generate two 2 files in ~/ci-framework-data/artifacts/ directory a
 * `cifmw_set_openstack_containers_dlrn_md5_path`: Full path of delorean.repo.md5. Defaults to `/etc/yum.repos.d/delorean.repo.md5`.
 * `cifmw_set_openstack_containers_overrides`: Extra container overrides. Defaults to `{}`
 * `cifmw_set_openstack_containers_prefix`: Update container containing. Defaults to `openstack`
+* `cifmw_set_openstack_containers_edpm`: Update EDPM containers. Defaults to `false`
 
 ## Examples
 
