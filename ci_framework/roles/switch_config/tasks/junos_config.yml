@@ -1,0 +1,162 @@
+---
+
+# Workaround since Ansible modules lock the database similar to `configure exclusive`
+- name: "Random Duraion Pause"
+  ansible.builtin.pause:
+    seconds: "{{ 90 | random(step=6) }}"
+
+- name: "Check If Junos Database Is Open"
+  junipernetworks.junos.junos_config:
+    lines:
+      - set system license keys
+  register: junos_config_db_check
+  retries: "{{ cifmw_switch_config_task_retries }}"
+  delay: "{{ cifmw_switch_config_task_retry_delay }}"
+  # Not filtering specific database issue or taking into account other errors
+  until: (junos_config_db_check['msg'] is not defined)
+
+- name: Junos configuration block
+  block:
+    - name: Set login banner
+      junipernetworks.junos.junos_banner:
+        banner: motd
+        text: "{{ switch_vars['switch_banner'] }}"
+        state: present
+      when: "'switch_banner' in switch_vars"
+
+    - name: Set VLANs
+      junipernetworks.junos.junos_vlan:
+        name: "vlan{{ item }}"
+        vlan_id: "{{ item }}"
+        state: present
+      loop: "{{ vlan_list }}"
+
+    - name: Configure interfaces - description, mode (access/trunk), vlans
+      vars:
+        iface_vlans: "{%- set iface_vlans = [] -%}
+                      {%- set helper_var = [] -%}
+                      {%- if item.iface_mode == 'trunk'-%}
+                      {%- if ',' in item.vlan -%}
+                      {%- for vlan in item.vlan.replace(' ', '').split(',') -%} {{ helper_var.append(vlan) }} {%- endfor -%}
+                      {%- else -%}
+                      {{ helper_var.append(item.vlan) }}
+                      {%- endif -%}
+                      {%- for vlan in helper_var -%}
+                      {%- if '-' in vlan -%}
+                      {%- for v in range(vlan.split('-')[0] | int, vlan.split('-')[1] | int + 1) -%}
+                      {{ iface_vlans.append(v) }}
+                      {%- endfor -%}
+                      {%- else -%}
+                      {{ iface_vlans.append(vlan | int) }}
+                      {%- endif -%}
+                      {%- endfor -%}
+                      {%- endif -%}
+                      {{ iface_vlans | unique }}"
+        vlans_string: "{%- if iface_vlans -%}
+                       {% for item in iface_vlans %}vlan{{ item }} {% endfor %}
+                       {%- elif item.vlan == 'all' -%}{{ item.vlan }}
+                       {%- else -%}vlan{{ item.vlan }}{% endif %}"
+        trunk_vlans_list: "{%- if vlans_string[0] is defined -%}
+                           {{ vlans_string.split() }}{% else %}{{ item.vlan }}{% endif %}"
+        access_vlan: "{%- if item.iface_mode == 'access' -%}
+                      {{ item.vlan |regex_replace('^(.*)$', 'vlan\\1') }}
+                      {%- endif -%}"
+      junipernetworks.junos.junos_l2_interface:
+        name: "{{ item.iface }}"
+        description: "{{ item.description }}"
+        mode: "{{ item.iface_mode }}"
+        access_vlan: "{%- if item.iface_mode == 'access' -%}
+                      {{ access_vlan }}{% else %}{{ omit }}{% endif %}"
+        trunk_vlans: "{%- if item.iface_mode == 'trunk' -%}
+                      {{ trunk_vlans_list }}{% else %}{{ omit }}{% endif %}"
+        native_vlan: "{%- if item.iface_mode == 'trunk' and 'native_vlan' in item -%}
+                      {{ item.native_vlan | int }}{% else %}{{ omit }}{% endif %}"
+        unit: 0
+        state: present
+      loop: "{{ switch_vars.interfaces }}"
+      when: "'interfaces' in switch_vars"
+
+    - name: Set MTU value on the interface
+      junipernetworks.junos.junos_interface:
+        name: "{{ item.iface }}"
+        mtu: "{{ item.mtu }}"
+        state: present
+      loop: "{{ switch_vars.interfaces }}"
+      when: item.mtu is defined
+
+    # LACP aggregation can't override existing configuration
+    # that is not LACP related on the memeber interfaces.
+    # Required to delete the config before setting the LACP dependency interface.
+    - name: Reset LACP member interface
+      junipernetworks.junos.junos_interface:
+        name: "{{ item.1 }}"
+        state: absent
+      loop: "{{ switch_vars.interfaces | subelements('aggr_members', 'skip_missing=True') }}"
+      when: item.0.aggr_members is defined
+
+    - name: Set aggregation for the interface
+      junipernetworks.junos.junos_linkagg:
+        name: "{{ item.iface }}"
+        description: "{{ item.description }}"
+        members: "{{ item.aggr_members }}"
+        mode: active
+      loop: "{{ switch_vars.interfaces }}"
+      when: item.aggr_members is defined
+
+    # For each vlan for which igmp snooping is configured, remove previous
+    # configuration if it exists to ensure that applied configuration is
+    # as specified in configuration file
+    - name: Configure IGMP snooping
+      when: switch_vars.igmp_snooping is defined
+      block:
+        - name: Reset IGMP snooping for each defined vlan
+          junipernetworks.junos.junos_config:
+            lines:
+              - delete protocols igmp-snooping vlan vlan{{ item.vlan }}
+          loop: "{{ switch_vars.igmp_snooping }}"
+          when: item.vlan is defined
+
+        - name: Create IGMP querier for each defined vlan
+          junipernetworks.junos.junos_config:
+            lines:
+              - "set protocols igmp-snooping vlan vlan{{ item.vlan }}
+                 l2-querier source-address {{ item.ip_address }}"
+          loop: "{{ switch_vars.igmp_snooping }}"
+          when: item.vlan is defined and item.ip_address is defined
+
+        - name: Configure interfaces in which IGMP queries are broadcasted
+          junipernetworks.junos.junos_config:
+            lines:
+              - "set protocols igmp-snooping vlan vlan{{ item.0.vlan }}
+                 interface {{ item.1 }}"
+          loop: "{{ switch_vars.igmp_snooping | default([]) |
+                 subelements('interfaces', 'skip_missing=True') }}"
+          when: item.0.vlan is defined and item.0.interfaces is defined
+
+    - name: Configure Layer3(irb) Interfaces
+      when: "'layer3_interfaces' in switch_vars"
+      block:
+        - name: Ensure irb Interfae is configured
+          junipernetworks.junos.junos_l3_interface:
+            name: irb
+            unit: "{{ item['unit'] }}"
+            ipv4: "{{ item['ipv4_address'] }}"
+          loop: "{{ switch_vars['layer3_interfaces'] }}"
+        - name: Assign irb Interface To VLAN Interface
+          junipernetworks.junos.junos_vlan:
+            name: "{{ item['vlan_interface'] }}"
+            l3_interface: "irb.{{ item['unit'] }}"
+          loop: "{{ switch_vars['layer3_interfaces'] }}"
+
+    - name: Save configuration
+      junipernetworks.junos.junos_config:
+        confirm_commit: true
+
+  rescue:
+    - name: Configuration rollback
+      junipernetworks.junos.junos_config:
+        rollback: 1
+
+    - name: Fail Play
+      ansible.builtin.fail:
+        msg: "Configuration was rollbacked, failing play."
