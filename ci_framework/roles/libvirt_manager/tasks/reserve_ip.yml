@@ -30,26 +30,74 @@
 #   extraworker     100
 #   compute         100      # Has the same index of extraworker
 
-
-- name: Generate the IP address
+- name: "Dump net XML for {{ network.name }}"
   vars:
-    _vm_name: "{{ vm_name | replace('-', '_') | split('_') }}"
-    _ip_index: >-
+    _net_name: >-
       {{
-        cifmw_libvirt_manager_vm_net_ip_set[_vm_name[1]] +
-        _vm_name[2] | int
+        (network.name is match('^ocp')) |
+        ternary(network.name, 'cifmw-' ~ network.name)
+      }}
+  register: _net_xml
+  community.libvirt.virt_net:
+    command: "get_xml"
+    name: "{{ _net_name }}"
+
+- name: "Parse XML for {{ network.name }}"
+  failed_when: false
+  register: _reserved
+  community.general.xml:
+    xmlstring: "{{ _net_xml.get_xml }}"
+    xpath: "/network/ip/dhcp/host"
+    content: "attribute"
+
+- name: "Check for existing reservation for {{ vm_name }} in {{ network.name }}"  # noqa: name[template]
+  vars:
+    _reservation: >-
+      {{
+        _reserved.matches | default([]) |
+        selectattr('host.name', 'equalto', vm_name) |
+        first
       }}
   ansible.builtin.set_fact:
-    _lm_ip_address: "{{ network.cidr | ansible.utils.nthhost(_ip_index) }}"
+    reserved: >-
+      {{
+        _reservation.host.mac | default('')
+      }}
 
-- name: Reserve static IP address for the node.
-  vars:
-    _vm_name: "{{ vm_name | replace('^cifmw-', '') }}"
-  community.libvirt.virt_net:
-    command: modify
-    name: "cifmw-{{ network.name }}"
-    uri: "qemu:///system"
-    xml: |
-      <host mac='{{ mac_address }}' name='{{ _vm_name }}' ip='{{ _lm_ip_address }}'>
-        <lease expiry='60' unit='minutes'/>
-      </host>
+- name: "Override MAC for {{ vm_name }} on {{ network.name }}"  # noqa: name[template]
+  when:
+    - reserved != ''
+  ansible.builtin.set_fact:
+    mac_address: "{{ reserved }}"
+
+- name: Reserve IP address
+  when:
+    - reserved == ''
+  block:
+    - name: "Generate IP address for {{ vm_name }}"
+      vars:
+        _vm_name: "{{ vm_name | replace('-', '_') | split('_') }}"
+        _ip_index: >-
+          {{
+            cifmw_libvirt_manager_vm_net_ip_set[_vm_name[1]] +
+            _vm_name[2] | int
+          }}
+      ansible.builtin.set_fact:
+        _lm_ip_address: "{{ network.cidr | ansible.utils.nthhost(_ip_index) }}"
+
+    - name: "Reserve IP for {{ vm_name }} on {{ network.name }}"  # noqa: name[template]
+      vars:
+        _vm_name: "{{ vm_name | replace('^cifmw-', '') }}"
+        _net_name: >-
+          {{
+            (network.name is match('^ocp')) |
+            ternary(network.name, 'cifmw-' ~ network.name)
+          }}
+      community.libvirt.virt_net:
+        command: modify
+        name: "{{ _net_name }}"
+        uri: "qemu:///system"
+        xml: |
+          <host mac='{{ mac_address }}' name='{{ _vm_name }}' ip='{{ _lm_ip_address }}'>
+            <lease expiry='60' unit='minutes'/>
+          </host>

@@ -105,6 +105,16 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
+- name: Attach listed networks to the VMs
+  vars:
+    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    networks: "{{ vm_data.value.nets }}"
+  ansible.builtin.include_tasks: net_to_vms.yml
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
 - name: Fetch per-vm ports
   register: _vm_ports
   ansible.builtin.command:
@@ -223,6 +233,11 @@
 - name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"  # noqa: name[template]
   vars:
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    identity_file: >-
+      {{
+        cifmw_reproducer_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type == 'ocp' else
+        ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
+      }}
   ansible.builtin.blockinfile:
     create: true
     path: "{{ ansible_user_dir }}/.ssh/config"
@@ -232,7 +247,7 @@
       Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         Hostname {{ extracted_ip }}
         User zuul
-        IdentityFile {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
+        IdentityFile {{ identity_file }}
         StrictHostKeyChecking no
         UserKnownHostsFile /dev/null
   loop: "{{ vm_ips.results }}"
@@ -275,7 +290,7 @@
 
 - name: "Configure ssh access on type {{ vm_type }}"
   when:
-    - vm_type is not match('^crc.*$')
+    - vm_type is not match('^(crc|ocp).*$')
   delegate_to: "{{ vm_ip.nic.host }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.posix.authorized_key:
