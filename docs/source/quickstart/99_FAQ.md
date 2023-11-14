@@ -68,5 +68,5 @@ During the deployment, `chronyc` is trying to sync up with default NTP servers.
 If you don't have an access, you can provide modify your `env.yml` file to include:
 ```
 cifmw_install_yamls_vars:
-  DATAPLANE_CHRONY_NTP_SERVER: "<your_chosen_ntp_server>"
+  DATAPLANE_NTP_SERVER: "<your_chosen_ntp_server>"
 ```
