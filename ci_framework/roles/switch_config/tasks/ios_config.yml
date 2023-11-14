@@ -1,0 +1,114 @@
+---
+- name: Set login banner
+  cisco.ios.ios_banner:
+    banner: motd
+    text: "{{ switch_vars['switch_banner'] }}"
+    state: present
+  when: "'switch_banner' in switch_vars"
+
+- name: Configure DHCP Relay
+  cisco.ios.ios_config:
+    lines:
+      - ip dhcp relay information option
+      - ip dhcp relay information {{ switch_vars['dhcp_relay'] }}
+  when: "'dhcp_relay' in switch_vars"
+
+- name: Set VLANs
+  cisco.ios.ios_vlan:
+    name: "vlan{{ item }}"
+    vlan_id: "{{ item }}"
+    state: present
+  loop: "{{ vlan_list }}"
+
+- name: Advanced VLAN Interface Configuration
+  when: "'vlan_interfaces' in switch_vars"
+  block:
+    - name: Configure IP Address For Vlan Interface
+      cisco.ios.ios_config:
+        lines: ip address {{ item['ip_address'] }} {{ item['netmask'] }}
+        parents: "interface {{ item['iface'] }}"
+      loop: "{{ switch_vars['vlan_interfaces'] }}"
+      when:
+        - "'ip_address' in item"
+        - "'netmask' in item"
+    - name: Configure IP Helper Address For Vlan Interface
+      cisco.ios.ios_config:
+        lines: |
+          {%- set commands = [] -%}
+          {%- if item['ip_helper_address'] | type_debug == 'string' -%}
+          {{ commands.append('ip helper-address ' + item['ip_helper_address']) }}
+          {%- elif item['ip_helper_address'] | type_debug == 'list' -%}
+          {%- for helper in item['ip_helper_address'] -%}
+          {{ commands.append('ip helper-address ' + helper) }}
+          {%- endfor -%}
+          {%- endif -%}
+          {{ commands }}
+        parents: "interface {{ item['iface'] }}"
+      loop: "{{ switch_vars['vlan_interfaces'] }}"
+      when: "'ip_helper_address' in item"
+
+- name: Configure route-maps
+  when: "'route_maps' in switch_vars"
+  block:
+    # Native Ansible module 'ios_route_maps' shipped with collection
+    # 'cisco.ios' did not appear to work on tested Cisco switch
+    # (Catalyst 3750)
+    # We support a specific scenario for route-map
+    - name: Assign route-map To Interface
+      cisco.ios.ios_config:
+        lines:
+          - match ip address {{ item['match_ip_address'] }}
+          - set ip next-hop {{ item['ip_next_hop'] }}
+        parents: "route-map {{ item['route_map_name'] }} permit 10"
+      loop: "{{ switch_vars['route_maps'] }}"
+    - name: Assign route-map To Interface
+      cisco.ios.ios_config:
+        lines: ip policy route-map {{ item['route_map_name'] }}
+        parents: "interface {{ item['interface'] }}"
+      loop: "{{ switch_vars['route_maps'] }}"
+
+- name: Set interface description and MTU
+  cisco.ios.ios_interface:
+    name: "{{ item.iface }}"
+    description: "{{ item.description }}"
+    mtu: "{{ item.mtu |default(omit) }}"
+    # state: present
+  loop: "{{ switch_vars.interfaces }}"
+
+- name: Configure interfaces - mode (access/trunk), vlans
+  vars:
+    iface_vlans: "{%- if item.iface_mode == 'trunk' and '-' in item.vlan -%}
+                  {{ item.vlan.split('-') }}
+                  {%- endif -%}"
+    iface_vlan_range: "{%- if iface_vlans -%}
+                       {{ range(iface_vlans.0 | int, iface_vlans.1 | int + 1) | list }}
+                       {%- endif -%}"
+    trunk_vlans_list: "{%- if iface_vlan_range[0] is defined -%}
+                       {{ iface_vlan_range.split() }}{% else %}{{ item.vlan }}{% endif %}"
+    access_vlan: "{% if item.iface_mode == 'access' %}{{ item.vlan }}{% endif %}"
+  cisco.ios.ios_l2_interface:
+    name: "{{ item.iface }}"
+    mode: "{{ item.iface_mode }}"
+    access_vlan: "{%- if item.iface_mode == 'access' -%}
+                  {{ access_vlan }}{% else %}{{ omit }}{% endif %}"
+    trunk_vlans: "{%- if item.iface_mode == 'trunk' -%}
+                  {{ trunk_vlans_list }}{% else %}{{ omit }}{% endif %}"
+    native_vlan: "{%- if item.iface_mode == 'trunk' and 'native_vlan' in item -%}
+                  {{ item.native_vlan | int }}{% else %}{{ omit }}{% endif %}"
+    state: present
+  loop: "{{ switch_vars.interfaces }}"
+
+# TODO: Once moving to 2.9 version, replace the task below with the new ios_l2_interface
+# module and merge with the task above.
+- name: Set encapsulation on the interface
+  cisco.ios.ios_config:
+    lines:
+      - switchport trunk encapsulation dot1q
+      - switchport mode trunk
+    parents: "interface {{ item.iface }}"
+  loop: "{{ switch_vars.interfaces }}"
+  when: item.encapsulation is defined and item.encapsulation
+
+- name: Save configuration
+  cisco.ios.ios_config:
+    save_when: always
