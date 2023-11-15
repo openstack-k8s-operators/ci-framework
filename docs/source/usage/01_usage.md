@@ -1,19 +1,6 @@
-# Usage guide
+# General consideration
 
-The Framework leverages [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
-content and generate the needed bits in order to deploy EDPM on the selected infrastructure.
-
-The Framework will also ensure we're able to reproduce the exact same run we
-got in CI with a series of artifacts one may download locally, and re-run.
-
-## Parameters
-
-There are two levels of parameters we may provide:
-
-* top level
-* role level
-
-### Top level parameters
+## Top level parameters
 
 The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
@@ -45,7 +32,7 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 * `cifmw_config_network`: (Bool) toggle networking deployment based on CI-framework instead of install_yamls. Default to false.
 
-#### Words of caution
+### Words of caution
 
 If you want to output the content in another location than `~/ci-framework-data`
 (namely set the `cifmw_basedir` to some other location), you will have to update
@@ -54,7 +41,7 @@ this new location.
 
 We cannot do this change runtime unfortunately.
 
-### Role level parameters
+## Role level parameters
 
 Please refer to the README located within the various roles.
 

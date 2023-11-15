@@ -1,1 +1,0 @@
-../../../ci_framework/hooks/playbooks/README.md
