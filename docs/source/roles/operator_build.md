@@ -1,1 +1,0 @@
-../../../ci_framework/roles/operator_build/README.md
