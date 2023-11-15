@@ -4,14 +4,16 @@ ENV USE_VENV=no
 ENV MOLECULE_CONFIG=.config/molecule/config_local.yml
 
 RUN adduser -d / -M prow
+RUN mkdir -p /home/prow && chown prow: /home/prow
 RUN echo "prow ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/prow
 
-COPY ../ /opt/sources
+RUN --mount=type=bind,source=../,destination=/tmp/project-code cp -ra /tmp/project-code /opt/sources
 RUN chown -R prow: /opt/sources
 WORKDIR /opt/sources
 RUN find . -type d -exec chmod g+rwx {} \;
 RUN find . -type f -exec chmod g+rw {} \;
 RUN /usr/bin/make setup_molecule USE_VENV=${USE_VENV}
+RUN dnf clean all
 
 USER prow
 RUN git config core.fileMode false

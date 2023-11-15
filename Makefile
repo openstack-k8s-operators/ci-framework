@@ -105,8 +105,8 @@ ansible_test_nodeps: ## Run ansible-test without installing dependencies
 ci_ctx: ## Build CI container with podman
 	if [ "x$(BUILD_VENV_CTX)" == 'xyes' ]; then \
 		podman image exists localhost/cifmw-build:latest || \
-		podman build -t localhost/cifmw-build:latest -f containerfiles/Containerfile.ci .; \
-		buildah bud -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests .; \
+		podman build --security-opt label=disable -t localhost/cifmw-build:latest -f containerfiles/Containerfile.ci .; \
+		podman build --security-opt label=disable -t ${CI_CTX_NAME} -f containerfiles/Containerfile.tests .; \
 	fi
 
 .PHONY: run_ctx_all_tests
