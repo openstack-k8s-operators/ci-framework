@@ -1,1 +1,0 @@
-../../../ci_framework/roles/ci_setup/README.md
