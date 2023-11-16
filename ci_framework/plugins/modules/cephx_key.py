@@ -11,10 +11,10 @@ DOCUMENTATION = r"""
 ---
 module: cephx_key
 
-short_description: Generate a random CephX authenticaton key
+short_description: Generate a random CephX authentication key
 
 description:
-- Generate a random CephX authenticaton key and return it
+- Generate a random CephX authentication key and return it
 
 author:
   - John Fulton (@fultonj)
