@@ -21,6 +21,8 @@ In the examples bellow, the options will do:
 - `-v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519`: exposes your private SSH key.
 - `-v .:/home/prow/ci-framework`: exposes the project content in /home/prow/ci-framework in the container.
 - `-v ~/inventory.yml:/home/prow/ci-framework/inventory.yml`: an example of how you can override the inventory.yml.
+- `-v ~/custom_files:/home/prow/custom_files`: mounts the custom_files directory. This is useful for incorporating various files that cifmw requires, such as multiple inventory files, ci_token, and pull_secret.
+- `--uidmap 1000:0:1 --uidmap 0:1:1000`: sets up user ID mappings for improved security.
 - `--security-opt label=disable`: needed for SELinux environment.
 
 ### Inventory considerations
@@ -51,8 +53,8 @@ podman run --rm -ti \
     -w /home/prow \
     -e HOME=/home/prow \
     -v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519 \
-    -v .:/home/prow/ci-framework \
-    -v ~/inventory.yml:/home/prow/ci-framework/inventory.yml \
+    -v $(pwd):/home/prow/ci-framework \
+    -v ~/custom_files:/home/prow/custom_files \
     --security-opt label=disable \
     localhost/cifmw:latest bash
 ```
@@ -63,10 +65,31 @@ podman run --rm -ti \
     -w /home/prow \
     -e HOME=/home/prow \
     -v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519 \
-    -v .:/home/prow/ci-framework \
-    -v ~/inventory.yml:/home/prow/ci-framework/inventory.yml \
+    -v $(pwd):/home/prow/ci-framework \
+    -v ~/custom_files:/home/prow/custom_files \
     --security-opt label=disable \
     localhost/cifmw:latest bash
 ```
 
+##### On systems utilizing Podman Remote Machine (MacOS, Windows, ...):
+> NOTE: It is required to have podman-machine configured with the home directory mounted.
+Be aware that running this process will remove all existing images and containers, including those that were preinstalled or already exist on your system.
+
+```Bash
+podman machine stop podman-machine-default
+podman machine rm podman-machine-default
+podman machine init -v $HOME:$HOME
+podman machine start
+```
+
+```Bash
+podman run --rm -ti \
+    -w /home/prow \
+    -e HOME=/home/prow \
+    -v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519 \
+    -v $(pwd):/home/prow/ci-framework \
+    -v ~/custom_files:/home/prow/custom_files \
+    --uidmap 1000:0:1 --uidmap 0:1:1000 \
+    localhost/cifmw:latest bash
+```
 Note that you can replace `podman` command by `docker` with the same flags.
