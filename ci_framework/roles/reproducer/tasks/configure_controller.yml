@@ -124,3 +124,24 @@
     - name: Install ansible dependencies
       ansible.builtin.pip:
         requirements: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/ansible-requirements.txt
+
+    - name: Inject most of the cifmw_ parameters passed to the reproducer run
+      vars:
+        _filtered_vars: >-
+          {{
+            hostvars[inventory_hostname] | default({}) |
+            dict2items |
+            selectattr('key', 'match', '^cifmw_(?!install_yamls|openshift|devscripts).*') |
+            rejectattr('key', 'equalto', 'cifmw_target_host') |
+            rejectattr('key', 'equalto', 'cifmw_basedir') |
+            rejectattr('key', 'equalto', 'cifmw_path') |
+            rejectattr('key', 'match', '^cifmw_use.*') |
+            rejectattr('key', 'match', '^cifmw_reproducer.*') |
+            rejectattr('key', 'match', '^cifmw_rhol.*') |
+            rejectattr('key', 'match', '^cifmw_discover.*') |
+            rejectattr('key', 'match', '^cifmw_libvirt_manager.*') |
+            items2dict
+          }}
+      ansible.builtin.copy:
+        dest: "/home/zuul/reproducer-variables.yml"
+        content: "{{ _filtered_vars | to_nice_yaml }}"
