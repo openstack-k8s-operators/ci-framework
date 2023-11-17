@@ -40,6 +40,18 @@ all:
 
 And then mount it in the container, as shown bellow.
 
+### Home directory considerations
+
+Since the container's primary goal was to run tests, without any interactive shell, the $HOME set to the used is the same as
+in Prow environment: `/`. While the proposed commands exports the $HOME environment variables, some processes may not get it right.
+
+In order to switch the user's home directory, we strongly advice running this as soon as you are in the container:
+```Bash
+$ sudo usermod -d /home/prow prow
+```
+
+This should then ensure SSH, molecule and other things are consuming the right location.
+
 ### Commands
 
 #### UNIX systems
