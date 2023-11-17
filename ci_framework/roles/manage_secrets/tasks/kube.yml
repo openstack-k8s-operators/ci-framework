@@ -1,0 +1,48 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert we get needed data
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_manage_secrets_kube_type is match('^(config|kubeadmin-password)$')
+      - cifmw_manage_secrets_kube_file != None or
+        cifmw_manage_secrets_kube_content != None
+      - not (cifmw_manage_secrets_kube_file != None and
+             cifmw_manage_secrets_kube_content != None)
+    msg: |
+      Please provide EITHER cifmw_manage_secrets_kube_file
+      OR cifmw_manage_secrets_kube_content - not both.
+
+      cifmw_manage_secrets_kube_type MUST be either config
+      or kubeadmin-password
+
+- name: Ensure destination directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_manage_secrets_kube_dest }}"
+    state: "directory"
+    mode: "0750"
+
+- name: Manage secret
+  vars:
+    _secret_dest: >-
+      {{
+        (cifmw_manage_secrets_kube_dest,
+         cifmw_manage_secrets_kube_type) | path_join
+      }}
+    _secret_content: "{{ cifmw_manage_secrets_kube_content }}"
+    _secret_file: "{{ cifmw_manage_secrets_kube_file }}"
+  ansible.builtin.include_tasks: _push_secret.yml
