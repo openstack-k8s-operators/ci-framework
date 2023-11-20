@@ -1,0 +1,83 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  roles:
+    - role: manage_secrets
+  tasks:
+    - name: Inject fake pull_secret
+      ansible.builtin.copy:
+        dest: "/tmp/yodel"
+        content: >-
+          {"auths": {"my_cloud":
+            {"auth": "starwars and startrek are on a boat",
+             "email": "foo@none.tld"}}}
+    - name: Expose pull_secret to target location
+      vars:
+        _file: >-
+          {{ (ansible_user_dir,
+              'ci-framework-data',
+              'secrets',
+              'pull_secret.json') | path_join
+          }}
+      block:
+        - name: Copy provided file
+          vars:
+            cifmw_manage_secrets_pullsecret_file: '/tmp/yodel'
+          ansible.builtin.include_role:
+            name: manage_secrets
+            tasks_from: pull_secret.yml
+
+        - name: Check for file
+          register: cp_file
+          ansible.builtin.stat:
+            checksum_algorithm: sha256
+            get_checksum: true
+            get_attributes: false
+            get_mime: false
+            path: "{{ _file }}"
+
+        - name: Create file from content
+          vars:
+            cifmw_manage_secrets_pullsecret_content: >-
+              {"auths": {
+                "your_cloud": {
+                  "auth": "complicated life isn't easy",
+                  "email": "nope@yodel.tld"
+                }
+              }}
+          ansible.builtin.include_role:
+            name: manage_secrets
+            tasks_from: pull_secret.yml
+
+        - name: Check for file
+          register: create_file
+          ansible.builtin.stat:
+            checksum_algorithm: sha256
+            get_checksum: true
+            get_attributes: false
+            get_mime: false
+            path: "{{ _file }}"
+
+        - name: Validate files
+          ansible.builtin.assert:
+            that:
+              - cp_file.stat.exists | bool
+              - cp_file.stat.checksum == '9295045617ece5e18e43a84bf8075d5a9cf8f956e493a3149d4d382f4f0badc3'
+              - create_file.stat.exists | bool
+              - create_file.stat.checksum == '5635f1ec0143515126da8dd9fedd80cd001954f4baafd94489718cc1dbba87d5'

@@ -1,0 +1,92 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  roles:
+    - role: manage_secrets
+  tasks:
+    - name: Inject fake kubeconfig
+      ansible.builtin.copy:
+        dest: "/tmp/yodel"
+        content: >-
+          - name: admin
+            user:
+              client-certificate-data: foobar
+              client-key-data: barfoo
+
+    - name: Expose kube to target location
+      vars:
+        _config_file: >-
+          {{ (ansible_user_dir,
+              '.kube',
+              'config') | path_join
+          }}
+        _adm_file: >-
+          {{ (ansible_user_dir,
+              '.kube',
+              'kubeadmin-password') | path_join
+          }}
+      block:
+        - name: Copy provided file
+          vars:
+            cifmw_manage_secrets_kube_file: '/tmp/yodel'
+            cifmw_manage_secrets_kube_type: "config"
+          ansible.builtin.include_role:
+            name: manage_secrets
+            tasks_from: kube.yml
+
+        - name: Check for file
+          register: cp_file
+          ansible.builtin.stat:
+            checksum_algorithm: sha256
+            get_checksum: true
+            get_attributes: false
+            get_mime: false
+            path: "{{ _config_file }}"
+
+        - name: Create file from content
+          vars:
+            cifmw_manage_secrets_kube_content: |-
+              E234-Jac45-UuvCD-X2BZ2
+            cifmw_manage_secrets_kube_type: kubeadmin-password
+          ansible.builtin.include_role:
+            name: manage_secrets
+            tasks_from: kube.yml
+
+        - name: Check for file
+          register: create_file
+          ansible.builtin.stat:
+            checksum_algorithm: sha256
+            get_checksum: true
+            get_attributes: false
+            get_mime: false
+            path: "{{ _adm_file }}"
+
+        - name: Expose file data
+          ansible.builtin.debug:
+            msg:
+              - "{{ cp_file }}"
+              - "{{ create_file }}"
+
+        - name: Validate files
+          ansible.builtin.assert:
+            that:
+              - cp_file.stat.exists | bool
+              - cp_file.stat.checksum == '5903097f988e969fc7d35578338cdbe4bd6c94bfa5e845c47ee4518c5d490bcc'
+              - create_file.stat.exists | bool
+              - create_file.stat.checksum == 'd87438c29fedd67024def70ef2eeaae5ac310aa119f35605e8411f46a258bb30'

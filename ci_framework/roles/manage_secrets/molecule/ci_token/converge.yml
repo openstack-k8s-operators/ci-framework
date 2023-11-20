@@ -1,0 +1,76 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  roles:
+    - role: manage_secrets
+  tasks:
+    - name: Inject fake pull_secret
+      ansible.builtin.copy:
+        dest: "/tmp/yodel"
+        content: >-
+          sha256~abcdefg1234-ABEFGRsd3
+    - name: Expose ci_token to target location
+      vars:
+        _file: >-
+          {{ (ansible_user_dir,
+              'ci-framework-data',
+              'secrets',
+              'ci_token') | path_join
+          }}
+      block:
+        - name: Copy provided file
+          vars:
+            cifmw_manage_secrets_citoken_file: '/tmp/yodel'
+          ansible.builtin.include_role:
+            name: manage_secrets
+            tasks_from: ci_token.yml
+
+        - name: Check for file
+          register: cp_file
+          ansible.builtin.stat:
+            checksum_algorithm: sha256
+            get_checksum: true
+            get_attributes: false
+            get_mime: false
+            path: "{{ _file }}"
+
+        - name: Create file from content
+          vars:
+            cifmw_manage_secrets_citoken_content: |-
+              sha256~AABBCC-DDEE1232455
+          ansible.builtin.include_role:
+            name: manage_secrets
+            tasks_from: ci_token.yml
+
+        - name: Check for file
+          register: create_file
+          ansible.builtin.stat:
+            checksum_algorithm: sha256
+            get_checksum: true
+            get_attributes: false
+            get_mime: false
+            path: "{{ _file }}"
+
+        - name: Validate files
+          ansible.builtin.assert:
+            that:
+              - cp_file.stat.exists | bool
+              - cp_file.stat.checksum == '199432267350192a54c6a92869056386956732a5bf476fadfa9536adcc49285f'
+              - create_file.stat.exists | bool
+              - create_file.stat.checksum == '697bbc161f38c5173f4d6ac7340aac5e62719c3e2d734bbf700af4f7d4933662'
