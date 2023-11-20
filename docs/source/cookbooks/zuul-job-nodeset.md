@@ -57,6 +57,7 @@ job parameter:
                 ip: 172.19.0.5
 ```
 
+~~~{tip}
 We have to use that `extra_vars` in order to properly override the `vars` we define in the
 parent job - apparently, Zuul is merging mappings instead of properly overriding them like
 it does with actual string parameters.

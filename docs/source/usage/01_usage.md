@@ -32,14 +32,15 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 * `cifmw_config_network`: (Bool) toggle networking deployment based on CI-framework instead of install_yamls. Default to false.
 
-### Words of caution
-
+~~~{admonition} Words of caution
+:class: danger
 If you want to output the content in another location than `~/ci-framework-data`
 (namely set the `cifmw_basedir` to some other location), you will have to update
 the `ansible.cfg`, updating the value of `roles_path` so that it includes
 this new location.
 
 We cannot do this change runtime unfortunately.
+~~~
 
 ## Role level parameters
 
@@ -129,8 +130,13 @@ For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
 
 ```Bash
-$ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
-$ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
+$ ansible-playbook deploy-edpm.yml \
+    -K --tags bootstrap,packages \
+    [-e @scenarios/centos-9/some-environment -e <...>]
+$
+$ ansible-playbook deploy-edpm.yml \
+    -K --skip-tags bootstrap,packages \
+    [-e @scenarios/centos-9/some-environment -e <...>]
 ```
 Running the command twice, with `--tags` and `--skip-tags` as only difference,
 will ensure your environment has the needed directories, packages and

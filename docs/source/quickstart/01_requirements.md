@@ -60,14 +60,22 @@ must be present on your system:
 
 # Needed specific configurations
 
-You must run the deployment as a **non root user**. For a remote user, it must
-have appropriate SSH configuration for **password less** authentication (use the
-`.ssh/authorized_keys` on the remote host).
+~~~{warning}
+You must run the deployment as a **non root user**.
+~~~
 
+~~~{tip}
+For a remote user, it must have appropriate SSH configuration
+for **password less** authentication (use the `.ssh/authorized_keys`
+ on the remote host).
+~~~
+
+~~~{tip}
 Your user must have full `sudo` access in order to:
 
 * install packages
 * push specific configurations linked to CRC
+~~~
 
 While we try to keep the footprint low on the system, packages are needed, and
 some 3rd-party software requires access, such as CRC.

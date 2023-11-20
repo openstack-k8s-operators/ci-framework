@@ -7,8 +7,10 @@ The Framework works in a 2-step approach. Let's first get the needed infrastruct
 As said, this infrastructure involves [CRC](https://crc.dev/crc/getting_started/getting_started/introducing/)
 and fewer resources than the Validated Architecture.
 
-Note: for the lightweight infrastructure, you may be able to deploy it on your laptop/desktop directly.
+~~~{tip}
+For the lightweight infrastructure, you may be able to deploy it on your laptop/desktop directly.
 In such a case, additional notes will be provided.
+~~~
 
 In order to deploy that infrastructure, you have to:
 
@@ -37,7 +39,9 @@ all:
       ansible_host: hypervisor.localnet
 ```
 
-Note: in case you want to run the framework against your laptop/desktop, you can avoid the `hypervisor-1` host.
+~~~{tip}
+In case you want to run the framework against your laptop/desktop, you can avoid the `hypervisor-1` host.
+~~~
 
 ### Custom variables file
 

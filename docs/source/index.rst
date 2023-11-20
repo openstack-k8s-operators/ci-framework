@@ -17,8 +17,8 @@ It is not intended for a production use, and should not be treated as a persiste
 
 .. _RHOSO: https://www.redhat.com/en/blog/red-hat-openstack-services-openshift-next-generation-red-hat-openstack-platform
 
-Found a bug?
-############
+Found a bug or need a new feature?
+##################################
 
 The project is under constant development, bugs happen.
 

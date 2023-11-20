@@ -12,8 +12,10 @@ $ ansible-playbook -i custom/inventory.yml \
     reproducer-clean.yml
 ```
 
-Note: if you deployed on your laptop/desktop, you don't need to pass the inventory nor
+~~~{tip}
+If you deployed on your laptop/desktop, you don't need to pass the inventory nor
 the `cifmw_target_host` extra variable.
+~~~
 
 ## Deep scrub
 In case you need to re-deploy the full OCP cluster for your next deploy,

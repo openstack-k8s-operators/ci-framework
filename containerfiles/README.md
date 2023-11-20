@@ -84,8 +84,11 @@ podman run --rm -ti \
 ```
 
 ##### On systems utilizing Podman Remote Machine (MacOS, Windows, ...):
-> NOTE: It is required to have podman-machine configured with the home directory mounted.
-Be aware that running this process will remove all existing images and containers, including those that were preinstalled or already exist on your system.
+~~~{warning}
+It is required to have podman-machine configured with the home directory mounted.
+Be aware that running this process will remove all existing images and containers,
+including those that were preinstalled or already exist on your system.
+~~~
 
 ```Bash
 podman machine stop podman-machine-default

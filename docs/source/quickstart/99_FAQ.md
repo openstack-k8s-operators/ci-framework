@@ -49,15 +49,21 @@ fatal: [localhost]: FAILED! => {
 }
 ```
 
-Cause: there are multiple causes, but usually its because NTP can't be properly configured. This usually happens when running in a network
+~~~{admonition} Cause
+:class: error
+There are multiple causes, but usually its because NTP can't be properly configured. This usually happens when running in a network
 without access to public NTP servers.
+~~~
 
-Solution: ensure you're passing the following parameter to your deploy:
+~~~{admonition} Solution
+:class: tip
+Ensure you're passing the following parameter to your deploy:
 
 ```YAML
 cifmw_install_yamls_vars:
   DATAPLANE_NTP_SERVER: <your selected NTP server>
 ```
+~~~
 
 #### internal error: Network is already in use by interface virbr0
 
@@ -77,22 +83,28 @@ failed: [hypervisor] (item=osp_trunk) => {
 }
 ```
 
-Cause: there's currently a conflict between the `default` network created by libvirt during its first startup, and the `osp_trunk` network
+~~~{admonition} Cause
+:class: error
+There's currently a conflict between the `default` network created by libvirt during its first startup, and the `osp_trunk` network
 we create within the CI Framework: they are both consuming the same range, `192.168.122.0/24`. This is mostly due to hard-coded values in the
 product, not the Framework. We're working on getting rid of them.
+~~~
 
-Solution: connect to the hypervisor, and issue this command:
+~~~{admonition} Solution
+:class: tip
+Connect to the hypervisor, and issue this command:
 
 ```Bash
 $ virsh -c qemu:///system net-destroy default
 ```
+~~~
 
 This will stop the network (while keeping it available for later use). You then want to start the `osp_trunk` network, else you'll hit another issue
 during the next run (see [below](#network-cifmw-osp-trunk-is-not-active)):
 
 
 ```Bash
-$ virsh -c qemu://system net-start cifmw-osp_trunk
+$ virsh -c qemu:///system net-start cifmw-osp_trunk
 ```
 
 #### network 'cifmw-osp_trunk' is not active
@@ -105,15 +117,20 @@ The error was: libvirt.libvirtError: Requested operation is not valid: network
 'cifmw-osp_trunk' is not active
 ```
 
-Cause: the `cifmw-osp_trunk` virtual network didn't start properly. This usually happen
+~~~{admonition} Cause
+:class: error
+The `cifmw-osp_trunk` virtual network didn't start properly. This usually happen
 because a previous run hit another issue (see [above](#internal-error-network-is-already-in-use-by-interface-virbr0)).
+~~~
 
-Solution: either clean the deployment, or connect to the hypervisor, and run the following command:
+~~~{admonition} Solution
+Either clean the deployment, or connect to the hypervisor, and run the following command:
 
 ```Bash
 $ virsh -c qemu:///system net-start cifmw-osp_trunk
 ```
 and re-start the deployment.
+~~~
 
 
 ### How can I clean the deployed layout?
