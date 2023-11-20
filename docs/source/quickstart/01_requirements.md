@@ -64,8 +64,10 @@ USERNAME          ALL=(ALL)       NOPASSWD: ALL
 ```
 Of course, replace `USERNAME` by your user's name.
 
-Note that you can require the password for `sudo` calls, but you'll then have to pass `-K` option to
+~~~{tip}
+You can require the password for `sudo` calls, but you'll then have to pass `-K` option to
 any of the `ansible-playbook` related to the infrastructure provisioning.
+~~~
 
 ## Specific access rights
 
