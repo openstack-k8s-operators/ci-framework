@@ -63,33 +63,16 @@
     - name: Configure and start RHOL/CRC
       when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_running|bool
       block:
-        - name: Configure RHOL/CRC using install_yamls
-          when: cifmw_rhol_crc_use_installyamls|bool
-          ansible.builtin.import_tasks: install_yamls.yml
+        - name: Set RHOL/CRC configuration options
+          ansible.builtin.import_tasks: configuration.yml
 
-        - name: Manually configure RHOL/CRC
-          when: not cifmw_rhol_crc_use_installyamls|bool
-          block:
-            - name: Set RHOL/CRC configuration options
-              ansible.builtin.import_tasks: configuration.yml
+        - name: Setup RHOL/CRC
+          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
+          register: cifmw_rhol_crc_cmd_setup
 
-            - name: Setup RHOL/CRC
-              ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
-              register: cifmw_rhol_crc_cmd_setup
-
-            - name: Start RHOL/CRC
-              ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
-              register: cifmw_rhol_crc_cmd_start
-
-    - name: Attach default network to CRC
-      when: cifmw_rhol_crc_use_installyamls|bool
-      vars:
-        make_crc_attach_default_interface_dryrun: "{{ cifmw_rhol_crc_dryrun }}"
-        make_crc_attach_default_interface_env:
-          PATH: "{{ cifmw_path }}"
-      ansible.builtin.include_role:
-        name: "install_yamls_makes"
-        tasks_from: "make_crc_attach_default_interface.yml"
+        - name: Start RHOL/CRC
+          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
+          register: cifmw_rhol_crc_cmd_start
 
   always:
     - name: Delete sudoers file
