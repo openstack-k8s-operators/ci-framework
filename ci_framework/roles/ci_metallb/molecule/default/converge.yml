@@ -1,0 +1,198 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_ci_metallb_namespace: "metallb-system"
+  tasks:
+    - name: Add crc hostname with it's IP to /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "192.168.130.11 crc"
+
+    - name: Add the crc host dynamically
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
+    - name: Fetch crc network facts
+      ansible.builtin.setup:
+        gather_subset: network
+      delegate_to: crc
+      delegate_facts: true
+
+    - name: Prepare the networking var for the ci_nmstate role
+      ansible.builtin.set_fact:
+        cifmw_network_layout:
+          networks:
+            osp-trunk:
+              metallb:
+                ranges:
+                  - 192.168.122.80-192.168.122.90
+            test-vlan-connection:
+              metallb:
+                ranges:
+                  - 172.18.0.80-172.18.0.90
+          controller:
+            osp-trunk:
+              connection: ci-private-network
+              gw: 192.168.122.1
+              iface: eth1
+              ip: 192.168.122.11/24
+              mac: fa:16:3e:45:c1:b1
+              mtu: 1500
+            internal-api:
+              connection: ci-private-network-20
+              iface: eth1.20
+              ip: 172.17.0.4/24
+              mac: 52:54:00:30:d2:36
+              mtu: '1496'
+              parent_iface: eth1
+              vlan: 20
+          crc:
+            osp-trunk:
+              connection: ci-private-network
+              gw: "{{ hostvars.crc.ansible_default_ipv4.gateway }}"
+              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+              ip4: >-
+                {{
+                  hostvars.crc.ansible_default_ipv4.address +
+                    '/' + hostvars.crc.ansible_default_ipv4.prefix
+                }}
+              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu }}"
+            test-vlan-connection:
+              connection: test-network-20
+              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}.20"
+              ip4: 172.17.0.5/24
+              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu | string }}"
+              parent_iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+              vlan: 20
+
+    - name: Call the role under test
+      ansible.builtin.include_role:
+        name: "ci_metallb"
+
+    # Verify the run
+    - name: Fetch files stat results
+      ansible.builtin.stat:
+        path: >-
+          {{
+            [
+              ansible_user_dir,
+              'ci-framework-data',
+              'artifacts',
+              'manifests',
+              'metallb',
+              item
+            ] | ansible.builtin.path_join
+          }}
+      register: _ci_metallb_molecule_stat_out
+      loop:
+        - metallb-operatorgroup-olm.yaml
+        - metallb-subscription-olm.yaml
+        - ipaddresspools.yaml
+        - l2advertisements.yaml
+
+    - name: Assert that all expected files exist
+      ansible.builtin.assert:
+        that: >-
+          _ci_metallb_molecule_stat_out.results |
+          map(attribute="stat.exists") |
+          select("equalto", true) |
+          length == (_ci_metallb_molecule_stat_out.results | length)
+    - name: Fetch all files content
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      register: _ci_metallb_molecule_slurp_out
+      loop: >-
+        {{
+          _ci_metallb_molecule_stat_out.results |
+          map(attribute="stat.path")
+        }}
+    - name: Assert that all files contains proper YAML data
+      ansible.builtin.assert:
+        that: "item.content | b64decode | from_yaml_all | length > 0"
+      loop: "{{ _ci_metallb_molecule_slurp_out.results }}"
+      loop_control:
+        label: "{{ item.source }}"
+
+    - name: Ensure that IPAddressPools are created with the right parameters
+      kubernetes.core.k8s_info:
+        api_version: metallb.io/v1beta1
+        kind: IPAddressPool
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        name: "{{ item.name }}"
+        namespace: "{{ cifmw_ci_metallb_namespace }}"
+      register: _ci_metallb_default_ipaddresspool_out
+      failed_when: >-
+        (_ci_metallb_default_ipaddresspool_out is not defined) or
+        (_ci_metallb_default_ipaddresspool_out is failed) or
+        (_ci_metallb_default_ipaddresspool_out.resources | length == 0) or
+        not (_ci_metallb_default_ipaddresspool_out.resources[0].spec.addresses == item.ranges)
+      loop:
+        - name: "osp-trunk"
+          ranges: ["192.168.122.80-192.168.122.90"]
+        - name: "test-vlan-connection"
+          ranges: ["172.18.0.80-172.18.0.90"]
+
+    - name: Ensure that L2Advertisements are created with the right parameters
+      kubernetes.core.k8s_info:
+        api_version: metallb.io/v1beta1
+        kind: L2Advertisement
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        name: "{{ item.name }}"
+        namespace: "{{ cifmw_ci_metallb_namespace }}"
+      register: _ci_metallb_test_vlan_l2advertisement_out
+      failed_when: >-
+        (_ci_metallb_test_vlan_l2advertisement_out is not defined) or
+        (_ci_metallb_test_vlan_l2advertisement_out is failed) or
+        (_ci_metallb_test_vlan_l2advertisement_out.resources | length == 0) or
+        not (_ci_metallb_test_vlan_l2advertisement_out.resources[0].spec.ipAddressPools == [item.name]) or
+        not (_ci_metallb_test_vlan_l2advertisement_out.resources[0].spec.interfaces == [item.interface])
+      loop:
+        - name: "osp-trunk"
+          interface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+        - name: "test-vlan-connection"
+          interface: "{{ hostvars.crc.ansible_default_ipv4.interface }}.20"
+
+    - name: Call ci_metallb cleanup
+      ansible.builtin.import_role:
+        name: ci_metallb
+        tasks_from: cleanup.yml
+
+    - name: Fetch namespaces
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: "namespaces"
+      register: _ci_metallb_molecule_ns_out
+
+    - name: Assert that the metallb ns is gone
+      vars:
+        ns_names: >-
+          {{
+            _ci_metallb_molecule_ns_out.resources |
+            default([]) |
+            map(attribute='metadata.name')
+          }}
+      ansible.builtin.assert:
+        that: "cifmw_ci_metallb_namespace not in ns_names"
