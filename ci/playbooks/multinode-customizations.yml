@@ -128,6 +128,28 @@
       ansible.builtin.set_fact:
         persistent_ssh_key: "{{ pub_key_slurp['content'] | b64decode }}"
 
+    - name: Check if cloud-init is overriding NM settings
+      become: true
+      ansible.builtin.stat:
+        path: "/etc/NetworkManager/conf.d/99-cloud-init.conf"
+      register: _cloud_init_nm_override_stat
+
+    - name: Remove cloud-init DNS override if present and reload
+      become: true
+      when: _cloud_init_nm_override_stat.stat.exists
+      block:
+        - name: Remove cloud-init DNS override if present
+          community.general.ini_file:
+            path: "/etc/NetworkManager/conf.d/99-cloud-init.conf"
+            section: main
+            option: dns
+            state: absent
+
+        - name: Reload the NetworkManager to pick the changes
+          ansible.builtin.service:
+            name: NetworkManager
+            state: "reloaded"
+
     - name: Get the default iface connection
       register: controller_default_connection_out
       ansible.builtin.command:
