@@ -1,0 +1,119 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_cert_manager_operator_namespace: cert-manager-operator
+    cifmw_cert_manager_cleanup: true
+  tasks:
+    - name: Deploy cert-manager role
+      ansible.builtin.include_role:
+        name: "cert_manager"
+
+    - name: Store self signed ca file
+      vars:
+        _ca_content: |
+          ---
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: sandbox
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: selfsigned-issuer
+          spec:
+            selfSigned: {}
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: my-selfsigned-ca
+            namespace: cert-manager
+          spec:
+            isCA: true
+            commonName: my-selfsigned-ca
+            secretName: root-secret
+            privateKey:
+              algorithm: ECDSA
+              size: 256
+            issuerRef:
+              name: selfsigned-issuer
+              kind: ClusterIssuer
+              group: cert-manager.io
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: my-ca-issuer
+          spec:
+            ca:
+              secretName: root-secret
+      ansible.builtin.copy:
+        dest: "/tmp/cmtest.yaml"
+        content: "{{ _ca_content }}"
+
+    - name: Apply cmtest.yaml
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        state: present
+        src: /tmp/cmtest.yaml
+
+    - name: Get clusterissuer my-ca-issuer
+      kubernetes.core.k8s_info:
+        api_version: cert-manager.io/v1
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: sandbox
+        name: my-ca-issuer
+        kind: clusterissuer
+      register: _data
+
+    - name: Assert the length of returned resources
+      ansible.builtin.assert:
+        that:
+          - '_data.resources | length > 0'
+
+    - name: Verify the presence of my-ca-issuer
+      ansible.builtin.assert:
+        that:
+          - '_data.resources[0]["metadata"]["name"] == "my-ca-issuer"'
+
+    - name: Cleanup cert manager resources
+      ansible.builtin.include_role:
+        name: "cert_manager"
+        tasks_from: cleanup.yml
+
+    - name: Get all namespaces
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Namespace
+      register: _cert_manager_ns
+
+    - name: Assert that the cert-manager ns is deleted
+      vars:
+        ns_names: >-
+          {{
+            _cert_manager_ns.resources |
+            default([]) |
+            map(attribute='metadata.name')
+          }}
+      ansible.builtin.assert:
+        that: "cifmw_cert_manager_operator_namespace not in ns_names"
