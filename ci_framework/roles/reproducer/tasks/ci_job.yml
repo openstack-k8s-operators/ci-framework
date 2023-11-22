@@ -32,34 +32,6 @@
   delegate_to: controller-0
   remote_user: zuul
   block:
-    - name: Set facts related to the reproducer
-      ansible.builtin.set_fact:
-        _ctl_reproducer_basedir: >-
-          {{
-            (
-             '/home/zuul',
-             'ci-framework-data',
-             'artifacts'
-             ) | path_join
-          }}
-
-    - name: Ensure directory exists
-      ansible.builtin.file:
-        path: "{{ _ctl_reproducer_basedir }}"
-        state: directory
-
-    - name: Create data directory on controller-0
-      ansible.builtin.file:
-        path: "{{ _ctl_reproducer_basedir }}/parameters"
-        state: directory
-
-    - name: Ensure /etc/ci/env is created
-      become: true
-      ansible.builtin.file:
-        path: /etc/ci/env
-        state: directory
-        mode: "0755"
-
     - name: Create crc_ci_bootstrap_networks_out fact
       vars:
         net_config_list: |-
@@ -124,22 +96,6 @@
           ansible.builtin.copy:
             dest: zuul-network-data.yml
             content: "{{ {'job_network': ci_job_networking} | to_nice_yaml}}"
-
-    - name: Install collections
-      tags:
-        - bootstrap
-      ansible.builtin.command:
-        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: ansible-galaxy collection install -r requirements.yml
-
-    - name: Build job inventory for hook usage
-      tags:
-        - bootstrap
-      ansible.builtin.shell:
-        cmd: >-
-          cat reproducer-inventory/* >
-          ci-framework-data/artifacts/zuul_inventory.yml
-        creates: ci-framework-data/artifacts/zuul_inventory.yml
 
     - name: Push pre-CI job playbook
       tags:
