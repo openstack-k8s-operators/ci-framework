@@ -17,6 +17,8 @@ Please explain the role purpose.
 * `cifmw_repo_setup_env`: (Dict) Environment variables to be passed to repo_setup cli . Defaults to `'{}'`.
 * `cifmw_repo_setup_enable_rhos_release`: (Boolean) Toggle `rhos-release` support. Defaults to `False`.
 * `cifmw_repo_setup_dlrn_hash_tag`: (String) repo-setup dlrn-hash-tag. Defaults to `{}`.
+* `cifmw_repo_setup_component_name`: (String) component repo to setup. Used in component lines. Defaults to ''.
+* `cifmw_repo_setup_component_promotion_tag`: (String) DLRN hash tag to use for component repo setup. Defaults to `component-ci-testing`.
 
 ### Optional parameters for rhos-release
 * `cifmw_repo_setup_rhos_release_rpm`: (String) URL to rhos-release RPM.
