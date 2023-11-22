@@ -12,7 +12,9 @@ From now on, you should be able to jump on the ansible controller:
 ```Bash
 $ ssh controller-0
 ```
+~~~{tip}
 No user nor key is needed - everything is configured in your ~/.ssh/config for an easy access.
+~~~
 
 ## Controller-0
 
@@ -23,12 +25,14 @@ tools and generated files
 
 By default, you will find those three repositories:
 
-- `~/src/github.com/openstack-k82-operators/architecture`
-- `~/src/github.com/openstack-k82-operators/ci-framework`
-- `~/src/github.com/openstack-k82-operators/install_yamls`
+- `~/src/github.com/openstack-k8s-operators/architecture`
+- `~/src/github.com/openstack-k8s-operators/ci-framework`
+- `~/src/github.com/openstack-k8s-operators/install_yamls`
 
+~~~{tip}
 If you want to either get more, or override the default clone, you can pass the following parameter:
 `cifmw_reproducer_repositories`. You can know more about it [here](../roles/reproducer.md#push-repositories).
+~~~
 
 ### Ansible inventory
 

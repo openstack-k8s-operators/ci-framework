@@ -49,12 +49,13 @@ Then, you can run the following command in order to run tests locally:
 ```Bash
 $ make run_ctx_pre_commit
 $ make run_ctx_ansible_test
-$ make run_ctx_molecule MOLECULE_CONFIG=.config/molecule/config_local.yml
 ```
 
-This will create a container, and run tests in it (pre-commit, and molecule).
+This will create a container, and run tests in it (pre-commit and ansible-test).
 
-Note that `podman` as well as `buildah` are needed for this step.
+~~~{warning}
+`podman` is needed for this step.
+~~~
 
 One can also run:
 ```Bash
