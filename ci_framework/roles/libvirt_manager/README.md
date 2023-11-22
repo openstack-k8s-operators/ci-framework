@@ -30,7 +30,8 @@ Used for checking if:
 * `cifmw_libvirt_manager_net_prefix_add` (Boolean) Adds `cifmw-` prefix to the network resources managed by this role. By default, it is set to `true`.
 * `cifmw_libvirt_manager_pub_net`: (String) Network name playing the "public" interface. Defaults to `public`.
 
-## Parameters imported from the reproducer role
+### Parameters imported from the reproducer role
+
 The following parameters are usually set in the [reproducer](./reproducer.md) context.
 The parameters listed here are therefore merely proxies to the ones set in the reproducer,
 and have the same name, less the role prefix. Default values are the same as the
@@ -43,3 +44,31 @@ reproducer role.
 * `cifmw_libvirt_manager_crc_gw4`: `{{ cifmw_reproducer_crc_gw4 | default('192.168.122.1') }}`
 * `cifmw_libvirt_manager_dns_servers`: `{{ cifmw_reproducer_dns_servers | default(['1.1.1.1', '8.8.8.8']) }}`
 * `cifmw_libvirt_manager_crc_private_nic`: `{{ cifmw_reproducer_crc_private_nic | default('enp2s0') }}`
+
+## Calling attach_network.yml from another role
+You may want to include that specific tasks file from another role in order to inject some networks into
+a virtual machine.
+
+In order to do so, you have to provide specific variables:
+
+* `vm_name`: (String) Virtual machine name. Mandatory.
+* `network`: (Data structure). Mandatory.
+  * `name`: (String) Network or bridge name. Mandatory.
+  * `cidr`: (String) Network CIDR. Mandatory.
+  * `mtu`: (Int) Network MTU. Optional (and not used in this specific case).
+  * `static_ip`: (Bool) Set it to `true` to get a fixed IP.
+* `cifmw_libvirt_manager_net_prefix_add`: (Bool) Toggle this to `true` if the network name needs to get the `cifmw-` prefix (advanced usage). Optional. Defaults to `true`.
+
+### Example
+```YAML
+- name: Attach my network to my virtual machine
+  vars:
+    vm_name: my-virtual-machine
+    network:
+      name: my-network
+      cidr: 192.168.130.0/24
+      static_ip: true
+  ansible.builtin.include_role:
+    name: libvirt_manager
+    tasks_from: attack_interface.yml
+```

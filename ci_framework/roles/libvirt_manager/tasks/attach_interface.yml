@@ -17,10 +17,35 @@
 # This task requires
 #   vm_name         Domain name to which the interface needs to be attached.
 #   network
-#     name          Name of the network bridge
+#     name          Name of the network
 #     cidr          network notation
 #     mtu           MTU applied on the interface.
 #     static_ip     boolean if static address is required.
+
+- name: Get existing networks and bridges
+  when:
+    - _net_bridge_map is undefined
+  block:
+    - name: Loop over existing nets to extract info
+      register: _net_info
+      community.libvirt.virt_net:
+        command: "info"
+        uri: "qemu:///system"
+
+    - name: Create network to bridge mapping
+      vars:
+        _local_map: "{{ {net.key: net.value.bridge} }}"
+      ansible.builtin.set_fact:
+        cached: true
+        _net_bridge_map: >-
+          {{
+            _net_bridge_map | default({}) |
+            combine(_local_map, recursive=true)
+          }}
+      loop: "{{ _net_info.networks | dict2items }}"
+      loop_control:
+        loop_var: net
+        label: "{{ net.key }}"
 
 - name: "Check ports attached to the domain {{ vm_name }}"
   block:
@@ -40,18 +65,25 @@
 
 - name: Attach new port if needed
   vars:
+    # add prefix if needed/wanted
     _net_name: >-
       {{
         (cifmw_libvirt_manager_net_prefix_add | bool) |
         ternary('cifmw-' + network.name, network.name)
       }}
-    _attached_nets: >-
+    # ensure we're using bridge name
+    _local_bridge_name: >-
+      {{
+        (_net_name not in _net_bridge_map.keys()) |
+        ternary(_net_name, _net_bridge_map[_net_name])
+      }}
+    _attached_bridges: >-
       {{
         _extracted_xml.matches | default([]) |
-        selectattr('source.bridge', 'equalto', _net_name)
+        selectattr('source.bridge', 'equalto', _local_bridge_name) | default([])
       }}
   when:
-    - _attached_nets | length == 0
+    - _attached_bridges | length == 0
   block:
     - name: "Generate a random MAC address for {{ vm_name }}"
       ansible.builtin.set_fact:
@@ -69,7 +101,7 @@
         cmd: >-
           virsh -c qemu:///system
           attach-interface "{{ vm_name }}"
-          --source "{{ _net_name }}"
+          --source "{{ _local_bridge_name }}"
           --type bridge
           --mac "{{ _lm_mac_address }}"
           --model virtio
