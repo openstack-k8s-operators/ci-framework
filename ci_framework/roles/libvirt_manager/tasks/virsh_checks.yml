@@ -27,41 +27,23 @@
       ansible.builtin.systemd_service:
         daemon_reload: true
 
-- name: Ensure proper services are enabled on newer OS
-  become: true
+- name: Ensure libvirt modular driver daemons are started.
   when:
     - ansible_facts['distribution'] in ['CentOS', 'RedHat']
     - ansible_facts['distribution_major_version'] >= '9'
-  vars:
-    _services:
-      - qemu
-      - network
-      - nodedev
-      - nwfilter
-      - secret
-      - storage
-      - interface
-  block:
-    - name: Ensure main sockets are enabled
-      ansible.builtin.service:
-        name: "virt{{ item }}d.socket"
-        state: started
-        enabled: true
-      loop: "{{ _services }}"
-
-    - name: Ensure read-only sockets are enabled
-      ansible.builtin.service:
-        name: "virt{{ item }}d-ro.socket"
-        state: started
-        enabled: true
-      loop: "{{ _services }}"
-
-    - name: Ensure admin sockets are enabled
-      ansible.builtin.service:
-        name: "virt{{ item }}d-admin.socket"
-        state: started
-        enabled: true
-      loop: "{{ _services }}"
+  ansible.builtin.include_tasks:
+    file: drivers.yml
+  loop:
+    - qemu
+    - interface
+    - network
+    - nodedev
+    - nwfilter
+    - secret
+    - storage
+    - proxy
+  loop_control:
+    loop_var: driver_name
 
 - name: Manage service for older releases
   become: true
