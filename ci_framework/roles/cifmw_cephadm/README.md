@@ -54,6 +54,24 @@ need to be changed for a typical EDPM deployment.
 
 * `cifmw_cephadm_keys`: see below
 
+ `cifmw_cephadm_certs`: The path on the ceph host where TLS/SSL certificates
+   are located. It points to '/etc/pki/tls'
+
+* `cifmw_cephadm_dashboard_crt`: The SSL/TLS certificate signed by CA which is
+   an optional parameter. If it is provided, ceph dashabord will be configured
+   for SSL automatically. Certficate should be made available in
+   `cifmw_cephadm_certs` path only. To enable SSL for dashabord, both
+   `cifmw_cephadm_dashboard_crt` and `cifmw_cephadm_dashboard_key` are needed.
+
+* `cifmw_cephadm_dashboard_key`: The SSL/TLS certificate key which is an
+   optional parameter. If it is provided, ceph dashabord will be configured
+   for SSL automatically.
+
+* `cifmw_cephadm_monitoring_network`: the Ceph `public_network` where the
+   dashboard monitoring stack instances should be bound. The network range
+   is gathered from the `cifmw_cephadm_bootstrap_conf` file, which represents
+   the initial Ceph configuration file passed at bootstrap time.
+
 * `cifmw_cephadm_rgw_network`: the Ceph `public_network` where the `radosgw`
    instances should be bound. The network range is gathered from the
    `cifmw_cephadm_bootstrap_conf` file, which represents the initial Ceph
@@ -76,7 +94,7 @@ need to be changed for a typical EDPM deployment.
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
-fmw_cephadm_pools:
+cifmw_cephadm_pools:
 - name: vms
   pg_autoscale_mode: True
   target_size_ratio: 0.3
