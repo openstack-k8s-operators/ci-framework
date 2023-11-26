@@ -61,8 +61,16 @@
           oc adm must-gather --image {{ cifmw_os_must_gather_image }}
           --timeout {{ cifmw_os_must_gather_timeout }}
           --host-network={{ cifmw_os_must_gather_host_network }}
-          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs > {{ cifmw_os_must_gather_output_dir }}/logs/os_must_gather.log
+          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs
+          -- ADDITIONAL_NAMESPACES={{ cifmw_os_must_gather_additional_namespaces }} gather &> {{ cifmw_os_must_gather_output_dir }}/logs/os_must_gather.log
+
   rescue:
+    - name: Create oc_inspect log directory
+      ansible.builtin.file:
+        path: "{{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect"
+        state: directory
+        mode: "0755"
+
     - name: Inspect the cluster after must-gather failure
       ignore_errors: true # noqa: ignore-errors
       environment:
@@ -71,7 +79,13 @@
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
         script: |
-          mkdir -p {{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
-          for ns in openstack-operators openstack baremetal-operator-system openshift-machine-api cert-manager openshift-nmstate metallb-system; do
-            oc adm inspect namespace/"${ns}" --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect || echo "Error getting logs from ${ns}"
-          done
+            oc adm inspect namespace/{{ item }} --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
+      loop: >-
+        {{
+          (
+            cifmw_os_must_gather_namespaces | default([]) +
+            (
+              cifmw_os_must_gather_additional_namespaces | split(',') | list
+            )
+          ) | unique
+        }}
