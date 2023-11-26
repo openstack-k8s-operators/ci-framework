@@ -1,0 +1,156 @@
+---
+# Will attempt to configure BIOS
+- name: Configure BIOS
+  block:
+    - name: Set BIOS Configuration
+      register: bios_config_change
+      retries: "{{ cifmw_idrac_configuration_task_retries }}"
+      until:
+        - "'EOF occurred in violation of protocol' not in bios_config_change['msg']"
+      community.general.redfish_config:
+        category: Systems
+        command: "{{ bios_config_command }}"
+        bios_attributes: "{{ host_bios_configuration }}"
+        boot_order: "{{ cifmw_idrac_configuration_boot_order }}"
+        baseuri: "{{ inventory_hostname }}"
+        username: "{{ cifmw_idrac_configuration_user }}"
+        password: "{{ cifmw_idrac_configuration_password }}"
+        timeout: "{{ cifmw_idrac_configuration_timeout }}"
+
+  # Error handling in edge scenarios
+  rescue:
+    - name: Proceed If New Configuration Is Committed But Not Applied - Job Is Created By iDRAC
+      when:
+        - "'HTTP Error 400 on PATCH request' in bios_config_change['msg']"
+        - "'Pending configuration values are already committed' in bios_config_change['msg']"
+      ansible.builtin.set_fact:
+        bios_config_change: "{{ bios_config_change | combine({'changed': True, 'failed':  False, 'self_created_job': True}) }}"
+
+- name: Fail If iDRAC Import/Export Operation In Progress (FATAL)
+  when:
+    - "'Unable to apply the configuration changes because an import or export operation is currently in progress' in bios_config_change['msg']"
+    - bios_config_change is failed
+  ansible.builtin.fail:
+    msg:
+      - "An operation running in iDRAC {{ inventory_hostname }} is preventing updating BIOS configuration."
+      - 'Consider restarting iDRAC, this can be done remotely:'
+      - "ssh {{ cifmw_idrac_configuration_user }}@{{ inventory_hostname }} 'racadm  racreset soft'"
+
+- name: Fail If Can't Handle BIOS Configuration Error
+  when:
+    - bios_config_change is failed
+    - bios_config_change is not changed
+    - bios_config_change is not skipped
+  ansible.builtin.fail:
+    msg:
+      - 'Encountered an error that is deemed as FATAL.'
+      - 'Error:'
+      - "{{ bios_config_change['msg'] }}"
+
+- name: Create BIOS Configuration Job (Schedule BIOS Setting Update) If Needed
+  block:
+    - name: Create Job If Required
+      register: bios_config_job
+      when:
+        - bios_config_change is changed
+        - "'self_created_job' not in bios_config_change"
+        - "'BootOrder set' not in bios_config_change['msg']"
+      retries: "{{ cifmw_idrac_configuration_task_retries }}"
+      until:
+        - "'EOF occurred in violation of protocol' not in bios_config_job['msg']"
+        - "'The specified job starts when Lifecycle Controller is available.' not in bios_config_job['msg']"
+      community.general.idrac_redfish_command:
+        category: Systems
+        command: CreateBiosConfigJob
+        baseuri: "{{ inventory_hostname }}"
+        username: "{{ cifmw_idrac_configuration_user }}"
+        password: "{{ cifmw_idrac_configuration_password }}"
+        timeout: "{{ cifmw_idrac_configuration_timeout }}"
+
+  # Error handling in edge scenarios
+  rescue:
+    - name: Proceed If Job Is Scheduled But Not Applied
+      when:
+        - "'HTTP Error 500 on POST request' in bios_config_job['msg']"
+        - "'Pending configuration values are already committed' in bios_config_job['msg']"
+      ansible.builtin.set_fact:
+        bios_config_job: "{{ bios_config_job | combine({'changed': True}) }}"
+
+    - name: Proceed If Requested Configuration Is Already Applied
+      when:
+        - "'HTTP Error 400 on POST request' in bios_config_job['msg']"
+        - "'Pending configuration values are already committed' in bios_config_job['msg']"
+      ansible.builtin.set_fact:
+        bios_config_job:
+          changed: true
+
+- name: Power Off iDRAC Before Applying New BIOS Settings If Needed
+  vars:
+    power_action: 'PowerForceOff'
+  when: >-
+    'self_created_job' in bios_config_change or
+    bios_config_change is changed or
+    bios_config_job is changed
+  ansible.builtin.include_tasks:
+    file: power_action.yml
+
+- name: Save Power Action Result Of 'PowerForceOff'
+  ansible.builtin.set_fact:
+    # From our point of view, there is no difference between successful and changed
+    # but keeping it for the sake of consistency
+    bios_idrac_poweroff: >-
+      {%- set status_dict = dict() -%}
+      {%- if power_action_result is defined and power_action_result is skipped -%}
+        {%- set _ = status_dict.update({'skipped': True}) -%}
+      {%- elif power_action_result is defined and power_action_result is successful -%}
+        {%- set _ = status_dict.update({'successful': True}) -%}
+      {%- elif power_action_result is defined and power_action_result is changed -%}
+        {%- set _ = status_dict.update({'changed': True}) -%}
+      {%- endif -%}
+      {{ status_dict }}
+
+- name: Pause To Let iDRAC Shutdown Before PowerOn
+  when:
+    - (bios_idrac_poweroff is successful) or (bios_idrac_poweroff is changed)
+    - bios_idrac_poweroff is not skipped
+  ansible.builtin.pause:
+    seconds: 20
+
+- name: Power On iDRAC To Apply New BIOS Settings If Needed
+  vars:
+    power_action: 'PowerOn'
+  retries: "{{ cifmw_idrac_configuration_task_retries }}"
+  until:
+    - power_action_result is changed
+  when:
+    - (bios_idrac_poweroff is successful) or (bios_idrac_poweroff is changed)
+    - bios_idrac_poweroff is not skipped
+  ansible.builtin.import_tasks:
+    file: power_action.yml
+  # Will attempt to wait for iDRAC to be powered on because in some cases GracefulShutdown will take a while.
+
+- name: Save Power Action Result Of PowerOn
+  ansible.builtin.set_fact:
+    bios_idrac_poweron: >-
+      {%- set status_dict=dict() -%}
+      {%- if power_action_result is skipped -%}
+        {{ status_dict.update({'skipped': True}) }}
+      {%- elif power_action_result is successful -%}
+        {{ status_dict.update({'successful': True}) }}
+      {%- elif power_action_result is changed -%}
+        {{ status_dict.update({'changed': True}) }}
+      {%- endif -%}
+      {{ status_dict }}
+
+- name: Pause To Let iDRAC Trigger Job Before Proceeding # noqa: no-handler
+  when: bios_config_job is changed
+  ansible.builtin.pause:
+    seconds: 150
+
+- name: Check BIOS Configuration Status
+  when:
+    - not ansible_check_mode
+    - check_bios_jobs
+  ansible.builtin.include_role:
+    name: idrac_configuration
+    tasks_from: check_bios

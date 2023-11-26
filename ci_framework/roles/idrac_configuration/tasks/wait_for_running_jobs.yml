@@ -1,0 +1,29 @@
+---
+
+# We don't want to interrupt running jobs in order to prevent corruption
+- name: Query For Running Jobs Completion
+  # Can not use map filter due to special character '@'
+  # Forced to use jinja2 loop
+  # Jobs that are being executed will not be able to be deleted, we will attempt to wait
+  # for them to finish
+  # Also not all iDRAC versions support Deleting Job Queue via Redfish
+  vars:
+    idrac_jobs_uris: >-
+      {%- set jobs=[] -%}
+      {%- for job in idrac_runnig_jobs -%}
+        {{ jobs.append(cifmw_idrac_configuration_uri_protocol + '://' + inventory_hostname + job['json']['@odata.id']) }}
+      {%- endfor -%}
+      {{ jobs }}
+  register: idrac_runnig_jobs_query
+  retries: "{{ cifmw_idrac_configuration_task_retries }}"
+  delay: 5
+  until: idrac_runnig_jobs_query['json']['JobState'] == 'Completed'
+  loop: "{{ idrac_jobs_uris }}"
+  when: idrac_runnig_jobs
+  ansible.builtin.uri:
+    url: "{{ item }}"
+    user: "{{ cifmw_idrac_configuration_user }}"
+    password: "{{ cifmw_idrac_configuration_password }}"
+    force_basic_auth: true
+    return_content: true
+    validate_certs: "{{ cifmw_idrac_configuration_validate_ssl_certs }}"

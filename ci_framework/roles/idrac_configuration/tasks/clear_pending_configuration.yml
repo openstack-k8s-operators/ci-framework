@@ -1,0 +1,25 @@
+---
+- name: Clear Pending BIOS Configuration For iDRAC If Needed
+  until: >-
+    (idrac_clear_pending['status'] == 200) or
+    (idrac_clear_pending['status'] == 400 and
+     idrac_clear_pending['json']['error']['@Message.ExtendedInfo'] |
+     selectattr('Message', 'contains', 'There are no pending values to be cleared') |
+     list)
+  register: idrac_clear_pending
+  retries: "{{ cifmw_idrac_configuration_task_retries }}"
+  ansible.builtin.uri:
+    url: "{{ cifmw_idrac_configuration_uri}}/Systems/System.Embedded.1/Bios/Settings/Actions/Oem/DellManager.ClearPending"
+    method: 'POST'
+    headers:
+      Content-Type: application/json
+    body_format: 'json'
+    body: {}
+    status_code:
+      - 200
+      - 400
+    user: "{{ cifmw_idrac_configuration_user }}"
+    password: "{{ cifmw_idrac_configuration_password }}"
+    force_basic_auth: true
+    return_content: true
+    validate_certs: "{{ cifmw_idrac_configuration_validate_ssl_certs }}"

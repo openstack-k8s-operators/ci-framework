@@ -1,0 +1,141 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Build A List Of Variables For iDRAC
+  ansible.builtin.set_fact:
+    host_play_variables: "{{ hostvars[inventory_hostname] }}"
+
+# This allows us to override variables for individual hosts
+- name: Append Extra Vars To host_play_variables If Supplied
+  ansible.builtin.set_fact:
+    host_play_variables: "{{ host_play_variables | combine(hostvars[inventory_hostname][inventory_hostname]) }}"
+  when: "inventory_hostname in hostvars[inventory_hostname]"
+
+- name: Check if can authenticate with iDRAC Using REST API
+  when: not ansible_check_mode
+  ansible.builtin.include_tasks:
+    file: healthcheck.yml
+
+- name: Reset iDRAC If Requested By User
+  when: cifmw_idrac_configuration_racreset
+  ansible.builtin.include_tasks:
+    file: racreset.yml
+
+- name: Query iDRAC
+  when: cifmw_idrac_configuration_query | bool
+  ansible.builtin.include_tasks:
+    file: query.yml
+
+- name: Delete Previous Completed iDRAC Jobs
+  when: cifmw_idrac_configuration_delete_previous_idrac_jobs
+  ansible.builtin.include_tasks:
+    file: clear_job_inventory.yml
+
+- name: Configure BIOS
+  vars:
+    host_bios_attributes: >-
+      {%- if 'bios_attributes' in host_play_variables -%}
+        {{ host_play_variables['bios_attributes'] }}
+      {%- else -%}
+        {{ cifmw_idrac_configuration_bios_attributes }}
+      {%- endif -%}
+    host_boot_mode: >-
+      {%- if 'cifmw_idrac_configuration_boot_mode' in host_play_variables -%}
+        {{ host_play_variables['cifmw_idrac_configuration_boot_mode'] }}
+      {%- else -%}
+        {{ cifmw_idrac_configuration_boot_mode }}
+      {%- endif -%}
+    host_boot_order: >-
+      {%- if 'boot_order' in host_play_variables -%}
+        {%- if (host_play_variables['boot_order'] | type_debug) == 'str' -%}
+          {{ host_play_variables['boot_order'].split(',') }}
+        {%- elif (host_play_variables['boot_order'] | type_debug) == 'list' -%}
+          {{ host_play_variables['boot_order'] }}
+        {%- endif -%}
+      {%- else -%}
+        {{ cifmw_idrac_configuration_boot_order }}
+      {%- endif -%}
+    host_bios_configuration: >-
+      {%- set bios_dict=dict() -%}
+      {%- if host_bios_attributes -%}
+        {{ bios_dict.update(host_bios_attributes) }}
+      {%- endif -%}
+      {%- if host_boot_mode -%}
+        {{ bios_dict.update({'BootMode': host_boot_mode}) }}
+      {%- endif -%}
+      {{ bios_dict }}
+  # We parse each BIOS attribute individually in order to build a correct config
+  when: >-
+      (host_bios_attributes) and (host_bios_attributes | type_debug == 'dict') or
+      (host_boot_mode) and (host_boot_mode in ['Bios', 'Uefi']) or
+      (host_boot_order) and (host_boot_order | type_debug == 'list')
+  block:
+    - name: Delete Pending BIOS Jobs
+      when: not ansible_check_mode
+      ansible.builtin.import_tasks:
+        file: check_bios.yml
+
+    - name: Clear Pending Configuration
+      when:
+        - not ansible_check_mode
+        - not cifmw_idrac_configuration_skip_clear_pending
+      ansible.builtin.include_tasks:
+        file: clear_pending_configuration.yml
+
+    # In this scenario we will wait for job completion
+    - name: Update BIOS Configuration - Boot Mode
+      vars:
+        bios_config_command: 'SetBiosAttributes'
+        check_bios_jobs: true
+        host_bios_configuration:
+          BootMode: "{{ cifmw_idrac_configuration_boot_mode }}"
+      when:
+        - cifmw_idrac_configuration_boot_mode is defined
+        - cifmw_idrac_configuration_boot_mode in ['Bios', 'Uefi']
+      ansible.builtin.include_tasks:
+        file: configure_bios.yml
+
+    - name: Update BIOS Configuration - Boot Attributes
+      vars:
+        bios_config_command: 'SetBiosAttributes'
+        check_bios_jobs: true
+      when:
+        - host_bios_attributes
+        - host_bios_attributes | type_debug == 'dict'
+      ansible.builtin.include_tasks:
+        file: configure_bios.yml
+
+    - name: Update BIOS Configuration - Boot Order
+      vars:
+        bios_config_command: 'SetBootOrder'
+      when:
+        - cifmw_idrac_configuration_boot_order
+        - cifmw_idrac_configuration_boot_order | type_debug == 'list'
+      ansible.builtin.include_tasks:
+        file: configure_bios.yml
+
+- name: Power Action
+  when:
+    - cifmw_idrac_configuration_power_action | bool
+    - host_play_variables['cifmw_idrac_configuration_power_action'] in
+      ['PowerOn',
+      'PowerForceOff',
+      'PowerForceRestart',
+      'PowerGracefulRestart',
+      'PowerGracefulShutdown',
+      'PowerReboot']
+  ansible.builtin.include_tasks:
+    file: power_action.yml
