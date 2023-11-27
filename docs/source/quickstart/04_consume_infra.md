@@ -66,17 +66,3 @@ In addition to this, it also creates 2 networks in libvirt:
 
 - `public`, mimicking a public network, with DHCP and non-fixed IPs. It's the network your nodes will use to access external resources.
 - `osp_trunk`, a private network used for network isolation.
-
-### Validated Architecture
-
-This layout, involving more machines and networks, deploys (by default):
-
-- `ocp-0`, `ocp-1`, `ocp-2` the OpenShift cluster.
-- `controller-0` the ansible controller.
-- `compute-0`, `compute-1`, `compute-2`.
-
-In addition to those hosts, it created 3 networks in libvirt:
-
-- `ocppr` OCP Provisioning network
-- `ocpbm` OCP Baremetal network
-- `osp_trunk` a private network used for network isolation.

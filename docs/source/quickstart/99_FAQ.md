@@ -164,12 +164,3 @@ $ ansible-playbook [-i inventory.yml] \
     reproducer-clean.yml \
     --tags deepscrub
 ```
-
-## Lightweight layout
-
-
-## Validated Architecture layout
-
-### Where can I check for dev-scripts logs?
-You can connect to your hypervisor using the non-root user you defined, and check for
-the logs in `~/src/github.com/openshift-metal3/dev-scripts/logs` directory.

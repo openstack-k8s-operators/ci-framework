@@ -26,29 +26,6 @@ It of course depends on the hypervisor. Running on a dedicated, remote server, g
 - Deploy from scratch the lightweight layout: ~30 minutes
 - Re-deploy the lightweight layout: ~10 minutes
 
-## Validated Architecture
-
-The Validated Architecture involves more resources, since it requires a 3-node
-[OCP](https://www.redhat.com/en/technologies/cloud-computing/openshift/container-platform) cluster,
-at least three compute nodes, and the ansible controller.
-
-Minimal requirements are:
-
-- 64GB of RAM
-- 400G of free storage (in /home)
-- 24 CPUs
-
-### Details
-
-OCP nodes require at least 16G of RAM and 100G of disk space.
-
-### Time to deploy
-
-It of course depends on the hypervisor. Running on a dedicated, remote server, gets these kind of timings:
-
-- Deploy from scratch the VA layout: ~1 hour
-- Re-deploy the VA layout: ~10 minutes
-
 # Needed packages
 In order to be able to start consuming the Framework, the following packages
 must be present on your system:
