@@ -34,7 +34,7 @@
   vars:
     _net_name: >-
       {{
-        (network.name is match('^ocp')) |
+        (network.name is match('^(ocp|default)')) |
         ternary(network.name, 'cifmw-' ~ network.name)
       }}
   register: _net_xml
@@ -76,11 +76,17 @@
   block:
     - name: "Generate IP address for {{ vm_name }}"
       vars:
-        _vm_name: "{{ vm_name | replace('-', '_') | split('_') }}"
+        _vm_name: >-
+          {{
+            vm_name |
+            replace('cifmw-', '') |
+            replace('-', '_') |
+            split('_')
+          }}
         _ip_index: >-
           {{
-            cifmw_libvirt_manager_vm_net_ip_set[_vm_name[1]] +
-            _vm_name[2] | int
+            cifmw_libvirt_manager_vm_net_ip_set[_vm_name[0]] +
+            (_vm_name[1] | default(0)) | int
           }}
       ansible.builtin.set_fact:
         _lm_ip_address: "{{ network.cidr | ansible.utils.nthhost(_ip_index) }}"
@@ -90,7 +96,7 @@
         _vm_name: "{{ vm_name | replace('^cifmw-', '') }}"
         _net_name: >-
           {{
-            (network.name is match('^ocp')) |
+            (network.name is match('^(ocp|default)')) |
             ternary(network.name, 'cifmw-' ~ network.name)
           }}
       community.libvirt.virt_net:
