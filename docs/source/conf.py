@@ -33,6 +33,18 @@ extensions = [
     "reno.sphinxext",
 ]
 
+myst_enable_extensions = {
+    "attrs_block",
+    "attrs_inline",
+    "deflist",
+    "linkify",
+    "tasklist",
+}
+myst_heading_anchors = 5
+suppress_warnings = [
+    "myst.xref_missing",
+]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
