@@ -3,8 +3,7 @@
 We propose two kind of cleanup.
 
 ## Quick cleanup
-The recommended one, allowing a faster re-deploy, especially for the
-Validated Architecture.
+The recommended one, allowing a faster re-deploy.
 
 ```Bash
 $ ansible-playbook -i custom/inventory.yml \
@@ -18,8 +17,7 @@ the `cifmw_target_host` extra variable.
 ~~~
 
 ## Deep scrub
-In case you need to re-deploy the full OCP cluster for your next deploy,
-or if you just want to see everything burning.
+In case you want to remove everything, with the base images.
 
 ```Bash
 $ ansible-playbook -i custom/inventory.yml \
