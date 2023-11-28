@@ -58,13 +58,13 @@ need to be changed for a typical EDPM deployment.
    are located. It points to '/etc/pki/tls'
 
 * `cifmw_cephadm_dashboard_crt`: The SSL/TLS certificate signed by CA which is
-   an optional parameter. If it is provided, ceph dashabord will be configured
-   for SSL automatically. Certficate should be made available in
-   `cifmw_cephadm_certs` path only. To enable SSL for dashabord, both
+   an optional parameter. If it is provided, ceph dashboard will be configured
+   for SSL automatically. Certificate should be made available in
+   `cifmw_cephadm_certs` path only. To enable SSL for dashboard, both
    `cifmw_cephadm_dashboard_crt` and `cifmw_cephadm_dashboard_key` are needed.
 
 * `cifmw_cephadm_dashboard_key`: The SSL/TLS certificate key which is an
-   optional parameter. If it is provided, ceph dashabord will be configured
+   optional parameter. If it is provided, ceph dashboard will be configured
    for SSL automatically.
 
 * `cifmw_cephadm_monitoring_network`: the Ceph `public_network` where the
