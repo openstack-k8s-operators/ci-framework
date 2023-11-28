@@ -24,35 +24,36 @@
 - name: Configure the Ceph Dashboard port
   become: true
   block:
-    - name: "set the dashboard port ({{ cifmw_cephadm_dashboard_port }})"
+    - name: "Set the dashboard port ({{ cifmw_cephadm_dashboard_port }})"
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/server_port {{ cifmw_cephadm_dashboard_port }}"
       changed_when: false
-    - name: "set the dashboard SSL port ({{ cifmw_cephadm_dashboard_port }})"
+    - name: "Set the dashboard SSL port ({{ cifmw_cephadm_dashboard_port }})"
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/ssl_server_port {{ cifmw_cephadm_dashboard_port }}"
       run_once: true
 
-- name: disable SSL for dashboard
+- name: Disable SSL for dashboard
   become: true
   ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/ssl false"
 
 - name: Configure SSL key/cert for the Ceph Dashboard if provided
   become: true
+  when: cifmw_cephadm_dashboard_crt | length > 0 and
+        cifmw_cephadm_dashboard_key | length > 0
   block:
-    - name: enable SSL for dashboard
+    - name: Enable SSL for dashboard
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config set mgr mgr/dashboard/ssl true"
       run_once: true
 
-    - name: import dashboard certificate file
+    - name: Import dashboard certificate file
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config-key set mgr/dashboard/crt -i {{ cifmw_cephadm_dashboard_crt }}"
       changed_when: false
 
-    - name: import dashboard certificate key
+    - name: Import dashboard certificate key
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config-key set mgr/dashboard/key -i {{ cifmw_cephadm_dashboard_key }}"
       changed_when: false
-  when: cifmw_cephadm_dashboard_crt | length > 0 and
-        cifmw_cephadm_dashboard_key | length > 0
 
-- include_tasks: configure_dashboard_backends.yml
+- name: Configure dashboard backends
+  ansible.builtin.include_tasks: configure_dashboard_backends.yml
   with_items: "{{ groups['edpm'] }}"
   vars:
     dashboard_backend: '{{ item }}'
@@ -60,41 +61,41 @@
 - name: Restart the Ceph dashboard
   become: true
   block:
-    - name: disable mgr dashboard module (restart)
+    - name: Disable mgr dashboard module (restart)
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} mgr module disable dashboard"
-    - name: enable mgr dashboard module (restart)
+    - name: Enable mgr dashboard module (restart)
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} mgr module enable dashboard"
 
 - name: Configure Monitoring Stack
   become: true
   vars:
-    grafana_host:  "{{ groups['edpm'][0] }}"
+    grafana_host: "{{ groups['edpm'][0] }}"
   block:
-    - name: get Grafana instance address
+    - name: Get Grafana instance address
       ansible.builtin.set_fact:
         grafana_server_addr: "{{ hostvars[grafana_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_monitoring_network) | first }}"
-    - name: set grafana api user
+    - name: Set grafana api user
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-username {{ cifmw_cephadm_grafana_admin_user }}"
-    - name: set grafana api password
+    - name: Set grafana api password
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-password -i -"
       args:
         stdin: "{{ cifmw_cephadm_grafana_admin_password }}"
-        stdin_add_newline: no
-    - name: disable ssl verification for grafana
+        stdin_add_newline: "no"
+    - name: Disable ssl verification for grafana
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-ssl-verify False"
       changed_when: false
       when:
         - cifmw_cephadm_dashboard_crt | length > 0 and
           cifmw_cephadm_dashboard_key | length > 0
 
-    - name: set alertmanager host
+    - name: Set alertmanager host
       ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} dashboard set-alertmanager-api-host http://{{ grafana_server_addr }}:9093
-    - name: set prometheus host
+    - name: Set prometheus host
       ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} dashboard set-prometheus-api-host \
         http://{{ grafana_server_addr }}:{{ cifmw_cephadm_prometheus_port }}
-    - name: config grafana api url
+    - name: Config grafana api url
       ansible.builtin.command: |
         {{ cifmw_cephadm_ceph_cli }} dashboard set-grafana-api-url \
         http://{{ grafana_server_addr }}:{{ cifmw_cephadm_grafana_port }}
@@ -102,7 +103,7 @@
 - name: Restart the Ceph dashboard
   become: true
   block:
-    - name: disable mgr dashboard module (restart)
+    - name: Disable mgr dashboard module (restart)
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} mgr module disable dashboard"
-    - name: enable mgr dashboard module (restart)
+    - name: Enable mgr dashboard module (restart)
       ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} mgr module enable dashboard"
