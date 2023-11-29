@@ -14,9 +14,8 @@ In such a case, additional notes will be provided.
 In order to deploy that infrastructure, you have to:
 
 - Retrieve your [pull-secret](https://console.redhat.com/openshift/create/local) (chose "Download pull secret")
-- Push it onto the hypervisor (`scp pull-secret user@hypervisor:pull-secret` for instance)
 - Prepare an inventory file
-- Maybe prepare a custom variables file
+- Prepare a custom variables file
 - run `ansible-playbook`
 
 ### Inventory file
@@ -48,6 +47,13 @@ You may want to override some of the default settings provided in the
 [3-node.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/scenarios/reproducers/3-nodes.yml)
 scenario file.
 
+Among the needed overrides, the pull-secret has to be passed down, for instance:
+
+~~~{code-block} YAML
+:caption: custom/private-params.yml
+cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME') }}/pull-secret.txt"
+~~~
+
 ### Run the deployment
 
 Once you're ready, run:
@@ -57,7 +63,7 @@ $ cd ci-framework
 $ ansible-playbook -i custom-inventory.yml \
     -e @scenarios/reproducers/3-nodes.yml \
     -e cifmw_target_host=hypervisor-1 \
-    [-e @custom-env-file.yml] \
+    -e @custom/private-params.yml
     reproducer.yml
 ```
 
