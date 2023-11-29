@@ -1,0 +1,106 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create role needed directories
+  ansible.builtin.file:
+    path: "{{ cifmw_ci_metallb_manifests_dir }}"
+    state: directory
+
+- name: Extract data from network env file if available
+  when:
+    - cifmw_network_layout is not defined
+    - crc_ci_bootstrap_networks_out is not defined
+  block:
+    - name: Check for CI env directory
+      when: crc_ci_bootstrap_networks_out is not defined
+      register: _cifmw_ci_metallb_ci_env_stat
+      ansible.builtin.stat:
+        path: /etc/ci/env
+
+    - name: Load network env file
+      when: _cifmw_ci_metallb_ci_env_stat.stat.exists
+      ansible.builtin.include_vars:
+        dir: /etc/ci/env/
+
+- name: Gather crc network layout to build metallb configuration
+  ansible.builtin.set_fact:
+    cifmw_ci_metallb_network_layout: >-
+      {{
+        cifmw_network_layout[cifmw_ci_metallb_crc_hostname] | default({}) |
+        combine( cifmw_network_layout['networks'], recursive=true)
+        if cifmw_network_layout is defined else
+        (crc_ci_bootstrap_networks_out[cifmw_ci_metallb_crc_hostname] | default({})|
+        combine( crc_ci_bootstrap_networks_out['networks'], recursive=true)
+        )
+      }}
+    cacheable: true
+
+- name: Prepare and install MetalLB
+  ansible.builtin.include_tasks: metallb_k8s_install.yml
+
+- name: Collect config to build IPAddressPool CR
+  vars:
+    _cifmw_ci_metallb_ipaddresspools: []
+  ansible.builtin.set_fact:
+    _cifmw_ci_metallb_ipaddresspools: >-
+      {{
+        _cifmw_ci_metallb_ipaddresspools +
+          [{
+            'name': item.key,
+            'addresses': item.value.metallb.ranges
+          }]
+      }}
+  loop: "{{ cifmw_ci_metallb_network_layout | dict2items }}"
+
+- name: Create IPAddressPool CR and save it in the manifests dir
+  ansible.builtin.template:
+    src: "ipaddresspools.yaml.j2"
+    dest: "{{ cifmw_ci_metallb_manifests_dir }}/ipaddresspools.yaml"
+
+- name: Apply IPAddressPool CR
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit)  }}"
+    state: present
+    definition: "{{ lookup('file', cifmw_ci_metallb_manifests_dir+'/ipaddresspools.yaml') | from_yaml_all  }}"
+
+- name: Collect config to build L2Advertisement CR
+  vars:
+    _cifmw_ci_metallb_l2advertisements: []
+  ansible.builtin.set_fact:
+    _cifmw_ci_metallb_l2advertisements: >-
+      {{
+        _cifmw_ci_metallb_l2advertisements +
+          [{
+            'name': item.key,
+            'interface': item.value.iface
+          }]
+      }}
+  loop: "{{ cifmw_ci_metallb_network_layout | dict2items }}"
+
+- name: Create L2Advertisement CR and save it in the manifests dir
+  ansible.builtin.template:
+    src: "l2advertisements.yaml.j2"
+    dest: "{{ cifmw_ci_metallb_manifests_dir }}/l2advertisements.yaml"
+
+- name: Apply L2Advertisement CR
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit)  }}"
+    state: present
+    definition: "{{ lookup('file', cifmw_ci_metallb_manifests_dir+'/l2advertisements.yaml') | from_yaml_all  }}"

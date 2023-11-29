@@ -1,0 +1,113 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create the metallb namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    name: "{{ cifmw_ci_metallb_namespace }}"
+    kind: Namespace
+    state: present
+
+- name: Save k8s metallb OLM manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_ci_metallb_manifests_dir }}/metallb-{{ item.kind | lower }}-olm.yaml"
+    content: "{{ item | to_nice_yaml }}"
+  loop:
+    - "{{ cifmw_ci_metallb_olm_operator_group }}"
+    - "{{ cifmw_ci_metallb_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Create the OLM subscription resources
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition: "{{ item }}"
+    state: present
+  loop:
+    - "{{ cifmw_ci_metallb_olm_operator_group }}"
+    - "{{ cifmw_ci_metallb_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Wait for metallb operator to be intalled
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      -n "{{ cifmw_ci_metallb_namespace }}"
+      -o jsonpath='{.items[*].status.phase}'
+  changed_when: false
+  register: _metallb_csv_out
+  retries: 12
+  delay: 10
+  until:
+    - _metallb_csv_out is defined
+    - _metallb_csv_out.failed is false
+    - _metallb_csv_out.stdout_lines | length > 0
+    - "(_metallb_csv_out.stdout_lines[0] | lower) == 'succeeded'"
+
+
+- name: Trigger metallb operator to install metallb
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition: "{{ cifmw_ci_metallb_operator_config }}"
+    state: present
+
+- name: Wait for nsmtate Deployments to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    label_selectors:
+      - "app=metallb"
+    namespace: "{{ cifmw_ci_metallb_namespace }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    wait: true
+    wait_sleep: 10
+    wait_timeout: 600
+    wait_condition:
+      type: Available
+      status: "True"
+
+- name: Wait for metallb DaemonSet to be ready
+  kubernetes.core.k8s_info:
+    kind: DaemonSet
+    label_selectors:
+      - "app=metallb"
+    namespace: "{{ cifmw_ci_metallb_namespace }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+  register: _metallb_daemonset_out
+  retries: 12
+  delay: 10
+  until:
+    - _metallb_daemonset_out is defined
+    - _metallb_daemonset_out is not failed
+    - _metallb_daemonset_out.resources | length > 0
+    - _metallb_daemonset_out.resources[0].status.numberAvailable is defined
+    - _metallb_daemonset_out.resources[0].status.desiredNumberScheduled is defined
+    - >-
+      _metallb_daemonset_out.resources[0].status.numberAvailable ==
+      _metallb_daemonset_out.resources[0].status.desiredNumberScheduled
