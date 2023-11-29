@@ -110,20 +110,20 @@ class HostNetworkRange:
 
     def __init__(
         self,
-        network: typing.Union[ipaddress.IPv4Network, ipaddress.IPv6Network],
+        network: typing.Union[ipaddress.IPv4Network, ipaddress.IPv6Network, str],
         start: typing.Union[
             ipaddress.IPv4Address, ipaddress.IPv6Address, str, int, None
         ] = None,
         end: typing.Union[
             ipaddress.IPv4Address, ipaddress.IPv6Address, str, int, None
         ] = None,
-        length: int = None,
+        length: typing.Union[int, str, None] = None,
     ):
         if not network:
             raise exceptions.NetworkMappingValidationError(
                 "network is a mandatory argument"
             )
-        self.__network = network
+        self.__network = ipaddress.ip_network(network)
         self.__init_range_start(start)
         self.__init_range_end(end, length)
 
@@ -139,6 +139,14 @@ class HostNetworkRange:
         parsed_end, end_is_ip = self.__parse_validate_range_limit(
             end, self.__FIELD_RANGE_END
         )
+
+        if end_is_ip and parsed_end.version != self.__network.version:
+            raise exceptions.NetworkMappingValidationError(
+                f"IP should match the range network family {self.__network.version}",
+                invalid_value=end,
+                field=self.__FIELD_RANGE_END,
+            )
+
         if parsed_end and end_is_ip and parsed_end not in self.__network:
             raise exceptions.NetworkMappingValidationError(
                 f"Range end IP {end} is out of range of {self.__network} network",
@@ -190,6 +198,14 @@ class HostNetworkRange:
         parsed_start, start_is_ip = self.__parse_validate_range_limit(
             start, self.__FIELD_RANGE_START
         )
+
+        if start_is_ip and parsed_start.version != self.__network.version:
+            raise exceptions.NetworkMappingValidationError(
+                f"IP should match the range network family {self.__network.version}",
+                invalid_value=start,
+                field=self.__FIELD_RANGE_START,
+            )
+
         if parsed_start and start_is_ip and parsed_start not in self.__network:
             raise exceptions.NetworkMappingValidationError(
                 f"Range start IP {start} is out of range of {self.__network} network",
