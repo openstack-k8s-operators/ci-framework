@@ -65,6 +65,32 @@ def _validate_parse_int(
         ) from err
 
 
+def _validate_parse_netadrr(
+    field_name: str,
+    raw_definition: typing.Dict[str, typing.Any],
+    parent_name: str = None,
+    parent_type: str = None,
+    version: int = None,
+) -> typing.Union[ipaddress.IPv4Network, e]:
+    raw_value = raw_definition[field_name]
+    try:
+        value = ipaddress.ip_network(raw_value)
+        if version and value.version != version:
+            raise exceptions.NetworkMappingValidationError(
+                f"network address {value} should be of {value} type",
+                field=field_name,
+                invalid_value=raw_value,
+            ) from err
+
+        return value
+    except ValueError as err:
+        raise exceptions.NetworkMappingValidationError(
+            "Invalid network value",
+            field=field_name,
+            invalid_value=raw_value,
+        ) from err
+
+
 def _validate_parse_field_type(
     field_name: str,
     raw_definition: typing.Dict[str, typing.Any],
@@ -90,6 +116,45 @@ def _validate_parse_field_type(
             parent_type=parent_type,
         )
     return raw_value
+
+
+def _validate_fields_one_of(
+    fields_list: typing.List[str],
+    raw_definition: typing.Dict[str, typing.Any],
+    parent_name: str = None,
+    parent_type: str = None,
+    alone_field: str = None,
+    mandatory: bool = False,
+):
+
+    fields_present = any(
+        field_name in raw_definition.keys() for field_name in fields_list
+    )
+    if not mandatory and not fields_present:
+        return
+
+    mandatory_fields = ",".join(fields_list).strip(",")
+    if not fields_present:
+        raise exceptions.NetworkMappingValidationError(
+            f"at least one of {mandatory_fields}" "must be provided",
+            field=self.__FIELD_NETWORK,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+    if alone_field and alone_field in raw_definition:
+        rest = [
+            field_name
+            for field_name in raw_definition.keys()
+            if field_name in fields_list and field_name != alone_field
+        ]
+        if rest:
+            raise exceptions.NetworkMappingValidationError(
+                f"{alone_field} cannot be used at the"
+                f"same time are used {','.join(rest).strip(',')}",
+                field=alone_field,
+                parent_name=parent_name,
+                parent_type=parent_type,
+            )
 
 
 def check_host_network_ranges_collisions(ranges: typing.List[HostNetworkRange]):
@@ -356,43 +421,58 @@ class HostNetworkRange:
 
 class SubnetBasedNetworkToolDefinition:
     __FIELD_RANGES = "ranges"
-    __FIELD_SINGLE_RANGE = "range"
+    __FIELD_RANGES_IPV4 = "v4-ranges"
+    __FIELD_RANGES_IPV6 = "v6-ranges"
 
     def __init__(
         self,
         network: NetworkDefinition,
         raw_config: typing.Dict[str, typing.Any],
-        allow_multiple_ranges: bool = True,
+        object_name: str,
     ):
         if not network:
             raise exceptions.NetworkMappingValidationError(
                 "network is a mandatory argument"
             )
         self.__network = network
+        self.__object_name = object_name
         self.__ranges: typing.List[HostNetworkRange] = []
-        self.__parse_raw(raw_config, allow_multiple_ranges)
+        self.__parse_raw(raw_config)
 
-    def __parse_raw(
-        self, raw_definition: typing.Dict[str, typing.Any], allow_multiple_ranges: bool
-    ):
-        field_name = (
-            self.__FIELD_RANGES if allow_multiple_ranges else self.__FIELD_SINGLE_RANGE
-        )
-
-        raw_ranges = _validate_parse_field_type(
-            field_name,
+    def __parse_raw(self, raw_definition: typing.Dict[str, typing.Any]):
+        _validate_fields_one_of(
+            [
+                self.__FIELD_RANGES,
+                self.__FIELD_RANGES_IPV4,
+                self.__FIELD_RANGES_IPV6,
+            ],
             raw_definition,
-            list if allow_multiple_ranges else dict,
-            parent_name=self.__network.name,
-            parent_type="network",
-            mandatory=False,
+            parent_name=self.__name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            alone_field=self.__FIELD_RANGES,
         )
 
-        ranges_list = raw_ranges if isinstance(raw_ranges, list) else [raw_ranges]
-        self.__ranges = [
-            HostNetworkRange.from_raw(self.__network.network, range_data)
-            for range_data in ranges_list
-        ]
+        self.__parse_raw_range_field(raw_definition, self.__FIELD_RANGES)
+        self.__parse_raw_range_field(raw_definition, self.__FIELD_RANGES_IPV4)
+        self.__parse_raw_range_field(raw_definition, self.__FIELD_RANGES_IPV6)
+
+    def __parse_raw_range_field(
+        self, raw_definition: typing.Dict[str, typing.Any], field_name: str
+    ):
+        if field_name in raw_definition:
+            raw_ranges = _validate_parse_field_type(
+                field_name,
+                raw_definition,
+                list,
+                parent_name=self.__object_name,
+                parent_type="tool",
+            )
+            self.__ranges.extend(
+                [
+                    self.__network.parse_range_from_raw(range_data)
+                    for range_data in raw_ranges
+                ]
+            )
 
     def get_ranges(self) -> typing.List[HostNetworkRange]:
         return self.__ranges
@@ -416,36 +496,44 @@ class SubnetBasedNetworkToolDefinition:
 
 
 class MultusNetworkDefinition(SubnetBasedNetworkToolDefinition):
+    __OBJECT_NAME = "multus"
+
     def __init__(
         self,
         network: NetworkDefinition,
         raw_config: typing.Dict[str, typing.Any],
     ):
-        super().__init__(network, raw_config, allow_multiple_ranges=False)
+        super().__init__(network, raw_config, self.__OBJECT_NAME)
 
 
 class MetallbNetworkDefinition(SubnetBasedNetworkToolDefinition):
+    __OBJECT_NAME = "metallb"
+
     def __init__(
         self,
         network: NetworkDefinition,
         raw_config: typing.Dict[str, typing.Any],
     ):
-        super().__init__(network, raw_config)
+        super().__init__(network, raw_config, self.__OBJECT_NAME)
 
 
 class NetconfigNetworkDefinition(SubnetBasedNetworkToolDefinition):
+    __OBJECT_NAME = "netconfig"
+
     def __init__(
         self,
         network: NetworkDefinition,
         raw_config: typing.Dict[str, typing.Any],
     ):
-        super().__init__(network, raw_config)
+        super().__init__(network, raw_config, self.__OBJECT_NAME)
 
 
 class NetworkDefinition:
     __OBJECT_TYPE_NAME = "network"
 
     __FIELD_NETWORK = "network"
+    __FIELD_NETWORK_IPV4 = "v4-network"
+    __FIELD_NETWORK_IPV6 = "v6-network"
     __FIELD_MTU = "mtu"
     __FIELD_VLAN_ID = "vlan"
 
@@ -463,7 +551,8 @@ class NetworkDefinition:
 
         self.__vlan = None
         self.__mtu = None
-        self.__network = None
+        self.__ipv6_network = None
+        self.__ipv4_network = None
         self.__multus_config: typing.Union[MultusNetworkDefinition, None] = None
         self.__metallb_config: typing.Union[MetallbNetworkDefinition, None] = None
         self.__netconfig_config: typing.Union[NetconfigNetworkDefinition, None] = None
@@ -494,26 +583,39 @@ class NetworkDefinition:
         return self.__netconfig_config
 
     @property
-    def network(self) -> typing.Union[ipaddress.IPv4Network, ipaddress.IPv6Network]:
-        return self.__network
+    def ipv4_network(self) -> typing.Union[ipaddress.IPv4Network, None]:
+        return self.__ipv4_network
+
+    @property
+    def ipv6_network(self) -> typing.Union[ipaddress.IPv6Network, None]:
+        return self.__ipv6_network
+
+    def parse_range_from_raw(
+        self, raw_definition: typing.Dict[str, typing.Any], ip_version: int = None
+    ) -> HostNetworkRange:
+        if ip_version == 6 and not self.__ipv6_network:
+            raise exceptions.NetworkMappingValidationError(
+                f"IPv6 ranges are not supported in {self.__name} "
+                "network cause it's IPv4 only",
+                invalid_value=str(raw_definition),
+            ) from err
+        elif ip_version == 4 and not self.__ipv4_network:
+            raise exceptions.NetworkMappingValidationError(
+                f"IPv4 ranges are not supported in {self.__name} "
+                "network cause it's IPv6 only",
+                invalid_value=str(raw_definition),
+            ) from err
+        elif ip_version == 6:
+            network = self.__ipv6_network
+        elif ip_version == 4:
+            network = self.__ipv4_network
+        else:
+            network = self.__ipv6_network or self.__ipv4_network
+
+        return HostNetworkRange.from_raw(network, raw_definition)
 
     def __parse_raw(self, raw_definition: typing.Dict[str, typing.Any]):
-        ip_net_str = raw_definition.get(self.__FIELD_NETWORK, None)
-        _raise_missing_field(
-            ip_net_str,
-            self.__FIELD_NETWORK,
-            parent_name=self.__name,
-            parent_type=self.__OBJECT_TYPE_NAME,
-        )
-
-        try:
-            self.__network = ipaddress.ip_network(ip_net_str)
-        except ValueError as err:
-            raise exceptions.NetworkMappingValidationError(
-                "Invalid network value",
-                field=self.__FIELD_NETWORK,
-                invalid_value=ip_net_str,
-            ) from err
+        self.__parse_raw_network(raw_definition)
 
         self.__mtu = _validate_parse_int(
             self.__FIELD_MTU,
@@ -532,6 +634,51 @@ class NetworkDefinition:
         )
 
         self.__parse_tools(raw_definition)
+
+    def __parse_raw_network(self, raw_definition):
+        _validate_fields_one_of(
+            [
+                self.__FIELD_NETWORK,
+                self.__FIELD_NETWORK_IPV4,
+                self.__FIELD_NETWORK_IPV6,
+            ],
+            raw_definition,
+            parent_name=self.__name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            alone_field=self.__FIELD_NETWORK,
+            mandatory=True,
+        )
+
+        if self.__FIELD_NETWORK in raw_definition:
+
+            parsed_net_ip = _validate_parse_netadrr(
+                self.__FIELD_NETWORK,
+                raw_definition,
+                parent_name=self.__name,
+                parent_type=self.__OBJECT_TYPE_NAME,
+            )
+            if parsed_net_ip.version == 6:
+                self.__ipv6_network = parsed_net_ip
+            else:
+                self.__ipv4_network = parsed_net_ip
+
+        if self.__FIELD_NETWORK_IPV6 in raw_definition:
+            self.__ipv6_network = _validate_parse_netadrr(
+                self.__FIELD_NETWORK_IPV6,
+                raw_definition,
+                parent_name=self.__name,
+                parent_type=self.__OBJECT_TYPE_NAME,
+                version=6,
+            )
+
+        if self.__FIELD_NETWORK_IPV4 in raw_definition:
+            self.__ipv4_network = _validate_parse_netadrr(
+                self.__FIELD_NETWORK_IPV4,
+                raw_definition,
+                parent_name=self.__name,
+                parent_type=self.__OBJECT_TYPE_NAME,
+                version=4,
+            )
 
     def __parse_tools(self, raw_definition: typing.Dict[str, typing.Any]):
         tools_raw_config = _validate_parse_field_type(
@@ -613,7 +760,8 @@ class NetworkDefinition:
     def __hash__(self) -> int:
         return hash(
             (
-                self.__network,
+                self.__ipv6_network,
+                self.__ipv4_network,
                 self.__name,
                 self.__mtu,
                 self.__vlan,
@@ -628,7 +776,8 @@ class NetworkDefinition:
             return False
 
         return (
-            self.__network == other.__network
+            self.__ipv6_network == other.__ipv6_network
+            and self.__ipv4_network == other.__ipv4_network
             and self.__name == other.__name
             and self.__mtu == other.__mtu
             and self.__vlan == other.__vlan
@@ -638,10 +787,11 @@ class NetworkDefinition:
         )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GroupTemplateNetworkDefinition:
     network: NetworkDefinition
-    range: HostNetworkRange = None
+    ipv6_range: HostNetworkRange = None
+    ipv4_range: HostNetworkRange = None
     skip_nm_configuration: bool = False
 
     def __hash__(self) -> int:
@@ -655,8 +805,8 @@ class GroupTemplateDefinition:
     __FIELD_NETWORK_TEMPLATE = "network-template"
     __FIELD_NETWORK_SKIP_NM = "skip-nm-configuration"
     __FIELD_NETWORK_RANGE = "range"
-    __FIELD_NETWORK_RANGE_START = "start"
-    __FIELD_NETWORK_RANGE_LENGTH = "length"
+    __FIELD_NETWORK_RANGE_IPV4 = "v4-range"
+    __FIELD_NETWORK_RANGE_IPV6 = "v6-range"
 
     def __init__(
         self,
@@ -740,12 +890,9 @@ class GroupTemplateDefinition:
             )
 
         templated_net_data = {**network_template_raw, **network_data}
-        network_range_raw = templated_net_data.get(self.__FIELD_NETWORK_RANGE, None)
-        network_range = None
-        if network_range_raw:
-            network_range = HostNetworkRange.from_raw(
-                network_definition.network, network_range_raw
-            )
+        ipv4_network_range, ipv6_network_range = self.__parse_raw_net_ranges(
+            templated_net_data, network_definition
+        )
 
         skip_nm_configuration = bool(
             templated_net_data.get(self.__FIELD_NETWORK_SKIP_NM, False)
@@ -754,10 +901,59 @@ class GroupTemplateDefinition:
         self.__groups_networks_definitions[
             network_name
         ] = GroupTemplateNetworkDefinition(
-            network_definitions[network_name],
-            range=network_range,
+            network_definition,
+            ipv4_range=ipv4_network_range,
+            ipv6_range=ipv6_network_range,
             skip_nm_configuration=skip_nm_configuration,
         )
+
+    def __parse_raw_net_ranges(
+        self,
+        raw_definition: typing.Dict[str, typing.Any],
+        network_definition: NetworkDefinition,
+    ) -> typing.Tuple[HostNetworkRange, HostNetworkRange]:
+        _validate_fields_one_of(
+            [
+                self.__FIELD_NETWORK_RANGE,
+                self.__FIELD_NETWORK_RANGE_IPV6,
+                self.__FIELD_NETWORK_RANGE_IPV6,
+            ],
+            raw_definition,
+            parent_name=self.__group_name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            alone_field=self.__FIELD_NETWORK_RANGE,
+        )
+
+        ipv6_network_range = None
+        ipv4_network_range = None
+        if self.__FIELD_NETWORK_RANGE in raw_definition:
+            net_range = network_definition.parse_range_from_raw(
+                raw_definition[self.__FIELD_NETWORK_RANGE]
+            )
+            if net_range.network.version == 4:
+                ipv4_network_range = net_range
+            else:
+                ipv6_network_range = net_range
+        else:
+            ipv4_network_range = network_definition.parse_range_from_raw(
+                raw_definition[self.__FIELD_NETWORK_RANGE_IPV4], ip_version=4
+            )
+            ipv6_network_range = network_definition.parse_range_from_raw(
+                raw_definition[self.__FIELD_NETWORK_RANGE_IPV4], ip_version=6
+            )
+        return ipv4_network_range, ipv6_network_range
+
+    def __parse_raw_range_field(
+        self,
+        raw_definition: typing.Dict[str, typing.Any],
+        field_name: str,
+        network_definition: NetworkDefinition,
+        ip_version: int = None,
+    ) -> typing.Union[HostNetworkRange, None]:
+        if field_name not in raw_definition:
+            return None
+
+        return
 
     def __hash__(self) -> int:
         return hash(
@@ -780,20 +976,24 @@ class GroupTemplateDefinition:
         )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class InstanceNetworkDefinition:
     network: NetworkDefinition
-    ip: typing.Union[ipaddress.IPv4Address, ipaddress.IPv6Address] = None
+    ipv4: typing.Union[ipaddress.IPv4Address] = None
+    ipv6: typing.Union[ipaddress.IPv6Address] = None
     skip_nm_configuration: bool = False
 
     def __hash__(self) -> int:
-        return hash((self.network, self.ip, self.skip_nm_configuration))
+        return hash((self.network, self.ip4, self.ip6, self.skip_nm_configuration))
 
 
 class InstanceDefinition:
+    __OBJECT_TYPE_NAME = "instance"
     __FIELD_SKIP_NM = "skip-nm-configuration"
     __FIELD_NETWORKS = "networks"
     __FIELD_NETWORKS_IP = "ip"
+    __FIELD_NETWORKS_IPV4 = "ipv4"
+    __FIELD_NETWORKS_IPV6 = "ipv6"
     __FIELD_NETWORK_SKIP_NM = "skip-nm-configuration"
 
     def __init__(
@@ -854,26 +1054,11 @@ class InstanceDefinition:
                 f"non-existing network {network_name}",
                 invalid_value=network_name,
             )
-        instance_net_ip_raw = network_data.get(self.__FIELD_NETWORKS_IP, None)
-        net_ip = None
-        if instance_net_ip_raw:
-            try:
-                net_ip = ipaddress.ip_address(instance_net_ip_raw)
-                if net_ip not in network_definition.network:
-                    raise exceptions.NetworkMappingValidationError(
-                        f"{self.__name} instance given IP is not "
-                        f"part of the linked network {network_name} "
-                        f"({network_definition.network})",
-                        invalid_value=instance_net_ip_raw,
-                        field=self.__FIELD_NETWORKS_IP,
-                    )
-            except ValueError as err:
-                raise exceptions.NetworkMappingValidationError(
-                    f"{instance_net_ip_raw} instance IP for {network_name} "
-                    "network is not a valid IP",
-                    invalid_value=str(instance_net_ip_raw),
-                    field=self.__FIELD_NETWORKS_IP,
-                ) from err
+
+        ipv4, ipv6 = self.__parse_raw_net_ips(
+            network_data,
+            network_definition,
+        )
 
         skip_nm_configuration = bool(
             network_data.get(self.__FIELD_NETWORK_SKIP_NM, False)
@@ -881,9 +1066,100 @@ class InstanceDefinition:
 
         self.__instances_network_definitions[network_name] = InstanceNetworkDefinition(
             network_definition,
-            ip=net_ip,
+            ipv4=ipv4,
+            ipv6=ipv6,
             skip_nm_configuration=skip_nm_configuration,
         )
+
+    def __parse_raw_net_ips(
+        self,
+        raw_definition: typing.Dict[str, typing.Any],
+        network_definition: NetworkDefinition,
+    ) -> typing.Tuple[ipaddress.IPv4Address, ipaddress.IPv6Address]:
+        _validate_fields_one_of(
+            [
+                self.__FIELD_NETWORKS_IP,
+                self.__FIELD_NETWORKS_IPV4,
+                self.__FIELD_NETWORKS_IPV6,
+            ],
+            raw_definition,
+            parent_name=self.__name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            alone_field=self.__FIELD_NETWORKS_IP,
+        )
+        ipv6 = None
+        ipv4 = None
+        if self.__FIELD_NETWORKS_IP in raw_definition:
+            net_ip = self.__parse_raw_net_ip(
+                raw_definition, network_definition, self.__FIELD_NETWORKS_IP
+            )
+            if net_ip.version == 4:
+                ipv4 = net_ip
+            else:
+                ipv6 = net_ip
+        else:
+            ipv4 = self.__parse_raw_net_ip(
+                raw_definition,
+                network_definition,
+                self.__FIELD_NETWORKS_IPV4,
+                ip_version=4,
+            )
+            ipv6 = self.__parse_raw_net_ip(
+                raw_definition,
+                network_definition,
+                self.__FIELD_NETWORKS_IPV6,
+                ip_version=6,
+            )
+        return ipv4, ipv6
+
+    def __parse_raw_net_ip(
+        self,
+        instance_net_ip_raw,
+        network_definition: NetworkDefinition,
+        field_name: str,
+        ip_version: int = None,
+    ):
+        if field_name not in instance_net_ip_raw:
+            return None
+
+        raw_value = instance_net_ip_raw[field_name]
+        try:
+            net_ip = ipaddress.ip_address(raw_value)
+            if ip_version and net_ip.version != ip_version:
+                raise exceptions.NetworkMappingValidationError(
+                    f"ip address {net_ip} should be a v{ip_version}",
+                    field=field_name,
+                    invalid_value=raw_value,
+                )
+            target_net = (
+                network_definition.ipv4_network
+                if net_ip.version == 4
+                else network_definition.ipv6_network
+            )
+            if not target_net:
+                raise exceptions.NetworkMappingValidationError(
+                    f"cannot assign {net_ip} IP to {self.__name}'s {network_definition.name} "
+                    f"cause it's not configured to use IPv{net_ip.version}",
+                    invalid_value=raw_value,
+                    field=field_name,
+                )
+
+            if net_ip not in target_net:
+                raise exceptions.NetworkMappingValidationError(
+                    f"{self.__name} instance given IP is not "
+                    f"part of the linked network {network_definition.name} "
+                    f"({network_definition.network})",
+                    invalid_value=raw_value,
+                    field=field_name,
+                )
+            return net_ip
+        except ValueError as err:
+            raise exceptions.NetworkMappingValidationError(
+                f"{raw_value} instance IP for {network_definition.name} "
+                "network is not a valid IP",
+                invalid_value=raw_value,
+                field=field_name,
+            ) from err
 
     def __hash__(self) -> int:
         return hash(
@@ -979,15 +1255,26 @@ class NetworkingDefinition:
         self.__check_overlapping_ranges()
 
     def __check_overlapping_ranges(self):
-        ranges_by_net: typing.Dict[str, typing.List[HostNetworkRange]] = {}
+        ranges_by_net_ipv4: typing.Dict[str, typing.List[HostNetworkRange]] = {}
+        ranges_by_net_ipv6: typing.Dict[str, typing.List[HostNetworkRange]] = {}
         for group_definition in self.__group_templates.values():
             for net_name, group_net_def in group_definition.networks.items():
-                if net_name not in ranges_by_net:
-                    ranges_by_net[net_name] = []
-                if group_net_def.range:
-                    ranges_by_net[net_name].append(group_net_def.range)
+                if net_name not in ranges_by_net_ipv4:
+                    ranges_by_net_ipv4[net_name] = []
+                if net_name not in ranges_by_net_ipv6:
+                    ranges_by_net_ipv6[net_name] = []
+                if group_net_def.ipv4_range:
+                    ranges_by_net_ipv4[net_name].append(group_net_def.ipv4_range)
+                if group_net_def.ipv6_range:
+                    ranges_by_net_ipv6[net_name].append(group_net_def.ipv6_range)
+        self.__check_oveerlapping_ranges_dict(ranges_by_net_ipv4)
+        self.__check_oveerlapping_ranges_dict(ranges_by_net_ipv6)
 
-        for net_name, net_ranges in ranges_by_net.items():
+    @staticmethod
+    def __check_oveerlapping_ranges_dict(
+        ranges_dict: typing.Dict[str, typing.List[HostNetworkRange]]
+    ):
+        for net_name, net_ranges in ranges_dict.items():
             if len(net_ranges) < 2:
                 continue
 
