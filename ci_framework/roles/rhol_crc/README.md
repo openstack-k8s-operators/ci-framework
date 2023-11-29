@@ -22,6 +22,16 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_reuse`: (Boolean) In case RHOL/CRC is detected, just reuse it. Defaults to `True`
 * `cifmw_rhol_crc_kubeconfig`: (String) Path to crc kubeconfig file. Defaults to `~/.crc/machines/crc/kubeconfig`.
 * `cifmw_rhol_crc_creds`: (Boolean) Add crc creds to bashrc. Defaults to `False`.
+* `cifmw_rhol_crc_pullsecret_dest`: (String) Absolute path of the pull-secrets destination. Defaults to `~/pull-secret.json`.
+
+### Pull-secret management
+This role calls the [manage_secrets](./manage_secrets.md) role. It allows to copy or create
+the pull-secret on the target host, in a known location. In order to run the `rhol_crc`
+role, you **must** provide either `cifmw_manage_secrets_pullsecret_file` OR
+`cifmw_manage_secrets_pullsecret_content`.
+
+If you provide neither, it will fail. If you provide both, it will also fail.
+
 
 ## Cleanup
 
