@@ -1,0 +1,49 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create manifests directory
+  ansible.builtin.file:
+    path: "{{ cifmw_ci_multus_manifests_dir }}"
+    state: directory
+
+- name: Build NetAttDef list from ci environment
+  when:
+    - cifmw_ci_multus_nad_list | length == 0
+  ansible.builtin.include_tasks: extract_ci_data.yml
+
+- name: Create network attachment definitions in manifest dir
+  vars:
+    _cifmw_ci_multus_nad_list: "{{ cifmw_ci_multus_nad_list + cifmw_ci_multus_nad_extra_list }}"
+  ansible.builtin.template:
+    src: "nad.yml.j2"
+    dest: "{{ cifmw_ci_multus_manifests_dir }}/ci_multus_nads.yml"
+
+- name: Create the multus namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    name: "{{ cifmw_ci_multus_namespace }}"
+    kind: Namespace
+    state: present
+
+- name: Apply network attachment definitions
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit)  }}"
+    state: present
+    definition: "{{ lookup('file', cifmw_ci_multus_manifests_dir+'/ci_multus_nads.yml') | from_yaml_all  }}"
