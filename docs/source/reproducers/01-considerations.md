@@ -3,16 +3,25 @@
 This reproducer has been successfully tested on a CentOS Stream 9 hypervisor
 running latest CRC qcow2, and latest CentOS Stream 9 qcow2 images.
 
-It *may* work on RHEL based hypervisor and VMs, provided you give the correct
+It also works on RHEL based hypervisor and VMs, provided you give the correct
 information for the [discover_latest_image](../roles/discover_latest_image.md)
 role/plugin, or download beforehand the images and consume them from within the
-configuration, but it **wasn't tested** (yet).
+configuration, but this will **not** be covered in this documentation.
+
+## Custom extra variables files
+You can push your custom variables files in the `custom` directory available
+at the root of the `ci-framework` git repository. Its content is ignored via the
+provided `.gitignore` file.
 
 ## Prerequisites
 ### CRC
-For now, you have to ensure your `pull-secret` is present on the target host (in the case
-of a remote deployment). A proper way to copy and manage it is in the pipe, but for now,
-this is your responsibility to get it on the remote node.
+You have to get a working [pull-secret](https://console.redhat.com/openshift/create/local) and
+pass it to the deployment using a custom parameter file, for instance:
+
+~~~{code-block} YAML
+:caption: custom/private-params.yml
+cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME') }}/pull-secret.txt"
+~~~
 
 ### Ssh authorized_keys
 On the target hypervisor, you have to ensure the ~/.ssh/authorized_keys has all
