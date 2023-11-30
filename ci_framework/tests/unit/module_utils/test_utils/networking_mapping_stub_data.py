@@ -1,3 +1,4 @@
+import ipaddress
 import pathlib
 import typing
 
@@ -8,6 +9,16 @@ from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping i
 
 __TEST_FILES_DIR = pathlib.Path(__file__).parent.parent.joinpath("test_files")
 
+NETWORK_1_NAME = "network-1"
+NETWORK_2_NAME = "network-2"
+NETWORK_3_NAME = "network-3"
+NETWORK_1_IPV4_NET = ipaddress.IPv4Network("192.168.122.0/24")
+NETWORK_2_IPV4_NET = ipaddress.IPv4Network("192.168.0.0/24")
+NETWORK_3_IPV4_NET = ipaddress.IPv4Network("192.168.123.0/24")
+NETWORK_1_IPV6_NET = ipaddress.IPv6Network("fdc0:8b54:108a:c949::/64")
+NETWORK_2_IPV6_NET = ipaddress.IPv6Network("fd42:add0:b7d2:09b1::/64")
+NETWORK_3_IPV6_NET = ipaddress.IPv6Network("fd5e:bdb2:6091:9306::/64")
+
 
 def build_valid_network_definition(
     name: str,
@@ -15,7 +26,7 @@ def build_valid_network_definition(
     add_multus: bool = False,
     add_netconfig: bool = False,
     add_metallb: bool = False,
-):
+) -> networking_definition.NetworkDefinition:
     if add_multus or add_netconfig or add_metallb:
         net_raw["tools"] = {}
     if add_multus:
@@ -38,26 +49,58 @@ def build_valid_network_definition(
 
 
 def build_valid_network_definition_set(
-    add_multus: bool = False, add_netconfig: bool = False, add_metallb: bool = False
-):
+    add_multus: bool = False,
+    add_netconfig: bool = False,
+    add_metallb: bool = False,
+    use_ipv4: bool = True,
+    use_ipv6: bool = False,
+    mixed_ip_versions: bool = False,
+) -> typing.Dict[str, networking_definition.NetworkDefinition]:
+    net_1_config = {"vlan": "122", "mtu": "9000"}
+    if use_ipv4 and not use_ipv6:
+        net_1_config["network"] = str(NETWORK_1_IPV4_NET)
+    elif use_ipv6 and not use_ipv4 and not mixed_ip_versions:
+        net_1_config["network-v6"] = str(NETWORK_1_IPV6_NET)
+    elif use_ipv6 and use_ipv4:
+        net_1_config["network-v4"] = str(NETWORK_1_IPV4_NET)
+        if not mixed_ip_versions:
+            net_1_config["network-v6"] = str(NETWORK_1_IPV6_NET)
     net_1 = build_valid_network_definition(
-        "network-1",
-        {"network": "192.168.122.0/24", "vlan": "122", "mtu": "9000"},
+        NETWORK_1_NAME,
+        net_1_config,
         add_metallb=add_metallb,
         add_multus=add_multus,
         add_netconfig=add_netconfig,
     )
 
+    net_2_config = {"mtu": 1500}
+    if use_ipv4 and not use_ipv6:
+        net_2_config["network-v4"] = str(NETWORK_2_IPV4_NET)
+    elif use_ipv6 and not use_ipv4:
+        net_2_config["network"] = str(NETWORK_2_IPV6_NET)
+    elif use_ipv6 and use_ipv4:
+        net_2_config["network-v4"] = str(NETWORK_2_IPV4_NET)
+        net_2_config["network-v6"] = str(NETWORK_2_IPV6_NET)
     net_2 = build_valid_network_definition(
-        "network-2",
-        {"network": "192.168.0.0/24", "mtu": 1500},
+        NETWORK_2_NAME,
+        net_2_config,
         add_metallb=add_metallb,
         add_multus=add_multus,
         add_netconfig=add_netconfig,
     )
+
+    net_3_config = {"vlan": 123, "mtu": 1500}
+    if use_ipv4 and not use_ipv6:
+        net_3_config["network-v4"] = str(NETWORK_3_IPV4_NET)
+    elif use_ipv6 and not use_ipv4:
+        net_3_config["network"] = str(NETWORK_3_IPV6_NET)
+    elif use_ipv6 and use_ipv4:
+        if not mixed_ip_versions:
+            net_3_config["network-v4"] = str(NETWORK_3_IPV4_NET)
+        net_3_config["network-v6"] = str(NETWORK_3_IPV6_NET)
     net_3 = build_valid_network_definition(
-        "network-3",
-        {"network": "192.168.123.0/24", "vlan": 123, "mtu": 1500},
+        NETWORK_3_NAME,
+        net_3_config,
         add_metallb=add_metallb,
         add_multus=add_multus,
         add_netconfig=add_netconfig,
@@ -70,36 +113,39 @@ def build_valid_network_definition_set(
     }
 
 
-def build_valid_network_definition_and_templates_set():
-    networks_definitions = build_valid_network_definition_set()
-    first_net = list(networks_definitions.values())[0]
-    second_net = list(networks_definitions.values())[1]
-    third_net = list(networks_definitions.values())[2]
+def build_valid_network_definition_and_templates_set(
+    use_ipv4: bool = True,
+    use_ipv6: bool = False,
+    mixed_ip_versions: bool = False,
+):
+    networks_definitions = build_valid_network_definition_set(
+        use_ipv4=use_ipv4, use_ipv6=use_ipv6, mixed_ip_versions=mixed_ip_versions
+    )
     group_template_raw_1 = {
         "networks": {
-            first_net.name: {"range": {"start": 1, "length": 29}},
-            second_net.name: {
+            NETWORK_1_NAME: {"range": {"start": 1, "length": 29}},
+            NETWORK_2_NAME: {
                 "range": {"start": 0, "length": 60},
             },
-            third_net.name: {},
+            NETWORK_3_NAME: {},
         },
     }
     group_template_raw_2 = {
         "networks": {
-            first_net.name: {"range": {"start": 30, "length": 30}},
-            second_net.name: {
+            NETWORK_1_NAME: {"range": {"start": 30, "length": 30}},
+            NETWORK_2_NAME: {
                 "range": {"start": 60, "length": 50},
             },
-            third_net.name: {},
+            NETWORK_3_NAME: {},
         },
     }
     group_template_raw_3 = {
         "networks": {
-            first_net.name: {"range": {"start": 60, "length": 40}},
-            second_net.name: {
+            NETWORK_1_NAME: {"range": {"start": 60, "length": 40}},
+            NETWORK_2_NAME: {
                 "range": {"start": 110, "length": 20},
             },
-            third_net.name: {
+            NETWORK_3_NAME: {
                 "range": {"start": 0, "length": 256},
             },
         },
@@ -128,13 +174,10 @@ def build_valid_network_definition_all_sets():
         networks_definitions,
         host_templates,
     ) = build_valid_network_definition_and_templates_set()
-    first_net = list(networks_definitions.values())[0]
-    second_net = list(networks_definitions.values())[1]
-    third_net = list(networks_definitions.values())[2]
     instance_definition_raw_1 = {
         "networks": {
-            first_net.name: {"ip": "192.168.122.15"},
-            second_net.name: {"ip": "192.168.0.15", "skip-nm-configuration": True},
+            NETWORK_1_NAME: {"ip": "192.168.122.15"},
+            NETWORK_2_NAME: {"ip": "192.168.0.15", "skip-nm-configuration": True},
         },
     }
     instance_definition_1 = networking_definition.InstanceDefinition(
@@ -143,9 +186,9 @@ def build_valid_network_definition_all_sets():
 
     instance_definition_raw_2 = {
         "networks": {
-            first_net.name: {"ip": "192.168.122.16"},
-            second_net.name: {"ip": "192.168.0.16"},
-            third_net.name: {"ip": "192.168.123.16"},
+            NETWORK_1_NAME: {"ip": "192.168.122.16"},
+            NETWORK_2_NAME: {"ip": "192.168.0.16"},
+            NETWORK_3_NAME: {"ip": "192.168.123.16"},
         },
     }
     instance_definition_2 = networking_definition.InstanceDefinition(
@@ -155,9 +198,9 @@ def build_valid_network_definition_all_sets():
     instance_definition_raw_3 = {
         "skip-nm-configuration": True,
         "networks": {
-            first_net.name: {"ip": "192.168.122.18"},
-            second_net.name: {"ip": "192.168.0.18"},
-            third_net.name: {"ip": "192.168.123.18"},
+            NETWORK_1_NAME: {"ip": "192.168.122.18"},
+            NETWORK_2_NAME: {"ip": "192.168.0.18"},
+            NETWORK_3_NAME: {"ip": "192.168.123.18"},
         },
     }
     instance_definition_3 = networking_definition.InstanceDefinition(

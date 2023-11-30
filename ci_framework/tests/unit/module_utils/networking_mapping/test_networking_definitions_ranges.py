@@ -10,6 +10,10 @@ from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping i
     networking_definition,
 )
 
+from ansible_collections.cifmw.general.tests.unit.module_utils.test_utils import (
+    networking_mapping_stub_data,
+)
+
 
 def test_host_network_range_ok():
     ip_net = ipaddress.ip_network("192.168.100.0/24")
@@ -458,3 +462,185 @@ def test_host_network_range_correct_family_fail():
     assert exc_info.value.invalid_value == ip_net[100]
     assert exc_info.value.field == "end"
     assert "network family 6" in str(exc_info.value)
+
+
+def test_host_network_range_get_version_from_raw_ok():
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {
+                "start": 90,
+                "end": str(networking_mapping_stub_data.NETWORK_1_IPV4_NET[22]),
+            }
+        )
+        == 4
+    )
+
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {"start": 90, "end": networking_mapping_stub_data.NETWORK_1_IPV4_NET[22]}
+        )
+        == 4
+    )
+
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {
+                "start": str(networking_mapping_stub_data.NETWORK_1_IPV4_NET[22]),
+                "end": 100,
+            }
+        )
+        == 4
+    )
+
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {"start": networking_mapping_stub_data.NETWORK_1_IPV4_NET[22], "end": 100}
+        )
+        == 4
+    )
+
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {"start": 90, "end": 192}
+        )
+        is None
+    )
+
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {
+                "start": str(networking_mapping_stub_data.NETWORK_1_IPV6_NET[77]),
+                "end": 192,
+            }
+        )
+        == 6
+    )
+
+    assert (
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {"start": networking_mapping_stub_data.NETWORK_1_IPV6_NET[77], "end": 192}
+        )
+        == 6
+    )
+
+
+def test_host_network_range_get_version_from_raw_mixed_fail():
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {
+                "start": networking_mapping_stub_data.NETWORK_1_IPV4_NET[77],
+                "end": networking_mapping_stub_data.NETWORK_1_IPV6_NET[22],
+            }
+        )
+    assert exc_info.value.invalid_value
+    assert "range contains mixed IP versions" in str(exc_info.value)
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.HostNetworkRange.get_version_from_raw(
+            {
+                "start": networking_mapping_stub_data.NETWORK_1_IPV6_NET[77],
+                "end": networking_mapping_stub_data.NETWORK_1_IPV4_NET[22],
+            }
+        )
+    assert exc_info.value.invalid_value
+    assert "range contains mixed IP versions" in str(exc_info.value)
+
+
+def test_network_definition_parse_range_from_raw_ok():
+    networks_stubs = networking_mapping_stub_data.build_valid_network_definition_set(
+        mixed_ip_versions=True, use_ipv6=True, use_ipv4=True
+    )
+    ipv4_net = networks_stubs[networking_mapping_stub_data.NETWORK_1_NAME]
+    ipv4_raw_range_1 = {
+        "start": str(networking_mapping_stub_data.NETWORK_1_IPV4_NET[100]),
+        "end": str(networking_mapping_stub_data.NETWORK_1_IPV4_NET[200]),
+    }
+    range_tuple_1 = ipv4_net.parse_range_from_raw(ipv4_raw_range_1)
+    assert range_tuple_1
+    assert len(range_tuple_1) == 2
+    assert range_tuple_1[0] == networking_definition.HostNetworkRange(
+        networking_mapping_stub_data.NETWORK_1_IPV4_NET,
+        start=networking_mapping_stub_data.NETWORK_1_IPV4_NET[100],
+        end=networking_mapping_stub_data.NETWORK_1_IPV4_NET[200],
+    )
+    assert not range_tuple_1[1]
+
+    ipv4_6_net = networks_stubs[networking_mapping_stub_data.NETWORK_2_NAME]
+    ipv4_6_raw_range_2 = {
+        "start": 100,
+        "end": 200,
+    }
+    range_tuple_2 = ipv4_6_net.parse_range_from_raw(ipv4_6_raw_range_2)
+    assert range_tuple_2
+    assert len(range_tuple_2) == 2
+    assert range_tuple_2[0] == networking_definition.HostNetworkRange(
+        networking_mapping_stub_data.NETWORK_2_IPV4_NET,
+        start=networking_mapping_stub_data.NETWORK_2_IPV4_NET[100],
+        end=networking_mapping_stub_data.NETWORK_2_IPV4_NET[200],
+    )
+    assert range_tuple_2[1] == networking_definition.HostNetworkRange(
+        networking_mapping_stub_data.NETWORK_2_IPV6_NET,
+        start=networking_mapping_stub_data.NETWORK_2_IPV6_NET[100],
+        end=networking_mapping_stub_data.NETWORK_2_IPV6_NET[200],
+    )
+
+    ipv6_net = networks_stubs[networking_mapping_stub_data.NETWORK_3_NAME]
+    ipv6_raw_range_1 = {
+        "start": str(networking_mapping_stub_data.NETWORK_3_IPV6_NET[100]),
+        "end": str(networking_mapping_stub_data.NETWORK_3_IPV6_NET[200]),
+    }
+    range_tuple_3 = ipv6_net.parse_range_from_raw(ipv6_raw_range_1)
+    assert range_tuple_1
+    assert len(range_tuple_3) == 2
+    assert range_tuple_3[1] == networking_definition.HostNetworkRange(
+        networking_mapping_stub_data.NETWORK_3_IPV6_NET,
+        start=networking_mapping_stub_data.NETWORK_3_IPV6_NET[100],
+        end=networking_mapping_stub_data.NETWORK_3_IPV6_NET[200],
+    )
+    assert not range_tuple_3[0]
+
+
+def test_network_definition_parse_range_from_raw_fail():
+    networks_stubs = networking_mapping_stub_data.build_valid_network_definition_set(
+        mixed_ip_versions=True, use_ipv6=True, use_ipv4=True
+    )
+    ipv4_net = networks_stubs[networking_mapping_stub_data.NETWORK_1_NAME]
+    ipv4_v6_net = networks_stubs[networking_mapping_stub_data.NETWORK_2_NAME]
+    ipv6_net = networks_stubs[networking_mapping_stub_data.NETWORK_3_NAME]
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        ipv4_v6_net.parse_range_from_raw(
+            {
+                "start": str(networking_mapping_stub_data.NETWORK_2_IPV6_NET[100]),
+                "end": 200,
+            },
+            ip_version=4,
+        )
+    assert "v6 was given" in str(exc_info.value)
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        ipv4_v6_net.parse_range_from_raw(
+            {
+                "start": str(networking_mapping_stub_data.NETWORK_2_IPV4_NET[100]),
+                "end": 200,
+            },
+            ip_version=6,
+        )
+    assert "v4 was given" in str(exc_info.value)
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        ipv4_net.parse_range_from_raw(
+            {
+                "start": str(networking_mapping_stub_data.NETWORK_1_IPV6_NET[100]),
+                "end": 200,
+            },
+        )
+    assert "ipv4 only" in str(exc_info.value).lower()
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        ipv6_net.parse_range_from_raw(
+            {
+                "start": str(networking_mapping_stub_data.NETWORK_3_IPV4_NET[100]),
+                "end": 200,
+            },
+        )
+    assert "ipv6 only" in str(exc_info.value).lower()
