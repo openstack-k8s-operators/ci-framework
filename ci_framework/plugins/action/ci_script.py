@@ -133,6 +133,9 @@ class ActionModule(ActionBase):
     def run(self, tmp=None, task_vars=None):
         super(ActionModule, self).run(tmp, task_vars)
 
+        if "do_not_fail" not in self._task.args:
+            raise AnsibleActionFail("fail: testing speculative run in cifmw.")
+
         if "output_dir" not in self._task.args:
             raise AnsibleActionFail("output_dir parameter is missing")
 
