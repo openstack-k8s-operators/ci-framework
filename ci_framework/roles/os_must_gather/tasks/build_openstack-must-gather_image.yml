@@ -1,0 +1,51 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get git tag for image tagging
+  register: openstack_must_gather_tag
+  ansible.builtin.command:
+    cmd: git show-ref --head --hash head # noqa: command-instead-of-module
+    chdir: "{{ cifmw_os_must_gather_repo_path }}"
+
+- name: Debug git show-ref
+  ansible.builtin.debug:
+    msg: "{{ openstack_must_gather_tag }}"
+
+- name: Build openstack-must-gather container
+  ci_make:
+    chdir: "{{ cifmw_os_must_gather_repo_path }}"
+    output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
+    target: podman-build
+    params:
+      IMAGE_TAG: "{{ openstack_must_gather_tag.stdout }}"
+      IMAGE_REGISTRY: "{{ cifmw_os_must_gather_image_registry }}"
+      MUST_GATHER_IMAGE: "openstack-must-gather"
+
+- name: Push openstack-must-gather container
+  ci_make:
+    chdir: "{{ cifmw_os_must_gather_repo_path }}"
+    output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
+    target: podman-push
+    params:
+      IMAGE_TAG: "{{ openstack_must_gather_tag.stdout }}"
+      IMAGE_REGISTRY: "{{ cifmw_os_must_gather_image_registry }}"
+      MUST_GATHER_IMAGE: "openstack-must-gather"
+  when: cifmw_os_must_gather_image_push | bool
+
+- name: Set cifmw_os_must_gather_image to new image tag
+  ansible.builtin.set_fact:
+    cifmw_os_must_gather_image: "{{ cifmw_os_must_gather_image_registry }}/openstack-must-gather:{{ openstack_must_gather_tag.stdout }}"
+  when: cifmw_os_must_gather_image_push | bool
