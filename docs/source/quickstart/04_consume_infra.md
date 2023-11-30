@@ -10,8 +10,9 @@ It's now time to see what has been deployed, and how to properly use it.
 From now on, you should be able to jump on the ansible controller:
 
 ```Bash
-$ ssh controller-0
+[laptop]$ ssh controller-0
 ```
+
 ~~~{tip}
 No user nor key is needed - everything is configured in your ~/.ssh/config for an easy access.
 ~~~

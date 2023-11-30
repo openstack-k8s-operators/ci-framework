@@ -20,6 +20,7 @@ pass it to the deployment using a custom parameter file, for instance:
 
 ~~~{code-block} YAML
 :caption: custom/private-params.yml
+:linenos:
 cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME') }}/pull-secret.txt"
 ~~~
 

@@ -11,7 +11,9 @@ In case you want to inherit from our base job, while still wanting to use only C
 and the ansible-controller one, you have to override a parameter via the `extra_vars`
 job parameter:
 
-```YAML
+~~~{code-block} YAML
+:caption: zuul.d/base.yaml
+:linenos:
 - job:
     name: my-job-with-2-nodes
     parent: podified-multinode-edpm-deployment-crc
@@ -55,7 +57,7 @@ job parameter:
                 ip: 172.18.0.5
               tenant:
                 ip: 172.19.0.5
-```
+~~~
 
 ~~~{tip}
 We have to use that `extra_vars` in order to properly override the `vars` we define in the

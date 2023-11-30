@@ -81,7 +81,9 @@ steps.
 
 In order to provide a hook, please pass the following as an environment file:
 
-```YAML
+~~~{code-block} YAML
+:caption: custom/my-hook.yml
+:linenos:
 pre_infra:
     - name: My glorious hook name
       type: playbook
@@ -94,7 +96,7 @@ pre_infra:
       wait_condition:
         type: pod
       source: /path/to/my/glorious.crd
-```
+~~~
 
 In the above example, the `foo.yml` is located in
 [ci_framework/hooks/playbooks](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/hooks/playbooks) while
@@ -130,11 +132,11 @@ For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
 
 ```Bash
-$ ansible-playbook deploy-edpm.yml \
+[controller-0]$ ansible-playbook deploy-edpm.yml \
     -K --tags bootstrap,packages \
     [-e @scenarios/centos-9/some-environment -e <...>]
 $
-$ ansible-playbook deploy-edpm.yml \
+[controller-0]$ ansible-playbook deploy-edpm.yml \
     -K --skip-tags bootstrap,packages \
     [-e @scenarios/centos-9/some-environment -e <...>]
 ```
@@ -148,7 +150,7 @@ during [os_net_setup](../roles/os_net_setup.md) and you've taken steps
 to correct the problem and want to test if they resolved the issue,
 then use:
 ```Bash
-ansible-playbook deploy-edpm.yml -K --tags admin-setup
+[controller-0]$ ansible-playbook deploy-edpm.yml -K --tags admin-setup
 ```
 
 More tags may show up according to the needs.

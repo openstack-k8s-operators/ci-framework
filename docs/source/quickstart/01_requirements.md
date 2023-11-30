@@ -44,7 +44,7 @@ You must run the deployment as a **non root user**.
 ~~~{tip}
 For a remote user, it must have appropriate SSH configuration
 for **password less** authentication (use the `.ssh/authorized_keys`
- on the remote host).
+on the remote host).
 ~~~
 
 ~~~{tip}
