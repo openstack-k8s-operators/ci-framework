@@ -129,18 +129,6 @@
       "op":"replace", "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
       "value": {"name": "RELATED_IMAGE_ANSIBLEEE_IMAGE_URL_DEFAULT", "value": "quay.io/openstack-k8s-operators/openstack-ansibleee-runner:latest"}}]'
 
-# Prepare and kustomize the OpenStackControlPlane CR
-- name: Prepare OpenStack control plane CR
-  vars:
-    make_openstack_deploy_prep_env: "{{ cifmw_edpm_prepare_common_env |
-      combine(cifmw_edpm_prepare_make_openstack_deploy_prep_env | from_yaml)}}"
-    make_openstack_deploy_prep_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
-  ansible.builtin.include_role:
-    name: 'install_yamls_makes'
-    tasks_from: 'make_openstack_deploy_prep'
-  tags:
-    - control-plane
-
 - name: Deploy NetConfig
   vars:
     make_netconfig_deploy_env: "{{ cifmw_edpm_prepare_common_env }}"
@@ -151,27 +139,60 @@
   tags:
     - control-plane
 
+- name: Check for OpenStackControlPlane CR file
+  ansible.builtin.stat:
+    path: "{{ cifmw_edpm_prepare_openstack_cr_file }}"
+  register: _cr_file
+  tags:
+    - control-plane
+
 - name: Kustomize and deploy OpenStackControlPlane
   tags:
     - control-plane
   vars:
-    cifmw_edpm_prepare_openstack_crs_path: >-
+    _crs_path: >-
       {{
         [
           cifmw_edpm_prepare_manifests_dir,
           cifmw_install_yamls_defaults['NAMESPACE'],
-          'openstack',
           'cr'
         ] | ansible.builtin.path_join
       }}
-
   when:
-    - not cifmw_edpm_prepare_dry_run | bool
+    - _cr_file.stat.exists
   block:
+    - name: Make sure manifests directory exists
+      ansible.builtin.file:
+        state: directory
+        recurse: true
+        path: "{{ _crs_path }}"
+
+    - name: Copy cr to manifests directory
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ cifmw_edpm_prepare_openstack_cr_file }}"
+        dest: "{{ _crs_path }}"
+
+    - name: Perform kustomizations for storageclass
+      when: cifmw_install_yamls_defaults['STORAGE_CLASS'] != "local-storage"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/98-kustomization.yaml"
+        content: |
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          patches:
+          - patch: |-
+              - op: replace
+                path: /spec/storageClass
+                value: {{ cifmw_install_yamls_defaults['STORAGE_CLASS'] }}
+            target:
+              kind: OpenStackControlPlane
+
     - name: Perform kustomizations to the OpenStackControlPlane CR
-      when: not cifmw_edpm_prepare_dry_run
       ci_kustomize:
-        target_path: "{{ cifmw_edpm_prepare_openstack_crs_path }}"
+        target_path: "{{ _crs_path }}"
         sort_ascending: false
         kustomizations_paths: >-
           {{
