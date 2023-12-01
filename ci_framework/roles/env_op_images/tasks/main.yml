@@ -44,16 +44,46 @@
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   block:
-    - name: Get images from the csv
-      ansible.builtin.shell: |
-        csv_name=$(oc get csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} -l operators.coreos.com/openstack-operator.openstack-operators -o=jsonpath='{.items[*].metadata.name}')
-        oc get csv -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} ${csv_name} -o=jsonpath='{.spec.install.spec.deployments[*].spec.template.spec.containers[?(@.name=="manager")].env}'
-      register: csv_images
+    - name: Get images from the CSV
+      ansible.builtin.command:
+        cmd: >-
+          oc get ClusterServiceVersion
+          -l operators.coreos.com/openstack-operator.openstack-operators
+          -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          -o yaml
+      register: _csvs_out
 
     - name: Extract env variable name and images
       ansible.builtin.set_fact:
-        cifmw_openstack_service_images_content: "{{ cifmw_openstack_service_images_content | default({}) | combine({(item | from_json).name: (item | from_json).value}) }}"
-      loop: "{{ csv_images.stdout| regex_findall('\\{[^}]+\\}') }}"
+        cifmw_openstack_service_images_content: >-
+          {{
+            cifmw_openstack_service_images_content |
+            default({}) |
+            combine(
+              {
+                item.name: item.value
+              }
+            )
+          }}
+      loop: >-
+        {{
+          (_csvs_out.stdout | from_yaml)['items'] |
+          flatten(levels=1) |
+          selectattr('spec.install.spec.deployments', 'defined') |
+          map(attribute='spec.install.spec.deployments') |
+          flatten(levels=1) |
+          selectattr('spec.template.spec.containers', 'defined') |
+          map(attribute='spec.template.spec.containers') |
+          flatten(levels=1) |
+          selectattr('name', 'defined') |
+          selectattr('name', 'equalto', 'manager') |
+          selectattr('env', 'defined') |
+          map(attribute='env') |
+          flatten(levels=1) |
+          selectattr("name", "match", "^RELATED_IMAGE")
+        }}
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Get all the pods in openstack-operator namespace
       kubernetes.core.k8s_info:
@@ -88,8 +118,18 @@
     - name: Add operator images to the dictionary
       when: not cifmw_env_op_images_dryrun | bool
       ansible.builtin.set_fact:
-        cifmw_openstack_operator_images_content: "{{ cifmw_openstack_operator_images_content | combine({ item.metadata.labels['openstack.org/operator-name'] | upper ~ '_OP_IMG': item.status.containerStatuses[1].imageID}) }}"
+        cifmw_openstack_operator_images_content: >-
+          {{
+            cifmw_openstack_operator_images_content |
+            combine(
+              {
+                item.metadata.labels['openstack.org/operator-name'] | upper ~ '_OP_IMG': item.status.containerStatuses[1].imageID
+              }
+            )
+          }}
       loop: "{{ selected_pods }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
 
     - name: Write images to file
       vars:
