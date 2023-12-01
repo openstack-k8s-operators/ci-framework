@@ -27,7 +27,9 @@ It must expose at least two hosts:
 
 You can take this as a template:
 
-```YAML
+~~~{code-block} YAML
+:caption: inventory.yml
+:linenos:
 all:
   hosts:
     localhost:
@@ -35,7 +37,7 @@ all:
     hypervisor-1:
       ansible_user: my_remote_user
       ansible_host: hypervisor.localnet
-```
+~~~
 
 ~~~{tip}
 In case you want to run the framework against your laptop/desktop, you can avoid the `hypervisor-1` host.
@@ -59,8 +61,8 @@ cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME') }}/pull-secret.t
 Once you're ready, run:
 
 ```Bash
-$ cd ci-framework
-$ ansible-playbook -i custom-inventory.yml \
+[laptop]$ cd ci-framework
+[laptop]$ ansible-playbook -i custom-inventory.yml \
     -e @scenarios/reproducers/3-nodes.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @custom/private-params.yml

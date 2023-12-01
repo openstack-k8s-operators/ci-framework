@@ -15,3 +15,8 @@ then stop the involved VM(s), undefine all the resources in libvirt, and create 
 
 That way, you're in a "deploy once, use many times", with the capacity to get a clean environment in a
 matter of minutes instead of hours.
+
+## No root access
+
+The whole framework relies on a non-root user, either on your local laptop/desktop or on the remote
+hypervisor. We leverage `sudo` and `become: true` when we need actual privileges.

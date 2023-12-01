@@ -6,7 +6,7 @@ We propose two kind of cleanup.
 The recommended one, allowing a faster re-deploy.
 
 ```Bash
-$ ansible-playbook -i custom/inventory.yml \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
     -e cifmw_target_host=hypervisor-1 \
     reproducer-clean.yml
 ```
@@ -20,7 +20,7 @@ the `cifmw_target_host` extra variable.
 In case you want to remove everything, with the base images.
 
 ```Bash
-$ ansible-playbook -i custom/inventory.yml \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
     -e cifmw_target_host=hypervisor-1 \
     reproducer-clean.yml \
     --tags deepscrub

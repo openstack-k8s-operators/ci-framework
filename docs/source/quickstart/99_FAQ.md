@@ -13,12 +13,12 @@ On the hypervisor, you can check the deployed resources using `virsh` command, f
 
 Check on deployed virtual machines
 ```Bash
-$ virsh -c qemu:///system list --all
+[hypervisor]$ virsh -c qemu:///system list --all
 ```
 
 Check on deployed virtual networks
 ```Bash
-$ virsh -c qemu:///system net-list --all
+[hypervisor]$ virsh -c qemu:///system net-list --all
 ```
 
 Please refer to the `virsh` manpage for more commands.
@@ -59,7 +59,9 @@ without access to public NTP servers.
 :class: tip
 Ensure you're passing the following parameter to your deploy:
 
-```YAML
+```{code-block} YAML
+:caption: custom/ntp-server.yml
+:linenos:
 cifmw_install_yamls_vars:
   DATAPLANE_NTP_SERVER: <your selected NTP server>
 ```
@@ -95,7 +97,7 @@ product, not the Framework. We're working on getting rid of them.
 Connect to the hypervisor, and issue this command:
 
 ```Bash
-$ virsh -c qemu:///system net-destroy default
+[hypervisor]$ virsh -c qemu:///system net-destroy default
 ```
 ~~~
 
@@ -104,7 +106,7 @@ during the next run (see [below](#network-cifmw-osp-trunk-is-not-active)):
 
 
 ```Bash
-$ virsh -c qemu:///system net-start cifmw-osp_trunk
+[hypervisor]$ virsh -c qemu:///system net-start cifmw-osp_trunk
 ```
 
 #### network 'cifmw-osp_trunk' is not active
@@ -119,7 +121,7 @@ The error was: libvirt.libvirtError: Requested operation is not valid: network
 
 ~~~{admonition} Cause
 :class: error
-The `cifmw-osp_trunk` virtual network didn't start properly. This usually happen
+The `cifmw-osp_trunk` virtual network didn't start properly. This usually happens
 because a previous run hit another issue (see [above](#internal-error-network-is-already-in-use-by-interface-virbr0)).
 ~~~
 
@@ -127,7 +129,7 @@ because a previous run hit another issue (see [above](#internal-error-network-is
 Either clean the deployment, or connect to the hypervisor, and run the following command:
 
 ```Bash
-$ virsh -c qemu:///system net-start cifmw-osp_trunk
+[hypervisor]$ virsh -c qemu:///system net-start cifmw-osp_trunk
 ```
 and re-start the deployment.
 ~~~
@@ -147,8 +149,8 @@ This one will remove the running resources, mostly:
 It's probably the most used, since it allows a faster re-deploy later.
 
 ```Bash
-$ ansible-playbook [-i inventory.yml] \
-    [-e cifmw_target_host=HYPERVISOR] \
+[laptop]$ ansible-playbook [-i custom/inventory.yml] \
+    [-e cifmw_target_host=hypervisor-1] \
     reproducer-clean.yml
 ```
 
@@ -159,8 +161,13 @@ dev-scripts related resources such as repository, OCP resources and so on.
 
 
 ```Bash
-$ ansible-playbook [-i inventory.yml] \
-    [-e cifmw_target_host=HYPERVISOR] \
+[laptop]$ ansible-playbook [-i custom/inventory.yml] \
+    [-e cifmw_target_host=hypervisor-1] \
     reproducer-clean.yml \
     --tags deepscrub
 ```
+
+~~~{tip}
+`hypervisor-1` is the name we use in the example inventories through the documentation.
+Please be sure to pass the proper inventory hostname.
+~~~

@@ -18,13 +18,17 @@ and the image layers are removed.
 
 This parameter allows you to pass a list of repositories you want to sync from
 your local laptop onto the ansible controller machine. The form is pretty easy:
-```YAML
+~~~{code-block} YAML
+:caption: custom/repositories.yml
+:linenos:
+---
 cifmw_reproducer_repositories:
   - src: "{{ playbook_dir }}"
     dest: "src/github.com/openstack-k8s-operators/"
   - src: "{{ cifmw_install_yamls_repo }}"
     dest: "src/github.com/openstack-k8s-operators/"
-```
+~~~
+
 This one will ensure you have ci_framework as well as install_yamls in a
 known location on the virtual machine. The dest path matches the one we usually
 get in CI.
@@ -33,23 +37,25 @@ get in CI.
 This feature can be launched against your own desktop or laptop, but also
 against a remote hypervisor (preferred due to resources). You can therefore
 create your own inventory as follows:
-```YAML
+~~~{code-block} YAML
+:caption: custom/inventory.yml
+:linenos:
 ---
-# inventory_hypervisor.yml
 all:
   hosts:
     hypervisor:
      ansible_user: your_remote_user
      [any other ansible connection options]
-```
+~~~
 
 ## Usage
 Once the layout matches your needs, you just need to run the following:
 ```Bash
-$ ansible-playbook -K -i inventory_hypervisor.yml \
+[laptop]$ ansible-playbook -K -i custom/inventory.yml \
     reproducer.yml \
     -e cifmw_target_host=hypervisor \
-    -e @scenarios/reproducers/3-nodes.yml
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e @custom/private-params.yml [-e @custom/repositories.yml]
 ```
 Note: the `-K` option instructs ansible to request `sudo` password. This is
 needed in case you don't have the `NOPASSWD` option in the sudoers. Of course,
@@ -61,17 +67,21 @@ provided you passed the needed repositories to sync.
 
 The reproducer injects proper ssh configuration in order to jump on the nodes
 using their name. Usually, you'll just need to reach to the "controller":
+
 ```Bash
-$ ssh controller-0
+[laptop]$ ssh controller-0
 ```
+
 You'll end on the machine, using "zuul" user. Then, you're all set to run the
 framework, like we [do in the CI](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci/playbooks).
 
 ## Cleaning
+
 In order to clean the deployed layout, you can just call the `reproducer-clean.yml`
 playbook. It will clean the virtual machines:
+
 ```Bash
-$ ansible-playbook -i inventory_hypervisor.yml reproducer-clean.yml
+[laptop]$ ansible-playbook -i inventory_hypervisor.yml reproducer-clean.yml
 ```
 It doesn't require any environment file since it will list all of the existing
 virtual machines, and clean the ones which name starts with `cifmw-`.
@@ -81,7 +91,7 @@ deployment, you would need to pass it down accordingly.
 ## Expected layout with the default 3-nodes.yml environment
 The provided file should create the following resources on your environment:
 ```Bash
-$ virsh net-list --all
+[hypervisor]$ virsh net-list --all
  Name            State    Autostart   Persistent
 --------------------------------------------------
  cifmw-default   active   no          yes

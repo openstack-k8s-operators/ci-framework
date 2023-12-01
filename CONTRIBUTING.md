@@ -5,7 +5,7 @@ Thank you for your interest in that project, and for taking time to contribute!
 ## Create a new role
 Run the following command to get your new role ready:
 ```Bash
-$ make create_new_role ROLE_NAME=my_wonderful_role
+[laptop]$ make create_new_role ROLE_NAME=my_wonderful_role
 ```
 
 ### Consuming install_yamls variables
@@ -16,7 +16,9 @@ that contains the default values of every possible parameter of the install_yaml
 Makefiles.
 
 Here is an example, based on a common use-case, on how to use those variables
-```YAML
+~~~{code-block} YAML
+:linenos:
+---
 - name: Deploy EDPM
   vars:
     make_edpm_deploy_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path }) }}"
@@ -24,9 +26,11 @@ Here is an example, based on a common use-case, on how to use those variables
   ansible.builtin.import_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_deploy'
-```
+~~~
 
-```YAML
+~~~{code-block} YAML
+:linenos:
+---
 # Fetch openstackdataplane resources from the default namespace declared in install_yamls
 # Makefile. If the NAMESPACE has been overridden by cifmw_install_yamls_vars this variable
 # already points to the overridden value.
@@ -35,7 +39,7 @@ Here is an example, based on a common use-case, on how to use those variables
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command: |
     oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-```
+~~~
 
 ### Documentation
 A new role must get proper documentation. Please edit the README.md located in
@@ -47,8 +51,8 @@ new scenarios if needed.
 
 Then, you can run the following command in order to run tests locally:
 ```Bash
-$ make run_ctx_pre_commit
-$ make run_ctx_ansible_test
+[laptop]$ make run_ctx_pre_commit
+[laptop]$ make run_ctx_ansible_test
 ```
 
 This will create a container, and run tests in it (pre-commit and ansible-test).
@@ -59,7 +63,7 @@ This will create a container, and run tests in it (pre-commit and ansible-test).
 
 One can also run:
 ```Bash
-$ make enable-git-hooks
+[laptop]$ make enable-git-hooks
 ```
 
 in order to configure automatic run of pre-commit tests in a local repository before

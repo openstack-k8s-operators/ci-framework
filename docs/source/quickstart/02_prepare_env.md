@@ -13,11 +13,11 @@ The following operating systems were successfully tested:
 There are a few needed dependencies to install before starting consuming the framework:
 
 ```Bash
-$ sudo dnf install -y git-core make
-$ git clone https://github.com/openstack-k8s-operators/ci-framework ci-framework
-$ cd ci-framework
-$ make setup_molecule
-$ source ~/test-python/bin/activate
+[laptop]$ sudo dnf install -y git-core make
+[laptop]$ git clone https://github.com/openstack-k8s-operators/ci-framework ci-framework
+[laptop]$ cd ci-framework
+[laptop]$ make setup_molecule
+[laptop]$ source ~/test-python/bin/activate
 ```
 
 ## On the hypervisor
@@ -39,10 +39,12 @@ For now, you have to manually destroy the `default` network provided by libvirt.
 the same range is used by default for one of the deployed networks - and we can't have two virtual networks
 consuming the same range.
 
-In order to do so, please use one of those two commands:
+In order to do so, please use:
+
 ```Bash
-$ sudo virsh net-destroy default
-$ virsh -c qemu:///system net-destroy default
+[hypervisor]$ sudo virsh net-destroy default
 ```
 
+~~~{tip}
 Later, we may not need to do this, if we can get rid of the hard-coded subnets currently consumed in the product.
+~~~

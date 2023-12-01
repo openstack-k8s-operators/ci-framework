@@ -31,12 +31,14 @@ By default, the CI Framework runs against `localhost`. If you intend to run the 
 within the container, you **must** provide a custom inventory in order to let ansible use the network connection
 instead of the `local` default set in the provided inventory. For instance, you want an inventory like this:
 
-```YAML
+~~~{code-block} YAML
+:caption: custom/inventory.yml
+:linenos:
 all:
   hosts:
     localhost:
       ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-```
+~~~
 
 And then mount it in the container, as shown bellow.
 
@@ -45,9 +47,9 @@ And then mount it in the container, as shown bellow.
 Since the container's primary goal was to run tests, without any interactive shell, the $HOME set to the used is the same as
 in Prow environment: `/`. While the proposed commands exports the $HOME environment variables, some processes may not get it right.
 
-In order to switch the user's home directory, we strongly advice running this as soon as you are in the container:
+In order to switch the user's home directory, we strongly advise running this as soon as you are in the container:
 ```Bash
-$ sudo usermod -d /home/prow prow
+[container]$ sudo usermod -d /home/prow prow
 ```
 
 This should then ensure SSH, molecule and other things are consuming the right location.
@@ -61,7 +63,7 @@ on your SELinux status.
 
 ##### On RHEL based systems (CentOS, RHEL, Fedora, ...):
 ```Bash
-podman run --rm -ti \
+[laptop]$ podman run --rm -ti \
     -w /home/prow \
     -e HOME=/home/prow \
     -v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519 \
@@ -73,7 +75,7 @@ podman run --rm -ti \
 
 ##### On non-SELinux systems (Debian, Ubuntu, Mint, MacOS, ...):
 ```Bash
-podman run --rm -ti \
+[laptop]$ podman run --rm -ti \
     -w /home/prow \
     -e HOME=/home/prow \
     -v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519 \
@@ -91,14 +93,14 @@ including those that were preinstalled or already exist on your system.
 ~~~
 
 ```Bash
-podman machine stop podman-machine-default
-podman machine rm podman-machine-default
-podman machine init -v $HOME:$HOME
-podman machine start
+[macos]$ podman machine stop podman-machine-default
+[macos]$ podman machine rm podman-machine-default
+[macos]$ podman machine init -v $HOME:$HOME
+[macos]$ podman machine start
 ```
 
 ```Bash
-podman run --rm -ti \
+[macos]$ podman run --rm -ti \
     -w /home/prow \
     -e HOME=/home/prow \
     -v ~/.ssh/id_ed25519:/home/prow/.ssh/id_ed25519 \
