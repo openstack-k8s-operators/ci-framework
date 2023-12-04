@@ -28,7 +28,7 @@ It must expose at least two hosts:
 You can take this as a template:
 
 ~~~{code-block} YAML
-:caption: inventory.yml
+:caption: custom/inventory.yml
 :linenos:
 all:
   hosts:
@@ -62,16 +62,16 @@ Once you're ready, run:
 
 ```Bash
 [laptop]$ cd ci-framework
-[laptop]$ ansible-playbook -i custom-inventory.yml \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
     -e @scenarios/reproducers/3-nodes.yml \
     -e cifmw_target_host=hypervisor-1 \
-    -e @custom/private-params.yml
+    -e @custom/private-params.yml \
     reproducer.yml
 ```
 
 #### Explanations
 
-The `custom-inventory.yml` is your custom inventory. If you're deploying on your laptop/desktop, you don't need to
+The `custom/inventory.yml` is your custom inventory. If you're deploying on your laptop/desktop, you don't need to
 pass it.
 
 The `@scenarios/reproducers/3-nodes.yml` extra variable file is the base of the lightweight infrastructure.
