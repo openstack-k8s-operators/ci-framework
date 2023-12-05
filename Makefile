@@ -35,7 +35,8 @@ help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 .PHONY: create_new_role
-create_new_role:
+create_new_role: ## Please call `new_role ROLE_NAME=your_role` instead.
+	$(if $(strip $(INTER_CALL)),,$(error Please call make new_role ROLENAME=${ROLE_NAME}))
 	$(call check-var-defined,ROLE_NAME)
 	ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ci_framework/roles ${ROLE_NAME}
 
@@ -44,6 +45,7 @@ role_molecule: ## Regenerate the molecule jobs configuration
 	scripts/create_role_molecule.py
 
 .PHONY: new_role
+new_role: export INTER_CALL=yes
 new_role: create_new_role role_molecule ## Create a new Ansible role and related molecule Zuul job - ROLE_NAME parameter is mandatory
 
 ##@ Setup steps
