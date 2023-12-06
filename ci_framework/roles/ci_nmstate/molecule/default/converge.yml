@@ -14,14 +14,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
-- name: Converge
-  hosts: all
+- name: Gather instance facts
+  hosts: instance
   gather_facts: true
-  vars:
-    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
-    cifmw_ci_nmstate_namespace: openshift-nmstate
   tasks:
     - name: Add crc hostname with it's IP to /etc/hosts
       become: true
@@ -35,12 +30,27 @@
         ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
         ansible_ssh_user: core
 
+
+- name: Get CRC facts
+  hosts: crc
+  gather_facts: false
+  tasks:
     - name: Fetch crc network facts
       ansible.builtin.setup:
-        gather_subset: network
-      delegate_to: crc
-      delegate_facts: true
+        gather_subset:
+          - "!all"
+          - "!min"
+          - network
+          - pkg_mgr
 
+- name: Converge
+  hosts: instance
+  gather_facts: false
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_ci_nmstate_namespace: openshift-nmstate
+  tasks:
     - name: Prepare the networking var for the ci_nmstate role
       vars:
         instance_target_mtu: "{{ ansible_default_ipv4.mtu -50 }}"
