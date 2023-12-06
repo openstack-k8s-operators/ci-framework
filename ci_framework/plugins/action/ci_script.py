@@ -95,10 +95,15 @@ import glob
 import pathlib
 import re
 import uuid
+import yaml
+import typing
+
 
 from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
 
+from ansible.parsing.yaml.dumper import AnsibleDumper
+from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
 
 TMPL_SCRIPT = """#!/bin/bash
 set -euo pipefail
@@ -108,6 +113,38 @@ exec > >(tee -i %(logpath)s) 2>&1
 %(content)s
 %(popcmd)s
 """
+
+
+def decode_ansible_raw(data: typing.Any) -> typing.Any:
+    """Converts an Ansible var to a python native one
+
+    Ansible raw input args can contain AnsibleUnicodes or AnsibleUnsafes
+    that are not intended to be manipulated directly.
+    This function converts the given variable to a one that only contains
+    python built-in types.
+
+    Args:
+        data: The usafe Ansible content to decode
+
+    Returns: The python types based result
+
+    """
+    if isinstance(data, list):
+        return [decode_ansible_raw(_data) for _data in data]
+    elif isinstance(data, tuple):
+        return tuple(decode_ansible_raw(_data) for _data in data)
+    if isinstance(data, dict):
+        return yaml.load(
+            yaml.dump(
+                data, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True
+            ),
+            Loader=yaml.Loader,
+        )
+    if isinstance(data, AnsibleUnsafeText):
+        return str(data)
+    if isinstance(data, AnsibleUnsafeBytes):
+        return bytes(data)
+    return data
 
 
 class ActionModule(ActionBase):
@@ -133,13 +170,14 @@ class ActionModule(ActionBase):
     def run(self, tmp=None, task_vars=None):
         super(ActionModule, self).run(tmp, task_vars)
 
-        if "output_dir" not in self._task.args:
+        task_args = decode_ansible_raw(self._task.args)
+        if "output_dir" not in task_args:
             raise AnsibleActionFail("output_dir parameter is missing")
 
-        if "script" not in self._task.args:
+        if "script" not in task_args:
             raise AnsibleActionFail("script parameter is missing")
 
-        output_dir = pathlib.Path(self._task.args.pop("output_dir"))
+        output_dir = pathlib.Path(task_args.pop("output_dir"))
         if not output_dir.is_dir():
             raise AnsibleActionFail("output_dir points to a non-existing directory")
 
@@ -149,14 +187,14 @@ class ActionModule(ActionBase):
 
         # Remove cmd if not passed, we are going to use _raw_params
         # to pass the cmd we create here
-        if "cmd" in self._task.args:
-            self._task.args.pop("cmd")
+        if "cmd" in task_args:
+            task_args.pop("cmd")
 
         fnum = len(glob.glob(f"{output_dir}/ci_script_*"))
-        t_name = re.sub(r"([^\x00-\x7F]|\s)+", "_", self._task._name).lower()
-        chdir_path = self._task.args.pop("chdir", None)
+        t_name = re.sub(r"([^\x00-\x7F]|\s)+", "_", self._task.name).lower()
+        chdir_path = task_args.pop("chdir", None)
         script_template_data = {
-            "content": self._task.args.pop("script"),
+            "content": task_args.pop("script"),
             "logpath": logs_dir.joinpath(
                 f"ci_script_{fnum:03}_{t_name}.log"
             ).as_posix(),
