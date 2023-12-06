@@ -149,8 +149,8 @@ This one will remove the running resources, mostly:
 It's probably the most used, since it allows a faster re-deploy later.
 
 ```Bash
-[laptop]$ ansible-playbook [-i custom/inventory.yml] \
-    [-e cifmw_target_host=hypervisor-1] \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
+    -e cifmw_target_host=hypervisor-1 \
     reproducer-clean.yml
 ```
 
@@ -161,8 +161,8 @@ dev-scripts related resources such as repository, OCP resources and so on.
 
 
 ```Bash
-[laptop]$ ansible-playbook [-i custom/inventory.yml] \
-    [-e cifmw_target_host=hypervisor-1] \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
+    -e cifmw_target_host=hypervisor-1 \
     reproducer-clean.yml \
     --tags deepscrub
 ```
