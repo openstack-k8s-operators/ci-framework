@@ -70,27 +70,52 @@
   ansible.builtin.set_fact:
     mac_address: "{{ reserved }}"
 
+- name: "Generate IP address for {{ vm_name }}"
+  vars:
+    _net_ip_set: >-
+      {{
+        cifmw_libvirt_manager_vm_net_ip_set_default |
+        combine(cifmw_libvirt_manager_vm_net_ip_set)
+      }}
+    _vm_name: >-
+      {{
+        vm_name |
+        replace('cifmw-', '') |
+        replace('-', '_') |
+        split('_')
+      }}
+    _ip_index: >-
+      {{
+        _net_ip_set[_vm_name[0]] +
+        (_vm_name[1] | default(0)) | int
+      }}
+  ansible.builtin.set_fact:
+    _lm_ip_address: "{{ network.cidr | ansible.utils.nthhost(_ip_index) }}"
+
+- name: Inject data in cifmw_libvirt_manager_mac_map
+  vars:
+    _net_name: >-
+      {{
+        (network.name is match('^(ocp|default)')) |
+        ternary(network.name, 'cifmw-' ~ network.name)
+      }}
+    _dataset: >-
+      {{
+        {vm_name: [{'MAC': mac_address,
+                    'IP': _lm_ip_address,
+                    'network': _net_name}]}
+      }}
+  ansible.builtin.set_fact:
+    cifmw_libvirt_manager_mac_map: >-
+      {{
+        cifmw_libvirt_manager_mac_map | default({}) |
+        combine(_dataset, recursive=true)
+      }}
+
 - name: Reserve IP address
   when:
     - reserved == ''
   block:
-    - name: "Generate IP address for {{ vm_name }}"
-      vars:
-        _vm_name: >-
-          {{
-            vm_name |
-            replace('cifmw-', '') |
-            replace('-', '_') |
-            split('_')
-          }}
-        _ip_index: >-
-          {{
-            cifmw_libvirt_manager_vm_net_ip_set[_vm_name[0]] +
-            (_vm_name[1] | default(0)) | int
-          }}
-      ansible.builtin.set_fact:
-        _lm_ip_address: "{{ network.cidr | ansible.utils.nthhost(_ip_index) }}"
-
     - name: "Reserve IP for {{ vm_name }} on {{ network.name }}"  # noqa: name[template]
       vars:
         _vm_name: "{{ vm_name | replace('^cifmw-', '') }}"
