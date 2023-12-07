@@ -1,18 +1,54 @@
 ---
 {% if use_content_provider | default(false) | bool -%}
+{% raw %}
+- name: Load parameters and expose needed data
+  hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: Load mac-mapping
+      ansible.builtin.include_vars:
+        file: "{{ ansible_user_dir }}/ci-framework-data/artifacts/mac-mapping.yml"
+
+    - name: Set cifmw_rp_registry_ip
+      ansible.builtin.set_fact:
+        cacheable: true
+        cifmw_rp_registry_ip: >-
+          {{
+            ((cifmw_mac_mapping | dict2items |
+            selectattr('key', 'match', '.*controller-0') |
+            first)['value'] |
+            selectattr('network', 'match', '.*osp_trunk') |
+            first)['IP']
+          }}
+
+
 - name: Configure CRC for insecure registry
   hosts: crcs
   vars:
-    content_provider_registry_ip: {{ cifmw_reproducer_ctl_ip4 }}
+    content_provider_registry_ip: "{{ hostvars['localhost']['cifmw_rp_registry_ip'] }}"
   tasks:
+    - name: Wait for CRC to be ready
+      register: wait_crc
+      ansible.builtin.command: >-
+        oc login api.crc.testing:6443
+        -u kubeadmin
+        -p 12345678
+        --insecure-skip-tls-verify=true
+      retries: 60
+      delay: 10
+      until:
+        - wait_crc is defined
+        - wait_crc.rc is defined
+        - wait_crc.rc == 0
+
     - name: Set insecure registry on crc node
       ansible.builtin.import_tasks: ci/playbooks/tasks/set_crc_insecure_registry.yml
+{% endraw %}
 
 - name: "Content Provider"
   hosts: localhost
-  gather_facts: true
+  gather_facts: false
   vars:
-    cifmw_rp_registry_ip: {{ cifmw_reproducer_ctl_ip4 }}
     cifmw_rp_registry_firewall: false
     job_id: "{{ job_id }}"
   tasks:
@@ -21,6 +57,7 @@
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
+        - "{{ ansible_user_dir }}/ci-framework-data/artifacts/mac-mapping.yml"
         - "{{ ansible_user_dir }}/{{ job_id }}-params/zuul-params.yml"
         - "./scenarios/centos-9/base.yml"
         - "./scenarios/centos-9/content_provider.yml"
@@ -77,6 +114,45 @@
 {% endraw %}
 {% endif %}
 
+{% raw %}
+- name: Configure NetworkManager on controller-0
+  hosts: localhost
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Instruct NetworkManager to not manage DNS
+      community.general.ini_file:
+        path: "/etc/NetworkManager/NetworkManager.conf"
+        option: dns
+        section: main
+        value: none
+
+    - name: Restart NetworkManager
+      ansible.builtin.service:
+        name: NetworkManager
+        state: restarted
+
+    - name: Inject proper DNS resolver
+      vars:
+        _net: "{{ cifmw_rp_registry_ip }}/24"
+        _crc_resolver: >-
+          {{
+            _net | ansible.utils.ipaddr('host/prefix') |
+            ansible.utils.nthhost(80)
+          }}
+        _pub_resolver: >-
+          {{
+            _net | ansible.utils.ipaddr('host/prefix') |
+            ansible.utils.nthhost(1)
+          }}
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf"
+        content: |
+          # Managed by ansible/cifmw reproducer role
+          nameserver {{ _crc_resolver }}
+          nameserver {{ _pub_resolver }}
+{% endraw %}
+
 {% for play in zuul_plays %}
 - name: "Reproducer for {{ job_id }}: {{ play }}"
   vars:
@@ -89,7 +165,7 @@
 {% endif %}
       - cifmw_zuul_target_host=controller-0
       - cifmw_openshift_user=kubeadmin
-      - cifmw_openshift_kubeconfig=/home/zuul/.crc/machines/crc/kubeconfig
+      - cifmw_openshift_kubeconfig=/home/zuul/.kube/config
       - cifmw_openshift_login_skip_tls_verify=true
       - cifmw_openshift_setup_skip_internal_registry_tls_verify=true
     cifmw_zuul_target_host: controller-0
