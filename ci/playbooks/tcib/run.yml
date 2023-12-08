@@ -33,6 +33,15 @@
           {%- endif %}
           -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
 
+    - name: Include inner ansible vars file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_artifacts_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/ansible-vars.yml"
+      register: inner_ansible
+
+    - name: Get inner ansible vars
+      ansible.builtin.set_fact:
+        inner_ansible_vars: "{{ inner_ansible.content | b64decode | from_yaml }}"
+
     - name: Return Zuul Data
       ansible.builtin.debug:
         msg: >-
@@ -45,3 +54,5 @@
           zuul:
             pause: true
           content_provider_registry_ip: "{{ node_ip | default('nowhere') }}"
+          content_provider_namespace: "{{ inner_ansible_vars.cifmw_build_containers_registry_namespace }}"
+          content_provider_registry_tag: "{{ inner_ansible_vars.cifmw_repo_setup_full_hash }}"
