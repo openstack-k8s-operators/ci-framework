@@ -122,7 +122,7 @@ metadata:
 networking:
   machineNetwork:
     - cidr: 10.8.0.0/16
-  networkType: OpenShiftSDN
+  networkType: OVNKubernetes
 compute:
   - name: worker
     replicas: 3

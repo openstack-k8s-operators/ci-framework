@@ -74,7 +74,8 @@ If you provide neither, or both, it will fail.
 | Key | Default Value | Description |
 | --- | ------------- | ----------- |
 | ip_stack | `v4` | IP stack for the cluster. Supported values are `v4\|v6\|v6v4`. |
-| network_type | `OpenShiftSDN` | Sets the network type for the OpenShift cluster. Supported values are `OpenShiftSDN\|OVNKubernetes`. |
+| network_type | `OVNKubernetes` | Sets the network type for the OpenShift cluster. Supported values are `OpenShiftSDN\|OVNKubernetes`. |
+| ovn_local_gateway_mode | `false` | Enables local gateway mode, only applicable for `OVNKubernetes`. Supported values are `true\|false`. |
 | provisioning_network_profile | `Managed` | Allow the script to manage the provisioning network. Supported values are `Disabled\|Managed`. |
 | manage_pro_bridge | `y` | Allow dev-scripts to manage the provisioning bridge. Supported values are `y\|n`. |
 | provisioning_network | | The subnet CIDR to be used for the provisioning network. |
