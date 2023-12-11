@@ -170,11 +170,11 @@ You can refer to the [README](../roles/reproducer.md) nested in the role for mor
 The reproducer will generate a playbook mimicking the CI job itself. You can find it under
 `~/src/github.com/openstack-k8s-operators/ci-framework/SHORT_HASH_play.yml`, where SHORT_HASH
 is the last hash of the `cifmw_job_uri` parameter. You should, as well, get the proper
-inventory ready in the `scenarios/centos-9/zuul_inventory.yml` file, meaning you should
+inventory ready in the `~/ci-framework-data/artifacts/zuul_inventory.yml` file, meaning you should
 be able to run:
 ```Bash
 [controller-0]$ ansible-playbook \
-    -i scenarios/centos-9/zuul_inventory.yml \
+    -i ~/ci-framework-data/artifacts/zuul_inventory.yml \
     SHORT_HASH_play.yml
 ```
 You will be able to follow the live state in `~/ansible.log`:
