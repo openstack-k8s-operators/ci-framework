@@ -6,13 +6,13 @@ import ipaddress
 import typing
 
 import pytest
-from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping import (
+from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
     networking_definition,
 )
 
 from ansible_collections.cifmw.general.tests.unit.module_utils.test_utils import (
-    networking_mapping_stub_data,
+    net_map_stub_data,
 )
 
 
@@ -202,16 +202,14 @@ def test_network_definition_parse_all_tools_v4_ok():
 def test_network_definition_parse_all_tools_v6_ok():
     net_name = "testing-net"
     net_config = {
-        "network": networking_mapping_stub_data.NETWORK_1_IPV6_NET,
+        "network": net_map_stub_data.NETWORK_1_IPV6_NET,
         "vlan": "122",
         "mtu": "9000",
         "tools": {
             "multus": {
                 "ranges": [
                     {
-                        "start": str(
-                            networking_mapping_stub_data.NETWORK_1_IPV6_NET[20]
-                        ),
+                        "start": str(net_map_stub_data.NETWORK_1_IPV6_NET[20]),
                         "length": 10,
                     }
                 ],
@@ -223,7 +221,7 @@ def test_network_definition_parse_all_tools_v6_ok():
                         "length": 20,
                     },
                     {
-                        "start": networking_mapping_stub_data.NETWORK_1_IPV6_NET[170],
+                        "start": net_map_stub_data.NETWORK_1_IPV6_NET[170],
                         "length": 30,
                     },
                 ]
@@ -232,11 +230,11 @@ def test_network_definition_parse_all_tools_v6_ok():
                 "ranges": [
                     {
                         "start": "200",
-                        "end": networking_mapping_stub_data.NETWORK_1_IPV6_NET[239],
+                        "end": net_map_stub_data.NETWORK_1_IPV6_NET[239],
                     },
                     {
-                        "start": networking_mapping_stub_data.NETWORK_1_IPV6_NET[255],
-                        "end": networking_mapping_stub_data.NETWORK_1_IPV6_NET[2048],
+                        "start": net_map_stub_data.NETWORK_1_IPV6_NET[255],
+                        "end": net_map_stub_data.NETWORK_1_IPV6_NET[2048],
                     },
                 ]
             },
@@ -250,8 +248,8 @@ def test_network_definition_parse_tools_ranges_collision_fail():
     net_name = "testing-net"
 
     for network_ip in (
-        networking_mapping_stub_data.NETWORK_1_IPV4_NET,
-        networking_mapping_stub_data.NETWORK_1_IPV6_NET,
+        net_map_stub_data.NETWORK_1_IPV4_NET,
+        net_map_stub_data.NETWORK_1_IPV6_NET,
     ):
         colliding_range_config_1 = {
             "start": str(network_ip[170]),
@@ -310,15 +308,13 @@ def test_network_definition_parse_tools_ranges_collision_dual_stack_ok():
     }
 
     net_config = {
-        "network-v4": str(networking_mapping_stub_data.NETWORK_1_IPV4_NET),
-        "network-v6": str(networking_mapping_stub_data.NETWORK_1_IPV6_NET),
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET),
         "tools": {
             "metallb": {
                 "ranges-v4": [
                     {
-                        "start": str(
-                            networking_mapping_stub_data.NETWORK_1_IPV4_NET[100]
-                        ),
+                        "start": str(net_map_stub_data.NETWORK_1_IPV4_NET[100]),
                         "length": 20,
                     },
                     colliding_range_config_1,
@@ -344,8 +340,8 @@ def test_network_definition_parse_tools_ranges_collision_dual_stack_ok():
 def test_network_definition_parse_ranges_check_fail():
     net_name = "testing-net"
     for net_ip in [
-        networking_mapping_stub_data.NETWORK_1_IPV4_NET,
-        networking_mapping_stub_data.NETWORK_1_IPV6_NET,
+        net_map_stub_data.NETWORK_1_IPV4_NET,
+        net_map_stub_data.NETWORK_1_IPV6_NET,
     ]:
         net_config = {"network": str(net_ip), "vlan": "122", "mtu": "0"}
         with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
@@ -380,13 +376,13 @@ def test_network_definition_parse_ranges_check_fail():
 
 def test_network_definition_parse_invalid_network_fail():
     net_name = "testing-net"
-    net_config_1 = {"network": f"{networking_mapping_stub_data.NETWORK_1_IPV4_NET}s"}
+    net_config_1 = {"network": f"{net_map_stub_data.NETWORK_1_IPV4_NET}s"}
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.NetworkDefinition(net_name, net_config_1)
     assert exc_info.value.field == "network"
     assert exc_info.value.invalid_value == net_config_1["network"]
 
-    net_config_2 = {"network": f"{networking_mapping_stub_data.NETWORK_1_IPV6_NET}sss"}
+    net_config_2 = {"network": f"{net_map_stub_data.NETWORK_1_IPV6_NET}sss"}
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.NetworkDefinition(net_name, net_config_2)
     assert exc_info.value.field == "network"
@@ -394,14 +390,14 @@ def test_network_definition_parse_invalid_network_fail():
 
 
 def test_network_definition_parse_invalid_network_ip_version_fail():
-    net_config_1 = {"network-v4": f"{networking_mapping_stub_data.NETWORK_1_IPV6_NET}"}
+    net_config_1 = {"network-v4": f"{net_map_stub_data.NETWORK_1_IPV6_NET}"}
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.NetworkDefinition("testing-net", net_config_1)
     assert exc_info.value.field == "network-v4"
     assert exc_info.value.invalid_value == net_config_1["network-v4"]
     assert "of type v4" in str(exc_info.value)
 
-    net_config_1 = {"network-v6": f"{networking_mapping_stub_data.NETWORK_1_IPV4_NET}"}
+    net_config_1 = {"network-v6": f"{net_map_stub_data.NETWORK_1_IPV4_NET}"}
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.NetworkDefinition("testing-net", net_config_1)
     assert exc_info.value.field == "network-v6"
@@ -409,8 +405,8 @@ def test_network_definition_parse_invalid_network_ip_version_fail():
     assert "of type v6" in str(exc_info.value)
 
     net_config_1 = {
-        "network": f"{networking_mapping_stub_data.NETWORK_1_IPV4_NET}",
-        "network-v6": f"{networking_mapping_stub_data.NETWORK_1_IPV6_NET}",
+        "network": f"{net_map_stub_data.NETWORK_1_IPV4_NET}",
+        "network-v6": f"{net_map_stub_data.NETWORK_1_IPV6_NET}",
     }
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.NetworkDefinition("testing-net", net_config_1)

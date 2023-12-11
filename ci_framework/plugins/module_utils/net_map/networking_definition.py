@@ -4,7 +4,7 @@ import dataclasses
 import ipaddress
 import typing
 
-from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping import (
+from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
 )
 

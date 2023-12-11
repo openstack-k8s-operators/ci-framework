@@ -6,13 +6,13 @@ __metaclass__ = type
 import ipaddress
 
 import pytest
-from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping import (
+from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
     ip_pools,
     networking_definition,
 )
 from ansible_collections.cifmw.general.tests.unit.module_utils.test_utils import (
-    networking_mapping_stub_data,
+    net_map_stub_data,
 )
 
 
@@ -147,7 +147,7 @@ def test_host_ip_pool_manager_get_ip_v4_ok():
     (
         networks_definitions,
         hosts_templates,
-    ) = networking_mapping_stub_data.build_valid_network_definition_and_templates_set()
+    ) = net_map_stub_data.build_valid_network_definition_and_templates_set()
     first_net = list(networks_definitions.values())[0]
     second_net = list(networks_definitions.values())[1]
     first_group = list(hosts_templates.values())[0]
@@ -180,7 +180,7 @@ def test_host_ip_pool_manager_get_ip_v6_ok():
     (
         networks_definitions,
         hosts_templates,
-    ) = networking_mapping_stub_data.build_valid_network_definition_and_templates_set(
+    ) = net_map_stub_data.build_valid_network_definition_and_templates_set(
         use_ipv6=True, use_ipv4=False
     )
     first_net = list(networks_definitions.values())[0]
@@ -189,10 +189,10 @@ def test_host_ip_pool_manager_get_ip_v6_ok():
     second_group = list(hosts_templates.values())[1]
     ip_pool_manager = ip_pools.IPPoolsManager(hosts_templates)
     ip_pool_manager.add_instance_reservation(
-        first_net.name, networking_mapping_stub_data.NETWORK_1_IPV6_NET[2]
+        first_net.name, net_map_stub_data.NETWORK_1_IPV6_NET[2]
     )
     ip_pool_manager.add_instance_reservation(
-        second_net.name, networking_mapping_stub_data.NETWORK_2_IPV6_NET[60]
+        second_net.name, net_map_stub_data.NETWORK_2_IPV6_NET[60]
     )
     instance_name_1 = "instance-1"
     instance_name_2 = "instance-2"
@@ -200,26 +200,26 @@ def test_host_ip_pool_manager_get_ip_v6_ok():
         ip_pool_manager.get_ipv6(
             first_group.group_name, first_net.name, instance_name_1
         )
-        == networking_mapping_stub_data.NETWORK_1_IPV6_NET[1]
+        == net_map_stub_data.NETWORK_1_IPV6_NET[1]
     )
     assert (
         ip_pool_manager.get_ipv6(
             first_group.group_name, first_net.name, instance_name_2
         )
-        == networking_mapping_stub_data.NETWORK_1_IPV6_NET[3]
+        == net_map_stub_data.NETWORK_1_IPV6_NET[3]
     )
     assert (
         ip_pool_manager.get_ipv6(
             first_group.group_name, first_net.name, instance_name_1
         )
-        == networking_mapping_stub_data.NETWORK_1_IPV6_NET[1]
+        == net_map_stub_data.NETWORK_1_IPV6_NET[1]
     )
 
     assert (
         ip_pool_manager.get_ipv6(
             second_group.group_name, second_net.name, instance_name_1
         )
-        == networking_mapping_stub_data.NETWORK_2_IPV6_NET[61]
+        == net_map_stub_data.NETWORK_2_IPV6_NET[61]
     )
 
 
@@ -227,7 +227,7 @@ def test_host_ip_pool_manager_get_ip_unknown_fail():
     (
         networks_definitions,
         hosts_templates,
-    ) = networking_mapping_stub_data.build_valid_network_definition_and_templates_set(
+    ) = net_map_stub_data.build_valid_network_definition_and_templates_set(
         mixed_ip_versions=True, use_ipv4=True, use_ipv6=True
     )
     first_net = list(networks_definitions.values())[0]

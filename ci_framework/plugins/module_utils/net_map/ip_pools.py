@@ -1,7 +1,7 @@
 import ipaddress
 import typing
 
-from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping import (
+from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
     networking_definition,
 )
@@ -152,11 +152,9 @@ class IPPoolsManager:
         Returns: The requested IPv4.
 
         Raises:
-            exceptions.NetworkMappingError: If any of the following conditions:
-                The group doesn't exist.
-                The network doesn't exist for the given group.
-                The underlying IPPool is exhausted.
-
+            exceptions.NetworkMappingError: if either group doesn't exist or
+                network doesn't exist for the given group or underlying IPPool
+                is exhausted.
         """
         return self.__get_ip(
             self.__pools_table_v4,
@@ -182,11 +180,9 @@ class IPPoolsManager:
         Returns: The requested IPv6.
 
         Raises:
-            exceptions.NetworkMappingError: If any of the following conditions:
-                The group doesn't exist.
-                The network doesn't exist for the given group.
-                The underlying IPPool is exhausted.
-
+            exceptions.NetworkMappingError: If either group doesn't exist or
+                network doesn't exist for the given group or underlying IPPool
+                is exhausted.
         """
         return self.__get_ip(
             self.__pools_table_v6,

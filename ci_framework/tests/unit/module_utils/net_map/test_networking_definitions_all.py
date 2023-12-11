@@ -5,13 +5,13 @@ __metaclass__ = type
 import ipaddress
 
 import pytest
-from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping import (
+from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
     networking_definition,
 )
 
 from ansible_collections.cifmw.general.tests.unit.module_utils.test_utils import (
-    networking_mapping_stub_data,
+    net_map_stub_data,
 )
 
 
@@ -53,7 +53,7 @@ def test_networking_definition_colliding_ranges_fail():
 
 
 def test_networking_definition_load_networking_definition_1_ok():
-    raw_definition_1 = networking_mapping_stub_data.get_test_file_yaml_content(
+    raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
         "networking-definition-valid.yml"
     )
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
@@ -70,7 +70,7 @@ def test_networking_definition_load_networking_definition_1_ok():
 
 
 def test_networking_definition_load_networking_definition_all_tools_ok():
-    raw_definition_1 = networking_mapping_stub_data.get_test_file_yaml_content(
+    raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
         "networking-definition-valid-all-tools.yml"
     )
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
@@ -100,7 +100,7 @@ def test_networking_definition_load_networking_definition_all_tools_ok():
 
 
 def test_networking_definition_load_networking_definition_all_tools_dual_stack_ok():
-    raw_definition_1 = networking_mapping_stub_data.get_test_file_yaml_content(
+    raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
         "networking-definition-valid-all-tools-dual-stack.yml"
     )
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
@@ -225,7 +225,7 @@ def test_networking_definition_load_networking_definition_all_tools_dual_stack_o
 
 
 def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok():
-    raw_definition_1 = networking_mapping_stub_data.get_test_file_yaml_content(
+    raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
         "networking-definition-valid-all-tools-ipv6-only.yml"
     )
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
@@ -329,12 +329,12 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
 
 
 def test_networking_definition_groups_network_template_ok():
-    raw_definition_1 = networking_mapping_stub_data.get_test_file_yaml_content(
+    raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
         "networking-definition-valid.yml"
     )
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
     assert test_net_1
-    raw_definition_2 = networking_mapping_stub_data.get_test_file_yaml_content(
+    raw_definition_2 = net_map_stub_data.get_test_file_yaml_content(
         "networking-definition-valid-network-template.yml"
     )
     test_net_2 = networking_definition.NetworkingDefinition(raw_definition_2)
