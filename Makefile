@@ -36,7 +36,7 @@ help: ## Display this help.
 
 .PHONY: create_new_role
 create_new_role: ## Please call `new_role ROLE_NAME=your_role` instead.
-	$(if $(strip $(INTER_CALL)),,$(error Please call make new_role ROLENAME=${ROLE_NAME}))
+	$(if $(strip $(INTER_CALL)),,$(error Please call make new_role ROLE_NAME=${ROLE_NAME}))
 	$(call check-var-defined,ROLE_NAME)
 	ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ci_framework/roles ${ROLE_NAME}
 
