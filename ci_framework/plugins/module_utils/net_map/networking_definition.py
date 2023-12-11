@@ -171,7 +171,8 @@ def check_host_network_ranges_collisions(
     Args:
         ranges: List of HostNetworkRange to check
 
-    Returns: A tuple with the first two colliding items or a size two
+    Returns:
+        A tuple with the first two colliding items or a size two
         empty tuple if no colliding ranges have been found.
     """
     ranges.sort(key=lambda x: x.start_host, reverse=False)
@@ -279,10 +280,12 @@ class HostNetworkRange:
 
         Args:
             raw_range: The range as a dictionary that for which the
-                version is requested.
+            version is requested.
 
-        Returns: The version of the range or None if it can apply to
+        Returns:
+            The version of the range or None if it can apply to
             both IPv4 and vIPv6.
+
         Raises:
             exceptions.NetworkMappingValidationError: If the range is
                 malformatted and contains IPs poiting to IPv4 and IPv6
@@ -327,7 +330,9 @@ class HostNetworkRange:
             raw_range: The dictionary that contains the range data
                 as key-values of its start, end and/or lenth.
 
-        Returns: An instance of the given range.
+        Returns:
+            An instance of the given range.
+
         Raises:
             exceptions.NetworkMappingValidationError: When the format
                 of the provided range fields is not correct.
@@ -375,7 +380,7 @@ class HostNetworkRange:
 
         Raises:
             exceptions.NetworkMappingValidationError: If the given end or length are
-             not valid because of the following reasons:
+            not valid because of the following reasons:
                 The given end IP family is not the same of the associated network.
                 The given end is not a valid integer nor IP.
                 The given length is not a valid integer or is less than zero.
@@ -745,14 +750,17 @@ class NetworkDefinition:
 
     The network definition that this class parses should follow
     this format:
-    <network-name>:
-        network: <net-ip/prefix>
-        vlan: <vlan-id: optional>
-        mtu: <mtu: optional>
-        tools:
-            multus: <MultusNetworkDefinition>
-            metallb: <MetalbNetworkDefinition>
-            netconfig: <NetconfigNetworkDefinition>
+
+    .. code-block:: YAML
+
+        <network-name>:
+            network: <net-ip/prefix>
+            vlan: <vlan-id: optional>
+            mtu: <mtu: optional>
+            tools:
+                multus: <MultusNetworkDefinition>
+                metallb: <MetalbNetworkDefinition>
+                netconfig: <NetconfigNetworkDefinition>
     """
 
     __OBJECT_TYPE_NAME = "network"
@@ -885,7 +893,8 @@ class NetworkDefinition:
             ip_version: IP version of the requested range. If not given the
                 version will be inferred from the raw_definition.
 
-        Returns: A tuple with the IPv4 and IPv6 networks. If the range targets
+        Returns: A tuple with the IPv4 and IPv6 networks.
+            If the range targets
             only the IPv4 net only that one is returned. Same for the IPv6 one.
             If the range targets both elements of the tuple are returned.
 
@@ -1152,34 +1161,37 @@ class GroupTemplateDefinition:
 
     The group template definition that this class parses should follow
     this format:
-    <group-name>:
-        skip-nm-configuration: <true/false: defaults to False>
 
-        # 'network-template' is an optional field that can hold
-        # the base configuration for each network. If given, each
-        # declared network content will use the variables defined
-        # there as a base that can be overriden by each network
-        # content
-        network-template:   # Optional template
+    .. code-block:: YAML
 
-        networks:
-            <network-name>:
-                skip-nm-configuration: <true/false: defaults to False>
-                # 'range' applies to all IPv4 and IPv6 nets of the declared
-                #  network. For more fine grade settings use the dedicated
-                # range-v4 and range-v6
-                range:      # shouldn't be declared if range-v4/v6 present
-                    start:  <start index/ip>
-                    end:    <end index/ip: optional if length given>
-                    length: <size of the range: optional if end given>
-                range-v4:   # Only applies to the IPv4 network
-                    start:  <start index/IPv4>
-                    end:    <end index/IPv4: optional if length given>
-                    length: <size of the range: optional if end given>
-                range-v6:   # Only applies to the IPv6 network
-                    start:  <start index/IPv6>
-                    end:    <end index/IPv4: optional if length given>
-                    length: <size of the range: optional if end given>
+        <group-name>:
+            skip-nm-configuration: <true/false: defaults to False>
+
+            # 'network-template' is an optional field that can hold
+            # the base configuration for each network. If given, each
+            # declared network content will use the variables defined
+            # there as a base that can be overriden by each network
+            # content
+            network-template:   # Optional template
+
+            networks:
+                <network-name>:
+                    skip-nm-configuration: <true/false: defaults to False>
+                    # 'range' applies to all IPv4 and IPv6 nets of the declared
+                    #  network. For more fine grade settings use the dedicated
+                    # range-v4 and range-v6
+                    range:      # shouldn't be declared if range-v4/v6 present
+                        start:  <start index/ip>
+                        end:    <end index/ip: optional if length given>
+                        length: <size of the range: optional if end given>
+                    range-v4:   # Only applies to the IPv4 network
+                        start:  <start index/IPv4>
+                        end:    <end index/IPv4: optional if length given>
+                        length: <size of the range: optional if end given>
+                    range-v6:   # Only applies to the IPv6 network
+                        start:  <start index/IPv6>
+                        end:    <end index/IPv4: optional if length given>
+                        length: <size of the range: optional if end given>
     """
 
     __OBJECT_TYPE_NAME = "host-template"
@@ -1200,9 +1212,9 @@ class GroupTemplateDefinition:
         """Initializes a GroupTemplateDefinition from dict with its parameters
 
          Args:
-             group_name: The name of the group in the inventory
-             raw_definition: The dictionary that contains the configuration
-                 of the group template.
+            group_name: The name of the group in the inventory
+            raw_definition: The dictionary that contains the configuration
+                of the group template.
             network_definitions: Dict of the existing NetworkDefinition
 
         Raises:
@@ -1391,23 +1403,26 @@ class InstanceDefinition:
 
     The instance definition that this class parses should follow this
     format:
-    <instance-name>:
-        # Skip configuring Network Manager for all instance's nets
-        skip-nm-configuration: <true/false: defaults to False>
-        networks:
-            <network-name>:
-                # Skip configuring Network Manager for this network and
-                # for this instance
-                skip-nm-configuration: <true/false: defaults to False>
 
-                # 'ip' that this instance should use for the given net
-                # Cannot be present if ip-v4/v6 are given
-                ip:      # shouldn't be declared if range-v4/v6 present
+    .. code-block:: YAML
 
-                # 'ip-v4' and 'ip-v6' can be provided when the network
-                # is configured with IPv4 and IPv6 at the same time.
-                ip-v4:   <IPv4 IP>
-                ip-v6:   <IPv6 IP>
+        <instance-name>:
+            # Skip configuring Network Manager for all instance's nets
+            skip-nm-configuration: <true/false: defaults to False>
+            networks:
+                <network-name>:
+                    # Skip configuring Network Manager for this network and
+                    # for this instance
+                    skip-nm-configuration: <true/false: defaults to False>
+
+                    # 'ip' that this instance should use for the given net
+                    # Cannot be present if ip-v4/v6 are given
+                    ip:      # shouldn't be declared if range-v4/v6 present
+
+                    # 'ip-v4' and 'ip-v6' can be provided when the network
+                    # is configured with IPv4 and IPv6 at the same time.
+                    ip-v4:   <IPv4 IP>
+                    ip-v6:   <IPv6 IP>
     """
 
     __OBJECT_TYPE_NAME = "instance"
@@ -1628,12 +1643,14 @@ class NetworkingDefinition:
 
     The Networking Definition should follow this format:
 
-    networks:
-        <network-name>: <InstanceDefinition instance>
-    group-templates:
-        <group-name>: <GroupTemplateDefinition instance>
-    instances:
-        <instance-name>: <InstanceDefinition instance>
+    .. code-block:: YAML
+
+        networks:
+            <network-name>: <InstanceDefinition instance>
+        group-templates:
+            <group-name>: <GroupTemplateDefinition instance>
+        instances:
+            <instance-name>: <InstanceDefinition instance>
     """
 
     __FIELD_NETWORKS = "networks"

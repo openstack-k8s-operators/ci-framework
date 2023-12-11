@@ -9,7 +9,7 @@ from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
 
 class IPPool:
     """
-    Manages IP assignations in a network range, defined by a HostNetworkRange.
+    Manages IP assignments in a network range, defined by a HostNetworkRange.
     """
 
     def __init__(
@@ -55,7 +55,8 @@ class IPPool:
     def get_ip(self) -> typing.Union[ipaddress.IPv4Address, ipaddress.IPv6Address]:
         """Request a new IP
 
-        Returns: A new IPv4/v6 from the pool
+        Returns:
+            A new IPv4/v6 from the pool
 
         Raises:
             exceptions.NetworkMappingError: If the IPPool is exhausted.
@@ -103,11 +104,11 @@ class IPPoolsManager:
         """
         self.__pools_table_v4: typing.Dict[str, typing.Dict[str, IPPool]] = {}
         self.__pools_table_v6: typing.Dict[str, typing.Dict[str, IPPool]] = {}
-        self.__assignations_v4: typing.Dict[
+        self.__assignments_v4: typing.Dict[
             str,
             typing.Dict[str, typing.Union[ipaddress.IPv4Address]],
         ] = {}
-        self.__assignations_v6: typing.Dict[
+        self.__assignments_v6: typing.Dict[
             str,
             typing.Dict[str, typing.Union[ipaddress.IPv6Address]],
         ] = {}
@@ -149,7 +150,8 @@ class IPPoolsManager:
             network_name: The network for which IP is requested
             instance_name: The name of the instance for which IP is requested
 
-        Returns: The requested IPv4.
+        Returns:
+            The requested IPv4.
 
         Raises:
             exceptions.NetworkMappingError: if either group doesn't exist or
@@ -158,7 +160,7 @@ class IPPoolsManager:
         """
         return self.__get_ip(
             self.__pools_table_v4,
-            self.__assignations_v4,
+            self.__assignments_v4,
             group_name,
             network_name,
             instance_name,
@@ -177,7 +179,8 @@ class IPPoolsManager:
             network_name: The network for which IP is requested
             instance_name: The name of the instance for which IP is requested
 
-        Returns: The requested IPv6.
+        Returns:
+            The requested IPv6.
 
         Raises:
             exceptions.NetworkMappingError: If either group doesn't exist or
@@ -186,7 +189,7 @@ class IPPoolsManager:
         """
         return self.__get_ip(
             self.__pools_table_v6,
-            self.__assignations_v6,
+            self.__assignments_v6,
             group_name,
             network_name,
             instance_name,
@@ -195,7 +198,7 @@ class IPPoolsManager:
     @staticmethod
     def __get_ip(
         pools_table: typing.Dict[str, typing.Dict[str, IPPool]],
-        assignations_table: typing.Dict[
+        assignments_table: typing.Dict[
             str,
             typing.Dict[
                 str, typing.Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
@@ -205,7 +208,7 @@ class IPPoolsManager:
         network_name,
         instance_name: str,
     ):
-        assigned_ip = assignations_table.get(network_name, {}).get(instance_name, None)
+        assigned_ip = assignments_table.get(network_name, {}).get(instance_name, None)
         if assigned_ip:
             return assigned_ip
 
@@ -224,9 +227,9 @@ class IPPoolsManager:
             )
 
         ip = ip_pool.get_ip()
-        if network_name not in assignations_table:
-            assignations_table[network_name] = {}
-        assignations_table[network_name][instance_name] = ip
+        if network_name not in assignments_table:
+            assignments_table[network_name] = {}
+        assignments_table[network_name][instance_name] = ip
 
         return ip
 

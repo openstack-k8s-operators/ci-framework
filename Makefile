@@ -152,3 +152,12 @@ enable-git-hooks:
 .PHONY: docs
 docs: ## Create documentation under docs/build/html
 	./docs/source/build-docs.sh
+
+.PHONY: spelling
+spelling: docs ## Run spell check as in CI
+	if [ -f docs/dictionary/tmp ]; then \
+		cat docs/dictionary/en-custom.txt docs/dictionary/tmp | tr '[:upper:]' '[:lower:]' | sort -u > docs/dictionary/tmp-sorted; \
+		mv docs/dictionary/tmp-sorted docs/dictionary/en-custom.txt; \
+	fi
+
+	pyspelling -c .spellcheck.yml -v -n documentation -S "docs/_build/html/**/*.html"

@@ -12,6 +12,7 @@
 # sys.path.insert(0, os.path.abspath('.'))
 import os
 import re
+import sys
 
 # -- General configuration ------------------------------------------------
 
@@ -23,14 +24,15 @@ import re
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "myst_parser",
     "sphinx.ext.autodoc",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.napoleon",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
     "sphinx.ext.todo",
-    "sphinx.ext.viewcode",
     "sphinxemoji.sphinxemoji",
     "reno.sphinxext",
+    "myst_parser",
 ]
 
 myst_enable_extensions = {
@@ -109,3 +111,6 @@ html_logo = "images/logo_cifmw_200.png"
 
 # Output file base name for HTML help builder.
 # htmlhelp_basename = 'doc'
+
+# Exposes our custom module_utils content for docstring
+sys.path.append("../../ci_framework/plugins/module_utils")

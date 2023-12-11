@@ -94,6 +94,13 @@ In case of emergency, or if we didn't come back to you in a reasonable time (exp
 
 .. toctree::
    :maxdepth: 1
+   :caption: Module utils
+   :glob:
+
+   module_utils/*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Available roles
    :glob:
 
