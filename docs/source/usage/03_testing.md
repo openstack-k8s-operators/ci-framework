@@ -22,10 +22,11 @@ avoid duplication, please do as follow:
 ```Bash
 [laptop]$ sudo dnf install -y aspell-en
 [laptop]$ pip install pyspelling
-[laptop]$ pyspelling -c .spellcheck.yml
-# Recover the list of words, paste them in a temporary file
-[laptop]$ cat docs/dictionary/en-custom.txt >> your_temporary_file
-[laptop]$ cat your_temporary_file | tr '[:upper:]' '[:lower:]' | sort -u > docs/dictionary/en-custom.txt
+[laptop]$ make spelling
+# Correct actual spelling issues, or add new words to
+# docs/dictionary/tmp
+# Then, validate again the spelling (and re-build the dictionary)
+[laptop]$ make spelling
 ```
 That way, you ensure that only unique, lower-case words are added to the list.
 

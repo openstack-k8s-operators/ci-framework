@@ -5,19 +5,17 @@ __metaclass__ = type
 import typing
 
 import pytest
-from ansible_collections.cifmw.general.plugins.module_utils.networking_mapping import (
+from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
     networking_definition,
 )
 from ansible_collections.cifmw.general.tests.unit.module_utils.test_utils import (
-    networking_mapping_stub_data,
+    net_map_stub_data,
 )
 
 
 def test_group_template_definition_parse_simple_ok():
-    networks_definitions = (
-        networking_mapping_stub_data.build_valid_network_definition_set()
-    )
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
     inventory_group = "instances-group-1"
     group_template_definition_raw = {}
     group_template_definition = networking_definition.GroupTemplateDefinition(
@@ -36,14 +34,14 @@ def __generate_validate_base_group_template(
         {
             "skip-nm-configuration": True,
             "networks": {
-                networking_mapping_stub_data.NETWORK_1_NAME: {
+                net_map_stub_data.NETWORK_1_NAME: {
                     "range": {"start": 100, "length": 30}
                 },
-                networking_mapping_stub_data.NETWORK_2_NAME: {
+                net_map_stub_data.NETWORK_2_NAME: {
                     "range": {"start": 150, "length": 60},
                     "skip-nm-configuration": True,
                 },
-                networking_mapping_stub_data.NETWORK_3_NAME: {},
+                net_map_stub_data.NETWORK_3_NAME: {},
             },
         }
         if not raw_definition
@@ -60,26 +58,15 @@ def __generate_validate_base_group_template(
         group_template_definition_raw["networks"]
     )
     # Ensure nets were parsed
-    assert (
-        networking_mapping_stub_data.NETWORK_1_NAME
-        in group_template_definition.networks
-    )
-    assert (
-        networking_mapping_stub_data.NETWORK_2_NAME
-        in group_template_definition.networks
-    )
-    assert (
-        networking_mapping_stub_data.NETWORK_3_NAME
-        in group_template_definition.networks
-    )
+    assert net_map_stub_data.NETWORK_1_NAME in group_template_definition.networks
+    assert net_map_stub_data.NETWORK_2_NAME in group_template_definition.networks
+    assert net_map_stub_data.NETWORK_3_NAME in group_template_definition.networks
     return group_template_definition
 
 
 def test_group_template_definition_parse_networks_v4_ok():
-    stub_networks_definitions = (
-        networking_mapping_stub_data.build_valid_network_definition_set(
-            use_ipv4=True, use_ipv6=False
-        )
+    stub_networks_definitions = net_map_stub_data.build_valid_network_definition_set(
+        use_ipv4=True, use_ipv6=False
     )
 
     group_template_definition = __generate_validate_base_group_template(
@@ -88,10 +75,10 @@ def test_group_template_definition_parse_networks_v4_ok():
 
     # Ensure each parsed net has the proper values
     group_template_net_1 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_1_NAME
+        net_map_stub_data.NETWORK_1_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_1_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_1_NAME]
         == group_template_net_1.network
     )
     assert not group_template_net_1.skip_nm_configuration
@@ -101,10 +88,10 @@ def test_group_template_definition_parse_networks_v4_ok():
     assert group_template_net_1.ipv6_range is None
 
     group_template_net_2 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_2_NAME
+        net_map_stub_data.NETWORK_2_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_2_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_2_NAME]
         == group_template_net_2.network
     )
     assert group_template_net_2.skip_nm_configuration
@@ -114,10 +101,10 @@ def test_group_template_definition_parse_networks_v4_ok():
     assert group_template_net_2.ipv6_range is None
 
     group_template_net_3 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_3_NAME
+        net_map_stub_data.NETWORK_3_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_3_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_3_NAME]
         == group_template_net_3.network
     )
     assert not group_template_net_3.skip_nm_configuration
@@ -126,10 +113,8 @@ def test_group_template_definition_parse_networks_v4_ok():
 
 
 def test_group_template_definition_parse_networks_v6_ok():
-    stub_networks_definitions = (
-        networking_mapping_stub_data.build_valid_network_definition_set(
-            use_ipv4=False, use_ipv6=True
-        )
+    stub_networks_definitions = net_map_stub_data.build_valid_network_definition_set(
+        use_ipv4=False, use_ipv6=True
     )
 
     group_template_definition = __generate_validate_base_group_template(
@@ -138,10 +123,10 @@ def test_group_template_definition_parse_networks_v6_ok():
 
     # Ensure each parsed net has the proper values
     group_template_net_1 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_1_NAME
+        net_map_stub_data.NETWORK_1_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_1_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_1_NAME]
         == group_template_net_1.network
     )
     assert not group_template_net_1.skip_nm_configuration
@@ -151,10 +136,10 @@ def test_group_template_definition_parse_networks_v6_ok():
     assert group_template_net_1.ipv4_range is None
 
     group_template_net_2 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_2_NAME
+        net_map_stub_data.NETWORK_2_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_2_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_2_NAME]
         == group_template_net_2.network
     )
     assert group_template_net_2.skip_nm_configuration
@@ -164,10 +149,10 @@ def test_group_template_definition_parse_networks_v6_ok():
     assert group_template_net_2.ipv4_range is None
 
     group_template_net_3 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_3_NAME
+        net_map_stub_data.NETWORK_3_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_3_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_3_NAME]
         == group_template_net_3.network
     )
     assert not group_template_net_3.skip_nm_configuration
@@ -176,24 +161,20 @@ def test_group_template_definition_parse_networks_v6_ok():
 
 
 def test_group_template_definition_parse_networks_mixed_ok():
-    stub_networks_definitions = (
-        networking_mapping_stub_data.build_valid_network_definition_set(
-            use_ipv4=True, use_ipv6=True, mixed_ip_versions=True
-        )
+    stub_networks_definitions = net_map_stub_data.build_valid_network_definition_set(
+        use_ipv4=True, use_ipv6=True, mixed_ip_versions=True
     )
 
     group_template_definition_raw = {
         "skip-nm-configuration": True,
         "networks": {
-            networking_mapping_stub_data.NETWORK_1_NAME: {
-                "range": {"start": 100, "length": 30}
-            },
-            networking_mapping_stub_data.NETWORK_2_NAME: {
+            net_map_stub_data.NETWORK_1_NAME: {"range": {"start": 100, "length": 30}},
+            net_map_stub_data.NETWORK_2_NAME: {
                 "range-v4": {"start": 150, "length": 60},
                 "range-v6": {"start": 150, "length": 2048},
                 "skip-nm-configuration": True,
             },
-            networking_mapping_stub_data.NETWORK_3_NAME: {
+            net_map_stub_data.NETWORK_3_NAME: {
                 "range-v6": {"start": 150, "length": 60}
             },
         },
@@ -205,10 +186,10 @@ def test_group_template_definition_parse_networks_mixed_ok():
 
     # Ensure each parsed net has the proper values
     group_template_net_1 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_1_NAME
+        net_map_stub_data.NETWORK_1_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_1_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_1_NAME]
         == group_template_net_1.network
     )
     assert not group_template_net_1.skip_nm_configuration
@@ -218,10 +199,10 @@ def test_group_template_definition_parse_networks_mixed_ok():
     assert group_template_net_1.ipv6_range is None
 
     group_template_net_2 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_2_NAME
+        net_map_stub_data.NETWORK_2_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_2_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_2_NAME]
         == group_template_net_2.network
     )
     assert group_template_net_2.skip_nm_configuration
@@ -233,10 +214,10 @@ def test_group_template_definition_parse_networks_mixed_ok():
     )
 
     group_template_net_3 = group_template_definition.networks[
-        networking_mapping_stub_data.NETWORK_3_NAME
+        net_map_stub_data.NETWORK_3_NAME
     ]
     assert (
-        stub_networks_definitions[networking_mapping_stub_data.NETWORK_3_NAME]
+        stub_networks_definitions[net_map_stub_data.NETWORK_3_NAME]
         == group_template_net_3.network
     )
     assert not group_template_net_3.skip_nm_configuration
@@ -247,9 +228,7 @@ def test_group_template_definition_parse_networks_mixed_ok():
 
 
 def test_group_template_definition_parse_invalid_range_fail():
-    networks_definitions = (
-        networking_mapping_stub_data.build_valid_network_definition_set()
-    )
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
     inventory_group = "instances-group-1"
     first_net = list(networks_definitions.values())[0]
 
@@ -294,7 +273,7 @@ def test_group_template_definition_parse_invalid_net_fail():
         networking_definition.GroupTemplateDefinition(
             "instances-group-1",
             group_template_definition_raw,
-            networking_mapping_stub_data.build_valid_network_definition_set(),
+            net_map_stub_data.build_valid_network_definition_set(),
         )
     assert exc_info.value.invalid_value == "does-not-exist-net"
     assert "non-existing network " in str(exc_info.value)
