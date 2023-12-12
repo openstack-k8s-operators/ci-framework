@@ -1,7 +1,11 @@
 # ![CIFMW Logo](docs/source/images/logo_cifmw_64.png) CI-Framework
+
 [![CodeQL](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml/badge.svg)](https://github.com/openstack-k8s-operators/ci-framework/actions/workflows/codeql.yml)
+[![Zuul](https://review.rdoproject.org/zuul/api/badge?project=openstack-k8s-operators/ci-framework&pipeline=github-check&branch=main)](https://review.rdoproject.org/zuul/api/badge?project=openstack-k8s-operators/ci-framework&pipeline=github-check&branch=main)
+[![Documentation Status](https://readthedocs.org/projects/ci-framework/badge/?version=latest)](https://ci-framework.readthedocs.io/en/latest/?badge=latest)
 
 ## Documentation
+
 All the documentation can be checked on [ReadTheDocs](https://ci-framework.readthedocs.io/en/latest/).
 
 ## Licenses
