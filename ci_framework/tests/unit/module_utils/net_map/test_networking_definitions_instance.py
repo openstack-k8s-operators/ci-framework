@@ -242,9 +242,11 @@ def test_instance_definition_parse_invalid_ip_version_fail():
             stub_networks_definitions,
         )
     assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV6_NET[50])
-    assert net_map_stub_data.NETWORK_1_NAME in str(exc_info.value)
+    assert str(net_map_stub_data.NETWORK_1_IPV4_NET) in str(exc_info.value)
     assert exc_info.value.field == "ip"
-    assert "not configured to use ipv6" in str(exc_info.value).lower()
+    assert exc_info.value.parent_type == "instance"
+    assert exc_info.value.parent_name == "instance-3"
+    assert "version v6" in str(exc_info.value).lower()
 
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.InstanceDefinition(
@@ -259,9 +261,11 @@ def test_instance_definition_parse_invalid_ip_version_fail():
             stub_networks_definitions,
         )
     assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_3_IPV4_NET[50])
-    assert net_map_stub_data.NETWORK_3_NAME in str(exc_info.value)
+    assert str(net_map_stub_data.NETWORK_3_IPV6_NET) in str(exc_info.value)
     assert exc_info.value.field == "ip"
-    assert "not configured to use ipv4" in str(exc_info.value).lower()
+    assert exc_info.value.parent_type == "instance"
+    assert exc_info.value.parent_name == "instance-3"
+    assert "version v4" in str(exc_info.value).lower()
 
     with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
         networking_definition.InstanceDefinition(

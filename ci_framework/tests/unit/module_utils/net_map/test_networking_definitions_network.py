@@ -74,15 +74,53 @@ def validate_network_definition_from_raw_net_ips(
     if ip_v4:
         parsed_ip_net_4 = ipaddress.ip_network(ip_v4)
         assert network_definition.ipv4_network == parsed_ip_net_4
+    elif not ip_non_versioned:
         assert not network_definition.ipv6_network
 
     ip_v6 = net_config.get("network-v6", None)
     if ip_v6:
         parsed_ip_net_6 = ipaddress.ip_network(ip_v6)
         assert network_definition.ipv6_network == parsed_ip_net_6
+    elif not ip_non_versioned:
         assert not network_definition.ipv4_network
 
     return parsed_ip_net_4, parsed_ip_net_6
+
+
+def validate_network_definition_from_raw_gateways(
+    net_config,
+    network_definition: networking_definition.NetworkDefinition,
+    ipv4_net: typing.Optional[ipaddress.IPv4Network],
+    ipv6_net: typing.Optional[ipaddress.IPv6Network],
+):
+    ip_non_versioned = net_config.get("gateway", None)
+    if ip_non_versioned:
+        parsed_ip_gw = ipaddress.ip_address(ip_non_versioned)
+        if parsed_ip_gw.version == 6:
+            assert network_definition.ipv6_gateway == parsed_ip_gw
+            assert not network_definition.ipv4_gateway
+            assert parsed_ip_gw in ipv6_net
+
+        else:
+            assert network_definition.ipv4_gateway == parsed_ip_gw
+            assert not network_definition.ipv6_gateway
+            assert parsed_ip_gw in ipv4_net
+
+    ip_v4 = net_config.get("gateway-v4", None)
+    if ip_v4:
+        ipv4_gw = ipaddress.IPv4Address(ip_v4)
+        assert network_definition.ipv4_gateway == ipv4_gw
+        assert ipv4_gw in ipv4_net
+    elif not ip_non_versioned:
+        assert not network_definition.ipv4_gateway
+
+    ip_v6 = net_config.get("network-v6", None)
+    if ip_v6:
+        ipv6_gw = ipaddress.IPv6Address(ip_v6)
+        assert network_definition.ipv6_gateway == ipv6_gw
+        assert ipv6_gw in ipv6_net
+    elif not ip_non_versioned:
+        assert not network_definition.ipv6_gateway
 
 
 def validate_network_definition_from_raw(net_name, net_config, network_definition):
@@ -91,6 +129,9 @@ def validate_network_definition_from_raw(net_name, net_config, network_definitio
 
     ip_net_4, ip_net_6 = validate_network_definition_from_raw_net_ips(
         net_config, network_definition
+    )
+    validate_network_definition_from_raw_gateways(
+        net_config, network_definition, ip_net_4, ip_net_6
     )
 
     if "mtu" in net_config:
@@ -142,7 +183,26 @@ def test_network_definition_parse_ok():
 
 def test_network_definition_parse_all_ok():
     net_name = "testing-net"
-    net_config = {"network": "192.168.122.0/24", "vlan": 122, "mtu": 9000}
+    net_config = {
+        "network": "192.168.122.0/24",
+        "gateway": "192.168.122.1",
+        "vlan": 122,
+        "mtu": 9000,
+    }
+    network_definition = networking_definition.NetworkDefinition(net_name, net_config)
+    validate_network_definition_from_raw(net_name, net_config, network_definition)
+
+
+def test_network_definition_parse_all_dual_stack_ok():
+    net_name = "testing-net"
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET[1]),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
+        "gateway-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET[1]),
+        "gateway-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
+        "vlan": 122,
+        "mtu": 9000,
+    }
     network_definition = networking_definition.NetworkDefinition(net_name, net_config)
     validate_network_definition_from_raw(net_name, net_config, network_definition)
 
@@ -158,6 +218,7 @@ def test_network_definition_parse_all_tools_v4_ok():
     net_name = "testing-net"
     net_config = {
         "network": "192.168.122.0/24",
+        "gateway": "192.168.122.1",
         "vlan": "122",
         "mtu": "9000",
         "tools": {
@@ -203,6 +264,7 @@ def test_network_definition_parse_all_tools_v6_ok():
     net_name = "testing-net"
     net_config = {
         "network": net_map_stub_data.NETWORK_1_IPV6_NET,
+        "gateway": net_map_stub_data.NETWORK_1_IPV6_NET[1],
         "vlan": "122",
         "mtu": "9000",
         "tools": {
@@ -242,6 +304,96 @@ def test_network_definition_parse_all_tools_v6_ok():
     }
     network_definition = networking_definition.NetworkDefinition(net_name, net_config)
     validate_network_definition_from_raw(net_name, net_config, network_definition)
+
+
+def test_network_definition_parse_gateway_fail():
+    net_config = {
+        "network": "192.168.122.0/24",
+        "gateway": "192.168.122.1s",
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == "192.168.122.1s"
+    assert exc_info.value.field == "gateway"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "valid" in str(exc_info.value)
+
+    net_config = {
+        "network": "192.168.122.0/24",
+        "gateway": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV6_NET[1])
+    assert exc_info.value.field == "gateway"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "version v6" in str(exc_info.value)
+
+    net_config = {
+        "network": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "gateway": str(net_map_stub_data.NETWORK_1_IPV4_NET[1]),
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV4_NET[1])
+    assert exc_info.value.field == "gateway"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "version v4" in str(exc_info.value)
+
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "gateway": str(net_map_stub_data.NETWORK_1_IPV4_NET[1]),
+        "gateway-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV4_NET[1])
+    assert exc_info.value.field == "gateway"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "same time" in str(exc_info.value)
+
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "gateway": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
+        "gateway-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET[1]),
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV6_NET[1])
+    assert exc_info.value.field == "gateway"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "same time" in str(exc_info.value)
+
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "gateway": str(net_map_stub_data.NETWORK_2_IPV4_NET[1]),
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_2_IPV4_NET[1])
+    assert exc_info.value.field == "gateway"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "outside of the range" in str(exc_info.value)
+
+    net_config = {
+        "network": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "gateway-v6": str(net_map_stub_data.NETWORK_2_IPV6_NET[1]),
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_2_IPV6_NET[1])
+    assert exc_info.value.field == "gateway-v6"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "outside of the range" in str(exc_info.value)
 
 
 def test_network_definition_parse_tools_ranges_collision_fail():

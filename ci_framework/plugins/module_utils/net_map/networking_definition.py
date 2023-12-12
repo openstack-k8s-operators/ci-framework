@@ -8,6 +8,9 @@ from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
 )
 
+__CONFIG_IP_VERSION_SUFFIX_4 = "v4"
+__CONFIG_IP_VERSION_SUFFIX_6 = "v6"
+
 
 def _raise_missing_field(
     value: typing.Any, field_name: str, parent_name: str = None, parent_type: str = None
@@ -151,14 +154,128 @@ def _validate_fields_one_of(
         ]
         if rest:
             raise exceptions.NetworkMappingValidationError(
-                f"{alone_field} cannot be used at the"
+                f"{alone_field} cannot be used at the "
                 f"same time are used {','.join(rest).strip(',')}",
                 field=alone_field,
+                invalid_value=raw_definition[alone_field],
                 parent_name=parent_name,
                 parent_type=parent_type,
             )
 
     return True
+
+
+def _validate_parse_raw_net_ip(
+    instance_net_ip_raw,
+    field_name: str,
+    ipv4_network: typing.Optional[ipaddress.IPv4Network],
+    ipv6_network: typing.Optional[ipaddress.IPv6Network],
+    ip_version: int = None,
+    parent_name: str = None,
+    parent_type: str = None,
+):
+    if field_name not in instance_net_ip_raw:
+        return None
+
+    raw_value = instance_net_ip_raw[field_name]
+    try:
+        net_ip = ipaddress.ip_address(raw_value)
+        if ip_version and net_ip.version != ip_version:
+            raise exceptions.NetworkMappingValidationError(
+                f"ip address {net_ip} should be a IPv{ip_version}",
+                field=field_name,
+                invalid_value=raw_value,
+                parent_name=parent_name,
+                parent_type=parent_type,
+            )
+        target_net = ipv4_network if net_ip.version == 4 else ipv6_network
+        if not target_net:
+            existing_net = ipv6_network if net_ip.version == 4 else ipv4_network
+            raise exceptions.NetworkMappingValidationError(
+                f"{net_ip} cannot be used in {existing_net} "
+                f"because it's version v{net_ip.version}",
+                invalid_value=raw_value,
+                field=field_name,
+                parent_name=parent_name,
+                parent_type=parent_type,
+            )
+
+        if net_ip not in target_net:
+            raise exceptions.NetworkMappingValidationError(
+                f"{net_ip} cannot be used because it's outside "
+                f"of the range of {target_net}",
+                invalid_value=raw_value,
+                field=field_name,
+                parent_name=parent_name,
+                parent_type=parent_type,
+            )
+        return net_ip
+    except ValueError as err:
+        raise exceptions.NetworkMappingValidationError(
+            f"{raw_value} is not a valid IP",
+            invalid_value=raw_value,
+            field=field_name,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        ) from err
+
+
+def _validate_parse_raw_net_ips(
+    field_name: str,
+    raw_definition: typing.Dict[str, typing.Any],
+    ipv4_network: typing.Optional[ipaddress.IPv4Network],
+    ipv6_network: typing.Optional[ipaddress.IPv6Network],
+    parent_name: str = None,
+    parent_type: str = None,
+) -> typing.Tuple[ipaddress.IPv4Address, ipaddress.IPv6Address]:
+    v4_field = f"{field_name}-{__CONFIG_IP_VERSION_SUFFIX_4}"
+    v6_field = f"{field_name}-{__CONFIG_IP_VERSION_SUFFIX_6}"
+    _validate_fields_one_of(
+        [
+            field_name,
+            v4_field,
+            v6_field,
+        ],
+        raw_definition,
+        parent_name=parent_name,
+        parent_type=parent_type,
+        alone_field=field_name,
+    )
+    ipv6 = None
+    ipv4 = None
+    if field_name in raw_definition:
+        net_ip = _validate_parse_raw_net_ip(
+            raw_definition,
+            field_name,
+            ipv4_network,
+            ipv6_network,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+        if net_ip.version == 4:
+            ipv4 = net_ip
+        else:
+            ipv6 = net_ip
+    else:
+        ipv4 = _validate_parse_raw_net_ip(
+            raw_definition,
+            v4_field,
+            ipv4_network,
+            ipv6_network,
+            ip_version=4,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+        ipv6 = _validate_parse_raw_net_ip(
+            raw_definition,
+            v6_field,
+            ipv4_network,
+            ipv6_network,
+            ip_version=6,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+    return ipv4, ipv6
 
 
 def check_host_network_ranges_collisions(
@@ -755,6 +872,7 @@ class NetworkDefinition:
 
         <network-name>:
             network: <net-ip/prefix>
+            gateway: <net gateway: optional>
             vlan: <vlan-id: optional>
             mtu: <mtu: optional>
             tools:
@@ -768,6 +886,7 @@ class NetworkDefinition:
     __FIELD_NETWORK = "network"
     __FIELD_NETWORK_IPV4 = "network-v4"
     __FIELD_NETWORK_IPV6 = "network-v6"
+    __FIELD_GATEWAY = "gateway"
     __FIELD_MTU = "mtu"
     __FIELD_VLAN_ID = "vlan"
 
@@ -798,6 +917,8 @@ class NetworkDefinition:
         self.__mtu = None
         self.__ipv6_network = None
         self.__ipv4_network = None
+        self.__ipv4_gateway = None
+        self.__ipv6_gateway = None
         self.__multus_config: typing.Union[MultusNetworkDefinition, None] = None
         self.__metallb_config: typing.Union[MetallbNetworkDefinition, None] = None
         self.__netconfig_config: typing.Union[NetconfigNetworkDefinition, None] = None
@@ -842,6 +963,16 @@ class NetworkDefinition:
     def ipv6_network(self) -> typing.Union[ipaddress.IPv6Network, None]:
         """IPv6 network address"""
         return self.__ipv6_network
+
+    @property
+    def ipv4_gateway(self) -> typing.Optional[ipaddress.IPv4Address]:
+        """IPv4 gateway"""
+        return self.__ipv4_gateway
+
+    @property
+    def ipv6_gateway(self) -> typing.Optional[ipaddress.IPv6Address]:
+        """IPv6 gateway"""
+        return self.__ipv6_gateway
 
     def parse_range_from_raw(
         self, raw_definition: typing.Dict[str, typing.Any], ip_version: int = None
@@ -942,6 +1073,7 @@ class NetworkDefinition:
 
     def __parse_raw(self, raw_definition: typing.Dict[str, typing.Any]):
         self.__parse_raw_network(raw_definition)
+        self.__parse_raw_gateway(raw_definition)
 
         self.__mtu = _validate_parse_int(
             self.__FIELD_MTU,
@@ -960,6 +1092,16 @@ class NetworkDefinition:
         )
 
         self.__parse_tools(raw_definition)
+
+    def __parse_raw_gateway(self, raw_definition):
+        self.__ipv4_gateway, self.__ipv6_gateway = _validate_parse_raw_net_ips(
+            self.__FIELD_GATEWAY,
+            raw_definition,
+            self.__ipv4_network,
+            self.__ipv6_network,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            parent_name=self.__name,
+        )
 
     def __parse_raw_network(self, raw_definition):
         _validate_fields_one_of(
@@ -1438,8 +1580,6 @@ class InstanceDefinition:
     __FIELD_SKIP_NM = "skip-nm-configuration"
     __FIELD_NETWORKS = "networks"
     __FIELD_NETWORKS_IP = "ip"
-    __FIELD_NETWORKS_IPV4 = "ip-v4"
-    __FIELD_NETWORKS_IPV6 = "ip-v6"
     __FIELD_NETWORK_SKIP_NM = "skip-nm-configuration"
 
     def __init__(
@@ -1517,9 +1657,13 @@ class InstanceDefinition:
                 invalid_value=network_name,
             )
 
-        ipv4, ipv6 = self.__parse_raw_net_ips(
+        ipv4, ipv6 = _validate_parse_raw_net_ips(
+            self.__FIELD_NETWORKS_IP,
             network_data,
-            network_definition,
+            network_definition.ipv4_network,
+            network_definition.ipv6_network,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            parent_name=self.__name,
         )
 
         skip_nm_configuration = bool(
@@ -1532,97 +1676,6 @@ class InstanceDefinition:
             ipv6=ipv6,
             skip_nm_configuration=skip_nm_configuration,
         )
-
-    def __parse_raw_net_ips(
-        self,
-        raw_definition: typing.Dict[str, typing.Any],
-        network_definition: NetworkDefinition,
-    ) -> typing.Tuple[ipaddress.IPv4Address, ipaddress.IPv6Address]:
-        _validate_fields_one_of(
-            [
-                self.__FIELD_NETWORKS_IP,
-                self.__FIELD_NETWORKS_IPV4,
-                self.__FIELD_NETWORKS_IPV6,
-            ],
-            raw_definition,
-            parent_name=self.__name,
-            parent_type=self.__OBJECT_TYPE_NAME,
-            alone_field=self.__FIELD_NETWORKS_IP,
-        )
-        ipv6 = None
-        ipv4 = None
-        if self.__FIELD_NETWORKS_IP in raw_definition:
-            net_ip = self.__parse_raw_net_ip(
-                raw_definition, network_definition, self.__FIELD_NETWORKS_IP
-            )
-            if net_ip.version == 4:
-                ipv4 = net_ip
-            else:
-                ipv6 = net_ip
-        else:
-            ipv4 = self.__parse_raw_net_ip(
-                raw_definition,
-                network_definition,
-                self.__FIELD_NETWORKS_IPV4,
-                ip_version=4,
-            )
-            ipv6 = self.__parse_raw_net_ip(
-                raw_definition,
-                network_definition,
-                self.__FIELD_NETWORKS_IPV6,
-                ip_version=6,
-            )
-        return ipv4, ipv6
-
-    def __parse_raw_net_ip(
-        self,
-        instance_net_ip_raw,
-        network_definition: NetworkDefinition,
-        field_name: str,
-        ip_version: int = None,
-    ):
-        if field_name not in instance_net_ip_raw:
-            return None
-
-        raw_value = instance_net_ip_raw[field_name]
-        try:
-            net_ip = ipaddress.ip_address(raw_value)
-            if ip_version and net_ip.version != ip_version:
-                raise exceptions.NetworkMappingValidationError(
-                    f"ip address {net_ip} should be a IPv{ip_version}",
-                    field=field_name,
-                    invalid_value=raw_value,
-                )
-            target_net = (
-                network_definition.ipv4_network
-                if net_ip.version == 4
-                else network_definition.ipv6_network
-            )
-            if not target_net:
-                raise exceptions.NetworkMappingValidationError(
-                    f"cannot assign {net_ip} IP to {self.__name}'s "
-                    f"{network_definition.name} cause it's not configured "
-                    f"to use IPv{net_ip.version}",
-                    invalid_value=raw_value,
-                    field=field_name,
-                )
-
-            if net_ip not in target_net:
-                raise exceptions.NetworkMappingValidationError(
-                    f"{self.__name} instance given IP is not "
-                    f"part of the linked network {network_definition.name} "
-                    f"({target_net})",
-                    invalid_value=raw_value,
-                    field=field_name,
-                )
-            return net_ip
-        except ValueError as err:
-            raise exceptions.NetworkMappingValidationError(
-                f"{raw_value} instance IP for {network_definition.name} "
-                "network is not a valid IP",
-                invalid_value=raw_value,
-                field=field_name,
-            ) from err
 
     def __hash__(self) -> int:
         return hash(
