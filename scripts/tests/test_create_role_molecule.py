@@ -39,13 +39,15 @@ class CreateRoleMoleculeTest(unittest.TestCase):
             for path in self.generated_paths.values()
         ]
 
-        # Create 2 roles directories
-        role_3_dir = self.generated_paths["roles_dir"] / "role_3"
-        role_2_dir = self.generated_paths["roles_dir"] / "role_2"
-        role_1_dir = self.generated_paths["roles_dir"] / "role_1"
+        # Create some roles directories
+        role_no_molecule = self.generated_paths["roles_dir"] / "no_molecule"
+        role_3_dir = self.generated_paths["roles_dir"] / "role_3" / "molecule"
+        role_2_dir = self.generated_paths["roles_dir"] / "role_2" / "molecule"
+        role_1_dir = self.generated_paths["roles_dir"] / "role_1" / "molecule"
         Path(role_1_dir).mkdir(parents=True, exist_ok=True)
         Path(role_2_dir).mkdir(parents=True, exist_ok=True)
         Path(role_3_dir).mkdir(parents=True, exist_ok=True)
+        Path(role_no_molecule).mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
         self.temp_dir.cleanup()

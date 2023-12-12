@@ -77,6 +77,13 @@ One can also run:
 in order to configure automatic run of pre-commit tests in a local repository before
 pushing changing to any branch (see .githooks/pre-push)
 
+#### Can't get Molecule
+
+If your role can't be tested via molecule, you can remove the "molecule" directory generated in the
+role, and re-run `make role_molecule` to re-generate the the jobs and project list.
+
+Please add a note in the role README.md for future reference.
+
 ## Adding new script
 
 If you want/need to add a new script (python, bash, perl, ...), please provide

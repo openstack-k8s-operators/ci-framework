@@ -82,7 +82,10 @@ def regenerate_projects_zuul_jobs_yaml(generated_paths):
     # Add each role name after the generated content
     for role_directory in sorted(generated_paths["roles_dir"].iterdir()):
         if not role_directory.is_dir():
-            logging.warning("Skipping. Not a role directory")
+            logging.warning("Skipping %s. Not a role directory", role_directory.name)
+            continue
+        if not role_directory.joinpath("molecule").is_dir():
+            logging.warning("Skipping %s. No molecule directory", role_directory.name)
             continue
         projects_jobs_info[0]["project"]["github-check"]["jobs"].append(
             f"cifmw-molecule-{role_directory.name}"
@@ -97,7 +100,9 @@ def regenerate_molecule_zuul_jobs_yaml(generated_paths):
     Regenerate zuul.d/molecule.yaml file with role-specific YAML structures.
     """
     role_directories = [
-        entry.name for entry in generated_paths["roles_dir"].iterdir() if entry.is_dir()
+        entry.name
+        for entry in generated_paths["roles_dir"].iterdir()
+        if (entry.is_dir() and entry.joinpath("molecule").is_dir())
     ]
     molecule_yaml_zuul_jobs = generate_zuul_job_role_yaml(
         role_directories, generated_paths["ci_templates_dir"]

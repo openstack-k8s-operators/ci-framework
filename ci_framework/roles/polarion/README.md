@@ -23,3 +23,7 @@ Role to setup jump tool and upload XML test results to Polarion.
   roles:
     - polarion
 ```
+
+## Molecule
+This role exclusively relies on the internal Polarion instance and other internal repositories.
+Molecule cannot run and mimic it in an environment outside the designated network segment.
