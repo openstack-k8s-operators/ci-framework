@@ -1135,6 +1135,7 @@ class GroupTemplateNetworkDefinition:
 
     Attributes:
         network: The network the instance refers to.
+        group_name: The group the instance refers to.
         ipv4_range: The IPv4 range of the group for the network.
         ipv6_range: The IPv6 range of the group for the network.
         skip_nm_configuration: Indicates if the instances of the
@@ -1143,13 +1144,20 @@ class GroupTemplateNetworkDefinition:
     """
 
     network: NetworkDefinition
+    group_name: str
     ipv6_range: HostNetworkRange = None
     ipv4_range: HostNetworkRange = None
     skip_nm_configuration: bool = False
 
     def __hash__(self) -> int:
         return hash(
-            (self.network, self.ipv4_range, self.ipv6_range, self.skip_nm_configuration)
+            (
+                self.network,
+                self.group_name,
+                self.ipv4_range,
+                self.ipv6_range,
+                self.skip_nm_configuration,
+            )
         )
 
 
@@ -1312,6 +1320,7 @@ class GroupTemplateDefinition:
             network_name
         ] = GroupTemplateNetworkDefinition(
             network_definition,
+            self.__group_name,
             ipv4_range=ipv4_network_range,
             ipv6_range=ipv6_network_range,
             skip_nm_configuration=skip_nm_configuration,

@@ -86,6 +86,7 @@ def test_group_template_definition_parse_networks_v4_ok():
         group_template_net_1.network.ipv4_network, start=100, length=30
     )
     assert group_template_net_1.ipv6_range is None
+    assert group_template_net_1.group_name == group_template_definition.group_name
 
     group_template_net_2 = group_template_definition.networks[
         net_map_stub_data.NETWORK_2_NAME
@@ -99,6 +100,7 @@ def test_group_template_definition_parse_networks_v4_ok():
         group_template_net_2.network.ipv4_network, start=150, length=60
     )
     assert group_template_net_2.ipv6_range is None
+    assert group_template_net_2.group_name == group_template_definition.group_name
 
     group_template_net_3 = group_template_definition.networks[
         net_map_stub_data.NETWORK_3_NAME
@@ -110,6 +112,7 @@ def test_group_template_definition_parse_networks_v4_ok():
     assert not group_template_net_3.skip_nm_configuration
     assert group_template_net_3.ipv4_range is None
     assert group_template_net_3.ipv6_range is None
+    assert group_template_net_3.group_name == group_template_definition.group_name
 
 
 def test_group_template_definition_parse_networks_v6_ok():
