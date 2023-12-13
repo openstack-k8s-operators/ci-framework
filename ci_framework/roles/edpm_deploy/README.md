@@ -14,6 +14,7 @@ None
 * `cifmw_edpm_deploy_run_validation`: (Boolean) Run validation on EDPM node. Defaults to `False`.
 * `cifmw_edpm_deploy_dryrun`: (Boolean) Do a dry run on make edpm_deploy command. Defaults to `False`.
 * `cifmw_edpm_deploy_timeout`: (Integer) Time, in minutes to wait for the deployment to be ready. Defaults to `40`.
+* `cifmw_edpm_deploy_nova_compute_extra_config`: (String) Oslo config snippet defining extra configuration for the nova-compute services. Defaults to an empty string.
 
 ## TODO
 - Add support for deploying multiple compute node
