@@ -1,0 +1,38 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_login_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+  roles:
+    - role: openshift_login
+    - role: manage_secrets
+  tasks:
+    - name: Load nova_migration keypair
+      ansible.builtin.import_role:
+        name: manage_secrets
+        tasks_from: dataplane_ssh.yml
+
+    - name: Ensure secret is now present
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get secret {{ cifmw_manage_secrets_dataplane_ssh_metaname }}
+          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
