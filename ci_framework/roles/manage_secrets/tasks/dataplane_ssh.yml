@@ -1,0 +1,82 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if secret exists
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  failed_when: false
+  register: _secret_check
+  ansible.builtin.command:
+    cmd: >-
+      oc get secret {{ cifmw_manage_secrets_dataplane_ssh_metaname }}
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+
+- name: Assert secret does not exist
+  ansible.builtin.assert:
+    that:
+      - _secret_check.rc != 0
+    msg: >-
+      Looks like {{ cifmw_manage_secrets_dataplane_ssh_metaname }} exists.
+      Please delete it first calling
+      "oc delete secret {{ cifmw_manage_secrets_dataplane_ssh_metaname }}"
+
+- name: Ensure artifacts directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_manage_secrets_basedir }}/artifacts"
+    state: directory
+
+- name: Create keypair
+  vars:
+    dest: "{{ cifmw_manage_secrets_basedir }}/artifacts"
+  community.crypto.openssh_keypair:
+    path: "{{ dest }}/{{ cifmw_manage_secrets_dataplane_ssh_name }}"
+    type: "{{ cifmw_manage_secrets_ssh_type }}"
+    size: "{{ cifmw_manage_secrets_ssh_size }}"
+
+- name: Create namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          security.openshift.io/scc.podSecurityLabelSync: "false"
+
+- name: Create secret definition
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  vars:
+    dest: "{{ cifmw_manage_secrets_basedir }}/artifacts"
+    key_file: "{{ dest }}/{{ cifmw_manage_secrets_dataplane_ssh_name }}"
+  ansible.builtin.shell:
+    cmd: >-
+      set -e -o pipefail;
+      oc create secret generic "{{ cifmw_manage_secrets_dataplane_ssh_metaname }}"
+      --save-config
+      --dry-run=client
+      --from-file=authorized_keys={{ key_file }}.pub
+      --from-file=ssh-privatekey={{ key_file }}
+      --from-file=ssh-publickey={{ key_file }}.pub
+      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      -o yaml | oc apply -f -
