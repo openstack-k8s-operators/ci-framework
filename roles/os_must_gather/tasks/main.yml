@@ -1,0 +1,77 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ cifmw_os_must_gather_output_dir }}/{{ item }}"
+    state: directory
+  loop:
+    - logs
+
+- name: Construct project change list
+  ansible.builtin.set_fact:
+    zuul_change_list: "{{ zuul_change_list | default([]) + [item.project.short_name] }}"
+    cacheable: true
+  with_items: "{{ zuul['items'] }}"
+  when:
+    - zuul is defined
+    - "'change_url' in item"
+
+- name: Build openstack-must-gather image
+  ansible.builtin.import_tasks: build_openstack-must-gather_image.yml
+  when:
+    - zuul_change_list is defined
+    - "'openstack-must-gather' in zuul_change_list"
+
+- name: Check for oc command
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
+    script: command -v oc
+  environment:
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  register: oc_installed
+  ignore_errors: true
+
+- name: Running openstack-must-gather tool
+  when:
+    - oc_installed is defined
+    - oc_installed.rc == 0
+    - cifmw_openshift_kubeconfig is defined
+  block:
+    - name: Run openstack-must-gather command
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
+        script: >-
+          oc adm must-gather --image {{ cifmw_os_must_gather_image }}
+          --timeout {{ cifmw_os_must_gather_timeout }}
+          --host-network={{ cifmw_os_must_gather_host_network }}
+          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs > {{ cifmw_os_must_gather_output_dir }}/logs/os_must_gather.log
+  rescue:
+    - name: Inspect the cluster after must-gather failure
+      ignore_errors: true # noqa: ignore-errors
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
+        script: |
+          mkdir -p {{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
+          for ns in openstack-operators openstack baremetal-operator-system openshift-machine-api cert-manager openshift-nmstate metallb-system; do
+            oc adm inspect namespace/"${ns}" --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect || echo "Error getting logs from ${ns}"
+          done
