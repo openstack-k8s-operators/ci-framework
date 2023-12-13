@@ -78,26 +78,37 @@
     - "{{ cifmw_devscripts_logs_dir }}"
     - "{{ cifmw_devscripts_output_dir }}"
 
-- name: Prepare the host for execution of dev-scripts.
+- name: Perform pre-checks
   tags:
-    - devscripts_prepare
-    - devscripts_deploy
-  ansible.builtin.import_tasks: 01_prepare_host.yml
+    - always
+  ansible.builtin.import_tasks: 00_pre_check.yml
 
-- name: Gather the host and dev-scripts required information.
+- name: Prepare for OCP deployment.
   tags:
     - devscripts_prepare
     - devscripts_deploy
-  ansible.builtin.import_tasks: 02_gather_env_details.yml
+  when:
+    - not cifmw_devscripts_skip_deploy | default(false)
+    - not cifmw_devscripts_use_base_layer | default(false)
+  block:
+    - name: Prepare the host for execution of dev-scripts.
+      ansible.builtin.import_tasks: 01_prepare_host.yml
+
+    - name: Gather the host and dev-scripts required information.
+      ansible.builtin.import_tasks: 02_gather_env_details.yml
 
 - name: Running dev-scripts.
   tags:
     - devscripts_deploy
+  when:
+    - not cifmw_devscripts_skip_deploy | default(false)
+    - not cifmw_devscripts_use_base_layer | default(false)
   ansible.builtin.import_tasks: 03_install.yml
 
 - name: Prepare for image overlay
   when:
     - cifmw_devscripts_use_layers | bool
+    - not cifmw_devscripts_skip_deploy | default(false)
   ansible.builtin.import_tasks: 04_overlays.yml
 
 - name: Executing dev-scripts post-install tasks.
