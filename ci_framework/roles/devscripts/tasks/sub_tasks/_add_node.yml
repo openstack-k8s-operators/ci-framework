@@ -1,0 +1,50 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Verify if BaremetalHost resource exists.
+  when:
+    - cifmw_devscripts_skip_deploy | default(false)
+    - _login_result is defined
+  block:
+    - name: Gather the baremetal host information
+      kubernetes.core.k8s_info:
+        api_version: "metal3.io/v1alpha1"
+        kind: "BareMetalHost"
+        name: "{{ node.name }}"
+        namespace: "openshift-machine-api"
+      register: _bmh_node_result
+
+    - name: Node resource exists.
+      when: _bmh_node_result.resources is defined
+      ansible.builtin.set_fact:
+        _add_node: false
+
+- name: Create baremetal host object
+  when: _add_node | default(true)
+  ansible.builtin.template:
+    src: templates/bmh.yaml.j2
+    dest: "{{ cifmw_devscripts_artifacts_dir }}/bmh/{{ node.name }}.yaml"
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"
+
+- name: Apply the baremetal host definitions
+  when: _add_node | default(true)
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_devscripts_artifacts_dir }}/bmh/{{ node.name }}.yaml"
