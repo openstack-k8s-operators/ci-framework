@@ -3,14 +3,14 @@
 
 from __future__ import absolute_import, division, print_function
 import re
-import yaml
-import typing
 
 
 from ansible.errors import AnsibleError
 from ansible.plugins.action import ActionBase
-from ansible.parsing.yaml.dumper import AnsibleDumper
-from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
+
+from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+    ansible_encoding,
+)
 
 
 __metaclass__ = type
@@ -50,38 +50,6 @@ data:
 """
 
 
-def decode_ansible_raw(data: typing.Any) -> typing.Any:
-    """Converts an Ansible var to a python native one
-
-    Ansible raw input args can contain AnsibleUnicodes or AnsibleUnsafes
-    that are not intended to be manipulated directly.
-    This function converts the given variable to a one that only contains
-    python built-in types.
-
-    Args:
-        data: The usafe Ansible content to decode
-
-    Returns: The python types based result
-
-    """
-    if isinstance(data, list):
-        return [decode_ansible_raw(_data) for _data in data]
-    elif isinstance(data, tuple):
-        return tuple(decode_ansible_raw(_data) for _data in data)
-    if isinstance(data, dict):
-        return yaml.load(
-            yaml.dump(
-                data, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True
-            ),
-            Loader=yaml.Loader,
-        )
-    if isinstance(data, AnsibleUnsafeText):
-        return str(data)
-    if isinstance(data, AnsibleUnsafeBytes):
-        return bytes(data)
-    return data
-
-
 class ActionModule(ActionBase):
     IMAGES_FILES = [
         # e.g: https://cloud.centos.org/centos/9-stream/x86_64/images/CHECKSUM
@@ -99,18 +67,20 @@ class ActionModule(ActionBase):
         if "image_prefix" not in task_args:
             raise AnsibleError('"image_prefix" parameter is mandatory')
 
-        img_prefix = decode_ansible_raw(task_args.pop("image_prefix"))
+        img_prefix = ansible_encoding.decode_ansible_raw(task_args.pop("image_prefix"))
 
         images_files = self.IMAGES_FILES.copy()
         if "images_file" in task_args:
-            images_files.insert(0, decode_ansible_raw(task_args.pop("images_file")))
+            images_files.insert(
+                0, ansible_encoding.decode_ansible_raw(task_args.pop("images_file"))
+            )
 
         # Ensure we return content
         task_args["return_content"] = True
         # Ensure we run locally only
         task_vars["delegate_to"] = "localhost"
 
-        base_image_url = decode_ansible_raw(task_args["url"])
+        base_image_url = ansible_encoding.decode_ansible_raw(task_args["url"])
 
         qcow2_image_pattern = re.compile(
             rf"(SHA256|SHA1|MD5) \(.*?({re.escape(img_prefix)}.*?\.qcow2)\)"

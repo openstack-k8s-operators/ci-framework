@@ -202,9 +202,11 @@ import dataclasses
 import pathlib
 import yaml
 
-from ansible.parsing.yaml.dumper import AnsibleDumper
-from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
 from ansible.plugins.action import ActionBase
+
+from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+    ansible_encoding,
+)
 
 
 @dataclasses.dataclass
@@ -781,38 +783,6 @@ class CifmwKustomizeWrapper:
         )
 
 
-def decode_ansible_raw(data: typing.Any) -> typing.Any:
-    """Converts an Ansible var to a python native one
-
-    Ansible raw input args can contain AnsibleUnicodes or AnsibleUnsafes
-    that are not intended to be manipulated directly.
-    This function converts the given variable to a one that only contains
-    python built-in types.
-
-    Args:
-        data: The usafe Ansible content to decode
-
-    Returns: The python types based result
-
-    """
-    if isinstance(data, list):
-        return [decode_ansible_raw(_data) for _data in data]
-    elif isinstance(data, tuple):
-        return tuple(decode_ansible_raw(_data) for _data in data)
-    if isinstance(data, dict):
-        return yaml.load(
-            yaml.dump(
-                data, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True
-            ),
-            Loader=yaml.Loader,
-        )
-    if isinstance(data, AnsibleUnsafeText):
-        return str(data)
-    if isinstance(data, AnsibleUnsafeBytes):
-        return bytes(data)
-    return data
-
-
 class ActionModule(ActionBase):
     def run(self, tmp=None, task_vars=None):
         if task_vars is None:
@@ -821,7 +791,7 @@ class ActionModule(ActionBase):
         result = super(ActionModule, self).run(tmp, task_vars)
         del tmp
 
-        task_args = decode_ansible_raw(self._task.args)
+        task_args = ansible_encoding.decode_ansible_raw(self._task.args)
         target_path = task_args.get("target_path", None)
         kustomizations = task_args.get("kustomizations", None)
         kustomizations_paths = task_args.get("kustomizations_paths", None)
