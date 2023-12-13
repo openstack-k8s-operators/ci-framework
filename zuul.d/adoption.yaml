@@ -16,17 +16,17 @@
       groups:
         - name: computes
           nodes: []
-    roles:
+    roles: &adoption_roles
       - zuul: github.com/openstack-k8s-operators/ci-framework
-    pre-run:
+    pre-run: &pre_run
       - ci/playbooks/multinode-customizations.yml
       - ci/playbooks/e2e-prepare.yml
       - ci/playbooks/dump_zuul_data.yml
-    post-run:
+    post-run: &post_run
       - ci/playbooks/e2e-collect-logs.yml
       - ci/playbooks/collect-logs.yml
       - ci/playbooks/multinode-autohold.yml
-    vars:
+    vars: &adoption_vars
       zuul_log_collection: true
       registry_login_enabled: true
       push_registry: quay.rdoproject.org
@@ -78,9 +78,83 @@
                 ip: 172.19.0.5
 
 - job:
+    name: cifmw-adoption-standalone-base
+    parent: base-extracted-crc
+    abstract: true
+    timeout: 10800
+    attempts: 1
+    nodeset:
+      nodes:
+        # TODO(marios) update controller try smaller nodeset
+        - name: controller
+          label: cloud-centos-9-stream-tripleo-vexxhost-xl
+        - name: crc
+          label: coreos-crc-extracted-xxl
+        - name: standalone
+          label: cloud-rhel-9-2
+      groups:
+        - name: computes
+          nodes: []
+    roles: *adoption_roles
+    pre-run: *pre_run
+    post-run: *post_run
+    vars:
+      <<: *adoption_vars
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            mtu: 1500
+            range: 192.168.122.0/24
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/24
+          storage:
+            vlan: 21
+            range: 172.18.0.0/24
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/24
+        instances:
+          controller:
+            networks:
+              default:
+                ip: 192.168.122.11
+              internal-api:
+                ip: 172.17.0.4
+              storage:
+                ip: 172.18.0.4
+              tenant:
+                ip: 172.19.0.4
+          crc:
+            networks:
+              default:
+                ip: 192.168.122.10
+              internal-api:
+                ip: 172.17.0.5
+              storage:
+                ip: 172.18.0.5
+              tenant:
+                ip: 172.19.0.5
+          standalone:
+            networks:
+              default:
+                ip: 192.168.122.100
+                config_nm: false
+              internal-api:
+                ip: 172.17.0.100
+                config_nm: false
+              storage:
+                ip: 172.18.0.100
+                config_nm: false
+              tenant:
+                ip: 172.19.0.100
+                config_nm: false
+
+# TODO(marios) remove this definition after new OSP17 job is running and stable
+- job:
     name: cifmw-data-plane-adoption-github-rdo-centos-9-extracted-crc
     parent: content-provider-data-plane-adoption-github-rdo-centos-9-extracted-crc
-    files:
+    files: &dpa_job_files
       - ^ci_framework/playbooks/01-bootstrap.yml
       - ^ci_framework/playbooks/02-infra.yml
       - ^ci_framework/playbooks/06-deploy-edpm.yml
@@ -94,3 +168,10 @@
       - ^ci_framework/roles/repo_setup/(?!meta|README|molecule).*
       - ^ci_framework/hooks/playbooks/fetch_compute_facts.yml
       - ^zuul.d/adoption.yaml
+      - go.mod
+      - apis/go.mod
+
+- job:
+    name: cifmw-data-plane-adoption-OSP-17-to-extracted-crc
+    parent: content-provider-data-plane-adoption-OSP-17-to-extracted-crc
+    files: *dpa_job_files

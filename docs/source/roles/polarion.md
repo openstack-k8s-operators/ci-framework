@@ -1,1 +1,0 @@
-../../../ci_framework/roles/polarion/README.md

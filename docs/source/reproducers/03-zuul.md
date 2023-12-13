@@ -1,21 +1,16 @@
 # Zuul job
-## Words of warning
-This feature is still fresh, and limited. For now, you can reproduce only
-a job that doesn't rely on the content-provider job.
 
-It also has to run against the latest PR content output, since you won't
-have access to the actual commit hash on github.
+~~~{warning}
+This feature is still fresh. It should support most of the `multinode` jobs.
+~~~
 
-For now, it has been tested only the following jobs:
-* *podified-multinode-edpm-e2e-nobuild-tagged-crc*
-* *podified-multinode-edpm-deployment-crc* (which includes content-provider)
-
-## Words of advice
+~~~{tip}
 It is strongly advised to run this reproducer against a dedicated hypervisor
 with enough resources. The current configuration will require close to 40G
 of RAM and at least 24 CPUs. You can of course edit the specs,
 but keep in mind *CRC* has its own needs.
 [Please refer to its minimal spec](https://crc.dev/crc/getting_started/getting_started/installing/#_for_openshift_container_platform).
+~~~
 
 ## How does it work (high level explanation)
 It will fetch a few files from the Zuul job output, read and combine them
@@ -33,29 +28,60 @@ will be accessible from the private network interface.
 ## How do I run that job?
 ### First, get the project, and get its dependencies installed
 ```Bash
-$ git clone https://github.com/openstack-k8s-operators/ci-framework
-$ cd ci-framework
-$ make setup_molecule
+[laptop]$ git clone https://github.com/openstack-k8s-operators/ci-framework
+[laptop]$ cd ci-framework
+[laptop]$ make setup_molecule
 ```
 ### Create an inventory file in order to consume your hypervisor
 You can create a file in `custom/inventor.yml` for instance (ensure you ignore
 that path from git tree in order to NOT inject that custom inventory).
 
 The file should look like this:
-```YAML
+~~~{code-block} YAML
+:caption: custom/inventory.yml
+:linenos:
+---
 all:
   hosts:
     localhost:
       ansible_connection: local
-    builder1:
-      ansible_user: virtuser
-      ansible_host: 192.168.1.10
-```
-(Note the "localhost" host with the "local" connection - it will be used for some
-data, avoiding the network overhead will be faster)
+    hypervisor-1:
+      ansible_user: my_remote_user
+      ansible_host: hypervisor.localnet
+~~~
 
+~~~{tip}
+Note the "localhost" host with the "local" connection - it will be used for some
+data, avoiding the network overhead will be faster
+~~~
+
+~~~{warning}
 Please ensure your hypervisor provides `sudo` for the user you intend to use,
 with or without password. It must, of course, support virtualization.
+~~~
+
+### Create a custom environment file to feed your job
+
+This file is mandatory. It will let the Framework know about your job as well as the
+needed secret to deploy CRC.
+
+~~~{code-block} YAML
+:caption: custom/my-job.yml
+:linenos:
+cifmw_job_uri: "URI_TO_JOB_OUTPUT"
+cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME') }}/pull-secret.txt"
+~~~
+
+#### cifmw_job_uri
+This is the magic parameter: by setting it, you'll instruct the reproducer to switch into
+"reproducer job mode". This URI is the one you can find on a Zuul job output, and usually
+looks like this:
+
+https://logserver.rdoproject.org/74/574/LONG_HASH/github-check/podified-multinode-edpm-e2e-nobuild-tagged-crc/SHORT_HASH/
+
+Please take extra care to ensure it's NOT pointing to any sub-directory of that page, such
+as "/controller" - else, it will fail to fetch the needed pieces.
+
 
 ### Inject your custom code
 As an option, you're able to inject your custom code by leveraging the
@@ -66,14 +92,17 @@ For instance, if you're trying to re-run a job against `nova-operators` reposito
 you can override the job code in order to inject your local code and see if it
 fixes the job:
 
-```YAML
+~~~{code-block} YAML
+:caption: custom/repo-overrides.yml
+:linenos:
+---
 local_home_dir: "{{ lookup('env', 'HOME') }}"
 local_base_dir: "{{ local_home_dir }}/src/github.com/openstack-k8s-operators"
 remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
 cifmw_reproducer_repositories:
   - src: "{{ local_base_dir }}/nova-operator"
     dest: "{{ remote_base_dir }}/nova-operator"
-```
+~~~
 
 Provided you have the right code branch set in your local repository, the reproducer
 will then copy it 1:1 and override the Zuul content.
@@ -82,12 +111,11 @@ will then copy it 1:1 and override the Zuul content.
 Running this simple ansible-playbook command will deploy everything and run
 the job:
 ```Bash
-$ ansible-playbook -i custom/inventory.yml \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
     reproducer.yml \
-    -e cifmw_target_host=builder1 \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="URI_TO_JOB_OUTPUT" \
-    -K
+    -e @custom/my-job.yml [-e @custom/repo-overrides.yml]
 ```
 #### What does it do?!
 ##### reproducer.yml
@@ -108,16 +136,6 @@ that file in the `custom` directory described earlier with your own resources.
 
 Note that the reproducer will update the amount of computes. You therefore don't need
 to change it.
-
-##### cifmw_job_uri
-This is the magic parameter: by setting it, you'll instruct the reproducer to switch into
-"reproducer job mode". This URI is the one you can find on a Zuul job output, and usually
-looks like this:
-
-https://logserver.rdoproject.org/74/574/LONG_HASH/github-check/podified-multinode-edpm-e2e-nobuild-tagged-crc/SHORT_HASH/
-
-Please take extra care to ensure it's NOT pointing to any sub-directory of that page, such
-as "/controller" - else, it will fail to fetch the needed pieces.
 
 #### Generated files
 There will be a fair amount of generated files, as you may expect. As usual, most of them
@@ -152,16 +170,16 @@ You can refer to the [README](../roles/reproducer.md) nested in the role for mor
 The reproducer will generate a playbook mimicking the CI job itself. You can find it under
 `~/src/github.com/openstack-k8s-operators/ci-framework/SHORT_HASH_play.yml`, where SHORT_HASH
 is the last hash of the `cifmw_job_uri` parameter. You should, as well, get the proper
-inventory ready in the `scenarios/centos-9/zuul_inventory.yml` file, meaning you should
+inventory ready in the `~/ci-framework-data/artifacts/zuul_inventory.yml` file, meaning you should
 be able to run:
 ```Bash
-$ ansible-playbook \
-    -i scenarios/centos-9/zuul_inventory.yml \
+[controller-0]$ ansible-playbook \
+    -i ~/ci-framework-data/artifacts/zuul_inventory.yml \
     SHORT_HASH_play.yml
 ```
 You will be able to follow the live state in `~/ansible.log`:
 ```Bash
-$ tail -f ~/ansible.log
+[controller-0]$ tail -f ~/ansible.log
 ```
 
 Note that `tmux` is installed by default, and may be handy in such a case ;).
@@ -191,16 +209,16 @@ Note: you **must** have an already deployed layout before running only this tag.
 ##### Usage
 ```Bash
 # Reproduce first iteration of your PR that failed on Zuul
-$ ansible-playbook -i custom/inventory.yml reproducer.yml \
-    -e cifmw_target_host=builder1 \
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="YOUR_URI"
+    -e @custom/my-job.yml
 
 # Iterate with the second iteration of your PR that failed on Zuul
-$ ansible-playbook -i custom/inventory.yml reproducer.yml \
-    -e cifmw_target_host=builder1 \
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="YOUR_UPDATE_URI" \
+    -e @custom/my-job.yml \
     --tags bootstrap_repositories
 ```
 
@@ -214,16 +232,16 @@ Note: you **must** have an already deployed layout before skipping this tag.
 ##### Usage
 ```Bash
 # Reproduce first iteration of your PR that failed on Zuul
-$ ansible-playbook -i custom/inventory.yml reproducer.yml \
-    -e cifmw_target_host=builder1 \
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="YOUR_URI"
+    -e @custom/my-job.yml
 
 # Iterate with the second iteration of your PR that failed on Zuul
-$ ansible-playbook -i custom/inventory.yml reproducer.yml \
-    -e cifmw_target_host=builder1 \
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="YOUR_UPDATE_URI" \
+    -e @custom/my-job.yml \
     --skip-tags bootstrap_layout
 ```
 
@@ -236,38 +254,47 @@ Skip with caution, since it may end with a broken environment, where some files 
 an update, for instance the playbook running the job in case you wanted to just update
 the repository against a newer patch set.
 
-Note: you **must** have an already deployed layout before skipping that tag. But we strongly
+~~~{warning}
+You **must** have an already deployed layout before skipping that tag. But we strongly
 recommend *against* skipping it due to the lack of data regeneration.
+~~~
 
 ##### Usage
 ```Bash
 # Reproduce first iteration of your PR that failed on Zuul
-$ ansible-playbook -i custom/inventory.yml reproducer.yml \
-    -e cifmw_target_host=builder1 \
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="YOUR_URI"
+    -e @custom/my-job.yml
 
 # Iterate with the second iteration of your PR that failed on Zuul
-$ ansible-playbook -i custom/inventory.yml reproducer.yml \
-    -e cifmw_target_host=builder1 \
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
+    -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
-    -e cifmw_job_uri="YOUR_UPDATE_URI" \
+    -e @custom/my-job.yml \
     --skip-tags bootstrap_layout,bootstrap
 ```
 
 ## Cleaning the deployed job
 Go in the ci-framework directory on your local computer and run:
 ```Bash
-$ ansible-playbook \
+[laptop]$ ansible-playbook \
     -i custom/inventory.yml \
-    -e cifmw_target_host=builder1 \
+    -e cifmw_target_host=hypervisor-1 \
     reproducer-clean.yml
 ```
+
 This will destroy the whole environment:
 - stop the VMs
 - undefine them
 - remove their disk images
 - clean all of the generated content on the hypervisor
 
-Note that this action is irreversible, therefore please be sure you save
+~~~{warning}
+This action is irreversible, therefore please be sure you save
 whatever you need before running that command.
+~~~
+
+~~~{tip}
+Learn more about cleanup [here](../quickstart/05_clean_infra.md)
+~~~

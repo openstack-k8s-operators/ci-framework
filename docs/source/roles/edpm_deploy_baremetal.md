@@ -1,1 +1,0 @@
-../../../ci_framework/roles/edpm_deploy_baremetal/README.md

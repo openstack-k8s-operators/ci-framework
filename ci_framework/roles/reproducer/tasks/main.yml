@@ -21,6 +21,18 @@
   ansible.builtin.import_role:
     name: discover_latest_image
 
+- name: Assert no conflicting parameters were passed
+  ansible.builtin.assert:
+    that:
+      - (cifmw_libvirt_manager_configuration.vms.crc is defined) or
+        (cifmw_use_devscripts | default(false) | bool)
+      - not ((cifmw_libvirt_manager_configuration.vms.crc is defined) and
+             (cifmw_use_devscripts | default(false) | bool))
+    quiet: true
+    msg: >-
+      You cannot get both OpenShift cluster types.
+      Please chose between CRC and OCP cluster.
+
 - name: Ensure directories are present
   tags:
     - always
@@ -45,31 +57,19 @@
 - name: Deploy CRC if needed
   when:
     - cifmw_libvirt_manager_configuration.vms.crc is defined
-  block:
-    - name: Check for CRC availability in known path
-      register: _crc_available
-      vars:
-        _img: >-
-          {{
-            (cifmw_libvirt_manager_configuration.vms.crc.image_local_dir,
-             cifmw_libvirt_manager_configuration.vms.crc.disk_file_name) |
-             path_join
-          }}
-      ansible.builtin.stat:
-        path: "{{ _img }}"
+  tags:
+    - bootstrap
+    - bootstrap_layout
+    - crc_layout
+  ansible.builtin.import_tasks: crc_layout.yml
 
-    - name: Prepare CRC for later usage
-      when:
-        - not _crc_available.stat.exists
-      block:
-        - name: Deploy CRC
-          ansible.builtin.import_role:
-            name: rhol_crc
-
-        - name: Ensure CRC is stopped
-          ansible.builtin.import_role:
-            name: rhol_crc
-            tasks_from: undefine.yml
+- name: Consume dev-scripts for OCP cluster
+  when:
+    - cifmw_use_devscripts | default(false) | bool
+  tags:
+    - bootstrap
+    - boostrap_layout
+  ansible.builtin.import_tasks: devscripts_layout.yml
 
 - name: Consume libvirt_manager
   when:
@@ -79,66 +79,29 @@
     - bootstrap_layout
   ansible.builtin.import_tasks: libvirt_layout.yml
 
-- name: Run CI job if instructed
-  when:
-    - cifmw_job_uri is defined
-  tags:
-    - bootstrap
-  delegate_to: controller-0
-  remote_user: root
-  block:
-    - name: Push zuul-params.yml to expected location
-      tags:
-        - bootstrap
-      block:
-        - name: Get content of zuul-params.yml
-          register: zuul_params
-          ansible.builtin.slurp:
-            path: "{{ job_id }}-params/zuul-params.yml"
-
-        - name: Push extracted content
-          vars:
-            zuul_params_filtered: >-
-              {{
-                (zuul_params['content'] | b64decode | from_yaml) |
-                dict2items |
-                rejectattr('key', 'equalto', 'cifmw_operator_build_output') |
-                rejectattr('key', 'equalto', 'content_provider_registry_ip') |
-                items2dict
-              }}
-          ansible.builtin.copy:
-            dest: "ci-framework-data/artifacts/parameters/zuul-params.yml"
-            content: "{{ zuul_params_filtered | to_nice_yaml }}"
-
-    - name: Prepare environment for content-provider
-      when:
-        - cifmw_job_uri is defined
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-content-provider-bootstrap.log"
-      ansible.builtin.command:
-        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook
-          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          ci_framework/playbooks/01-bootstrap.yml
-
-    - name: Run job
-      when:
-        - cifmw_reproducer_run_job | bool
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-{{ job_id }}.log"
-      ansible.builtin.command:
-        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook
-          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          {{ job_id }}_play.yml
-
 - name: Push local code
   tags:
     - bootstrap_repositories
     - bootstrap
   ansible.builtin.import_tasks: push_code.yml
+
+- name: Rotate some logs
+  tags:
+    - always
+  ansible.builtin.include_tasks: rotate_log.yml
+  loop:
+    - ansible-bootstrap.log
+
+- name: Bootstrap environment on controller-0
+  delegate_to: controller-0
+  environment:
+    ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+  ansible.builtin.command:
+    chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+    cmd: >-
+      ansible-playbook
+      -e @~/reproducer-variables.yml
+      ci_framework/playbooks/01-bootstrap.yml
 
 - name: Emulate CI job
   when:

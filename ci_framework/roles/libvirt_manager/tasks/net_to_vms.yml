@@ -1,0 +1,30 @@
+---
+# Mostly called from the create_vms.yml tasks, from
+# within a loop on the VMs.
+# It will then loop on the listed networks and attach
+# them to the current "item", which is an actual VM.o
+- name: "Attach {{ vm_item }} to {{ net_item }}"  # noqa: name[template]
+  vars:
+    cifmw_libvirt_manager_net_prefix_add: >-
+      {{
+        net_item is not match('^ocp.*')
+      }}
+    vm_name: "cifmw-{{ vm_item }}"
+    network:
+      name: "{{ net_item }}"
+      cidr: >-
+        {{
+          cifmw_libvirt_manager_networks[net_item]['range']
+        }}
+      mtu: >-
+        {{
+          cifmw_libvirt_manager_networks[net_item]['mtu'] | default(1500)
+        }}
+      static_ip: >-
+        {{
+          cifmw_libvirt_manager_networks[net_item]['static_ip'] | default(false)
+        }}
+  ansible.builtin.include_tasks: attach_interface.yml
+  loop: "{{ networks }}"
+  loop_control:
+    loop_var: net_item

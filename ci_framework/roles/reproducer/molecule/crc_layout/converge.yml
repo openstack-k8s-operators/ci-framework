@@ -23,6 +23,8 @@
     cifmw_install_yamls_repo: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
     cifmw_libvirt_manager_networks:
+      public:
+        range: "192.168.100.0/24"
       osp_trunk:
         default: true
         range: "192.168.140.0/24"
@@ -85,9 +87,10 @@
             <forward mode='nat'/>
             <bridge name='public' stp='on' delay='0'/>
             <mac address='52:54:00:6a:f2:dc'/>
-            <ip family='ipv4' address='192.168.100.1' prefix='24'>
+            <ip family='ipv4' address='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(1) }}' prefix='24'>
               <dhcp>
-                <range start='192.168.100.10' end='192.168.100.100'/>
+                <range start='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(10) }}'
+                end='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(100) }}'/>
               </dhcp>
             </ip>
           </network>
@@ -123,6 +126,11 @@
           register: _crc_key
           ansible.builtin.stat:
             path: "{{ ansible_user_dir }}/.ssh/crc_key"
+
+        - name: Ensure we have the MAC mapping file
+          register: _mac_mapping
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/mac-mapping.yml"
 
         - name: Ensure we can ping compute-0 on osp_trunk net
           register: _cmp0_ping
@@ -164,6 +172,7 @@
         that:
           - _kubeconfig.stat.exists | bool
           - _crc_key.stat.exists | bool
+          - _mac_mapping.stat.exists | bool
           - _inventory_files.matched == 4
           - _inventory_content == _expected_files
           - _crc_ping.rc == 0

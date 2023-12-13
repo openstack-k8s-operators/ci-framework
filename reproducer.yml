@@ -13,7 +13,40 @@
           Please ensure you pass "cifmw_use_libvirt: true" to the
           deployment!
         quiet: true
+
+    - name: Gather OS facts
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - "distribution"
+
+    - name: Tweak dnf configuration
+      community.general.ini_file:
+        no_extra_spaces: true
+        option: "{{ config.option }}"
+        path: "/etc/dnf/dnf.conf"
+        section: "{{ config.section | default('main') }}"
+        state: "{{ config.state | default(omit) }}"
+        value: "{{ config.value | default(omit) }}"
+      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
+      loop_control:
+        label: "{{ config.option }}"
+        loop_var: 'config'
+
+    - name: Setup repositories via rhos-release if needed
+      tags:
+        - packages
+      when:
+        - ansible_facts['distribution'] == 'RedHat'
+        - cifmw_reproducer_hp_rhos_release | bool
+      vars:
+        cifmw_repo_setup_output: /etc/yum.repos.d
+        cifmw_repo_setup_rhos_release_args: "rhel"
+      ansible.builtin.import_role:
+        name: repo_setup
+        tasks_from: rhos_release.yml
+
   roles:
     - role: ci_setup
-    - role: libvirt_manager
     - role: reproducer

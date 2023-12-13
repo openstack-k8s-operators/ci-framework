@@ -14,49 +14,49 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Gather default IPv4 network notation.
-  tags:
-    - bootstrap
-  when:
-    - "'manage_br_bridge' in cifmw_devscripts_config"
-    - cifmw_devscripts_config['manage_br_bridge'] == 'n'
-    - cifmw_devscripts_config['ip_stack'] != 'v6'
-    - cifmw_devscripts_ext_net_cidr is not defined
-  vars:
-    subnet: >-
-      {{ ansible_default_ipv4.network}}/{{ ansible_default_ipv4.netmask }}
-    ext_net_v4:
-      external_subnet_v4: >-
-        {{
-          subnet | ansible.utils.ipaddr('network/prefix')
-        }}
-  ansible.builtin.set_fact:
-    cifmw_devscripts_config: >-
-      {{
-        cifmw_devscripts_config | combine(ext_net_v4, recursive=true)
-      }}
 
-- name: Gather default IPv6 network notation.
+- name: Gather external network subnet information.
   tags:
     - bootstrap
   when:
-    - "'manage_br_bridge' in cifmw_devscripts_config"
+    - cifmw_devscripts_config['manage_br_bridge'] is defined
     - cifmw_devscripts_config['manage_br_bridge'] == 'n'
-    - cifmw_devscripts_config['ip_stack'] != 'v4'
-    - cifmw_devscripts_ext_net_cidr_6 is not defined
-  vars:
-    subnet: >-
-      {{ ansible_default_ipv6.network}}/{{ ansible_default_ipv6.netmask }}
-    ext_net_v6:
-      external_subnet_v6: >-
-        {{
-          subnet | ansible.utils.ipaddr('network/prefix')
-        }}
-  ansible.builtin.set_fact:
-    cifmw_devscripts_config: >-
-      {{
-        cifmw_devscripts_config | combine(ext_net_v6, recursive=true)
-      }}
+  block:
+    - name: Collect subnet when v4 family is enabled.
+      when:
+        - cifmw_devscripts_config['external_subnet_v4'] is not defined
+        - cifmw_devscripts_config['ip_stack'] != 'v6'
+      vars:
+        subnet: >-
+          {{ ansible_default_ipv4.network}}/{{ ansible_default_ipv4.netmask }}
+        ext_net_v4:
+          external_subnet_v4: >-
+            {{
+              subnet | ansible.utils.ipaddr('network/prefix')
+            }}
+      ansible.builtin.set_fact:
+        cifmw_devscripts_config: >-
+          {{
+            cifmw_devscripts_config | combine(ext_net_v4, recursive=true)
+          }}
+
+    - name: Gather subnet when v6 family is enabled.
+      when:
+        - cifmw_devscripts_config['external_subnet_v6'] is not defined
+        - cifmw_devscripts_config['ip_stack'] != 'v4'
+      vars:
+        subnet: >-
+          {{ ansible_default_ipv6.network}}/{{ ansible_default_ipv6.netmask }}
+        ext_net_v6:
+          external_subnet_v6: >-
+            {{
+              subnet | ansible.utils.ipaddr('network/prefix')
+            }}
+      ansible.builtin.set_fact:
+        cifmw_devscripts_config: >-
+          {{
+            cifmw_devscripts_config | combine(ext_net_v6, recursive=true)
+          }}
 
 - name: Add external network IPv4 address
   tags:

@@ -32,12 +32,31 @@
     cacheable: true
 
 - name: Prepare OpenStack Dataplane NodeSet CR
+  when: cifmw_edpm_deploy_prepare_run | bool
   vars:
     make_edpm_deploy_prep_env: "{{ cifmw_edpm_deploy_env }}"
     make_edpm_deploy_prep_dryrun: "{{ cifmw_edpm_deploy_dryrun | bool }}"
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_deploy_prep'
+
+- name: Install Dataplane services
+  vars:
+    _cifmw_edpm_deploy_service_path: >-
+      {{
+        [
+          cifmw_edpm_deploy_manifests_dir,
+          'operator/dataplane-operator',
+          'config/services'
+        ] | ansible.builtin.path_join
+      }}
+  when: not cifmw_edpm_deploy_dryrun
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ci_script:
+    output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
+    script: "oc apply -f {{ _cifmw_edpm_deploy_service_path }}"
 
 - name: Kustomize and deploy OpenStackDataPlaneNodeSet
   when:

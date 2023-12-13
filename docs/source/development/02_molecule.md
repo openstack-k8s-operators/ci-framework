@@ -12,11 +12,13 @@ Any extra configuration required for any Zuul CI job will be added in the follow
 
 For example if we need to set a timeout to the job `cifmw-molecule-rhol_crc` then we need to append the following lines:
 
-```
+~~~{code-block} YAML
+:caption: zuul.d/job.yaml
+:linenos:
 - job:
     name: cifmw-molecule-rhol_crc
     timeout: 3600
-```
+~~~
 
 These directives will be merged with the job definition created in the script [scripts/create_role_molecule.py](https://github.com/openstack-k8s-operators/ci-framework/blob/main/scripts/create_role_molecule.py)
 

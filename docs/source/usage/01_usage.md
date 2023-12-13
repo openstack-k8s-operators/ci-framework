@@ -1,35 +1,23 @@
-# Usage guide
+# General consideration
 
-The Framework leverages [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)
-content and generate the needed bits in order to deploy EDPM on the selected infrastructure.
-
-The Framework will also ensure we're able to reproduce the exact same run we
-got in CI with a series of artifacts one may download locally, and re-run.
-
-## Parameters
-
-There are two levels of parameters we may provide:
-
-* top level
-* role level
-
-### Top level parameters
+## Top level parameters
 
 The following parameters allow to set a common value for parameters that
 are shared among multiple roles:
 
 * `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
-`~/ci-framework-data`
-* `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook
+`~/ci-framework-data`.
+* `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook.
 in the multinode layout, especially for the reproducer case.
-* `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes
+* `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes.
 provisioned with virtual baremetal vs pre-provisioned VM.
-* `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`
+* `cifmw_installyamls_repos`: install_yamls repository location. Defaults to `../..`.
 * `cifmw_manifests`: Directory where k8s related manifests will be places. Defaults to
-`{{ cifmw_basedir }}/manifests`
-* `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`
-* `cifmw_use_libvirt`: (Bool) toggle libvirt support
-* `cifmw_use_crc`: (Bool) toggle rhol/crc usage
+`{{ cifmw_basedir }}/manifests`.
+* `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`.
+* `cifmw_use_libvirt`: (Bool) toggle libvirt support.
+* `cifmw_use_crc`: (Bool) toggle rhol/crc usage.
+* `cifmw_use_devscripts`: (Bool) toggle devscripts usage.
 * `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided. If provided will be the kubeconfig to use and update after login.
 * `cifmw_openshift_api`: (String) Path to the kubeconfig file. If provided will be the API to authenticate against.
 * `cifmw_openshift_user`: (String) Login user. If provided, the user that logins.
@@ -40,20 +28,21 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_use_opn`: (Bool) toggle openshift provisioner node support.
 * `cifmw_use_hive`: (Bool) toggle OpenShift deployment using hive operator.
 * `cifmw_use_devscripts`: (Bool) toggle OpenShift deploying using devscripts role.
-* `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment
+* `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment.
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 * `cifmw_config_network`: (Bool) toggle networking deployment based on CI-framework instead of install_yamls. Default to false.
 
-#### Words of caution
-
+~~~{admonition} Words of caution
+:class: danger
 If you want to output the content in another location than `~/ci-framework-data`
 (namely set the `cifmw_basedir` to some other location), you will have to update
 the `ansible.cfg`, updating the value of `roles_path` so that it includes
 this new location.
 
 We cannot do this change runtime unfortunately.
+~~~
 
-### Role level parameters
+## Role level parameters
 
 Please refer to the README located within the various roles.
 
@@ -92,7 +81,9 @@ steps.
 
 In order to provide a hook, please pass the following as an environment file:
 
-```YAML
+~~~{code-block} YAML
+:caption: custom/my-hook.yml
+:linenos:
 pre_infra:
     - name: My glorious hook name
       type: playbook
@@ -105,7 +96,7 @@ pre_infra:
       wait_condition:
         type: pod
       source: /path/to/my/glorious.crd
-```
+~~~
 
 In the above example, the `foo.yml` is located in
 [ci_framework/hooks/playbooks](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/hooks/playbooks) while
@@ -141,8 +132,13 @@ For instance, if you want to bootstrap a hypervisor, and reuse it over and
 over, you'll run the following commands:
 
 ```Bash
-$ ansible-playbook deploy-edpm.yml -K --tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
-$ ansible-playbook deploy-edpm.yml -K --skip-tags bootstrap,packages [-e @scenarios/centos-9/some-environment -e <...>]
+[controller-0]$ ansible-playbook deploy-edpm.yml \
+    -K --tags bootstrap,packages \
+    [-e @scenarios/centos-9/some-environment -e <...>]
+$
+[controller-0]$ ansible-playbook deploy-edpm.yml \
+    -K --skip-tags bootstrap,packages \
+    [-e @scenarios/centos-9/some-environment -e <...>]
 ```
 Running the command twice, with `--tags` and `--skip-tags` as only difference,
 will ensure your environment has the needed directories, packages and
@@ -154,7 +150,7 @@ during [os_net_setup](../roles/os_net_setup.md) and you've taken steps
 to correct the problem and want to test if they resolved the issue,
 then use:
 ```Bash
-ansible-playbook deploy-edpm.yml -K --tags admin-setup
+[controller-0]$ ansible-playbook deploy-edpm.yml -K --tags admin-setup
 ```
 
 More tags may show up according to the needs.

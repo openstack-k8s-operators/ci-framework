@@ -1,1 +1,0 @@
-../../../ci_framework/roles/install_ca/README.md

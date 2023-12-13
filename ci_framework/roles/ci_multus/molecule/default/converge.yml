@@ -1,0 +1,201 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    testpod_name: "pod-testnad"
+  tasks:
+    - name: Add crc hostname with it's IP to /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "192.168.130.11 crc"
+
+    - name: Add the crc host dynamically
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
+    - name: Fetch crc network facts
+      ansible.builtin.setup:
+        gather_subset: network
+      delegate_to: crc
+      delegate_facts: true
+
+    - name: Prepare the network var for the role
+      ansible.builtin.set_fact:
+        crc_ci_bootstrap_networks_out:
+          networks:
+            default:
+              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+              mtu: 1500
+              range: 192.168.122.0/24
+              multus:
+                range: 192.168.122.30-192.168.122.70
+        cifmw_ci_multus_nad_extra_list:
+          - name: bgpnet1
+            iface: bgpnet1_iface
+            type: interface
+            ipam:
+              type: whereabouts
+              range: 100.65.4.0/30
+              range_start: 100.65.4.1
+              range_end: 100.65.4.2
+
+    - name: Call ci_multus role
+      ansible.builtin.include_role:
+        name: "ci_multus"
+
+    # Verify the run
+    - name: Fetch files stat results
+      ansible.builtin.stat:
+        path: >-
+          {{
+            [
+              ansible_user_dir,
+              'ci-framework-data',
+              'artifacts',
+              item
+            ] | ansible.builtin.path_join
+          }}
+      register: _ci_multus_molecule_stat_out
+      loop:
+        - manifests/ci_multus/ci_multus_nads.yml
+
+    - name: Assert that all expected files exist
+      ansible.builtin.assert:
+        that: >-
+          _ci_multus_molecule_stat_out.results |
+          map(attribute="stat.exists") |
+          select("equalto", true) |
+          length == (_ci_multus_molecule_stat_out.results | length)
+
+    - name: Fetch all files content
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      register: _ci_multus_molecule_slurp_out
+      loop: >-
+        {{
+          _ci_multus_molecule_stat_out.results |
+          map(attribute="stat.path")
+        }}
+
+    - name: Assert that all files contains proper YAML data
+      ansible.builtin.assert:
+        that: "item.content | b64decode | from_yaml_all | length > 0"
+      loop: "{{ _ci_multus_molecule_slurp_out.results }}"
+      loop_control:
+        label: "{{ item.source }}"
+
+    - name: Check if NADs were created
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ cifmw_ci_multus_namespace }}"
+        api_version: k8s.cni.cncf.io/v1
+        kind: NetworkAttachmentDefinition
+      register: _ci_multus_molecule_nads_out
+      failed_when: >-
+        (_ci_multus_molecule_nads_out is not defined) or
+        (_ci_multus_molecule_nads_out is failed) or
+        (_ci_multus_molecule_nads_out.resources | length == 0)
+
+    - name: Create a test pod to attach a network
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ cifmw_ci_multus_namespace }}"
+        state: present
+        definition:
+          api_version: v1
+          kind: Pod
+          metadata:
+            name: "{{ testpod_name }}"
+            annotations:
+              k8s.v1.cni.cncf.io/networks: default
+          spec:
+            containers:
+              - name: testnad
+                image: quay.rdoproject.org/openstack-k8s-operators/alpine:latest
+                imagePullPolicy: Always
+                command:
+                  - "/bin/ash"
+                  - "-c"
+                  - "trap : TERM INT; sleep infinity & wait"
+        wait: true
+        wait_sleep: 10
+        wait_timeout: 300
+        wait_condition:
+          type: Ready
+          status: "True"
+      register: _ci_multus_molecule_test_pod_out
+
+    - name: Assert that test pod has the additional network
+      ansible.builtin.assert:
+        that:
+          - _ci_multus_molecule_test_pod_out.result.metadata.annotations[
+              'k8s.v1.cni.cncf.io/networks'] == "default"
+
+    - name: Delete test pod
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        namespace: "{{ cifmw_ci_multus_namespace }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        name: "{{ testpod_name }}"
+
+    - name: Call cleanup
+      ansible.builtin.import_role:
+        name: ci_multus
+        tasks_from: cleanup.yml
+
+    - name: Check if NADs were deleted
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ cifmw_ci_multus_namespace }}"
+        api_version: k8s.cni.cncf.io/v1
+        kind: NetworkAttachmentDefinition
+      register: _ci_multus_molecule_nads_cleanup_out
+      failed_when: >-
+        (_ci_multus_molecule_nads_cleanup_out is not defined) or
+        (_ci_multus_molecule_nads_cleanup_out is failed) or
+        (_ci_multus_molecule_nads_cleanup_out.resources | length > 0)
+
+    - name: Get all namespaces
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: Namespace
+      register: _ci_multus_molecule_ns_out
+
+    - name: Assert that multus namespace is absent
+      vars:
+        ns_names: >-
+          {{
+            _ci_multus_molecule_ns_out.resources |
+            default([]) |
+            map(attribute='metadata.name')
+          }}
+      ansible.builtin.assert:
+        that: "cifmw_ci_multus_namespace not in ns_names"

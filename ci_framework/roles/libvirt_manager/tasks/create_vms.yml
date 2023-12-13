@@ -1,10 +1,10 @@
 ---
-- name: "Create VM overlays for {{ vm_type }}"
+- name: "Create VM overlays or images for {{ vm_type }}"
   become: true
   vars:
     _base_img_name: >-
       {{
-        (vm_data.value.image_local_dir,
+        (vm_data.value.image_local_dir | default(ansible_user_dir),
          vm_data.value.disk_file_name) |
          path_join
       }}
@@ -17,7 +17,9 @@
   ansible.builtin.command:
     cmd: >-
       qemu-img create
+      {% if vm_data.value.disk_file_name != 'blank' %}
       -o backing_file={{ _img }},backing_fmt=qcow2
+      {% endif %}
       -f qcow2
       "{{ vm_type }}-{{ vm_id }}.qcow2"
       "{{ vm_data.value.disksize|default ('40') }}G"
@@ -31,7 +33,12 @@
 - name: Ensure file ownership and rights
   become: true
   ansible.builtin.file:
-    path: "{{ cifmw_libvirt_manager_basedir }}/workload/{{ vm_type }}-{{ vm_id }}.qcow2"
+    path: >-
+      {{
+        (cifmw_libvirt_manager_basedir, 'workload',
+        vm_type ~ '-' ~ vm_id ~ '.qcow2') |
+        path_join
+      }}
     group: "qemu"
     mode: "0664"
     owner: "{{ ansible_user_id }}"
@@ -105,6 +112,16 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
+- name: Attach listed networks to the VMs
+  vars:
+    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    networks: "{{ vm_data.value.nets }}"
+  ansible.builtin.include_tasks: net_to_vms.yml
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
 - name: Fetch per-vm ports
   register: _vm_ports
   ansible.builtin.command:
@@ -169,188 +186,7 @@
     loop_var: mac_node
     label: "{{ mac_node.host }}"
 
-- name: "Start VMs for type {{ vm_type }}"
-  community.libvirt.virt:
-    state: running
-    name: "cifmw-{{ vm_type }}-{{ vm_id }}"
-    uri: "qemu:///system"
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
-
-- name: "Grab IPs for nodes type {{ vm_type }}"  # noqa: risky-shell-pipe
-  register: vm_ips
-  ansible.builtin.shell:
-    cmd: >-
-      virsh -c qemu:///system -q
-      domifaddr --source arp
-      cifmw-{{ nic.host }} | grep "{{ nic.mac }}"
-  loop: "{{ public_net_nics }}"
-  loop_control:
-    loop_var: nic
-    label: "{{ nic.host }}"
-  retries: 20
-  delay: 5
-  until:
-    - vm_ips.rc == 0
-    - vm_ips.stdout != ''
-
-- name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
+- name: Start and grab IP if image is not blank
   when:
-    - inventory_hostname != 'localhost'
-  delegate_to: localhost
-  vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
-    proxy_hostname: "{{ ansible_host | default(inventory_hostname) }}"
-  ansible.builtin.blockinfile:
-    create: true
-    path: "{{ lookup('env', 'HOME') }}/.ssh/config"
-    marker: "## {mark} {{ vm_ip.nic.host }}"
-    mode: "0600"
-    block: |-
-      Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
-        ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ proxy_hostname }}
-        Hostname {{ extracted_ip }}
-        User zuul
-        StrictHostKeyChecking no
-        UserKnownHostsFile /dev/null
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: vm_ip
-    label: "{{ vm_ip.nic.host }}"
-
-- name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"  # noqa: name[template]
-  vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
-  ansible.builtin.blockinfile:
-    create: true
-    path: "{{ ansible_user_dir }}/.ssh/config"
-    marker: "## {mark} {{ vm_ip.nic.host }}"
-    mode: "0600"
-    block: |-
-      Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
-        Hostname {{ extracted_ip }}
-        User zuul
-        IdentityFile {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
-        StrictHostKeyChecking no
-        UserKnownHostsFile /dev/null
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: vm_ip
-    label: "{{ vm_ip.nic.host }}"
-
-- name: Inject nodes in the ansible inventory
-  delegate_to: localhost
-  vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
-  ansible.builtin.add_host:
-    name: "{{ vm_ip.nic.host }}"
-    groups: "{{ vm_type }}"
-    ansible_host: "{{ extracted_ip }}"
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: vm_ip
-    label: "{{ vm_ip.nic.host }}"
-
-- name: "Create group inventory for {{ vm_type }}"
-  vars:
-    hosts: "{{ vm_ips.results }}"
-    admin_user: "{{ vm_data.value.admin_user | default('zuul') }}"
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/{{ vm_type }}-group.yml"
-    src: inventory.yml.j2
-
-- name: "Wait for SSH on VMs type {{ vm_type }}"
-  vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
-  ansible.builtin.wait_for:
-    host: "{{ extracted_ip }}"
-    port: 22
-    delay: 5
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: vm_ip
-    label: "{{ extracted_ip }}"
-
-- name: "Configure ssh access on type {{ vm_type }}"
-  when:
-    - vm_type is not match('^crc.*$')
-  delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.posix.authorized_key:
-    user: "{{ _init_admin_user }}"
-    state: present
-    key: "{{ pub_key }}"
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: "vm_ip"
-    label: "{{ vm_ip.nic.host }}"
-
-- name: "Configure VMs type {{ vm_type }}"
-  when:
-    - vm_type is not match('^(crc|ocp).*$')
-  delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.builtin.shell:
-    executable: /bin/bash
-    cmd: |-
-      test -d /home/zuul && exit 0;
-      set -xe -o pipefail;
-      echo "{{ vm_ip.nic.host }}" | sudo tee /etc/hostname;
-      sudo hostname -F /etc/hostname;
-      sudo useradd -m -d /home/zuul zuul;
-      echo "zuul ALL=(ALL)  NOPASSWD: ALL" | sudo tee /etc/sudoers.d/zuul;
-      sudo -u zuul mkdir -p /home/zuul/.ssh /home/zuul/src/github.com/openstack-k8s-operators;
-      sudo cp ${HOME}/.ssh/authorized_keys /home/zuul/.ssh/;
-      chown -R zuul: /home/zuul/.ssh;
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: "vm_ip"
-    label: "{{ vm_ip.nic.host }}"
-
-- name: "Inject private key on hosts {{ vm_type }}"
-  when:
-    - vm_type is match('^controller.*$')
-  delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.builtin.copy:
-    dest: "/home/zuul/.ssh/id_ed25519"
-    content: "{{ priv_key }}"
-    owner: zuul
-    group: zuul
-    mode: "0400"
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: "vm_ip"
-    label: "{{ vm_ip.nic.host }}"
-
-- name: "Inject public key on hosts {{ vm_type }}"
-  when:
-    - vm_type is match('^controller.*$')
-  delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.builtin.copy:
-    dest: "/home/zuul/.ssh/id_ed25519.pub"
-    content: "{{ pub_key }}"
-    owner: zuul
-    group: zuul
-    mode: "0444"
-  loop: "{{ vm_ips.results }}"
-  loop_control:
-    loop_var: "vm_ip"
-    label: "{{ vm_ip.nic.host }}"
-
-- name: "Inject network configuration file on {{ vm_type }}"
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-network-env/{{ vm_type }}-{{ vm_id }}.yml"
-    src: >-
-      {{
-        (ci_job_networking is defined)
-        | ternary('ci-network-data.yml.j2', 'network-data.yml.j2')
-      }}
-    mode: "0644"
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
+    - vm_data.value.disk_file_name != 'blank'
+  ansible.builtin.include_tasks: start_manage_vms.yml

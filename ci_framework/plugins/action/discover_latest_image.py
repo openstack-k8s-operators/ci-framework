@@ -3,8 +3,15 @@
 
 from __future__ import absolute_import, division, print_function
 import re
-from ansible.plugins.action import ActionBase
+import yaml
+import typing
+
+
 from ansible.errors import AnsibleError
+from ansible.plugins.action import ActionBase
+from ansible.parsing.yaml.dumper import AnsibleDumper
+from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
+
 
 __metaclass__ = type
 
@@ -43,6 +50,38 @@ data:
 """
 
 
+def decode_ansible_raw(data: typing.Any) -> typing.Any:
+    """Converts an Ansible var to a python native one
+
+    Ansible raw input args can contain AnsibleUnicodes or AnsibleUnsafes
+    that are not intended to be manipulated directly.
+    This function converts the given variable to a one that only contains
+    python built-in types.
+
+    Args:
+        data: The usafe Ansible content to decode
+
+    Returns: The python types based result
+
+    """
+    if isinstance(data, list):
+        return [decode_ansible_raw(_data) for _data in data]
+    elif isinstance(data, tuple):
+        return tuple(decode_ansible_raw(_data) for _data in data)
+    if isinstance(data, dict):
+        return yaml.load(
+            yaml.dump(
+                data, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True
+            ),
+            Loader=yaml.Loader,
+        )
+    if isinstance(data, AnsibleUnsafeText):
+        return str(data)
+    if isinstance(data, AnsibleUnsafeBytes):
+        return bytes(data)
+    return data
+
+
 class ActionModule(ActionBase):
     IMAGES_FILES = [
         # e.g: https://cloud.centos.org/centos/9-stream/x86_64/images/CHECKSUM
@@ -55,23 +94,23 @@ class ActionModule(ActionBase):
     def run(self, tmp=None, task_vars=None):
         super().run(tmp, task_vars)
 
-        module_args = self._task.args.copy()
+        task_args = self._task.args.copy()
 
-        if "image_prefix" not in module_args:
+        if "image_prefix" not in task_args:
             raise AnsibleError('"image_prefix" parameter is mandatory')
 
-        img_prefix = module_args.pop("image_prefix")
+        img_prefix = decode_ansible_raw(task_args.pop("image_prefix"))
 
         images_files = self.IMAGES_FILES.copy()
-        if "images_file" in module_args:
-            images_files.insert(0, module_args.pop("images_file"))
+        if "images_file" in task_args:
+            images_files.insert(0, decode_ansible_raw(task_args.pop("images_file")))
 
         # Ensure we return content
-        module_args["return_content"] = True
+        task_args["return_content"] = True
         # Ensure we run locally only
         task_vars["delegate_to"] = "localhost"
 
-        base_image_url = module_args["url"]
+        base_image_url = decode_ansible_raw(task_args["url"])
 
         qcow2_image_pattern = re.compile(
             rf"(SHA256|SHA1|MD5) \(.*?({re.escape(img_prefix)}.*?\.qcow2)\)"
@@ -79,11 +118,11 @@ class ActionModule(ActionBase):
 
         image_list = None
         for image_file in images_files:
-            module_args["url"] = f"{base_image_url}/{image_file}"
+            task_args["url"] = f"{base_image_url}/{image_file}"
 
             page = self._execute_module(
                 module_name="ansible.builtin.uri",
-                module_args=module_args,
+                module_args=task_args,
                 task_vars=task_vars,
                 tmp=tmp,
             )
@@ -93,7 +132,7 @@ class ActionModule(ActionBase):
                     filter(qcow2_image_pattern.match, page["content"].split("\n"))
                 )
                 break
-        else:
+
             raise AnsibleError(
                 "Error fetching the information from all checksum files."
             )

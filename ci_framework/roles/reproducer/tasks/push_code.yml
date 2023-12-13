@@ -11,8 +11,8 @@
       ansible.builtin.git:
         dest: "{{ repo.project.src_dir }}"
         repo: "https://{{ repo.project.canonical_name }}"
-        refspec: "pull/{{ repo.change }}/head:{{ job_id }}"
-        version: "{{ job_id }}"
+        refspec: "{{ omit if job_id is not defined else 'pull/'~repo.change~'/head:'~job_id }}"
+        version: "{{ job_id | default(omit) }}"
         force: true
       loop: "{{ zuul['items'] }}"
       loop_control:
@@ -57,7 +57,7 @@
         repo: "{{ item.src }}"
         dest: "{{ item.dest }}"
         version: "{{ item.version | default('HEAD') }}"
-        refspec: "{{ item.refspec | default('omit') }}"
+        refspec: "{{ item.refspec | default(omit) }}"
         force: true
       loop: "{{ cifmw_reproducer_repositories }}"
       loop_control:
@@ -69,3 +69,9 @@
       loop_control:
         loop_var: repository
         label: "{{ repository.src | basename }}"
+
+- name: Install collections on controller-0
+  delegate_to: controller-0
+  ansible.builtin.command:
+    chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+    cmd: ansible-galaxy collection install -r requirements.yml

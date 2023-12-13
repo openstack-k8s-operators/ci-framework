@@ -1,1 +1,0 @@
-../../../ci_framework/roles/hive/README.md

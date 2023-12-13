@@ -79,8 +79,8 @@
         {%- if cifmw_openshift_skip_tls_verify | default(false) |bool %}
         --insecure-skip-tls-verify=true
         {%- endif %}
-      retries: 20
-      delay: 60
+      retries: 60
+      delay: 10
       until:
         - wait_crc is defined
         - wait_crc.rc is defined
@@ -127,6 +127,28 @@
     - name: Register pub key as a fact
       ansible.builtin.set_fact:
         persistent_ssh_key: "{{ pub_key_slurp['content'] | b64decode }}"
+
+    - name: Check if cloud-init is overriding NM settings
+      become: true
+      ansible.builtin.stat:
+        path: "/etc/NetworkManager/conf.d/99-cloud-init.conf"
+      register: _cloud_init_nm_override_stat
+
+    - name: Remove cloud-init DNS override if present and reload
+      become: true
+      when: _cloud_init_nm_override_stat.stat.exists
+      block:
+        - name: Remove cloud-init DNS override if present
+          community.general.ini_file:
+            path: "/etc/NetworkManager/conf.d/99-cloud-init.conf"
+            section: main
+            option: dns
+            state: absent
+
+        - name: Reload the NetworkManager to pick the changes
+          ansible.builtin.service:
+            name: NetworkManager
+            state: "reloaded"
 
     - name: Get the default iface connection
       register: controller_default_connection_out
@@ -178,3 +200,12 @@
         content: |-
           cloud-admin ALL=(ALL) NOPASSWD:ALL
         mode: "0640"
+
+- name: Set some fancy hostname
+  hosts: all,!crc
+  tasks:
+    - name: Inject hostname in configuration file
+      become: true
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}.ci-rdo.local"
+        use: "systemd"

@@ -202,9 +202,9 @@ import dataclasses
 import pathlib
 import yaml
 
-
-from ansible.plugins.action import ActionBase
 from ansible.parsing.yaml.dumper import AnsibleDumper
+from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
+from ansible.plugins.action import ActionBase
 
 
 @dataclasses.dataclass
@@ -773,11 +773,24 @@ class CifmwKustomizeWrapper:
         )
 
 
-# Ansible raw input args can contain AnsibleUnicodes nested
-# in dicts, this ensures we work with plain python types
-def decode_ansible_raw_iterable(data):
+def decode_ansible_raw(data: typing.Any) -> typing.Any:
+    """Converts an Ansible var to a python native one
+
+    Ansible raw input args can contain AnsibleUnicodes or AnsibleUnsafes
+    that are not intended to be manipulated directly.
+    This function converts the given variable to a one that only contains
+    python built-in types.
+
+    Args:
+        data: The usafe Ansible content to decode
+
+    Returns: The python types based result
+
+    """
     if isinstance(data, list):
-        return [decode_ansible_raw_iterable(_data) for _data in data]
+        return [decode_ansible_raw(_data) for _data in data]
+    elif isinstance(data, tuple):
+        return tuple(decode_ansible_raw(_data) for _data in data)
     if isinstance(data, dict):
         return yaml.load(
             yaml.dump(
@@ -785,7 +798,10 @@ def decode_ansible_raw_iterable(data):
             ),
             Loader=yaml.Loader,
         )
-
+    if isinstance(data, AnsibleUnsafeText):
+        return str(data)
+    if isinstance(data, AnsibleUnsafeBytes):
+        return bytes(data)
     return data
 
 
@@ -797,19 +813,18 @@ class ActionModule(ActionBase):
         result = super(ActionModule, self).run(tmp, task_vars)
         del tmp
 
-        target_path = self._task.args.get("target_path", None)
-        kustomizations = decode_ansible_raw_iterable(
-            self._task.args.get("kustomizations", None)
-        )
-        kustomizations_paths = self._task.args.get("kustomizations_paths", None)
-        output_path = self._task.args.get("output_path", None)
-        kustomization_files_goes_first = self._task.args.get(
+        task_args = decode_ansible_raw(self._task.args)
+        target_path = task_args.get("target_path", None)
+        kustomizations = task_args.get("kustomizations", None)
+        kustomizations_paths = task_args.get("kustomizations_paths", None)
+        output_path = task_args.get("output_path", None)
+        kustomization_files_goes_first = task_args.get(
             "kustomization_files_goes_first", True
         )
-        preserve_workspace = self._task.args.get("preserve_workspace", False)
-        sort_ascending = self._task.args.get("sort_ascending", True)
-        skip_regexes = self._task.args.get("skip_regexes", None)
-        include_regexes = self._task.args.get("include_regexes", None)
+        preserve_workspace = task_args.get("preserve_workspace", False)
+        sort_ascending = task_args.get("sort_ascending", True)
+        skip_regexes = task_args.get("skip_regexes", None)
+        include_regexes = task_args.get("include_regexes", None)
         final_environment = {}
         self._compute_environment_string(final_environment)
 

@@ -1,0 +1,126 @@
+---
+# This is local to your desktop/laptop.
+# We can't use ansible_user_dir here, unless you have the same user on the
+# hypervisor and locally.
+cifmw_install_yamls_repo: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+# This will be created on the hypervisor.
+cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+cifmw_path: "{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+
+cifmw_reproducer_epel_pkgs:
+  - python3-bcrypt
+  - python3-passlib
+
+# Since we don't have zuul data, we have to provide some
+# networking information to the libvirt_manager so that it will be able to
+# generate the needed content for later usage
+cifmw_libvirt_manager_networks:
+  ocpbm:
+    range: "192.168.111.0/24"
+    static_ip: true
+  osp_trunk:
+    default: true
+    range: "192.168.122.0/24"
+    mtu: 9000
+    static_ip: true
+  internal-api:
+    range: "172.17.0.0/24"
+    vlan: 20
+  storage:
+    range: "172.18.0.0/24"
+    vlan: 21
+  tenant:
+    range: "172.19.0.0/24"
+    vlan: 22
+  storage-mgmt:
+    range: "172.20.0.0/24"
+    vlan: 23
+
+cifmw_libvirt_manager_pub_net: ocpbm
+
+# This will instruct libvirt_manager to create 3 compute and
+# the ansible-controller, consuming the networks created and
+# managed by devscripts.
+# Note that the "osp_trunk" network is the equivalent of the
+# "private_net" in the CI layout, and will hold the VLAN for
+# network isolation.
+# The "ocpbm" network is managed by devscripts as well, and
+# provides access to Internet. This will be the equivalent of the
+# "public network" as seen in CI.
+cifmw_use_libvirt: true
+cifmw_libvirt_manager_configuration:
+  networks:
+    osp_trunk: |
+      <network>
+        <name>osp_trunk</name>
+        <forward mode='nat'/>
+        <bridge name='osp_trunk' stp='on' delay='0'/>
+        <mtu size='{{ cifmw_libvirt_manager_networks.osp_trunk.mtu }}'/>
+        <ip family='ipv4' address='{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
+        </ip>
+      </network>
+  vms:
+    compute:
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
+      amount: 3
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+    controller:
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+    ocp:
+      amount: 3
+      admin_user: core
+      image_local_dir: "/home/dev-scripts/pool"
+      disk_file_name: "ocp_master"
+      disksize: "105"
+      xml_paths:
+        - /home/dev-scripts/ocp_master_0.xml
+        - /home/dev-scripts/ocp_master_1.xml
+        - /home/dev-scripts/ocp_master_2.xml
+      nets:
+        - osp_trunk
+
+
+## devscript support for OCP deploy
+cifmw_use_devscripts: true
+cifmw_devscripts_ocp_version: '4.13.13'
+cifmw_devscripts_config_overrides:
+  worker_memory: 16384
+  worker_disk: 100
+  worker_vcpu: 10
+  num_extra_workers: 0
+
+# Note: with that extra_network_names "osp_trunk", we instruct
+# devscripts role to create a new network, and associate it to
+# the OCP nodes. This one is a "private network", and will hold
+# the VLANs used for network isolation.
+
+# Please create a custom env file to provide:
+# cifmw_devscripts_ci_token:
+# cifmw_devscripts_pull_secret:

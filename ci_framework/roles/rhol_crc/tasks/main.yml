@@ -24,6 +24,10 @@
     - artifacts
     - bin
 
+- name: Initialize manage_secrets
+  ansible.builtin.import_role:
+    name: manage_secrets
+
 - name: Verify CRC status
   tags:
     - always
@@ -36,6 +40,17 @@
     - crc_present|bool
     - not cifmw_rhol_crc_force_cleanup|bool
     - not cifmw_rhol_crc_reuse | bool
+
+- name: Ensure pull-secret is in place if we need to configure CRC
+  when:
+    - (cifmw_rhol_crc_force_cleanup|bool) or
+      (not crc_present|bool) or
+      (not crc_running|bool)
+  vars:
+    cifmw_manage_secrets_pullsecret_dest: "{{ cifmw_rhol_crc_pullsecret_dest }}"
+  ansible.builtin.include_role:
+    name: manage_secrets
+    tasks_from: pull_secret.yml
 
 - name: Clean/deploy CRC
   block:
@@ -63,33 +78,50 @@
     - name: Configure and start RHOL/CRC
       when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_running|bool
       block:
-        - name: Configure RHOL/CRC using install_yamls
-          when: cifmw_rhol_crc_use_installyamls|bool
-          ansible.builtin.import_tasks: install_yamls.yml
+        - name: Set RHOL/CRC configuration options
+          ansible.builtin.import_tasks: configuration.yml
 
-        - name: Manually configure RHOL/CRC
-          when: not cifmw_rhol_crc_use_installyamls|bool
-          block:
-            - name: Set RHOL/CRC configuration options
-              ansible.builtin.import_tasks: configuration.yml
+        - name: Setup RHOL/CRC
+          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
+          register: cifmw_rhol_crc_cmd_setup
 
-            - name: Setup RHOL/CRC
-              ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} setup"
-              register: cifmw_rhol_crc_cmd_setup
-
-            - name: Start RHOL/CRC
-              ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
-              register: cifmw_rhol_crc_cmd_start
+        - name: Start RHOL/CRC
+          ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} start"
+          register: cifmw_rhol_crc_cmd_start
 
     - name: Attach default network to CRC
       when: cifmw_rhol_crc_use_installyamls|bool
       vars:
-        make_crc_attach_default_interface_dryrun: "{{ cifmw_rhol_crc_dryrun }}"
-        make_crc_attach_default_interface_env:
-          PATH: "{{ cifmw_path }}"
-      ansible.builtin.include_role:
-        name: "install_yamls_makes"
-        tasks_from: "make_crc_attach_default_interface.yml"
+        cifmw_libvirt_manager_net_prefix_add: false
+        vm_name: crc
+        network:
+          name: default
+          static_ip: true
+          cidr: "192.168.122.0/24"
+          mtu: 1500
+      block:
+        - name: List VMs
+          register: _vm_list
+          community.libvirt.virt:
+            command: "list_vms"
+
+        - name: Output VMs
+          ansible.builtin.debug:
+            var: _vm_list
+
+        - name: List networks
+          register: _net_list
+          community.libvirt.virt_net:
+            command: "list_nets"
+
+        - name: Output networks
+          ansible.builtin.debug:
+            var: _net_list
+
+        - name: Attach default network
+          ansible.builtin.import_role:
+            name: libvirt_manager
+            tasks_from: attach_interface.yml
 
   always:
     - name: Delete sudoers file

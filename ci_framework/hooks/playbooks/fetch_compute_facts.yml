@@ -1,16 +1,4 @@
 ---
-- name: Push repositories hook
-  hosts: all,!crcs,!crc
-  gather_facts: true
-  tasks:
-    - name: Copy repositories from controller to compute
-      when:
-        - inventory_hostname is match('^compute.*')
-      become: true
-      ansible.builtin.copy:
-        dest: "/etc/yum.repos.d/"
-        src: "{{ cifmw_basedir }}/artifacts/repositories/"
-
 - name: Build dataset hook
   hosts: localhost
   gather_facts: false
@@ -129,31 +117,14 @@
               - target:
                   kind: OpenStackDataPlaneNodeSet
                 patch: |-
+              {% for compute_node in groups['computes'] %}
+                  - op: replace
+                    path: /spec/nodes/edpm-{{ compute_node }}/hostName
+                    value: "{{compute_node}}.ci-rdo.local"
+              {% endfor %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/neutron_public_interface_name
                     value: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('') }}"
-
-                  - op: replace
-                    path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_mtu
-                    value: {{ crc_ci_bootstrap_networks_out['compute-0'].default.mtu | default(1500) }}
-
-              {% if 'tenant' in crc_ci_bootstrap_networks_out['compute-0'] %}
-                  - op: replace
-                    path: /spec/nodeTemplate/ansible/ansibleVars/tenant_mtu
-                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['tenant'].mtu | default(1500) }}
-              {% endif %}
-
-              {% if 'storage' in crc_ci_bootstrap_networks_out['compute-0'] %}
-                  - op: replace
-                    path: /spec/nodeTemplate/ansible/ansibleVars/storage_mtu
-                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['storage'].mtu | default(1500) }}
-              {% endif %}
-
-              {% if 'internal-api' in crc_ci_bootstrap_networks_out['compute-0'] %}
-                  - op: replace
-                    path: /spec/nodeTemplate/ansible/ansibleVars/internal_api_mtu
-                    value: {{ crc_ci_bootstrap_networks_out['compute-0']['internal-api'].mtu | default(1500) }}
-              {% endif %}
 
               {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
                   - op: replace
@@ -182,6 +153,16 @@
                         edpm-compute:
                           nic2: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('ens7') }}"
 
+                  - op: add
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_debug
+                    value: true
+
+                  - op: add
+                    path: /spec/env
+                    value:
+                      - name: "ANSIBLE_VERBOSITY"
+                        value: "2"
+
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
                     value: |-
@@ -209,7 +190,7 @@
                             primary: true
                         {% for network in role_networks %}
                           - type: vlan
-                            mtu: 1496
+                            mtu: {{ min_viable_mtu - 4 }}
                             vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
                             addresses:
                             - ip_netmask:

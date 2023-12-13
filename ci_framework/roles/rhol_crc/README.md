@@ -9,8 +9,7 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 ## Parameters
 
 * `cifmw_rhol_crc_basedir`: (String) Directory where we will have the RHOL/CRC binary and the configuration (e.g. `artifacts/.rhol_crc_pull_secret.txt`). Default to `cifmw_basedir` which defaults to `~/ci-framework-data`.
-* `cifmw_edpm_deploy_installyamls`: (String) install_yamls root location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`.
-* `cifmw_rhol_crc_use_installyamls`: (Boolean) Tell the role to leverage install_yamls `crc` related targets. Defaults to `False`.
+* `cifmw_rhol_crc_use_installyamls`: (Boolean) Mimic some steps of the install_yamls way to deploy CRC. Defaults to `False`.
 * `cifmw_rhol_crc_dryrun`: (Boolean) Toggle the `ci_make` `dry_run` parameter. Defaults to `False`.
 * `cifmw_rhol_crc_config`: (Dict) This structure is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Defaults to `{}`.
 * `cifmw_rhol_crc_version`: (String) RHOL/CRC binary version we want to use. Default: `latest`.
@@ -23,6 +22,16 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_reuse`: (Boolean) In case RHOL/CRC is detected, just reuse it. Defaults to `True`
 * `cifmw_rhol_crc_kubeconfig`: (String) Path to crc kubeconfig file. Defaults to `~/.crc/machines/crc/kubeconfig`.
 * `cifmw_rhol_crc_creds`: (Boolean) Add crc creds to bashrc. Defaults to `False`.
+* `cifmw_rhol_crc_pullsecret_dest`: (String) Absolute path of the pull-secrets destination. Defaults to `~/pull-secret.json`.
+
+### Pull-secret management
+
+This role calls the [manage_secrets](./manage_secrets.md) role. It allows to copy or create
+the pull-secret on the target host, in a known location. In order to run the `rhol_crc`
+role, you **must** provide either `cifmw_manage_secrets_pullsecret_file` OR
+`cifmw_manage_secrets_pullsecret_content`.
+
+If you provide neither, or both, it will fail.
 
 ## Cleanup
 

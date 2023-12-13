@@ -1,0 +1,206 @@
+---
+- name: Set facts related to the reproducer
+  ansible.builtin.set_fact:
+    _ctl_reproducer_basedir: >-
+      {{
+        (
+         '/home/zuul',
+         'ci-framework-data',
+         'artifacts'
+         ) | path_join
+      }}
+
+- name: Configure controller-0
+  delegate_to: controller-0
+  delegate_facts: true
+  remote_user: root
+  block:
+    - name: Gather some facts
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - 'min'
+
+    - name: Ensure directory exists
+      ansible.builtin.file:
+        path: "{{ _ctl_reproducer_basedir }}"
+        state: directory
+        owner: zuul
+        group: zuul
+        mode: "0755"
+
+    - name: Create data directory on controller-0
+      ansible.builtin.file:
+        path: "{{ _ctl_reproducer_basedir }}/parameters"
+        state: directory
+        owner: zuul
+        group: zuul
+        mode: "0755"
+
+    - name: Build job inventory for hook usage
+      tags:
+        - bootstrap
+      become: true
+      become_user: zuul
+      ansible.builtin.shell:
+        cmd: >-
+          cat /home/zuul/reproducer-inventory/* >
+          {{  _ctl_reproducer_basedir }}/zuul_inventory.yml
+        creates: "{{ _ctl_reproducer_basedir }}/zuul_inventory.yml"
+
+    - name: Push the MAC mapping data
+      tags:
+        - bootstrap
+      become: true
+      become_user: zuul
+      vars:
+        content: >-
+          {{
+            {'cifmw_mac_mapping': cifmw_libvirt_manager_mac_map}
+          }}
+      ansible.builtin.copy:
+        dest: "{{ _ctl_reproducer_basedir }}/mac-mapping.yml"
+        content: "{{ content | to_nice_yaml }}"
+
+    - name: Ensure /etc/ci/env is created
+      become: true
+      ansible.builtin.file:
+        path: /etc/ci/env
+        state: directory
+        mode: "0755"
+
+    - name: Tweak dnf configuration
+      community.general.ini_file:
+        no_extra_spaces: true
+        option: "{{ config.option }}"
+        path: "/etc/dnf/dnf.conf"
+        section: "{{ config.section | default('main') }}"
+        state: "{{ config.state | default(omit) }}"
+        value: "{{ config.value | default(omit) }}"
+      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
+      loop_control:
+        label: "{{ config.option }}"
+        loop_var: 'config'
+
+    - name: Create kube directory
+      ansible.builtin.file:
+        path: "/home/zuul/.kube"
+        state: directory
+        owner: zuul
+        group: zuul
+        mode: "0755"
+    - name: Inject kubeconfig content
+      when:
+        - _devscripts_kubeconfig is defined or _crc_kubeconfig is defined
+      ansible.builtin.copy:
+        dest: "/home/zuul/.kube/config"
+        content: >-
+          {{
+            (cifmw_use_devscripts | default(false) | bool) |
+            ternary(_devscripts_kubeconfig.content, _crc_kubeconfig.content) |
+            b64decode
+          }}
+        owner: zuul
+        group: zuul
+        mode: "0644"
+
+    - name: Inject kubeadmin-password if exists
+      when:
+        - _devscripts_kubeadm.content is defined
+      ansible.builtin.copy:
+        dest: "/home/zuul/.kube/kubeadmin-password"
+        content: "{{ _devscripts_kubeadm.content | b64decode }}"
+        owner: zuul
+        group: zuul
+        mode: "0600"
+
+    - name: Inject devscripts private key if set
+      when:
+        - _devscript_privkey.content is defined
+      ansible.builtin.copy:
+        dest: "/home/zuul/.ssh/devscripts_key"
+        content: "{{ _devscript_privkey.content | b64decode }}"
+        owner: "zuul"
+        group: "zuul"
+        mode: "0400"
+
+    - name: Inject CRC related content if needed
+      when:
+        - _layout.vms.crc is defined
+      block:
+        - name: Inject CRC ssh key
+          ansible.builtin.copy:
+            dest: "/home/zuul/.ssh/crc_key"
+            content: "{{ crc_priv_key['content'] | b64decode }}"
+            mode: "0400"
+            owner: zuul
+            group: zuul
+
+        - name: Inject crc related host entry
+          ansible.builtin.lineinfile:
+            path: /etc/hosts
+            line: >-
+              {{ cifmw_reproducer_crc_ip4 }} api.crc.testing
+              canary-openshift-ingress-canary.apps-crc.testing
+              console-openshift-console.apps-crc.testing
+              default-route-openshift-image-registry.apps-crc.testing
+              downloads-openshift-console.apps-crc.testing
+              oauth-openshift.apps-crc.testing
+
+    - name: RHEL repository setup for ansible-controller
+      when:
+        - cifmw_repo_setup_rhos_release_rpm is defined
+      block:
+        - name: Get rhos-release
+          ansible.builtin.package:
+            name: "{{ cifmw_repo_setup_rhos_release_rpm }}"
+            state: present
+            disable_gpg_check: true
+
+        - name: Enable RHEL repos
+          ansible.builtin.command:
+            cmd: "rhos-release rhel"
+
+        - name: Install internal CA
+          ansible.builtin.package:
+            name: "{{ cifmw_reproducer_internal_ca }}"
+            disable_gpg_check: true
+
+    - name: Install some tools
+      ansible.builtin.package:
+        name:
+          - bash-completion
+          - git-core
+          - make
+          - podman
+          - python3-jmespath
+          - python3-netaddr
+          - python3-pip
+          - tmux
+          - vim
+          - wget
+
+    - name: Install ansible dependencies
+      ansible.builtin.pip:
+        requirements: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/ansible-requirements.txt
+
+    - name: Inject most of the cifmw_ parameters passed to the reproducer run
+      vars:
+        _filtered_vars: >-
+          {{
+            hostvars[inventory_hostname] | default({}) |
+            dict2items |
+            selectattr('key', 'match', '^cifmw_(?!install_yamls|openshift|devscripts).*') |
+            rejectattr('key', 'equalto', 'cifmw_target_host') |
+            rejectattr('key', 'equalto', 'cifmw_basedir') |
+            rejectattr('key', 'equalto', 'cifmw_path') |
+            rejectattr('key', 'match', '^cifmw_use.*') |
+            rejectattr('key', 'match', '^cifmw_reproducer.*') |
+            rejectattr('key', 'match', '^cifmw_rhol.*') |
+            rejectattr('key', 'match', '^cifmw_discover.*') |
+            rejectattr('key', 'match', '^cifmw_libvirt_manager.*') |
+            items2dict
+          }}
+      ansible.builtin.copy:
+        dest: "/home/zuul/reproducer-variables.yml"
+        content: "{{ _filtered_vars | to_nice_yaml }}"

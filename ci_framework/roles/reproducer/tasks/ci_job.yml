@@ -32,37 +32,6 @@
   delegate_to: controller-0
   remote_user: zuul
   block:
-    - name: Ensure _reproducer_basedir is set
-      when:
-        - _reproducer_basedir is undefined
-      ansible.builtin.set_fact:
-        job_id: "reproducer"
-        _reproducer_basedir: >-
-          {{
-            (
-             '/home/zuul',
-             'ci-framework-data',
-             'artifacts'
-             ) | path_join
-          }}
-
-    - name: Ensure directory exists
-      ansible.builtin.file:
-        path: "{{ _reproducer_basedir }}"
-        state: directory
-
-    - name: Create data directory on controller-0
-      ansible.builtin.file:
-        path: "ci-framework-data/artifacts/parameters"
-        state: directory
-
-    - name: Ensure /etc/ci/env is created
-      become: true
-      ansible.builtin.file:
-        path: /etc/ci/env
-        state: directory
-        mode: "0755"
-
     - name: Create crc_ci_bootstrap_networks_out fact
       vars:
         net_config_list: |-
@@ -79,7 +48,11 @@
             default({}) |
             combine(item)
           }}
-      loop: "{{ net_config_list | map(attribute='crc_ci_bootstrap_networks_out') }}"
+      loop: >-
+        {{
+          net_config_list |
+          map(attribute='crc_ci_bootstrap_networks_out')
+        }}
 
     - name: Inject generated networking-info.yml file on controller
       become: true
@@ -124,22 +97,6 @@
             dest: zuul-network-data.yml
             content: "{{ {'job_network': ci_job_networking} | to_nice_yaml}}"
 
-    - name: Install collections
-      tags:
-        - bootstrap
-      ansible.builtin.command:
-        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: ansible-galaxy collection install -r requirements.yml
-
-    - name: Build job inventory for hook usage
-      tags:
-        - bootstrap
-      ansible.builtin.shell:
-        cmd: >-
-          cat reproducer-inventory/* >
-          ci-framework-data/artifacts/zuul_inventory.yml
-        creates: ci-framework-data/artifacts/zuul_inventory.yml
-
     - name: Push pre-CI job playbook
       tags:
         - bootstrap
@@ -155,6 +112,20 @@
           register: zuul_params
           ansible.builtin.slurp:
             path: "{{ job_id }}-params/zuul-params.yml"
+
+        - name: Push extracted content
+          vars:
+            zuul_params_filtered: >-
+              {{
+                (zuul_params['content'] | b64decode | from_yaml) |
+                dict2items |
+                rejectattr('key', 'equalto', 'cifmw_operator_build_output') |
+                rejectattr('key', 'equalto', 'content_provider_registry_ip') |
+                items2dict
+              }}
+          ansible.builtin.copy:
+            dest: "ci-framework-data/artifacts/parameters/zuul-params.yml"
+            content: "{{ zuul_params_filtered | to_nice_yaml }}"
 
     - name: Check for ansible logs file and rotate it
       tags:
@@ -178,3 +149,15 @@
           ansible-playbook
           -i ~/ci-framework-data/artifacts/zuul_inventory.yml
           pre-ci-play.yml
+
+    - name: Run job
+      when:
+        - cifmw_reproducer_run_job | bool
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-{{ job_id }}.log"
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+          {{ job_id }}_play.yml

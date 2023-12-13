@@ -24,10 +24,12 @@ The `import_*` directives allow to load content statically. It's usually
 small performances improvements. They fully support `tags` so that we may
 get a more convenient way to filter tasks in the play.
 
-#### What to use then?
+~~~{admonition} What to use then?
+:class: tip
 A simple rule of thumb: if I intend to run the tasks/role multiple time
 over the same play, I'll use `include_*` module. For the rest, I'll use
 `import_*`.
+~~~
 
 ## Testing
 ### Ansible role

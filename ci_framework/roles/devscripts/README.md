@@ -20,29 +20,37 @@ managed services.
 ## Parameters
 
 * `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the role artifacts.
-* `cifmw_devscripts_ci_token` (str) oAuth token required for accessing
-  [openshift-console](https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/).
-* `cifmw_devscripts_ci_token_file` (str) oAuth token required for accessing
-  [openshift-console](https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/).
-  We can use `cifmw_devscripts_ci_token` or `cifmw_devscripts_ci_token_file` for passing OAuth token.
 * `cifmw_devscripts_config_overrides` (dict) key/value pairs to be used for overriding the default
   configuration. Refer [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more information.
-* `cifmw_devscripts_crb_repo` (str) Repo URL of code ready builder.
 * `cifmw_devscripts_dry_run` (bool) If enabled, the workflow is evaluated.
-* `cifmw_devscripts_restart_virtproxyd` (bool) Optional, if libvirt's virtproxy service should be restarted via
-  a dev-scripts patch. By default this is enabled for stability.
 * `cifmw_devscripts_make_target` (str) Optional, the target to be used with dev-scripts.
 * `cifmw_devscripts_ocp_version` (str) The version of OpenShift to be deployed.
 * `cifmw_devscripts_osp_compute_nodes` (list) A list of nodes which has key/value pairs
   containing details about OpenStack compute nodes. Refer
   [section](#supported-keys-in-cifmw_devscripts_osp_compute_nodes) for more information.
-* `cifmw_devscripts_pull_secret` (str) Access secret for pulling OCP component images.
-* `cifmw_devscripts_pull_secret_file` (str) Path to pull-secret for pulling OCP component images.
-  We can use `cifmw_devscripts_pull_secret` or `cifmw_devscripts_pull_secret_file` for passing pull_secrets
 * `cifmw_devscripts_src_dir` (str) The parent folder of dev-scripts repository.
 * `cifmw_devscripts_use_layers` (bool) Toggle overlay support. Specifically, this boolean will instruct the role to
   shutdown the whole OCP cluster, dump the XML, undefine the nodes, and prevents running the "post" tasks. Defaults to `false`.
 * `cifmw_devscripts_remove_default_net` (bool) Remove the default virtual network. Defaults to `false`.
+
+### Secrets management
+
+This role calls the [manage_secrets](./manage_secrets.md) role. It allows to copy or create
+the needed secrets.
+
+#### pull-secret
+
+You **must** provide either `cifmw_manage_secrets_pullsecret_file` OR
+`cifmw_manage_secrets_pullsecret_content`.
+
+If you provide neither, or both, it will fail.
+
+#### CI Token
+
+You **must** provide either `cifmw_manage_secrets_citoken_file` OR
+`cifmw_manage_secrets_citoken_content`.
+
+If you provide neither, or both, it will fail.
 
 ### Supported keys in cifmw_devscripts_config_overrides
 

@@ -1,1 +1,0 @@
-../../../ci_framework/roles/openshift_provisioner_node/README.md
