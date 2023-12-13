@@ -8,16 +8,16 @@ __metaclass__ = type
 import glob
 import json
 import os
-import typing
 import re
-import yaml
 
 from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
 from ansible.module_utils import basic
-from ansible.parsing.yaml.dumper import AnsibleDumper
-from ansible.utils.unsafe_proxy import AnsibleUnsafeText, AnsibleUnsafeBytes
 from ansible.utils.display import Display
+
+from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+    ansible_encoding,
+)
 
 
 DOCUMENTATION = r"""
@@ -146,38 +146,6 @@ popd
 """
 
 
-def decode_ansible_raw(data: typing.Any) -> typing.Any:
-    """Converts an Ansible var to a python native one
-
-    Ansible raw input args can contain AnsibleUnicodes or AnsibleUnsafes
-    that are not intended to be manipulated directly.
-    This function converts the given variable to a one that only contains
-    python built-in types.
-
-    Args:
-        data: The usafe Ansible content to decode
-
-    Returns: The python types based result
-
-    """
-    if isinstance(data, list):
-        return [decode_ansible_raw(_data) for _data in data]
-    elif isinstance(data, tuple):
-        return tuple(decode_ansible_raw(_data) for _data in data)
-    if isinstance(data, dict):
-        return yaml.load(
-            yaml.dump(
-                data, Dumper=AnsibleDumper, default_flow_style=False, allow_unicode=True
-            ),
-            Loader=yaml.Loader,
-        )
-    if isinstance(data, AnsibleUnsafeText):
-        return str(data)
-    if isinstance(data, AnsibleUnsafeBytes):
-        return bytes(data)
-    return data
-
-
 class ActionModule(ActionBase):
     def extract_env(self, task_vars):
         env_content = task_vars["environment"]
@@ -231,7 +199,7 @@ class ActionModule(ActionBase):
 
         # Remove output_dir param from the params we'll pass down to the
         # module, and generate log dir path.
-        output_dir = decode_ansible_raw(task_args.pop("output_dir"))
+        output_dir = ansible_encoding.decode_ansible_raw(task_args.pop("output_dir"))
         log_dir = os.path.join(output_dir, "../logs")
 
         # Generate file using the community.general.make "command" output value
@@ -293,7 +261,9 @@ class ActionModule(ActionBase):
             )
             m_ret.update(cp_log.run(task_vars=task_vars))
         else:
-            m_ret = {"command": json.dumps(decode_ansible_raw(task_args))}
+            m_ret = {
+                "command": json.dumps(ansible_encoding.decode_ansible_raw(task_args))
+            }
 
         # Write the reproducer script
         exports = self.extract_env(task_vars)
@@ -302,7 +272,9 @@ class ActionModule(ActionBase):
 
         data = {
             "chdir": task_args["chdir"],
-            "cmd": m_ret.get("command", json.dumps(decode_ansible_raw(task_args))),
+            "cmd": m_ret.get(
+                "command", json.dumps(ansible_encoding.decode_ansible_raw(task_args))
+            ),
             "exports": "\n".join(exports),
         }
         copy_args["content"] = TMPL_REPRODUCER % data
