@@ -10,8 +10,9 @@ cd ${DOCS_DIR}/source
 
 # Fake the ansible_collections path for python imports
 SITE_PACKAGES=$(python -c 'import site; print(site.getsitepackages()[0])')
-mkdir -p "${SITE_PACKAGES}/ansible_collections/cifmw"
-ln -nsfr ../../ci_framework "${SITE_PACKAGES}/ansible_collections/cifmw/general"
+# install the cifmw collection from source without dependencies (removes the
+# need for any symlink)
+ansible-galaxy collection install -U -n ../.. -p "${SITE_PACKAGES}"
 
 make clean
 

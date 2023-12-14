@@ -29,7 +29,7 @@ plugin_doc:
 utils_doc: export SPHINX_APIDOC_OPTIONS=members,show-inheritance
 utils_doc:
 	#find ../../plugins/module_utils/ -type f -iname "*.py" -exec cp '{}' module_utils/ \;
-	$(SPHINXAPI) -o ./module_utils -T --implicit-namespaces ../../plugins/module_utils/*
+	$(SPHINXAPI) -o ./module_utils -T --implicit-namespaces ../../plugins/module_utils/*/
 
 .PHONY: role_doc
 role_doc:

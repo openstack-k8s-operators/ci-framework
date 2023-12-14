@@ -1,0 +1,121 @@
+---
+- name: Apply a single string based kustomization using kustomize instead of oc
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_extra_path: "{{ ci_kustomize_kustomize_bin_path }}"
+    kustomize_tc_name: "tc-success-extras-bare-kustomize-bin"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      patches:
+      -   patch: |-
+            - op: replace
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+              kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: false
+    kustomize_tc_should_change: true
+    kustomize_tc_should_have_labels:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: testing-deployment
+        labels:
+          cifmw-label-1: "cifmw-label-1-value"
+    kustomize_tc_should_apply_kustomizations_count: 1
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply colliding kustomizations with reversed priority
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_extra_path: "{{ ci_kustomize_oc_bin_path }}"
+    kustomize_tc_name: "tc-success-extras-reversed-priority"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomization_files_goes_first: false
+    kustomize_tc_kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      patches:
+      -   patch: |-
+            - op: replace
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value-from-string"
+          target:
+              kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: false
+    kustomize_tc_should_change: true
+    kustomize_tc_should_have_labels:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: testing-deployment
+        labels:
+          cifmw-label-1: "cifmw-label-1-value"
+    kustomize_tc_should_apply_kustomizations_count: 2
+    # Define kustomization that needs to be copied to the TC temporal folder:
+    kustomize_tc_copy_kustomization_files:
+      - "kustomization.yaml"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Apply kustomization overriding the output file
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_extra_path: "{{ ci_kustomize_oc_bin_path }}"
+    kustomize_tc_name: "tc-success-extras-override-output-file"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_output_path: "kustomization-result.yaml"
+    kustomize_tc_kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      patches:
+      -   patch: |-
+            - op: replace
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+              kind: Deployment
+    # Define assertions
+    kustomize_tc_should_fail: false
+    kustomize_tc_should_change: true
+    kustomize_tc_should_have_labels:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: testing-deployment
+        labels:
+          cifmw-label-1: "cifmw-label-1-value"
+    kustomize_tc_should_apply_kustomizations_count: 2
+    # Define kustomization that needs to be copied to the TC temporal folder:
+    kustomize_tc_copy_kustomization_files:
+      - "kustomization.yaml"
+  ansible.builtin.include_tasks: run_test_case.yml
+
+- name: Preserve the workspace folder after a successful kustomization
+  vars:
+    # Define the kustomization parameters
+    kustomize_tc_extra_path: "{{ ci_kustomize_kustomize_bin_path }}"
+    kustomize_tc_name: "tc-success-extras-preserve-workspace-dir"
+    kustomize_tc_target_manifest_path: "testing-deployment.yaml"
+    kustomize_tc_kustomizations: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      patches:
+      -   patch: |-
+            - op: replace
+              path: /metadata/labels/cifmw-label-1
+              value: "cifmw-label-1-value"
+          target:
+              kind: Deployment
+    kustomize_tc_preserve_workspace: true
+    # Define assertions
+    kustomize_tc_should_fail: false
+    kustomize_tc_should_change: true
+    kustomize_tc_should_have_labels:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: testing-deployment
+        labels:
+          cifmw-label-1: "cifmw-label-1-value"
+    kustomize_tc_should_apply_kustomizations_count: 1
+  ansible.builtin.include_tasks: run_test_case.yml
