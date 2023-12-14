@@ -155,7 +155,7 @@ instance.
 
 #### Access to the virtual machines
 Your local ssh configuration file will be modified by the reproducer in order to offer
-an easy access to the nodes: `ssh controller-0`, `ssh core@crc-0`, `ssh compute-0` and
+an easy access to the nodes: `ssh controller-0`, `ssh crc-0`, `ssh compute-0` and
 so on will work right out of the box.
 
 ### Specific parameters
