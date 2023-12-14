@@ -311,7 +311,15 @@ def sha1_file(file_path: typing.Union[str, os.PathLike]) -> str:
 
 
 class CifmwKustomizeWrapper:
-    __CI_KUSTOMIZE_CMD_OPTS = [".", "-o"]
+    # NOTE(gibi): the "-o" opt needs to be the last one in the list as
+    # the output dir appended to the command line after it by
+    # __create_kustomize_build_command()
+    __CI_KUSTOMIZE_CMD_OPTS = [
+        ".",
+        "--load-restrictor",
+        "LoadRestrictionsNone",
+        "-o",
+    ]
     __CI_KUSTOMIZE_TOOLS_OPTS = {"kustomize": ["build"], "oc": ["kustomize"]}
     __CI_KUSTOMIZE_WORKSPACE_DIR_NAME = "cifmw-kustomize-workspace"
     __CI_KUSTOMIZE_FILES_GLOB_EXPRESSIONS = ["*.yaml", "*.yml"]
