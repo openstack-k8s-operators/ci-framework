@@ -29,6 +29,19 @@
     _hosts: "{{ _hosts|default([]) + [ hostvars[item][ceph_hostname_var] ] }}"
   loop: "{{ groups['edpm'] }}"
 
+- name: Get and save TLS certificate for rgw spec if provided
+  when: cifmw_cephadm_certificate | length > 0 and
+        cifmw_cephadm_key | length > 0
+  block:
+    - name: Get the certificate content
+      register: slurp_cert
+      ansible.builtin.slurp:
+        src: "{{ cifmw_cephadm_certificate }}"
+
+    - name: Set rgw_frontend_cert for rgw spec
+      ansible.builtin.set_fact:
+        rgw_frontend_cert: "{{ slurp_cert['content'] | b64decode }}"
+
 - name: Create a Ceph RGW spec
   ansible.builtin.template:
     src: templates/ceph_rgw.yml.j2
