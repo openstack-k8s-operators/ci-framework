@@ -57,6 +57,11 @@
 - name: Deploy CRC if needed
   when:
     - cifmw_libvirt_manager_configuration.vms.crc is defined
+    - (
+        cifmw_libvirt_manager_configuration.vms.crc.target is defined and
+        cifmw_libvirt_manager_configuration.vms.crc.target == inventory_hostname
+      ) or
+      cifmw_libvirt_manager_configuration.vms.crc.target is undefined
   tags:
     - bootstrap
     - bootstrap_layout
@@ -65,7 +70,12 @@
 
 - name: Consume dev-scripts for OCP cluster
   when:
-    - cifmw_use_devscripts | default(false) | bool
+    - cifmw_libvirt_manager_configuration.vms.ocp is defined
+    - (
+        cifmw_libvirt_manager_configuration.vms.ocp.target is defined and
+        cifmw_libvirt_manager_configuration.vms.ocp.target == inventory_hostname
+      ) or
+      cifmw_libvirt_manager_configuration.vms.ocp.target is undefined
   tags:
     - bootstrap
     - boostrap_layout
@@ -79,31 +89,39 @@
     - bootstrap_layout
   ansible.builtin.import_tasks: libvirt_layout.yml
 
-- name: Push local code
-  tags:
-    - bootstrap_repositories
-    - bootstrap
-  ansible.builtin.import_tasks: push_code.yml
-
-- name: Rotate some logs
-  tags:
-    - always
-  ansible.builtin.include_tasks: rotate_log.yml
-  loop:
-    - ansible-bootstrap.log
-
-- name: Bootstrap environment on controller-0
-  delegate_to: controller-0
-  environment:
-    ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
-  ansible.builtin.command:
-    chdir: "src/github.com/openstack-k8s-operators/ci-framework"
-    cmd: >-
-      ansible-playbook
-      -e @~/reproducer-variables.yml
-      ci_framework/playbooks/01-bootstrap.yml
-
-- name: Emulate CI job
+- name: Run only on hypervisor with controller-0
   when:
-    - cifmw_job_uri is defined
-  ansible.builtin.import_tasks: ci_job.yml
+    - (
+        cifmw_libvirt_manager_configuration.vms.controller.target is defined and
+        cifmw_libvirt_manager_configuration.vms.controller.target == inventory_hostname
+      ) or
+      cifmw_libvirt_manager_configuration.vms.controller.target is undefined
+  block:
+    - name: Push local code
+      tags:
+        - bootstrap_repositories
+        - bootstrap
+      ansible.builtin.import_tasks: push_code.yml
+
+    - name: Rotate some logs
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - ansible-bootstrap.log
+
+    - name: Bootstrap environment on controller-0
+      delegate_to: controller-0
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+      ansible.builtin.command:
+        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -e @~/reproducer-variables.yml
+          ci_framework/playbooks/01-bootstrap.yml
+
+    - name: Emulate CI job
+      when:
+        - cifmw_job_uri is defined
+      ansible.builtin.import_tasks: ci_job.yml

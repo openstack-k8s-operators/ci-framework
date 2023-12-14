@@ -6,15 +6,28 @@
     name: libvirt_manager
     tasks_from: deploy_layout
 
-- name: Push generated inventory from hypervisor
-  ansible.builtin.command:  # noqa: command-instead-of-module
-    cmd: >-
-      rsync -r {{ cifmw_reproducer_basedir }}/reproducer-inventory/
-      zuul@controller-0:reproducer-inventory
+- name: Run tasks on controller-0 hypervisor
+  when:
+    - (
+        cifmw_libvirt_manager_configuration.vms.controller.target is defined and
+        cifmw_libvirt_manager_configuration.vms.controller.target == inventory_hostname
+      ) or
+      cifmw_libvirt_manager_configuration.vms.controller.target is undefined
+  block:
+    - name: Push generated inventory from hypervisor
+      ansible.builtin.command:  # noqa: command-instead-of-module
+        cmd: >-
+          rsync -r {{ cifmw_reproducer_basedir }}/reproducer-inventory/
+          zuul@controller-0:reproducer-inventory
 
 - name: Run post tasks in devscripts case
   when:
-    - cifmw_use_devscripts | default(false) | bool
+    - cifmw_libvirt_manager_configuration.vms.ocp is defined
+    - (
+        cifmw_libvirt_manager_configuration.vms.ocp.target is defined and
+        cifmw_libvirt_manager_configuration.vms.ocp.target == inventory_hostname
+      ) or
+      cifmw_libvirt_manager_configuration.vms.ocp.target is undefined
   tags:
     - boostrap
     - bootstrap_layout
@@ -22,7 +35,12 @@
 
 - name: Configure CRC node if available
   when:
-    - _layout.vms.crc is defined
+    - cifmw_libvirt_manager_configuration.vms.crc is defined
+    - (
+        cifmw_libvirt_manager_configuration.vms.crc.target is defined and
+        cifmw_libvirt_manager_configuration.vms.crc.target == inventory_hostname
+      ) or
+      cifmw_libvirt_manager_configuration.vms.crc.target is undefined
   tags:
     - bootstrap
     - bootstrap_layout
