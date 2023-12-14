@@ -47,6 +47,7 @@ cifmw_libvirt_manager_configuration:
       memory: (integer, RAM amount in GB. Optional, defaults to 2)
       cpus: (integer, amount of CPU. Optional, defaults to 2)
       nets: (ordered list of networks to connect to)
+      target: (Hypervisor hostname you want to deploy the family on. Optional)
   networks:
     net_name: <XML definition of the network to create>
 ```

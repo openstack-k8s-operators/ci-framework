@@ -40,7 +40,6 @@
     label: "{{ item.key }}"
 
 - name: Create temporary ssh keypair
-  delegate_facts: true
   ansible.builtin.command:
     cmd: >-
       ssh-keygen -t ed25519
@@ -48,13 +47,11 @@
     creates: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
 
 - name: Slurp public key for later use
-  delegate_facts: true
   register: pub_ssh_key
   ansible.builtin.slurp:
     path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
 
 - name: Slurp private key for later use
-  delegate_facts: true
   register: priv_ssh_key
   ansible.builtin.slurp:
     path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
@@ -101,6 +98,12 @@
       }}
 
 - name: Create and run VMs
+  when:
+    - (
+        vm_data.value.target is defined and
+        vm_data.value.target == inventory_hostname
+      ) or
+      vm_data.value.target is undefined
   vars:
     vm_type: "{{ vm_data.key }}"
     pub_key: "{{ pub_ssh_key.content | b64decode }}"
@@ -131,6 +134,11 @@
 - name: Ensure we get proper access to CRC
   when:
     - _layout.vms.crc is defined
+    - (
+        _layout.vms.crc.target is defined and
+        _layout.vms.crc.target == inventory_hostname
+      ) or
+      _layout.vms.crc.target is undefined
   vars:
     crc_private_key: >-
       {{
