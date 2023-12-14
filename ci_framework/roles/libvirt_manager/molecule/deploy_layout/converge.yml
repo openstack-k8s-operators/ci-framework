@@ -15,7 +15,7 @@
 # under the License.
 
 - name: Converge
-  hosts: all
+  hosts: instance
   gather_facts: true
   vars:
     ansible_user_dir: "{{ lookup('env', 'HOME') }}"
@@ -43,13 +43,16 @@
           image_local_dir: "{{ cifmw_basedir }}/images/"
           disk_file_name: "centos-stream-9.qcow2"
           disksize: 20
-          memory: 4
-          cpus: 2
+          memory: 1
+          cpus: 1
           nets:
             - public
             - osp_trunk
         baremetal:
           amount: 1
+          disksize: 10
+          memory: 1
+          cpus: 1
           disk_file_name: 'blank'
           nets:
             - public
@@ -214,3 +217,119 @@
               ansible.builtin.assert:
                 that:
                   - cmp_1.host.ip == '192.168.140.101'
+
+- name: Cleanup
+  hosts: instance
+  tasks:
+    - name: Clean layout
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: clean_layout.yml
+
+- name: Inject fake hosts in inventory
+  hosts: instance
+  tasks:
+    - name: Inject compute-0 in inventory
+      ansible.builtin.add_host:
+        name: compute-0
+        ansible_host: localhost
+        ansible_connection: local
+
+    - name: Inject compute-1 in inventory
+      ansible.builtin.add_host:
+        name: compute-1
+        ansible_host: localhost
+        ansible_connection: local
+
+- name: Converge
+  hosts: all
+  vars:
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_basedir: "/opt/basedir"
+    cifmw_libvirt_manager_vm_net_ip_set:
+      computecp0: 100
+      computecp1: 110
+    cifmw_libvirt_manager_networks:
+      osp_trunk:
+        default: true
+        range: "192.168.140.0/24"
+        mtu: 1500
+        static_ip: true
+      public:
+        range: "192.168.100.0/24"
+      internal-api:
+        range: "172.17.0.0/24"
+        vlan: 20
+    cifmw_libvirt_manager_configuration:
+      vms:
+        computecp0:
+          target: compute-0
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 20
+          memory: 1
+          cpus: 1
+          nets:
+            - public
+            - osp_trunk
+        computecp1:
+          target: compute-1
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 20
+          memory: 1
+          cpus: 1
+          nets:
+            - public
+            - osp_trunk
+      networks:
+        public: |-
+          <network>
+            <name>public</name>
+            <forward mode='nat'/>
+            <bridge name='public' stp='on' delay='0'/>
+            <ip
+             family='ipv4'
+             address='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(1) }}'
+             prefix='24'>
+              <dhcp>
+                <range start='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(10) }}'
+                end='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(100) }}'/>
+              </dhcp>
+            </ip>
+          </network>
+        osp_trunk: |-
+          <network>
+            <name>osp_trunk</name>
+            <forward mode='nat'/>
+            <bridge name='osp_trunk' stp='on' delay='0'/>
+            <ip
+             family='ipv4'
+             address='{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}'
+             prefix='24'>
+            </ip>
+          </network>
+  roles:
+    - role: "discover_latest_image"
+  tasks:
+    - name: Deploy layout
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: deploy_layout
+
+    - name: Gather instances
+      run_once: true
+      register: _vms
+      community.libvirt.virt:
+        command: "list_vms"
+
+    - name: Debug created VMs
+      run_once: true
+      ansible.builtin.debug:
+        var: _vms
+
+    - name: Ensure we get only 2 VMs
+      run_once: true
+      ansible.builtin.assert:
+        that:
+          - (_vms.list_vms | length) == 2
