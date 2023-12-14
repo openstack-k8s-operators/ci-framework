@@ -6,6 +6,28 @@
     name: libvirt_manager
     tasks_from: deploy_layout
 
+- name: Get all generated inventory on remote hypervisors
+  when:
+    - cifmw_libvirt_manager_configuration.vms.controller.target is defined
+    - cifmw_libvirt_manager_configuration.vms.controller.target != inventory_hostname
+  block:
+    - name: Get deployed VM group inventories
+      register: _inventories
+      ansible.builtin.slurp:
+        path: >-
+          {{
+            (cifmw_reproducer_basedir, 'reproducer-inventory',
+             item ~ '-group.yml') |
+            path_join
+          }}
+      loop: >-
+          {{
+            cifmw_libvirt_manager_configuration.vms |
+            dict2items |
+            selectattr('value.target', 'equalto', inventory_hostname) |
+            map(attribute="key")
+          }}
+
 - name: Run tasks on controller-0 hypervisor
   when:
     - (
@@ -14,6 +36,12 @@
       ) or
       cifmw_libvirt_manager_configuration.vms.controller.target is undefined
   block:
+    - name: Inject remote inventories onto main hypervisor
+      ansible.builtin.include_tasks: gather_inventories.yml
+      loop: "{{ hostvars.keys() }}"
+      loop_control:
+        loop_var: "host"
+
     - name: Push generated inventory from hypervisor
       ansible.builtin.command:  # noqa: command-instead-of-module
         cmd: >-
