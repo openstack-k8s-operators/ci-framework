@@ -28,6 +28,10 @@
 - name: Setup tempest tests
   ansible.builtin.include_tasks: tempest-tests.yml
 
+- name: Create clouds.yaml
+  ansible.builtin.include_tasks: create-clouds-file.yml
+  when: not cifmw_tempest_dry_run | bool
+
 - name: Configure tempest
   ansible.builtin.include_tasks: configure-tempest.yml
   when: not cifmw_tempest_dry_run | bool
@@ -37,8 +41,8 @@
     src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
     dest: "{{ cifmw_tempest_artifacts_basedir }}"
     mode: '0444'
-    owner: "{{ lookup('env', 'USER') }}"
-    group: "{{ lookup('env', 'USER') }}"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     remote_src: true
 
 - name: Set proper permission for tempest directory
@@ -60,7 +64,7 @@
     name: tempest
     image: "{{ cifmw_tempest_image }}:{{ cifmw_tempest_image_tag }}"
     state: started
-    auto_remove: "{{ cifmw_tempest_remove_container | default(false) }}"
+    auto_remove: "{{ cifmw_tempest_remove_container }}"
     network: host
     volume:
       - "{{ cifmw_tempest_artifacts_basedir }}/:/var/lib/tempest/external_files:Z"
@@ -78,8 +82,8 @@
     path: "{{ cifmw_tempest_artifacts_basedir }}"
     state: directory
     recurse: true
-    owner: "{{ lookup('env', 'USER') }}"
-    group: "{{ lookup('env', 'USER') }}"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
 - name: Save logs from podman
   when: not cifmw_tempest_dry_run | bool
