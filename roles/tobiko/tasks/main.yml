@@ -1,0 +1,106 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure podman is installed
+  become: true
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Create tobiko directories
+  ansible.builtin.file:
+    path: "{{ cifmw_tobiko_artifacts_basedir }}"
+    state: directory
+
+- name: Create clouds.yaml
+  vars:
+    cifmw_tempest_artifacts_basedir: "{{ cifmw_tobiko_artifacts_basedir }}"
+  ansible.builtin.import_role:
+    name: tempest
+    tasks_from: create-clouds-file
+  when: not cifmw_tobiko_dry_run | bool
+
+- name: Copy CA bundle to cifmw_tobiko_artifacts_basedir
+  ansible.builtin.copy:
+    src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    dest: "{{ cifmw_tobiko_artifacts_basedir }}"
+    mode: '0444'
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    remote_src: true
+
+- name: Set proper permission for tobiko directory
+  ansible.builtin.command:
+    cmd: "podman unshare chown 42495:42495 -R {{ cifmw_tobiko_artifacts_basedir }}"
+  when: not cifmw_tobiko_dry_run | bool
+
+- name: Ensure we have tobiko container image
+  register: _tobiko_fetch_img
+  containers.podman.podman_image:
+    name: "{{ cifmw_tobiko_image }}:{{ cifmw_tobiko_image_tag }}"
+  retries: 5
+  delay: 5
+  until: _tobiko_fetch_img is success
+
+- name: Run tobiko
+  ignore_errors: true
+  containers.podman.podman_container:
+    name: tobiko
+    image: "{{ cifmw_tobiko_image }}:{{ cifmw_tobiko_image_tag }}"
+    state: started
+    auto_remove: "{{ cifmw_tobiko_remove_container }}"
+    network: host
+    volume:
+      - "{{ cifmw_tobiko_artifacts_basedir }}/:/var/lib/tobiko/external_files:Z"
+      - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
+    detach: false
+    dns: "{{ cifmw_tobiko_dns_servers }}"
+    env:
+      TOBIKO_DEBUG: "{{ cifmw_tobiko_debug }}"
+      TOBIKO_TESTENV: "{{ cifmw_tobiko_testenv }}"
+      TOBIKO_PREVENT_CREATE: "{{ cifmw_tobiko_prevent_create if cifmw_tobiko_prevent_create is not none else omit }}"
+      TOBIKO_VERSION: "{{ cifmw_tobiko_version if cifmw_tobiko_version is not none else omit }}"
+      TOBIKO_UBUNTU_INTERFACE_NAME: "{{ cifmw_tobiko_ubuntu_interface_name if cifmw_tobiko_ubuntu_interface_name is not none else omit }}"
+      TOBIKO_KEYSTONE_INTERFACE: "{{ cifmw_tobiko_keystone_interface if cifmw_tobiko_keystone_interface is not none else omit }}"
+      TOBIKO_TESTCASE_TIMEOUT: "{{ cifmw_tobiko_testcase_timeout if cifmw_tobiko_testcase_timeout is not none else omit }}"
+      TOBIKO_TESTRUNNER_TIMEOUT: "{{ cifmw_tobiko_testrunner_timeout if cifmw_tobiko_testrunner_timeout is not none else omit }}"
+      TOBIKO_PYTEST_ADDOPTS: "{{ cifmw_tobiko_pytest_addopts if cifmw_tobiko_pytest_addopts is not none else omit }}"
+      TOBIKO_REPORT_DIR: "{{ cifmw_tobiko_report_dir if cifmw_tobiko_report_dir is not none else omit }}"
+      TOBIKO_MANILA_SHARE_PROTOCOL: "{{ cifmw_tobiko_manila_share_protocol if cifmw_tobiko_manila_share_protocol is not none else omit }}"
+  when: not cifmw_tobiko_dry_run | bool
+  register: tobiko_run_output
+
+- name: Change tobiko directory permission back to original
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_tobiko_artifacts_basedir }}"
+    state: directory
+    recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+
+- name: Save logs from podman
+  when: not cifmw_tobiko_dry_run | bool
+  ansible.builtin.copy:
+    dest: "{{ cifmw_tobiko_artifacts_basedir }}/podman_tobiko.log"
+    content: |
+      "{{ tobiko_run_output.stdout }}"
+
+- name: Fail if podman container did not succeed
+  when: not cifmw_tobiko_dry_run | bool
+  ansible.builtin.assert:
+    that:
+      - "tobiko_run_output.failed == false"

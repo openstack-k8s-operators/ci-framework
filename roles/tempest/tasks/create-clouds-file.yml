@@ -1,0 +1,38 @@
+- name: Get keystone data
+  register: keystone_data
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: oc get keystoneapi keystone -n openstack -o json
+
+- name: Set keystone vars
+  vars:
+    _keystone_json_content: "{{ keystone_data.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    keystone_secret_name: "{{ _keystone_json_content['spec']['secret'] }}"
+    keystone_passwd_select: "{{ _keystone_json_content['spec']['passwordSelectors']['admin'] }}"
+    keystone_api: "{{ _keystone_json_content['status']['apiEndpoints']['public'] }}"
+
+- name: Get credentials data
+  register: os_password_data
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: 'oc get secret {{ keystone_secret_name }} -n openstack -o json'
+
+- name: Get password data
+  vars:
+    _os_password_data_json_content: "{{ os_password_data.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    os_password: >-
+      {{
+        _os_password_data_json_content['data'][keystone_passwd_select] |
+        ansible.builtin.b64decode
+      }}
+
+- name: Get clouds.yaml
+  ansible.builtin.template:
+    src: clouds.yaml.j2
+    dest: "{{ cifmw_tempest_artifacts_basedir }}/clouds.yaml"
