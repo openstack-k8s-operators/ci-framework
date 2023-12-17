@@ -79,6 +79,7 @@
         loop_var: "_xml"
         index_var: "_xml_id"
         label: "{{ vm_type }}-{{ _xml_id }}"
+
     - name: "Load VM XMLs for type {{ vm_type }}"
       register: _vm_xmls
       ansible.builtin.slurp:
@@ -99,6 +100,20 @@
         label: "{{ vm_type }}-{{ vm_id }}"
         loop_var: '_xml'
 
+- name: Ensure the required volumes are present.
+  when:
+    - vm_data.value.extra_disks_num is defined
+    - vm_data.value.extra_disks_num | int != 0
+    - vm_data.value.xml_paths is undefined
+  vars:
+    vol_prefix: "cifmw-{{ vm_type }}-{{ vm_id }}"
+    vol_num: "{{ vm_data.value.extra_disks_num }}"
+    vol_size: "{{ vm_data.value.extra_disks_size }}"
+  ansible.builtin.include_tasks: volumes.yml
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
 
 - name: "Define VMs with default template for type {{ vm_type }}"
   when:

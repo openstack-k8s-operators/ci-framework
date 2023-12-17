@@ -1,5 +1,5 @@
 ---
-- name: Create needed worload directory
+- name: Create needed workload directory
   ansible.builtin.file:
     path: "{{ cifmw_libvirt_manager_basedir }}/{{ item }}"
     state: directory
@@ -8,15 +8,19 @@
     - workload
     - reproducer-inventory
     - reproducer-network-env
+    - volumes
 
 - name: Allow QEMU on workload directory
   become: true
   ansible.posix.acl:
-    path: "{{ cifmw_libvirt_manager_basedir }}/workload"
+    path: "{{ cifmw_libvirt_manager_basedir }}/{{ item }}"
     entity: "qemu"
     etype: "user"
     permissions: rwx
     state: present
+  loop:
+    - workload
+    - volumes
 
 - name: Chose right parameter for layout definition
   ansible.builtin.set_fact:
@@ -27,6 +31,11 @@
   when:
     - _layout.networks is defined
   ansible.builtin.import_tasks: create_networks.yml
+
+- name: Ensure storage pool is present
+  vars:
+    action: "create"
+  ansible.builtin.include_tasks: storage_pool.yml
 
 - name: Ensure images are present
   when:

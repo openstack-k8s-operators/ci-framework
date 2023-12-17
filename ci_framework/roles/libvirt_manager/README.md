@@ -34,6 +34,7 @@ Used for checking if:
 ### Structure for `cifmw_libvirt_manager_configuration`
 
 The following structure has to be passed via the configuration parameter:
+
 ```YAML
 cifmw_libvirt_manager_configuration:
   vms:
@@ -55,6 +56,7 @@ cifmw_libvirt_manager_configuration:
 Specific `type_name`: `^crc.*` and `^ocp.*` are enabling specific paths in the module.
 
 #### Example
+
 ```YAML
 cifmw_libvirt_manager_networks:
   public:
@@ -130,6 +132,7 @@ reproducer role.
 * `cifmw_libvirt_manager_crc_private_nic`: `{{ cifmw_reproducer_crc_private_nic | default('enp2s0') }}`
 
 ## Calling attach_network.yml from another role
+
 You may want to include that specific tasks file from another role in order to inject some networks into
 a virtual machine.
 
@@ -144,6 +147,7 @@ In order to do so, you have to provide specific variables:
 * `cifmw_libvirt_manager_net_prefix_add`: (Bool) Toggle this to `true` if the network name needs to get the `cifmw-` prefix (advanced usage). Optional. Defaults to `true`.
 
 ### Example
+
 ```YAML
 - name: Attach my network to my virtual machine
   vars:
