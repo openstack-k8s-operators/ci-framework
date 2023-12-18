@@ -52,7 +52,6 @@
         cmd: >-
           cat /home/zuul/reproducer-inventory/* >
           {{  _ctl_reproducer_basedir }}/zuul_inventory.yml
-        creates: "{{ _ctl_reproducer_basedir }}/zuul_inventory.yml"
 
     - name: Push the MAC mapping data
       tags:
@@ -87,6 +86,55 @@
       loop_control:
         label: "{{ config.option }}"
         loop_var: 'config'
+
+    - name: Inject other Hypervisor SSH keys
+      when:
+        - hostvars[host]['priv_ssh_key'] is defined
+      vars:
+        _ssh_key: "{{ hostvars[host]['priv_ssh_key']['content'] | b64decode }}"
+        _ssh_host: >-
+          {{
+            hostvars[host]['ansible_host'] |
+            default(hostvars[host]['inventory_hostname'])
+          }}
+      ansible.builtin.copy:
+        dest: "/home/zuul/.ssh/ssh_{{ _ssh_host }}"
+        content: "{{ _ssh_key }}"
+        mode: "0600"
+        owner: "zuul"
+        group: "zuul"
+      loop: "{{ hostvars.keys() }}"
+      loop_control:
+        label: "{{ host }}"
+        loop_var: "host"
+
+    # We need to configure SSH on controller-0 so that
+    # it will consume the right ssh key and not obsess on
+    # remote host key checking. We have to put this in the
+    # local .ssh/config, because ProxyJump doesn't take the
+    # command line options, meaning ssh won't consume the various
+    # options set in the ansible inventory.
+    - name: Inject ProxyJump configuration
+      when:
+        - hostvars[host]['priv_ssh_key'] is defined
+      vars:
+        _ssh_host: >-
+          {{
+            hostvars[host]['ansible_host'] |
+            default(hostvars[host]['inventory_hostname'])
+          }}
+      ansible.builtin.blockinfile:
+        create: true
+        path: "/home/zuul/.ssh/config"
+        block: |-
+          Host {{ _ssh_host }}
+            IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+      loop: "{{ hostvars.keys() }}"
+      loop_control:
+        label: "{{ host }}"
+        loop_var: "host"
 
     - name: Create kube directory
       ansible.builtin.file:
