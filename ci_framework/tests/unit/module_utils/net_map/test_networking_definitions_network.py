@@ -87,6 +87,16 @@ def validate_network_definition_from_raw_net_ips(
     return parsed_ip_net_4, parsed_ip_net_6
 
 
+def validate_network_definition_ip_list(
+    raw_list: typing.List[typing.Any],
+    target_list: typing.List[
+        typing.Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+    ],
+):
+    test_raw_parsed_ips = [ipaddress.ip_address(ip) for ip in raw_list]
+    assert target_list == test_raw_parsed_ips
+
+
 def validate_network_definition_from_raw_gateways(
     net_config,
     network_definition: networking_definition.NetworkDefinition,
@@ -123,6 +133,32 @@ def validate_network_definition_from_raw_gateways(
         assert not network_definition.ipv6_gateway
 
 
+def validate_network_definition_from_raw_dnss(
+    net_config, network_definition: networking_definition.NetworkDefinition
+):
+    dnss_non_versioned = net_config.get("dns", None)
+    if dnss_non_versioned:
+        test_raw_parsed_ips = [ipaddress.ip_address(ip) for ip in dnss_non_versioned]
+        if test_raw_parsed_ips[0].version == 6:
+            assert network_definition.ipv6_dns == test_raw_parsed_ips
+            assert not network_definition.ipv4_dns
+        else:
+            assert network_definition.ipv4_dns == test_raw_parsed_ips
+            assert not network_definition.ipv6_dns
+
+    dns_v4 = net_config.get("dns-v4", None)
+    if dns_v4:
+        validate_network_definition_ip_list(dns_v4, network_definition.ipv4_dns)
+    elif not dnss_non_versioned:
+        assert not network_definition.ipv4_dns
+
+    dns_v6 = net_config.get("dns-v6", None)
+    if dns_v6:
+        validate_network_definition_ip_list(dns_v6, network_definition.ipv6_dns)
+    elif not dnss_non_versioned:
+        assert not network_definition.ipv6_dns
+
+
 def validate_network_definition_from_raw(net_name, net_config, network_definition):
     assert network_definition.name == net_name
     assert hash(network_definition)
@@ -133,6 +169,7 @@ def validate_network_definition_from_raw(net_name, net_config, network_definitio
     validate_network_definition_from_raw_gateways(
         net_config, network_definition, ip_net_4, ip_net_6
     )
+    validate_network_definition_from_raw_dnss(net_config, network_definition)
 
     if "mtu" in net_config:
         assert network_definition.mtu == int(net_config["mtu"])
@@ -186,6 +223,10 @@ def test_network_definition_parse_all_ok():
     net_config = {
         "network": "192.168.122.0/24",
         "gateway": "192.168.122.1",
+        "dns": [
+            "192.168.122.254",
+            "1.1.1.1",
+        ],
         "vlan": 122,
         "mtu": 9000,
     }
@@ -200,6 +241,14 @@ def test_network_definition_parse_all_dual_stack_ok():
         "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
         "gateway-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET[1]),
         "gateway-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET[1]),
+        "dns-v4": [
+            net_map_stub_data.NETWORK_1_IPV4_NET[-3],
+            net_map_stub_data.NETWORK_1_IPV4_NET[-2],
+        ],
+        "dns-v6": [
+            "2001:4860:4860::8888",
+            net_map_stub_data.NETWORK_1_IPV6_NET[-2],
+        ],
         "vlan": 122,
         "mtu": 9000,
     }
@@ -265,6 +314,7 @@ def test_network_definition_parse_all_tools_v6_ok():
     net_config = {
         "network": net_map_stub_data.NETWORK_1_IPV6_NET,
         "gateway": net_map_stub_data.NETWORK_1_IPV6_NET[1],
+        "dns": [net_map_stub_data.NETWORK_1_IPV6_NET[-2]],
         "vlan": "122",
         "mtu": "9000",
         "tools": {
@@ -394,6 +444,104 @@ def test_network_definition_parse_gateway_fail():
     assert exc_info.value.parent_type == "network"
     assert exc_info.value.parent_name == "testing-net"
     assert "outside of the range" in str(exc_info.value)
+
+
+def test_network_definition_parse_dns_fail():
+    net_config = {
+        "network": "192.168.122.0/24",
+        "dns": ["192.168.122.1s"],
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == "192.168.122.1s"
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "valid" in str(exc_info.value)
+
+    net_config = {
+        "network": "192.168.122.0/24",
+        "dns": "192.168.122.1",
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == "192.168.122.1"
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "type" in str(exc_info.value)
+    assert "list" in str(exc_info.value)
+
+    net_config = {
+        "network": "192.168.122.0/24",
+        "dns": [str(net_map_stub_data.NETWORK_1_IPV6_NET[-2])],
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV6_NET[-2])
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "version v6" in str(exc_info.value)
+
+    net_config = {
+        "network": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "dns": [str(net_map_stub_data.NETWORK_1_IPV4_NET[-2])],
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV4_NET[-2])
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "version v4" in str(exc_info.value)
+
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "dns": [str(net_map_stub_data.NETWORK_1_IPV4_NET[-2])],
+        "dns-v6": [str(net_map_stub_data.NETWORK_1_IPV6_NET[-2])],
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == [
+        str(net_map_stub_data.NETWORK_1_IPV4_NET[-2])
+    ]
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "same time" in str(exc_info.value)
+
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "dns": [str(net_map_stub_data.NETWORK_1_IPV6_NET[-2])],
+        "dns-v4": [str(net_map_stub_data.NETWORK_1_IPV4_NET[-2])],
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.invalid_value == [
+        str(net_map_stub_data.NETWORK_1_IPV6_NET[-2])
+    ]
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "same time" in str(exc_info.value)
+
+    net_config = {
+        "network-v4": str(net_map_stub_data.NETWORK_1_IPV4_NET),
+        "network-v6": str(net_map_stub_data.NETWORK_1_IPV6_NET),
+        "dns": [
+            str(net_map_stub_data.NETWORK_1_IPV6_NET[-2]),
+            str(net_map_stub_data.NETWORK_1_IPV4_NET[-2]),
+        ],
+    }
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition("testing-net", net_config)
+    assert exc_info.value.field == "dns"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "same version" in str(exc_info.value)
 
 
 def test_network_definition_parse_tools_ranges_collision_fail():
