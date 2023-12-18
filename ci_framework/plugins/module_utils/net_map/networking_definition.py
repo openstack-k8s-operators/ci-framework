@@ -116,7 +116,7 @@ def _validate_parse_field_type(
     raw_value = raw_definition[field_name]
     if not isinstance(raw_value, expected_type):
         raise exceptions.NetworkMappingValidationError(
-            f"'{field_name}' must be of type {expected_type}",
+            f"'{field_name}' must be of type {expected_type.__name__}",
             field=field_name,
             invalid_value=str(raw_value),
             parent_name=parent_name,
@@ -165,19 +165,19 @@ def _validate_fields_one_of(
     return True
 
 
-def _validate_parse_raw_net_ip(
-    instance_net_ip_raw,
-    field_name: str,
+def _validate_parse_net_ip(
+    raw_value: typing.Union[ipaddress.IPv4Address, ipaddress.IPv6Address, str, None],
     ipv4_network: typing.Optional[ipaddress.IPv4Network],
     ipv6_network: typing.Optional[ipaddress.IPv6Network],
     ip_version: int = None,
+    field_name: str = None,
     parent_name: str = None,
     parent_type: str = None,
+    validate_range: bool = True,
 ):
-    if field_name not in instance_net_ip_raw:
+    if not raw_value:
         return None
 
-    raw_value = instance_net_ip_raw[field_name]
     try:
         net_ip = ipaddress.ip_address(raw_value)
         if ip_version and net_ip.version != ip_version:
@@ -200,7 +200,7 @@ def _validate_parse_raw_net_ip(
                 parent_type=parent_type,
             )
 
-        if net_ip not in target_net:
+        if validate_range and net_ip not in target_net:
             raise exceptions.NetworkMappingValidationError(
                 f"{net_ip} cannot be used because it's outside "
                 f"of the range of {target_net}",
@@ -218,6 +218,72 @@ def _validate_parse_raw_net_ip(
             parent_name=parent_name,
             parent_type=parent_type,
         ) from err
+
+
+def _validate_parse_raw_net_ip(
+    instance_net_ip_raw,
+    field_name: str,
+    ipv4_network: typing.Optional[ipaddress.IPv4Network],
+    ipv6_network: typing.Optional[ipaddress.IPv6Network],
+    ip_version: int = None,
+    validate_range: bool = True,
+    parent_name: str = None,
+    parent_type: str = None,
+):
+    return _validate_parse_net_ip(
+        instance_net_ip_raw.get(field_name),
+        ipv4_network,
+        ipv6_network,
+        ip_version=ip_version,
+        validate_range=validate_range,
+        field_name=field_name,
+        parent_name=parent_name,
+        parent_type=parent_type,
+    )
+
+
+def _validate_parse_raw_net_ip_list(
+    raw_definition: typing.Dict[str, typing.Any],
+    field_name: str,
+    ipv4_network: typing.Optional[ipaddress.IPv4Network],
+    ipv6_network: typing.Optional[ipaddress.IPv6Network],
+    ip_version: int = None,
+    validate_range: bool = True,
+    parent_name: str = None,
+    parent_type: str = None,
+) -> typing.Union[
+    typing.List[ipaddress.IPv4Address], typing.List[ipaddress.IPv6Address]
+]:
+    ip_raw_list = _validate_parse_field_type(
+        field_name,
+        raw_definition,
+        list,
+        parent_name=parent_name,
+        parent_type=parent_type,
+    )
+
+    parsed_list = [
+        _validate_parse_net_ip(
+            raw_ip_value,
+            ipv4_network,
+            ipv6_network,
+            validate_range=validate_range,
+            field_name=field_name,
+            parent_name=parent_name,
+            parent_type=parent_type,
+            ip_version=ip_version,
+        )
+        for raw_ip_value in (ip_raw_list or [])
+    ]
+    if parsed_list and len(set([parsed_ip.version for parsed_ip in parsed_list])) != 1:
+        raise exceptions.NetworkMappingValidationError(
+            "all IPs of the list should be of the same version",
+            field=field_name,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+
+    return parsed_list
 
 
 def _validate_parse_raw_net_ips(
@@ -276,6 +342,71 @@ def _validate_parse_raw_net_ips(
             parent_type=parent_type,
         )
     return ipv4, ipv6
+
+
+def _validate_parse_raw_net_ip_lists(
+    field_name: str,
+    raw_definition: typing.Dict[str, typing.Any],
+    ipv4_network: typing.Optional[ipaddress.IPv4Network],
+    ipv6_network: typing.Optional[ipaddress.IPv6Network],
+    validate_range: bool = True,
+    parent_name: str = None,
+    parent_type: str = None,
+) -> typing.Tuple[
+    typing.List[ipaddress.IPv4Address], typing.List[ipaddress.IPv6Address]
+]:
+    v4_field = f"{field_name}-{__CONFIG_IP_VERSION_SUFFIX_4}"
+    v6_field = f"{field_name}-{__CONFIG_IP_VERSION_SUFFIX_6}"
+    _validate_fields_one_of(
+        [
+            field_name,
+            v4_field,
+            v6_field,
+        ],
+        raw_definition,
+        parent_name=parent_name,
+        parent_type=parent_type,
+        alone_field=field_name,
+    )
+    ipv6_addresses = []
+    ipv4_addresses = []
+    if field_name in raw_definition:
+        parsed_list = _validate_parse_raw_net_ip_list(
+            raw_definition,
+            field_name,
+            ipv4_network,
+            ipv6_network,
+            validate_range=validate_range,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+        version = next((ip.version for ip in parsed_list), None)
+        if version == 4:
+            ipv4_addresses = parsed_list
+        elif version == 6:
+            ipv6_addresses = parsed_list
+    else:
+        ipv4_addresses = _validate_parse_raw_net_ip_list(
+            raw_definition,
+            v4_field,
+            ipv4_network,
+            ipv6_network,
+            validate_range=validate_range,
+            parent_name=parent_name,
+            parent_type=parent_type,
+            ip_version=4,
+        )
+        ipv6_addresses = _validate_parse_raw_net_ip_list(
+            raw_definition,
+            v6_field,
+            ipv4_network,
+            ipv6_network,
+            validate_range=validate_range,
+            parent_name=parent_name,
+            parent_type=parent_type,
+            ip_version=6,
+        )
+    return ipv4_addresses, ipv6_addresses
 
 
 def check_host_network_ranges_collisions(
@@ -873,6 +1004,8 @@ class NetworkDefinition:
         <network-name>:
             network: <net-ip/prefix>
             gateway: <net gateway: optional>
+            dns:  <DNS servers list: optional>
+                - <DNS IP 1>
             vlan: <vlan-id: optional>
             mtu: <mtu: optional>
             tools:
@@ -887,6 +1020,7 @@ class NetworkDefinition:
     __FIELD_NETWORK_IPV4 = "network-v4"
     __FIELD_NETWORK_IPV6 = "network-v6"
     __FIELD_GATEWAY = "gateway"
+    __FIELD_DNSS = "dns"
     __FIELD_MTU = "mtu"
     __FIELD_VLAN_ID = "vlan"
 
@@ -919,6 +1053,8 @@ class NetworkDefinition:
         self.__ipv4_network = None
         self.__ipv4_gateway = None
         self.__ipv6_gateway = None
+        self.__ipv4_dns = []
+        self.__ipv6_dns = []
         self.__multus_config: typing.Union[MultusNetworkDefinition, None] = None
         self.__metallb_config: typing.Union[MetallbNetworkDefinition, None] = None
         self.__netconfig_config: typing.Union[NetconfigNetworkDefinition, None] = None
@@ -973,6 +1109,16 @@ class NetworkDefinition:
     def ipv6_gateway(self) -> typing.Optional[ipaddress.IPv6Address]:
         """IPv6 gateway"""
         return self.__ipv6_gateway
+
+    @property
+    def ipv4_dns(self) -> typing.List[ipaddress.IPv4Address]:
+        """IPv4 DNS servers"""
+        return self.__ipv4_dns
+
+    @property
+    def ipv6_dns(self) -> typing.List[ipaddress.IPv6Address]:
+        """IPv6 DNS servers"""
+        return self.__ipv6_dns
 
     def parse_range_from_raw(
         self, raw_definition: typing.Dict[str, typing.Any], ip_version: int = None
@@ -1074,6 +1220,7 @@ class NetworkDefinition:
     def __parse_raw(self, raw_definition: typing.Dict[str, typing.Any]):
         self.__parse_raw_network(raw_definition)
         self.__parse_raw_gateway(raw_definition)
+        self.__parse_raw_dnss(raw_definition)
 
         self.__mtu = _validate_parse_int(
             self.__FIELD_MTU,
@@ -1099,6 +1246,17 @@ class NetworkDefinition:
             raw_definition,
             self.__ipv4_network,
             self.__ipv6_network,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            parent_name=self.__name,
+        )
+
+    def __parse_raw_dnss(self, raw_definition):
+        self.__ipv4_dns, self.__ipv6_dns = _validate_parse_raw_net_ip_lists(
+            self.__FIELD_DNSS,
+            raw_definition,
+            self.__ipv4_network,
+            self.__ipv6_network,
+            validate_range=False,
             parent_type=self.__OBJECT_TYPE_NAME,
             parent_name=self.__name,
         )
