@@ -65,8 +65,8 @@ def test_networking_definition_load_networking_definition_1_ok():
         net_name in test_net_1.networks
         for net_name in ("ctlplane", "internal-api", "storage", "tenant")
     )
-    assert "crc" in test_net_1.group_templates
-    assert "instance-1" in test_net_1.instances
+    assert net_map_stub_data.GROUP_1_NAME in test_net_1.group_templates
+    assert net_map_stub_data.INSTANCE_1_NAME in test_net_1.instances
 
 
 def test_networking_definition_load_networking_definition_all_tools_ok():
@@ -82,8 +82,8 @@ def test_networking_definition_load_networking_definition_all_tools_ok():
         net_name in test_net_1.networks
         for net_name in ("ctlplane", "internal-api", "storage", "tenant")
     )
-    assert "crc" in test_net_1.group_templates
-    assert "instance-1" in test_net_1.instances
+    assert net_map_stub_data.GROUP_1_NAME in test_net_1.group_templates
+    assert net_map_stub_data.INSTANCE_1_NAME in test_net_1.instances
 
     for net_name, net_def in test_net_1.networks.items():
         assert net_def.multus_config

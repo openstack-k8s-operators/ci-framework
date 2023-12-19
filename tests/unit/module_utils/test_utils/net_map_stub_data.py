@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import pathlib
 import typing
 
@@ -18,15 +19,34 @@ NETWORK_3_IPV4_NET = ipaddress.IPv4Network("192.168.123.0/24")
 NETWORK_1_IPV6_NET = ipaddress.IPv6Network("fdc0:8b54:108a:c949::/64")
 NETWORK_2_IPV6_NET = ipaddress.IPv6Network("fd42:add0:b7d2:09b1::/64")
 NETWORK_3_IPV6_NET = ipaddress.IPv6Network("fd5e:bdb2:6091:9306::/64")
+INSTANCE_1_NAME = "instance-1"
+INSTANCE_2_NAME = "instance-2"
+INSTANCE_3_NAME = "instance-3"
+GROUP_ALL_NAME = "all"
+GROUP_1_NAME = "group-1"
+GROUP_2_NAME = "group-2"
+GROUP_3_NAME = "group-3"
+GROUP_ALL_CONTENT = ["localhost"]
+GROUP_1_CONTENT = [INSTANCE_1_NAME]
+GROUP_2_CONTENT = [INSTANCE_1_NAME, INSTANCE_2_NAME]
+GROUP_3_CONTENT = [INSTANCE_1_NAME, INSTANCE_2_NAME, INSTANCE_3_NAME]
+TEST_HOSTVARS = {
+    "groups": {
+        GROUP_ALL_NAME: GROUP_ALL_CONTENT,
+        GROUP_1_NAME: GROUP_1_CONTENT,
+        GROUP_2_NAME: GROUP_2_CONTENT,
+        GROUP_3_NAME: GROUP_3_CONTENT,
+    }
+}
 
 
-def build_valid_network_definition(
+def build_valid_network_definition_raw(
     name: str,
     net_raw,
     add_multus: bool = False,
     add_netconfig: bool = False,
     add_metallb: bool = False,
-) -> networking_definition.NetworkDefinition:
+) -> typing.Dict[str, typing.Any]:
     if add_multus or add_netconfig or add_metallb:
         net_raw["tools"] = {}
     if add_multus:
@@ -44,18 +64,36 @@ def build_valid_network_definition(
                 {"start": 60, "end": 69},
             ]
         }
-    net_1 = networking_definition.NetworkDefinition(name, net_raw)
-    return net_1
+    return net_raw
 
 
-def build_valid_network_definition_set(
+def build_valid_network_definition(
+    name: str,
+    net_raw,
+    add_multus: bool = False,
+    add_netconfig: bool = False,
+    add_metallb: bool = False,
+) -> networking_definition.NetworkDefinition:
+    return networking_definition.NetworkDefinition(
+        name,
+        build_valid_network_definition_raw(
+            name,
+            net_raw,
+            add_multus=add_multus,
+            add_netconfig=add_netconfig,
+            add_metallb=add_metallb,
+        ),
+    )
+
+
+def build_valid_network_definition_set_raw(
     add_multus: bool = False,
     add_netconfig: bool = False,
     add_metallb: bool = False,
     use_ipv4: bool = True,
     use_ipv6: bool = False,
     mixed_ip_versions: bool = False,
-) -> typing.Dict[str, networking_definition.NetworkDefinition]:
+) -> typing.Dict[str, typing.Any]:
     net_1_config = {"vlan": "122", "mtu": "9000"}
     if use_ipv4 and not use_ipv6:
         net_1_config["network"] = str(NETWORK_1_IPV4_NET)
@@ -65,7 +103,7 @@ def build_valid_network_definition_set(
         net_1_config["network-v4"] = str(NETWORK_1_IPV4_NET)
         if not mixed_ip_versions:
             net_1_config["network-v6"] = str(NETWORK_1_IPV6_NET)
-    net_1 = build_valid_network_definition(
+    net_1 = build_valid_network_definition_raw(
         NETWORK_1_NAME,
         net_1_config,
         add_metallb=add_metallb,
@@ -81,7 +119,7 @@ def build_valid_network_definition_set(
     elif use_ipv6 and use_ipv4:
         net_2_config["network-v4"] = str(NETWORK_2_IPV4_NET)
         net_2_config["network-v6"] = str(NETWORK_2_IPV6_NET)
-    net_2 = build_valid_network_definition(
+    net_2 = build_valid_network_definition_raw(
         NETWORK_2_NAME,
         net_2_config,
         add_metallb=add_metallb,
@@ -98,7 +136,7 @@ def build_valid_network_definition_set(
         if not mixed_ip_versions:
             net_3_config["network-v4"] = str(NETWORK_3_IPV4_NET)
         net_3_config["network-v6"] = str(NETWORK_3_IPV6_NET)
-    net_3 = build_valid_network_definition(
+    net_3 = build_valid_network_definition_raw(
         NETWORK_3_NAME,
         net_3_config,
         add_metallb=add_metallb,
@@ -107,9 +145,30 @@ def build_valid_network_definition_set(
     )
 
     return {
-        net_1.name: net_1,
-        net_2.name: net_2,
-        net_3.name: net_3,
+        NETWORK_1_NAME: net_1,
+        NETWORK_2_NAME: net_2,
+        NETWORK_3_NAME: net_3,
+    }
+
+
+def build_valid_network_definition_set(
+    add_multus: bool = False,
+    add_netconfig: bool = False,
+    add_metallb: bool = False,
+    use_ipv4: bool = True,
+    use_ipv6: bool = False,
+    mixed_ip_versions: bool = False,
+) -> typing.Dict[str, networking_definition.NetworkDefinition]:
+    return {
+        net_name: networking_definition.NetworkDefinition(net_name, net_config)
+        for net_name, net_config in build_valid_network_definition_set_raw(
+            add_multus=add_multus,
+            add_netconfig=add_netconfig,
+            add_metallb=add_metallb,
+            use_ipv4=use_ipv4,
+            use_ipv6=use_ipv6,
+            mixed_ip_versions=mixed_ip_versions,
+        ).items()
     }
 
 
@@ -237,3 +296,9 @@ def get_test_file_yaml_content(file_name: str) -> typing.Dict[str, typing.Any]:
     file_path = get_test_file_path(file_name)
     with open(file_path, "r") as file:
         return yaml.safe_load(file)
+
+
+def get_test_file_json_content(file_name: str) -> typing.Dict[str, typing.Any]:
+    file_path = get_test_file_path(file_name)
+    with open(file_path, "r") as file:
+        return json.load(file)

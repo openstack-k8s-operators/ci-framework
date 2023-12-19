@@ -16,9 +16,9 @@ class MappedIpv4NetworkRange:
 
     """
 
-    start: ipaddress.IPv4Network
+    start: ipaddress.IPv4Address
     start_host: int
-    end: ipaddress.IPv4Network
+    end: ipaddress.IPv4Address
     end_host: int
     length: int
 
@@ -36,9 +36,9 @@ class MappedIpv6NetworkRange:
 
     """
 
-    start: ipaddress.IPv6Network
+    start: ipaddress.IPv6Address
     start_host: int
-    end: ipaddress.IPv6Network
+    end: ipaddress.IPv6Address
     end_host: int
     length: int
 
@@ -135,7 +135,6 @@ class MappedNetwork:
     Attributes:
         network_name: The name of the network.
         search_domain: DNS search domain for the network.
-        dns_servers: Network relevant nameservers.
         tools: Tools configurations for the network.
         dns_v4: IPv4 nameservers for the network.
         dns_v6: IPv6 nameservers for the network.
@@ -150,10 +149,9 @@ class MappedNetwork:
 
     network_name: str
     search_domain: str
-    dns_servers: typing.List[str]
     tools: MappedNetworkTools
-    dns_v4: typing.List[ipaddress.IPv4Network]
-    dns_v6: typing.List[ipaddress.IPv6Network]
+    dns_v4: typing.List[ipaddress.IPv4Address]
+    dns_v6: typing.List[ipaddress.IPv6Address]
     network_v4: typing.Optional[ipaddress.IPv4Network] = None
     network_v6: typing.Optional[ipaddress.IPv6Network] = None
     gw_v4: typing.Optional[ipaddress.IPv4Address] = None
