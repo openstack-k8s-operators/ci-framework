@@ -1,0 +1,286 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set install_yamls Makefile environment variables
+  tags:
+    - always
+  vars:
+    operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
+  ansible.builtin.set_fact:
+    cifmw_edpm_prepare_common_env: >-
+      {{
+        cifmw_install_yamls_environment |
+        combine({'PATH': cifmw_path}) |
+        combine(cifmw_edpm_prepare_extra_vars | default({}))
+      }}
+    cifmw_edpm_prepare_make_openstack_env: |
+      {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
+      OPENSTACK_IMG: {{ operators_build_output[cifmw_operator_build_meta_name].image_catalog }}
+      {% endif %}
+    cifmw_edpm_prepare_make_openstack_deploy_prep_env: |
+      CLEANUP_DIR_CMD: "true"
+      {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
+      OPENSTACK_BRANCH: ""
+      GIT_CLONE_OPTS: "-l"
+      OPENSTACK_REPO: {{ operators_build_output[cifmw_operator_build_meta_name].git_src_dir }}
+      {% endif %}
+    cifmw_edpm_prepare_operators_build_output: "{{ operators_build_output }}"
+
+- name: Prepare storage in CRC
+  when:
+    - not cifmw_edpm_prepare_skip_crc_storage_creation | bool
+  vars:
+    make_crc_storage_env: "{{ cifmw_edpm_prepare_common_env }}"
+    make_crc_storage_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+    make_crc_storage_retries: 10
+    make_crc_storage_delay: 2
+    make_crc_storage_until: "make_crc_storage_status is not failed"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_crc_storage'
+  tags:
+    - control-plane
+
+- name: Prepare inputs
+  vars:
+    make_input_env: "{{ cifmw_edpm_prepare_common_env }}"
+    make_input_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+    make_input_retries: 10
+    make_input_delay: 5
+    make_input_until: "make_input_status is not failed"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_input'
+  tags:
+    - control-plane
+
+- name: OpenStack meta-operator installation
+  vars:
+    make_openstack_env: "{{ cifmw_edpm_prepare_common_env |
+      combine(cifmw_edpm_prepare_make_openstack_env | from_yaml)}}"
+    make_openstack_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack'
+  tags:
+    - control-plane
+
+- name: Wait for OpenStack operators to be installed
+  tags:
+    - control-plane
+  when:
+    - not cifmw_edpm_prepare_dry_run
+  block:
+    - name: Wait for OpenStack subscription creation
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get sub openstack-operator
+          --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          -o=jsonpath='{.status.installplan.name}'
+      until: cifmw_edpm_prepare_wait_installplan_out.rc == 0 and cifmw_edpm_prepare_wait_installplan_out.stdout != ""
+      register: cifmw_edpm_prepare_wait_installplan_out
+      retries: "{{ cifmw_edpm_prepare_oc_retries }}"
+      delay: "{{ cifmw_edpm_prepare_oc_delay }}"
+
+    - name: Wait for OpenStack operator to get installed
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc wait InstallPlan {{ cifmw_edpm_prepare_wait_installplan_out.stdout }}
+          --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          --for=jsonpath='{.status.phase}'=Complete --timeout=20m
+
+- name: Update OpenStack Services containers Env
+  when: cifmw_edpm_prepare_update_os_containers | bool
+  vars:
+    cifmw_set_openstack_containers_extra_vars: "{{ cifmw_edpm_prepare_extra_vars }}"
+  ansible.builtin.include_role:
+    name: set_openstack_containers
+
+- name: Patch ansible runner image temporarily
+  when:
+    - not cifmw_edpm_prepare_update_os_containers | bool
+    - not cifmw_edpm_prepare_skip_patch_ansible_runner | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc patch csv -n openstack-operators openstack-ansibleee-operator.v0.0.1
+      --type='json' -p='[{
+      "op":"replace", "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
+      "value": {"name": "RELATED_IMAGE_ANSIBLEEE_IMAGE_URL_DEFAULT", "value": "quay.io/openstack-k8s-operators/openstack-ansibleee-runner:latest"}}]'
+
+# Prepare and kustomize the OpenStackControlPlane CR
+- name: Prepare OpenStack control plane CR
+  vars:
+    make_openstack_deploy_prep_env: "{{ cifmw_edpm_prepare_common_env |
+      combine(cifmw_edpm_prepare_make_openstack_deploy_prep_env | from_yaml)}}"
+    make_openstack_deploy_prep_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_deploy_prep'
+  tags:
+    - control-plane
+
+- name: Deploy NetConfig
+  vars:
+    make_netconfig_deploy_env: "{{ cifmw_edpm_prepare_common_env }}"
+    make_netconfig_deploy_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_netconfig_deploy'
+  tags:
+    - control-plane
+
+- name: Kustomize and deploy OpenStackControlPlane
+  tags:
+    - control-plane
+  vars:
+    cifmw_edpm_prepare_openstack_crs_path: >-
+      {{
+        [
+          cifmw_edpm_prepare_manifests_dir,
+          cifmw_install_yamls_defaults['NAMESPACE'],
+          'openstack',
+          'cr'
+        ] | ansible.builtin.path_join
+      }}
+
+  when:
+    - not cifmw_edpm_prepare_dry_run | bool
+  block:
+    - name: Perform kustomizations to the OpenStackControlPlane CR
+      when: not cifmw_edpm_prepare_dry_run
+      ci_kustomize:
+        target_path: "{{ cifmw_edpm_prepare_openstack_crs_path }}"
+        sort_ascending: false
+        kustomizations_paths: >-
+          {{
+            [
+              (
+                [
+                  cifmw_edpm_prepare_manifests_dir,
+                  'kustomizations',
+                  'controlplane'
+                ] | ansible.builtin.path_join
+              )
+            ]
+          }}
+      register: cifmw_edpm_prepare_crs_kustomize_result
+
+    - name: Log the CR that is about to be applied
+      when: not cifmw_edpm_prepare_dry_run
+      ansible.builtin.debug:
+        var: cifmw_edpm_prepare_crs_kustomize_result
+
+    - name: Apply the OpenStackControlPlane CR
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      when: not cifmw_edpm_prepare_dry_run
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_edpm_prepare_basedir }}/artifacts"
+        script: "oc apply -f {{ cifmw_edpm_prepare_crs_kustomize_result.output_path }}"
+
+    - name: Wait for OpenStack controlplane to be deployed
+      when: not cifmw_edpm_prepare_dry_run
+      vars:
+        cr_name: >-
+          {{
+            (
+              cifmw_edpm_prepare_crs_kustomize_result.result |
+              selectattr('kind', 'defined') |
+              selectattr('metadata.name', 'defined') |
+              selectattr('kind', 'equalto', 'OpenStackControlPlane') |
+              first
+            ).metadata.name
+          }}
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc wait OpenStackControlPlane {{ cr_name }}
+          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          --for=condition=ready
+          --timeout={{ cifmw_edpm_prepare_timeout }}m
+
+    - name: Get CA bundle data
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: 'oc get secret combined-ca-bundle -n openstack -o "jsonpath={.data.tls-ca-bundle\.pem}" --ignore-not-found'
+      register: ca_bundle_data
+
+    - name: Get CA bundle
+      when: ca_bundle_data.stdout | length > 0
+      ansible.builtin.set_fact:
+        ca_bundle: >-
+          {{ ca_bundle_data.stdout | ansible.builtin.b64decode }}
+
+    - name: Creating tls-ca-bundle.pem
+      when: (ca_bundle is defined) and (ca_bundle | length > 0)
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_prepare_basedir }}/tls-ca-bundle.pem"
+        content: "{{ ca_bundle }}"
+      register: ca_bundle_file
+
+    - name: Inject OpenStackControlplane CA bundle  # noqa: no-handler
+      when: ca_bundle_file is changed
+      vars:
+        cifmw_install_ca_bundle_src: "{{ cifmw_edpm_prepare_basedir }}/tls-ca-bundle.pem"
+      ansible.builtin.include_role:
+        role: install_ca
+
+- name: Wait for keystone to be ready
+  tags:
+    - control-plane
+  when: not cifmw_edpm_prepare_dry_run
+  block:
+    - name: Extract keystone endpoint host
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get keystoneapi keystone
+          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          -o jsonpath='{ .status.apiEndpoints.public }'
+      register: _cifmw_edpm_prepare_keystone_endpoint_out
+      until: _cifmw_edpm_prepare_keystone_endpoint_out.rc == 0 and _cifmw_edpm_prepare_keystone_endpoint_out.stdout != ""
+      retries: "{{ cifmw_edpm_prepare_oc_retries }}"
+      delay: "{{ cifmw_edpm_prepare_oc_delay }}"
+
+    - name: Wait for keystone endpoint to exist in DNS
+      register: _cifmw_edpm_prepare_check_keystone_dns
+      vars:
+        _keystone_response_codes: [200, 300, 301, 302, 401, 402, 403]
+      ansible.builtin.uri:
+        url: "{{ _cifmw_edpm_prepare_keystone_endpoint_out.stdout | trim }}"
+        status_code: "{{ _keystone_response_codes }}"  # noqa: args[module]
+        validate_certs: "{{ cifmw_edpm_prepare_verify_tls }}"
+      retries: 20
+      delay: 10
+      until:
+        - _cifmw_edpm_prepare_check_keystone_dns.status is defined
+        - _cifmw_edpm_prepare_check_keystone_dns.status in _keystone_response_codes

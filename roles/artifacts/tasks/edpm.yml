@@ -1,0 +1,102 @@
+---
+- name: Check for virtualized compute in Baremetal jobs
+  when:
+    - cifmw_is_nested_virt | default(false) | bool
+  block:
+    - name: List all of the existing virtual machines
+      register: vms_list
+      community.libvirt.virt:
+        command: list_vms
+        uri: "qemu:///system"
+
+    - name: Filter out edpm vm
+      ansible.builtin.set_fact:
+        ssh_key_file: "{{ cifmw_artifacts_basedir }}/artifacts/edpm/ansibleee-ssh-key-id_rsa"
+        ssh_user: cloud-admin
+        edpm_vms: >-
+          {%- set listing=vms_list.list_vms | select('match', '^edpm-.*$') -%}
+          {%- if listing | length == 1 -%}
+          ['192.168.122.100']
+          {%- endif -%}
+
+- name: Hit compute nodeset
+  when:
+    - not cifmw_is_nested_virt | default(false) | bool
+  block:
+    - name: Check for CI env directory
+      register: network_env_dir
+      ansible.builtin.stat:
+        path: /etc/ci/env
+
+    - name: Extract data from network env file if available
+      when:
+        - network_env_dir.stat.exists
+      block:
+        - name: Load network env file
+          ansible.builtin.include_vars:
+            dir: /etc/ci/env/
+
+        - name: Extract Compute from zuul mapping if any
+          when:
+            - crc_ci_bootstrap_networks_out is defined
+            - cifmw_edpm_deploy_extra_vars is defined
+          ansible.builtin.set_fact:
+            ssh_key_file: "{{ cifmw_edpm_deploy_extra_vars.SSH_KEY_FILE }}"
+            ssh_user: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
+            edpm_vms: >-
+              {{
+                crc_ci_bootstrap_networks_out | dict2items |
+                selectattr('key', 'match', '^compute.*$') |
+                map(attribute='value.default.ip') | default([])
+              }}
+
+- name: Generate logs on EDPM vms
+  when:
+    - edpm_vms is defined
+    - edpm_vms | length > 0
+  block:
+    - name: "Generate logs on edpm vm {{ item.split('/')[0] }}"
+      ignore_errors: true  # noqa: ignore-errors
+      vars:
+        host_ip: "{{ item.split('/')[0] }}"
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: |-
+          ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
+            -i {{ ssh_key_file }} {{ ssh_user }}@{{ host_ip }} <<EOF
+          set -x
+          sudo dnf install -y rsync
+          mkdir -p /tmp/{{ host_ip }}
+          sudo test -d /etc/ci/env && sudo cp -r /etc/ci/env /tmp/{{ host_ip }}/ci-env
+          sudo cp -a /var/log/ /tmp/{{ host_ip }}
+          sudo test -d /var/lib/openstack && sudo cp -a /var/lib/openstack /tmp/{{ host_ip }}
+          sudo test -d /var/lib/config-data && sudo cp -a /var/lib/config-data /tmp/{{ host_ip }}
+          sudo test -d /var/lib/cloud && sudo cp -a /var/lib/cloud /tmp/{{ host_ip }}
+          sudo test -d /etc && sudo cp -RP /etc /tmp/{{ host_ip }}
+          sudo find /tmp/{{ host_ip }} -type d -exec chmod ugoa+rx '{}' \;
+          sudo find /tmp/{{ host_ip }} -type f -exec chmod ugoa+r '{}' \;
+          command -v ovs-vsctl && sudo ovs-vsctl list Open_vSwitch > /tmp/{{ host_ip }}/ovs_vsctl_list_openvswitch.txt
+          sudo ip netns > /tmp/{{ host_ip }}/ip_netns.txt
+          sudo ip a > /tmp/{{ host_ip }}/network.txt
+          sudo ip ro ls >> /tmp/{{ host_ip }}/network.txt
+          sudo rpm -qa > /tmp/{{ host_ip }}/rpm_qa.txt
+          sudo podman images > /tmp/{{ host_ip }}/podman_images.txt
+          sudo ausearch -i | grep denied > /tmp/{{ host_ip }}/selinux-denials.log || true
+          sudo journalctl -p warning -t kernel -o short -g DROPPING --no-pager &> /tmp/{{ host_ip }}/firewall-drops.txt || true
+          EOF
+      loop: "{{ edpm_vms }}"
+      loop_control:
+        label: "{{ item.split('/')[0] }}"
+
+    - name: "Copy logs to host machine from {{ item.split('/')[0] }}"
+      ignore_errors: true  # noqa: ignore-errors
+      vars:
+        host_ip: "{{ item.split('/')[0] }}"
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
+        script: >-
+          rsync -a -e "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i {{ ssh_key_file }}"
+          {{ ssh_user }}@{{ host_ip }}:/tmp/{{ host_ip }} {{ cifmw_artifacts_basedir }}/logs/
+      loop: "{{ edpm_vms }}"
+      loop_control:
+        label: "{{ item.split('/')[0] }}"

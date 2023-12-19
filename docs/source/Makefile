@@ -28,12 +28,12 @@ plugin_doc:
 .PHONY: utils_doc
 utils_doc: export SPHINX_APIDOC_OPTIONS=members,show-inheritance
 utils_doc:
-	#find ../../ci_framework/plugins/module_utils/ -type f -iname "*.py" -exec cp '{}' module_utils/ \;
-	$(SPHINXAPI) -o ./module_utils -T --implicit-namespaces ../../ci_framework/plugins/module_utils/*
+	#find ../../plugins/module_utils/ -type f -iname "*.py" -exec cp '{}' module_utils/ \;
+	$(SPHINXAPI) -o ./module_utils -T --implicit-namespaces ../../plugins/module_utils/*/
 
 .PHONY: role_doc
 role_doc:
-	for i in ../../ci_framework/roles/*/README.md; do \
+	for i in ../../roles/*/README.md; do \
 		dir_name=`dirname $$i`; \
 		role_name=`basename $$dir_name`; \
 		test -L ./roles/$${role_name}.md || \

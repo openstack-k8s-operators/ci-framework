@@ -113,4 +113,4 @@ html_logo = "images/logo_cifmw_200.png"
 # htmlhelp_basename = 'doc'
 
 # Exposes our custom module_utils content for docstring
-sys.path.append("../../ci_framework/plugins/module_utils")
+sys.path.append("../../plugins/module_utils")

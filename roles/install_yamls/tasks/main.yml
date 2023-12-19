@@ -1,0 +1,142 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories exist
+  tags:
+    - bootstrap
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ cifmw_install_yamls_out_dir }}"
+    - "{{ cifmw_install_yamls_tasks_out }}"
+    - "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters"
+
+- name: Set environment override cifmw_install_yamls_environment fact
+  tags:
+    - bootstrap
+  vars:
+    install_yamls_override_vars: "{{ cifmw_install_yamls_vars| default({}) }}"
+  ansible.builtin.set_fact:
+    cifmw_install_yamls_environment: >-
+      {{
+        install_yamls_override_vars.keys() |
+        map('upper') |
+        zip(install_yamls_override_vars.values()) |
+        items2dict(key_name=0, value_name=1) |
+        combine({
+          'OUT': cifmw_install_yamls_manifests_dir,
+          'OUTPUT_DIR': cifmw_install_yamls_edpm_dir
+        })
+      }}
+    cacheable: true
+
+- name: "Get environment structure"
+  tags:
+    - bootstrap
+  register: get_makefiles_env_output
+  environment: "{{ cifmw_install_yamls_environment }}"
+  cifmw.general.get_makefiles_env:
+    base_path: "{{ cifmw_install_yamls_repo }}"
+
+- name: Create env var if needed
+  tags:
+    - bootstrap
+  when: cifmw_install_yamls_vars is defined
+  block:
+    - name: Ensure Output directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_install_yamls_out_dir }}"
+        state: directory
+
+    - name: Ensure user cifmw_install_yamls_vars contains existing Makefile variables
+      vars:
+        _cifmw_install_yamls_unmatched_vars: >-
+          {{
+            cifmw_install_yamls_environment.keys() |
+            difference(
+              get_makefiles_env_output.makefiles_values.keys() | list +
+              cifmw_install_yamls_whitelisted_vars | default([])
+            )
+          }}
+      ansible.builtin.assert:
+        that: _cifmw_install_yamls_unmatched_vars | length == 0
+        msg: >-
+          cifmw_install_yamls_vars contains a variable that is not defined in
+          install_yamls Makefile nor cifmw_install_yamls_whitelisted_vars: {{ _cifmw_install_yamls_unmatched_vars | join(', ')}}
+        quiet: true
+
+    - name: "Generate {{ cifmw_install_yamls_out_dir }}/{{ cifmw_install_yamls_envfile }}"  # noqa: name[template]
+      ansible.builtin.copy:
+        dest: "{{ cifmw_install_yamls_out_dir }}/{{ cifmw_install_yamls_envfile }}"
+        content: |-
+          {% for k,v in cifmw_install_yamls_environment.items() %}
+          export {{ k }}={{ v }}
+          {% endfor %}
+
+- name: Set install_yamls default values
+  tags:
+    - bootstrap
+  ansible.builtin.set_fact:
+    cifmw_install_yamls_defaults: "{{ get_makefiles_env_output.makefiles_values  | combine(cifmw_install_yamls_environment) }}"
+    cacheable: true
+
+- name: Show the env structure
+  tags:
+    - bootstrap
+  ansible.builtin.debug:
+    var: cifmw_install_yamls_environment
+
+- name: Show the env structure defaults
+  tags:
+    - bootstrap
+  ansible.builtin.debug:
+    var: cifmw_install_yamls_defaults
+
+- name: "Generate make targets"
+  tags:
+    - bootstrap
+  register: cifmw_generate_makes
+  generate_make_tasks:
+    install_yamls_path: "{{ cifmw_install_yamls_repo }}"
+    output_directory: "{{ cifmw_install_yamls_tasks_out }}"
+
+- name: Debug generate_make module
+  tags:
+    - bootstrap
+  ansible.builtin.debug:
+    var: cifmw_generate_makes
+
+- name: Create the install_yamls parameters file
+  tags:
+    - bootstrap
+  ansible.builtin.copy:
+    dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters/install-yamls-params.yml"
+    content: >-
+      {{
+        {
+        'cifmw_install_yamls_environment': cifmw_install_yamls_environment,
+        'cifmw_install_yamls_defaults': cifmw_install_yamls_defaults
+        } | to_nice_yaml
+      }}
+
+- name: Create empty cifmw_install_yamls_environment if needed
+  tags:
+    - always
+  when:
+    - cifmw_install_yamls_environment is not defined
+  ansible.builtin.set_fact:
+    cifmw_install_yamls_environment: {}

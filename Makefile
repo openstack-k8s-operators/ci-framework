@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 # Roles directory location. May point outside of this repository
-ROLE_DIR ?= ci_framework/roles/
+ROLE_DIR ?= roles/
 # Code base directory - used for pre-commit check
 BASEDIR ?= ./
 # Create python virtualenv and use it?
@@ -38,7 +38,7 @@ help: ## Display this help.
 create_new_role: ## Please call `new_role ROLE_NAME=your_role` instead.
 	$(if $(strip $(INTER_CALL)),,$(error Please call make new_role ROLE_NAME=${ROLE_NAME}))
 	$(call check-var-defined,ROLE_NAME)
-	ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ci_framework/roles ${ROLE_NAME}
+	ansible-galaxy role init --role-skeleton _skeleton_role_ --init-path ./roles ${ROLE_NAME}
 
 .PHONY: role_molecule
 role_molecule: ## Regenerate the molecule jobs configuration

@@ -1,0 +1,43 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert needed parameters are passed
+  ansible.builtin.assert:
+    that:
+      - _kustomize_content is defined
+
+- name: Load and prepare the ci-framework kustomize template file
+  ansible.builtin.copy:
+    force: true
+    dest: "{{ cifmw_edpm_kustomize_cr_path | dirname }}/kustomization.yaml"
+    content: >-
+      {{
+        _kustomize_content |
+        combine({ 'resources': omit }) |
+        combine(
+          {
+            'resources': [(cifmw_edpm_kustomize_cr_path | basename)]
+          }
+        ) | to_nice_yaml
+      }}
+
+- name: Apply the already existing kustomization if present
+  environment:
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_edpm_kustomize_artifacts_dir }}"
+    chdir: "{{ cifmw_edpm_kustomize_cr_path | dirname }}"
+    script: "oc kustomize  -o {{ cifmw_edpm_kustomize_cr_path }}"
