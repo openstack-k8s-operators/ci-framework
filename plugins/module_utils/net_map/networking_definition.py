@@ -118,7 +118,7 @@ def _validate_parse_field_type(
         raise exceptions.NetworkMappingValidationError(
             f"'{field_name}' must be of type {expected_type.__name__}",
             field=field_name,
-            invalid_value=str(raw_value),
+            invalid_value=raw_value,
             parent_name=parent_name,
             parent_type=parent_type,
         )
@@ -1006,6 +1006,7 @@ class NetworkDefinition:
             gateway: <net gateway: optional>
             dns:  <DNS servers list: optional>
                 - <DNS IP 1>
+            search-domain: <DNS search domain: optional>
             vlan: <vlan-id: optional>
             mtu: <mtu: optional>
             tools:
@@ -1021,6 +1022,7 @@ class NetworkDefinition:
     __FIELD_NETWORK_IPV6 = "network-v6"
     __FIELD_GATEWAY = "gateway"
     __FIELD_DNSS = "dns"
+    __FIELD_SEARCH_DOMAIN = "search-domain"
     __FIELD_MTU = "mtu"
     __FIELD_VLAN_ID = "vlan"
 
@@ -1053,6 +1055,7 @@ class NetworkDefinition:
         self.__ipv4_network = None
         self.__ipv4_gateway = None
         self.__ipv6_gateway = None
+        self.__search_domain = None
         self.__ipv4_dns = []
         self.__ipv6_dns = []
         self.__multus_config: typing.Union[MultusNetworkDefinition, None] = None
@@ -1119,6 +1122,11 @@ class NetworkDefinition:
     def ipv6_dns(self) -> typing.List[ipaddress.IPv6Address]:
         """IPv6 DNS servers"""
         return self.__ipv6_dns
+
+    @property
+    def search_domain(self) -> typing.Optional[str]:
+        """DNS search domain"""
+        return self.__search_domain
 
     def parse_range_from_raw(
         self, raw_definition: typing.Dict[str, typing.Any], ip_version: int = None
@@ -1222,6 +1230,14 @@ class NetworkDefinition:
         self.__parse_raw_gateway(raw_definition)
         self.__parse_raw_dnss(raw_definition)
 
+        self.__search_domain = _validate_parse_field_type(
+            self.__FIELD_SEARCH_DOMAIN,
+            raw_definition,
+            str,
+            parent_name=self.__name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            mandatory=False,
+        )
         self.__mtu = _validate_parse_int(
             self.__FIELD_MTU,
             raw_definition,

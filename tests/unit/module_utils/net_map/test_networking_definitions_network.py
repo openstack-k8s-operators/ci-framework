@@ -210,6 +210,8 @@ def validate_network_definition_from_raw(net_name, net_config, network_definitio
             ip_net_4, ip_net_6, network_definition.netconfig_config, netconfig_config
         )
 
+    assert network_definition.search_domain == net_config.get("search-domain", None)
+
 
 def test_network_definition_parse_ok():
     net_name = "testing-net"
@@ -227,6 +229,7 @@ def test_network_definition_parse_all_ok():
             "192.168.122.254",
             "1.1.1.1",
         ],
+        "search-domain": "example.local",
         "vlan": 122,
         "mtu": 9000,
     }
@@ -593,6 +596,23 @@ def test_network_definition_parse_tools_ranges_collision_fail():
                 network_ip, colliding_range_config_2
             )
         )
+
+
+@pytest.mark.parametrize("invalid_test_input", [1, bool, 3.33, [], {}, ()])
+def test_network_definition_parse_search_domain_fail(invalid_test_input):
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.NetworkDefinition(
+            "testing-net",
+            {
+                "network": "192.168.122.0/24",
+                "search-domain": invalid_test_input,
+            },
+        )
+    assert exc_info.value.invalid_value == invalid_test_input
+    assert exc_info.value.field == "search-domain"
+    assert exc_info.value.parent_type == "network"
+    assert exc_info.value.parent_name == "testing-net"
+    assert "must be of type str" in str(exc_info.value)
 
 
 # Ensure dual stack ranges do not collide
