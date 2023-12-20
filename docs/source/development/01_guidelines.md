@@ -39,4 +39,4 @@ and cover as many corner cases as possible.
 ### Ansible custom plugins
 Please take the time to consider how to test your custom plugins. You may
 either rely on [molecule](./02_molecule.md) or, maybe,
-[ansible-test](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/tests/integration).
+[ansible-test](https://github.com/openstack-k8s-operators/ci-framework/tree/main/tests/integration).

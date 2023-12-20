@@ -12,7 +12,7 @@ It contains a set of playbooks to deploy podified control plane.
 * `cifmw_install_yamls_edpm_dir`: (String) Output directory for EDPM related artifacts (OUTPUT_BASEDIR). Defaults to `{{ cifmw_install_yamls_out_dir_basedir ~ '/artifacts/edpm' }}`
 
 ## Use case
-This module uses [a custom plugin](https://github.com/openstack-k8s-operators/ci-framework/blob/main/ci_framework/plugins/modules/generate_make_tasks.py) created to generate the role with tasks from Makefile.
+This module uses [a custom plugin](https://github.com/openstack-k8s-operators/ci-framework/blob/main/plugins/modules/generate_make_tasks.py) created to generate the role with tasks from Makefile.
 The created role directory contains multiple task files, similar to
 ```YAML
 ---

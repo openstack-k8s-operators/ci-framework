@@ -46,10 +46,10 @@ definition, you can pass any kind of parameters as a list:
     name: cifmw-end-to-end
     parent: cifmw-end-to-end-base
     files:
-      - ^ci_framework/roles/.*_build/(?!meta|README).*
-      - ^ci_framework/roles/build.*/(?!meta|README).*
-      - ^ci_framework/roles/openshift_*/(?!meta|README).*
-      - ^ci_framework/playbooks/.*build.*.yml
+      - ^roles/.*_build/(?!meta|README).*
+      - ^roles/build.*/(?!meta|README).*
+      - ^roles/openshift_*/(?!meta|README).*
+      - ^playbooks/.*build.*.yml
     irrelevant-files:
       - ^.*/*.md
       - ^ci/templates
