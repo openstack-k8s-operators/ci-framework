@@ -224,6 +224,60 @@
       ansible.builtin.command:
         cmd: "virsh -c qemu:///system pool-info cifmw-pool"
 
+    - name: Test volumes.
+      block:
+        - name: Gather the list of created volumes.
+          register: vol_count
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              virsh -c qemu:///system vol-list --pool cifmw-pool | \
+              grep -c cifmw-compute
+
+        - name: Verify the number of created volumes match with the expected count.
+          vars:
+            expect_vol_num: >-
+              {{
+                (cifmw_libvirt_manager_configuration.vms.compute.amount | int) *
+                (cifmw_libvirt_manager_configuration.vms.compute.extra_disks_num | int)
+              }}
+            found_vol_num: "{{ vol_count.stdout | int }}"
+          ansible.builtin.assert:
+            that:
+              - found_vol_num == expect_vol_num
+
+    - name: Test volume attachment.
+      block:
+        - name: Gather the domain information about VMs having extra disks.
+          register: vm_xml
+          community.libvirt.virt:
+            command: "get_xml"
+            name: "{{ item }}"
+            uri: "qemu:///system"
+          loop: "{{ vms.list_vms | select('match', '^cifmw-compute.*') }}"
+
+        - name: Gather the number of volumes attached.
+          register: volume_count
+          community.general.xml:
+            count: true
+            xmlstring: "{{ item.get_xml }}"
+            xpath: "/domain/devices/disk"
+          loop: "{{ vm_xml.results }}"
+
+        - name: Verify the number of volumes attached match with the expected count.
+          vars:
+            expected_count: >-
+              {{
+                (
+                  cifmw_libvirt_manager_configuration.vms.compute.extra_disks_num | int
+                ) + 1
+              }}
+            found_count: "{{ item.count | int }}"
+          ansible.builtin.assert:
+            that:
+              - expected_count == found_count
+          loop: "{{ volume_count.results }}"
+
 - name: Cleanup
   hosts: instance
   tasks:
