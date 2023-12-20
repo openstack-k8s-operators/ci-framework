@@ -1,0 +1,61 @@
+- name: Fail If infrastructure State Is Not Correct
+  ansible.builtin.fail:
+    msg:
+      - "cifmw_tofu_plan_state must be set to 'present' or 'absent'."
+  when: cifmw_tofu_plan_state is not in ['present', 'absent']
+
+- name: Fail If Check Mode Is Not Correct
+  ansible.builtin.fail:
+    msg:
+      - "cifmw_tofu_check_mode must be boolean ('true' or 'false')."
+  when: cifmw_tofu_check_mode | lower not in ['true', 'false']
+
+- name: Fail If Tofu Project Path Not Defined
+  ansible.builtin.fail:
+    msg:
+      - 'cifmw_tofu_project_path is not defined.'
+  when: cifmw_tofu_project_path is not defined
+
+- name: Prepare Remote Environment If Required
+  ansible.builtin.include_role:
+    name: tofu
+    tasks_from: remote_prepare
+  when:
+    - ansible_host != 'localhost'
+    - not cifmw_tofu_use_remote_project
+- name: Tofu Provisioning
+  block:
+    - name: Prepare Tofu Environment
+      ansible.builtin.import_role:
+        name: tofu
+        tasks_from: prepare
+
+    - name: Execute Tofu Plan
+      ansible.builtin.import_role:
+        name: tofu
+        tasks_from: plan
+  rescue:
+    - name: Notify Error In Execution  Tofu  Plan
+      ansible.builtin.debug:
+        msg: 'Failed to execute  Tofu  plan.'
+  always:
+    - name: Summarize Tofu Execution
+      ansible.builtin.debug:
+        msg:
+          - "Execution failed: {{ _tofu_plan_execution['failed'] }}"
+          - "Output:"
+          - |-
+            {%- if 'stdout_lines' in _tofu_plan_execution -%}
+              {{ _tofu_plan_execution['stdout_lines'] }}
+            {%- else -%}
+            []
+            {%- endif -%}
+          - "Error:"
+          - |-
+            {%- if 'stderr_lines' in _tofu_plan_execution -%}
+              {{ _tofu_plan_execution['stderr_lines'] }}
+            {%- else -%}
+              {%- set msg= _tofu_plan_execution['msg'].strip() | regex_replace('[\r\n]+','STRING_TO_SPLIT') -%}
+              {{ msg.split('STRING_TO_SPLIT') }}
+            {%- endif -%}
+      failed_when: _tofu_plan_execution is failed
