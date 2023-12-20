@@ -13,8 +13,6 @@ CI_CTX_NAME ?= localhost/cifmw:latest
 MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 # Run molecule against all tests
 TEST_ALL_ROLES ?= ${TEST_ALL_ROLES:-no}
-# Ansible options for the local_env_vm target
-LOCAL_ENV_OPTS ?= ""
 
 # target vars for generic operator install info 1: target name , 2: operator name
 define vars
