@@ -34,6 +34,7 @@ Used for checking if:
 ### Structure for `cifmw_libvirt_manager_configuration`
 
 The following structure has to be passed via the configuration parameter:
+
 ```YAML
 cifmw_libvirt_manager_configuration:
   vms:
@@ -47,6 +48,8 @@ cifmw_libvirt_manager_configuration:
       memory: (integer, RAM amount in GB. Optional, defaults to 2)
       cpus: (integer, amount of CPU. Optional, defaults to 2)
       nets: (ordered list of networks to connect to)
+      extra_disks_num: (integer, optional. Number of extra disks to be configured.)
+      extra_disks_size: (string, optional. Storage capacity to be allocated. Example 1G, 512M)
       target: (Hypervisor hostname you want to deploy the family on. Optional)
   networks:
     net_name: <XML definition of the network to create>
@@ -55,6 +58,7 @@ cifmw_libvirt_manager_configuration:
 Specific `type_name`: `^crc.*` and `^ocp.*` are enabling specific paths in the module.
 
 #### Example
+
 ```YAML
 cifmw_libvirt_manager_networks:
   public:
@@ -73,6 +77,8 @@ cifmw_libvirt_manager_configuration:
       nets:
         - public
         - osp_trunk
+      extra_disks_num: 5
+      extra_disks_size: '1G'
     controller:
       image_url: "{{ cifmw_discovered_image_url }}"
       sha256_image_name: "{{ cifmw_discovered_hash }}"
@@ -130,6 +136,7 @@ reproducer role.
 * `cifmw_libvirt_manager_crc_private_nic`: `{{ cifmw_reproducer_crc_private_nic | default('enp2s0') }}`
 
 ## Calling attach_network.yml from another role
+
 You may want to include that specific tasks file from another role in order to inject some networks into
 a virtual machine.
 
@@ -143,7 +150,8 @@ In order to do so, you have to provide specific variables:
   * `static_ip`: (Bool) Set it to `true` to get a fixed IP.
 * `cifmw_libvirt_manager_net_prefix_add`: (Bool) Toggle this to `true` if the network name needs to get the `cifmw-` prefix (advanced usage). Optional. Defaults to `true`.
 
-### Example
+### Example of a task
+
 ```YAML
 - name: Attach my network to my virtual machine
   vars:

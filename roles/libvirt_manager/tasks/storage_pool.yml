@@ -1,0 +1,85 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Gather the status of cifmw-pool storage pool.
+  register: pool_exists
+  ansible.builtin.command:
+    cmd: >-
+      virsh -c qemu:///system pool-info
+      {{ cifmw_libvirt_manager_storage_pool }}
+  failed_when: pool_exists.rc != 0 and pool_exists.rc != 1
+
+- name: Create and start the storage pool.
+  when:
+    - action == "create"
+    - pool_exists.rc == 1
+  block:
+    - name: Create the storage pool
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system
+          pool-define-as
+          --name {{ cifmw_libvirt_manager_storage_pool }}
+          --type dir
+          --target {{ cifmw_libvirt_manager_basedir }}/volumes
+
+    - name: Ensure the storage pool is started
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system
+          {{ item }}
+          {{ cifmw_libvirt_manager_storage_pool }}
+      loop:
+        - 'pool-start'
+        - 'pool-autostart'
+
+- name: Remove the storage pool.
+  when:
+    - action == "delete"
+    - pool_exists.rc == 0
+  block:
+    - name: Gather all the volumes in the pool.
+      register: _volumes
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          virsh -c qemu:///system vol-list \
+          --pool {{ cifmw_libvirt_manager_storage_pool }} | \
+          awk 'NR>2 { print $1 }' | \
+          awk 'NF'
+      failed_when: _volumes.rc != 0 and _volumes.rc != 1
+
+    - name: Remove the volumes
+      when:
+        - _volumes.stdout_lines is defined
+        - _volumes.stdout_lines | length > 0
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system vol-delete
+          --vol {{ item }}
+          --pool {{ cifmw_libvirt_manager_storage_pool }}
+      loop: "{{ _volumes.stdout_lines }}"
+
+    - name: Remove the storage pool
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system
+          {{ item }}
+          --pool {{ cifmw_libvirt_manager_storage_pool }}
+      loop:
+        - "pool-destroy"
+        - "pool-undefine"
