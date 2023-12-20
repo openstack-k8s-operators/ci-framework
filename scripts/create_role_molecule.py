@@ -37,7 +37,7 @@ def get_project_paths(project_dir=None):
     script_dir = project_dir / "scripts"
     ci_templates_dir = project_dir / "ci" / "templates"
     ci_config_dir = project_dir / "ci" / "config"
-    roles_dir = project_dir / "ci_framework" / "roles"
+    roles_dir = project_dir / "roles"
     zuul_job_dir = project_dir / "zuul.d"
     source_roles_docs_dir = project_dir / "docs" / "source" / "roles"
 

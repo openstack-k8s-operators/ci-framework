@@ -153,7 +153,7 @@ class CreateRoleMoleculeTest(unittest.TestCase):
                     "files": [
                         "^ansible-requirements.txt",
                         "^molecule-requirements.txt",
-                        "^ci_framework/roles/role_2/(?!meta|README).*",
+                        "^roles/role_2/(?!meta|README).*",
                         "^ci/playbooks/molecule.*",
                     ],
                     "name": "cifmw-molecule-role_2",
@@ -166,7 +166,7 @@ class CreateRoleMoleculeTest(unittest.TestCase):
                     "files": [
                         "^ansible-requirements.txt",
                         "^molecule-requirements.txt",
-                        "^ci_framework/roles/role_1/(?!meta|README).*",
+                        "^roles/role_1/(?!meta|README).*",
                         "^ci/playbooks/molecule.*",
                     ],
                     "name": "cifmw-molecule-role_1",
@@ -179,7 +179,7 @@ class CreateRoleMoleculeTest(unittest.TestCase):
                     "files": [
                         "^ansible-requirements.txt",
                         "^molecule-requirements.txt",
-                        "^ci_framework/roles/role_3/(?!meta|README).*",
+                        "^roles/role_3/(?!meta|README).*",
                         "^ci/playbooks/molecule.*",
                     ],
                     "name": "cifmw-molecule-role_3",
