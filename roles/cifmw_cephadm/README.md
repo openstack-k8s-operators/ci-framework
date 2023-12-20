@@ -191,5 +191,5 @@ export ANSIBLE_HOST_KEY_CHECKING=False
 
 ```
 cd ~/ci-framework/
-ansible-playbook ci_framework/playbooks/ceph.yml
+ansible-playbook playbooks/ceph.yml
 ```

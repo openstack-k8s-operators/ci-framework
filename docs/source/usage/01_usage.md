@@ -99,7 +99,7 @@ pre_infra:
 ~~~
 
 In the above example, the `foo.yml` is located in
-[ci_framework/hooks/playbooks](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/hooks/playbooks) while
+[hooks/playbooks](https://github.com/openstack-k8s-operators/ci-framework/tree/main/hooks/playbooks) while
 `glorious.crd` is located in some external path.
 
 Also, the list order is important: the hook will first load the playbook,

@@ -21,4 +21,4 @@ None
 - Integrate EDPM kustomize
 
 ## Resources
-* [ci_framework](https://github.com/openstack-k8s-operators/install_yamls)
+* [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)

@@ -26,7 +26,7 @@ The sample `cifmw_dlrn_promote_criteria_file` criteria file can be found in `fil
 
 ## Dependencies
 
-This role depends on ci-framework [repo-setup](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/roles/repo_setup)
+This role depends on ci-framework [repo-setup](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/repo_setup)
 and [set-zuul-log-path-fact](https://opendev.org/zuul/zuul-jobs/src/branch/master/roles/set-zuul-log-path-fact) roles.
 
 ## Example

@@ -22,7 +22,7 @@ This role does not need privilege escalation.
 
 ## Dependencies
 
-This role depends on ci-framework [repo-setup](https://github.com/openstack-k8s-operators/ci-framework/tree/main/ci_framework/roles/repo_setup)
+This role depends on ci-framework [repo-setup](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/repo_setup)
 and [set-zuul-log-path-fact](https://opendev.org/zuul/zuul-jobs/src/branch/master/roles/set-zuul-log-path-fact) roles.
 
 ## Example
