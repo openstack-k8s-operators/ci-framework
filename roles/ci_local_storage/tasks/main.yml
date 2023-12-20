@@ -1,0 +1,79 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create role needed directories
+  ansible.builtin.file:
+    path: "{{ cifmw_cls_manifests_dir }}"
+    state: directory
+
+- name: Create the cifmw_cls_namespace namespace"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    name: "{{ cifmw_cls_namespace }}"
+    kind: Namespace
+    state: present
+
+- name: Save storage manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_cls_manifests_dir }}/storage-class.yaml"
+    content: "{{ cifmw_cls_storage_manifest | to_nice_yaml }}"
+
+- name: Apply the storage class manifests
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit)  }}"
+    state: present
+    src: "{{ cifmw_cls_manifests_dir }}/storage-class.yaml"
+
+- name: Get the worker nodes
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    kind: Node
+    label_selectors:
+      - node-role.kubernetes.io/worker
+  register: _node_info
+
+- name: Get all the worker nodes
+  ansible.builtin.set_fact:
+    _cls_nodes: >-
+      {{ _node_info.resources |
+          selectattr("metadata.name", "defined") |
+          map(attribute="metadata.name")
+      }}
+
+- name: Create directories on worker node
+  vars:
+    _msg: "Creating"
+  ansible.builtin.import_tasks: worker_node_dirs.yml
+
+- name: Generate pv related storage manifest file
+  ansible.builtin.template:
+    src: storage.yaml.j2
+    dest: "{{ cifmw_cls_manifests_dir }}/storage.yaml"
+    mode: "0644"
+
+- name: Apply pv related storage manifest file
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit)  }}"
+    state: present
+    src: "{{ cifmw_cls_manifests_dir }}/storage.yaml"

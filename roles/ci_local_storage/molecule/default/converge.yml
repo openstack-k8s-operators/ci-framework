@@ -1,0 +1,73 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_cls_storage_provisioner: crc-devsetup
+    cifmw_cls_storage_class: molecule-storage
+    cifmw_cls_namespace: openstack
+  tasks:
+    - name: Run ci_local_storage role
+      ansible.builtin.include_role:
+        name: ci_local_storage
+
+    - name: Get all pvs
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: PersistentVolume
+        label_selectors:
+          - provisioned-by={{ cifmw_cls_storage_provisioner }}
+      register: _pv_info
+
+    - name: Get all pvs
+      ansible.builtin.set_fact:
+        _cls_pvs: >-
+          {{ _pv_info.resources |
+              selectattr("metadata.name", "defined") |
+              map(attribute="metadata.name")
+          }}
+
+    - name: Assert the created pvs
+      ansible.builtin.assert:
+        that:
+          - "cifmw_cls_storage_class in _cls_pvs[0]"
+
+    - name: Delete the created pvs
+      ansible.builtin.include_role:
+        name: ci_local_storage
+        tasks_from: cleanup.yml
+
+    - name: Get all namespaces
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Namespace
+      register: _ns
+
+    - name: Assert that the cifmw_cls_namespace ns is deleted
+      vars:
+        ns_names: >-
+          {{
+            _ns.resources |
+            default([]) |
+            map(attribute='metadata.name')
+          }}
+      ansible.builtin.assert:
+        that: "cifmw_cls_namespace not in ns_names"

@@ -1,0 +1,52 @@
+{% for node in _cls_nodes %}
+{% for pv_number in range(cifmw_cls_pv_count + 1) %}
+---
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: {{ cifmw_cls_storage_class }}{{ pv_number }}-{{ node }}
+  annotations:
+    pv.kubernetes.io/provisioned-by: {{ cifmw_cls_storage_provisioner }}
+  labels:
+    provisioned-by: {{ cifmw_cls_storage_provisioner }}
+spec:
+  storageClassName: {{ cifmw_cls_storage_class }}
+  capacity:
+    storage: {{ cifmw_cls_storage_capacity }}
+  accessModes:
+    - ReadWriteOnce
+    - ReadWriteMany
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Delete
+  local:
+    path: {{ cifmw_cls_local_storage_name }}/pv{{ pv_number }}
+    type: DirectoryOrCreate
+  volumeMode: Filesystem
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values: [{{ node }}]
+{% endfor %}
+{% endfor %}
+{% if cifmw_cls_create_ee_storage | bool %}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ansible-ee-logs
+  namespace: {{ cifmw_cls_namespace }}
+  annotations:
+    pv.kubernetes.io/provisioned-by: {{ cifmw_cls_storage_provisioner }}
+spec:
+  resources:
+    requests:
+      storage: {{ cifmw_cls_storage_capacity }}
+  accessModes:
+    - ReadWriteOnce
+    - ReadWriteMany
+    - ReadOnlyMany
+  storageClassName: {{ cifmw_cls_storage_class }}
+{% endif %}

@@ -1,0 +1,79 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get all pvs
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    kind: PersistentVolume
+    label_selectors:
+      - provisioned-by={{ cifmw_cls_storage_provisioner }}
+  register: _pv_info
+
+- name: Get all pvs
+  ansible.builtin.set_fact:
+    cifmw_cls_pvs: >-
+      {{ _pv_info.resources |
+          selectattr("metadata.name", "defined") |
+          map(attribute="metadata.name")
+      }}
+
+- name: Delete all pvs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    kind: PersistentVolume
+    state: absent
+    api_version: v1
+    namespace: "{{ cifmw_cls_namespace }}"
+    name: "{{ item }}"
+  loop: "{{ cifmw_cls_pvs }}"
+
+- name: Get the worker nodes
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    kind: Node
+    label_selectors:
+      - node-role.kubernetes.io/worker
+  register: _node_info
+
+- name: Get all the worker nodes
+  ansible.builtin.set_fact:
+    cifmw_cls_nodes: >-
+      {{ _node_info.resources |
+          selectattr("metadata.name", "defined") |
+          map(attribute="metadata.name")
+      }}
+
+- name: Delete directories on worker nodes
+  vars:
+    cifmw_cls_action: "rm -rf"
+    _msg: "Deleting"
+  ansible.builtin.import_tasks: worker_node_dirs.yml
+
+- name: Remove the cifmw_cls_namespace namespace
+  kubernetes.core.k8s:
+    state: absent
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    kind: Namespace
+    name: "{{ cifmw_cls_namespace }}"
+    wait: true
