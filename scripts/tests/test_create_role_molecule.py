@@ -151,8 +151,8 @@ class CreateRoleMoleculeTest(unittest.TestCase):
             {
                 "job": {
                     "files": [
-                        "^ansible-requirements.txt",
-                        "^molecule-requirements.txt",
+                        "^common-requirements.txt",
+                        "^test-requirements.txt",
                         "^roles/role_2/(?!meta|README).*",
                         "^ci/playbooks/molecule.*",
                     ],
@@ -164,8 +164,8 @@ class CreateRoleMoleculeTest(unittest.TestCase):
             {
                 "job": {
                     "files": [
-                        "^ansible-requirements.txt",
-                        "^molecule-requirements.txt",
+                        "^common-requirements.txt",
+                        "^test-requirements.txt",
                         "^roles/role_1/(?!meta|README).*",
                         "^ci/playbooks/molecule.*",
                     ],
@@ -177,8 +177,8 @@ class CreateRoleMoleculeTest(unittest.TestCase):
             {
                 "job": {
                     "files": [
-                        "^ansible-requirements.txt",
-                        "^molecule-requirements.txt",
+                        "^common-requirements.txt",
+                        "^test-requirements.txt",
                         "^roles/role_3/(?!meta|README).*",
                         "^ci/playbooks/molecule.*",
                     ],
