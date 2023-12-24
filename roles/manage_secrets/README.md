@@ -35,6 +35,11 @@ None
 * `cifmw_manage_secrets_dataplane_ssh_name`: File name for the dataplane SSH keypair. Defaults to `ansibleee-ssh-key-id_ecdsa`.
 * `cifmw_manage_secrets_dataplane_ssh_metaname`: Metadata for the dataplane ssh keypair. Defaults to `dataplane-ansible-ssh-private-key-secret`.
 
+### OSP secrets
+
+* `cifmw_manage_secrets_ospsecrets_manifests_dest`: (String) Destination directory for OSP secrets manifest
+* `cifmw_manage_secrets_ospsecrets_list`: (List) Secrets parameter definitions. See molecule test for example.
+
 ## File versus Content
 You can set either a file OR a content for the pull-secret and ci-token secrets. You can't set both.
 

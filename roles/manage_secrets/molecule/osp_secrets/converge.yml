@@ -1,0 +1,88 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_login_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_manage_secrets_ospsecrets_list:
+      - name: secret1
+        namespace: openstack
+        data:
+          foo: "{{ 'bar' | ansible.builtin.b64encode }}"
+          bar: "{{ 'foo' | ansible.builtin.b64encode }}"
+        label:
+          type: very-secret
+          newlabel: new-value
+      - name: secret2
+        namespace: openstack
+        data:
+          foobar: "{{ 'barfoo' | ansible.builtin.b64encode }}"
+        label:
+          type: very-secret
+          newestlabel: newest-value
+        type: Opaque
+  roles:
+    - role: openshift_login
+    - role: manage_secrets
+  tasks:
+    - name: Ensure namespace is present
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
+            labels:
+              pod-security.kubernetes.io/enforce: privileged
+              security.openshift.io/scc.podSecurityLabelSync: "false"
+
+    - name: Create osp secrets
+      ansible.builtin.import_role:
+        name: manage_secrets
+        tasks_from: osp_secrets.yml
+
+    - name: Ensure osp secrets exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: Secret
+        label_selectors:
+          - type=very-secret
+      register: _osp_secrets_info
+
+    - name: Get all secrets
+      ansible.builtin.set_fact:
+        _osp_secrets: >-
+          {{ _osp_secrets_info.resources |
+              selectattr("metadata.name", "defined") |
+              map(attribute="metadata.name")
+          }}
+
+    - name: Debug var
+      ansible.builtin.debug:
+        msg: "{{ item.name }} - {{ _osp_secrets }}"
+      loop: "{{ cifmw_manage_secrets_ospsecrets_list }}"
+
+    - name: Assert the created secrets
+      ansible.builtin.assert:
+        that: item.name in _osp_secrets
+      loop: "{{ cifmw_manage_secrets_ospsecrets_list }}"
