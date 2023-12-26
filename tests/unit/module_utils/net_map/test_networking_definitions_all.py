@@ -76,14 +76,15 @@ def test_networking_definition_load_networking_definition_all_tools_ok():
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
     assert test_net_1
     assert len(test_net_1.networks) == 4
-    assert len(test_net_1.group_templates) == 1
+    assert len(test_net_1.group_templates) == 2
     assert len(test_net_1.instances) == 1
     assert all(
         net_name in test_net_1.networks
         for net_name in ("ctlplane", "internal-api", "storage", "tenant")
     )
-    assert net_map_stub_data.GROUP_1_NAME in test_net_1.group_templates
-    assert net_map_stub_data.INSTANCE_1_NAME in test_net_1.instances
+    assert net_map_stub_data.GROUP_2_NAME in test_net_1.group_templates
+    assert net_map_stub_data.GROUP_3_NAME in test_net_1.group_templates
+    assert net_map_stub_data.INSTANCE_3_NAME in test_net_1.instances
 
     for net_name, net_def in test_net_1.networks.items():
         assert net_def.multus_config
@@ -106,8 +107,8 @@ def test_networking_definition_load_networking_definition_all_tools_dual_stack_o
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
     assert test_net_1
     assert len(test_net_1.networks) == 4
-    assert len(test_net_1.group_templates) == 1
-    assert len(test_net_1.instances) == 1
+    assert len(test_net_1.group_templates) == 2
+    assert len(test_net_1.instances) == 2
 
     # Check that the expected networks are in
     assert all(
@@ -214,14 +215,14 @@ def test_networking_definition_load_networking_definition_all_tools_dual_stack_o
     assert instance1_def.name == "instance-1"
     assert instance1_def.skip_nm_configuration is None
     assert len(instance1_def.networks) == 2
-    assert "network-1" in instance1_def.networks
     assert "network-3" in instance1_def.networks
-    instance1_net1_def = instance1_def.networks["network-1"]
-    assert not instance1_net1_def.ipv6
-    assert instance1_net1_def.ipv4
-    instance1_net3_def = instance1_def.networks["network-3"]
-    assert instance1_net3_def.ipv6
-    assert not instance1_net3_def.ipv4
+    assert "network-4" in instance1_def.networks
+    instance1_net1_def = instance1_def.networks["network-3"]
+    assert instance1_net1_def.ipv6
+    assert not instance1_net1_def.ipv4
+    instance1_net3_def = instance1_def.networks["network-4"]
+    assert not instance1_net3_def.ipv6
+    assert instance1_net3_def.ipv4
 
 
 def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok():
@@ -231,7 +232,7 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
     assert test_net_1
     assert len(test_net_1.networks) == 3
-    assert len(test_net_1.group_templates) == 1
+    assert len(test_net_1.group_templates) == 3
     assert len(test_net_1.instances) == 1
 
     # Check that the expected networks are in
@@ -326,22 +327,3 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     instance1_net3_def = instance1_def.networks["network-3"]
     assert instance1_net3_def.ipv6
     assert not instance1_net3_def.ipv4
-
-
-def test_networking_definition_groups_network_template_ok():
-    raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
-        "networking-definition-valid.yml"
-    )
-    test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
-    assert test_net_1
-    raw_definition_2 = net_map_stub_data.get_test_file_yaml_content(
-        "networking-definition-valid-network-template.yml"
-    )
-    test_net_2 = networking_definition.NetworkingDefinition(raw_definition_2)
-    # Both are equivalent, as the second is the "network-template" of
-    # the first one
-    assert test_net_2 == test_net_1
-    # Check that both hashes are the same
-    # Redundant, but serves as a test to check
-    # that they properly implement __hash__
-    assert hash(test_net_2) == hash(test_net_1)

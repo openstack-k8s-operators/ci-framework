@@ -49,26 +49,44 @@ class MappedInstanceNetwork:
 
     Attributes:
         network_name: The name of the network.
-        mac_addr: The MAC address of the interface attached to the network.
-        interface_name: The name of the interface attached to the network.
-        ip_v4: IPv4 address of the interface. Optional.
-        ip_v6: IPv6 address of the interface. Optional.
-        hostname: Hostname of the instance. Optional.
+        skip_nm: Skip configuring the interface.
+        ip_v4: IPv4 address of the interface. Optional if ip_v6 is given.
+        ip_v6: IPv6 address of the interface. Optional if ip_v4 is given.
         mtu: MTU of the interface. Optional.
-        parent_interface: The parent VLAN interface. Filled if the attached
-            network is a VLAN.
         vlan_id: VLAN ID. Filled if the attached network is a VLAN.
+        mac_addr: The MAC address of the interface attached to the network.
+            Filled if low-level information of the link is provided.
+        interface_name: The name of the interface attached to the network.
+            Filled if low-level information of the link is provided.
+        parent_interface: The parent VLAN interface.
+            Filled if the attached network is a VLAN and if low-level
+            information of the link is provided.
     """
 
     network_name: str
-    mac_addr: str
-    interface_name: str
+    skip_nm: bool = False
+    mac_addr: typing.Optional[str] = None
+    interface_name: typing.Optional[str] = None
     ip_v4: typing.Optional[ipaddress.IPv4Interface] = None
     ip_v6: typing.Optional[ipaddress.IPv6Interface] = None
-    hostname: typing.Optional[str] = None
     mtu: typing.Optional[int] = None
     parent_interface: typing.Optional[str] = None
     vlan_id: typing.Optional[int] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class MappedInstance:
+    """Defines an instance and its attached networks
+
+    Attributes:
+        name: Name of the instance.
+        networks: The networks attached to this instance.
+        hostname: Hostname of the instance. Optional.
+    """
+
+    name: str
+    networks: typing.Dict[str, MappedInstanceNetwork]
+    hostname: typing.Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,9 +186,9 @@ class NetworkingEnvironmentDefinition:
 
     Attributes:
         networks: The existing networks in the environment.
-        instance_networks: The instance information for each network.
+        instances: Networking related information for each instance.
 
     """
 
     networks: typing.Dict[str, MappedNetwork]
-    instance_networks: typing.Dict[str, typing.Dict[str, MappedInstanceNetwork]]
+    instances: typing.Dict[str, typing.Dict[str, MappedInstance]]

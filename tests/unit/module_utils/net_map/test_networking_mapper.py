@@ -37,9 +37,44 @@ def test_networking_mapper_basic_networks_map_ok(
     test_input_config_file, test_golden_file
 ):
     mapper = networking_mapper.NetworkingDefinitionMapper(
-        net_map_stub_data.TEST_HOSTVARS
+        net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
     )
     mapped_content = mapper.map_networks(
+        net_map_stub_data.get_test_file_yaml_content(test_input_config_file)
+    )
+    assert mapped_content == net_map_stub_data.get_test_file_json_content(
+        test_golden_file
+    )
+
+
+@pytest.mark.parametrize(
+    "test_input_config_file,test_golden_file",
+    [
+        (
+            "networking-definition-valid-all-tools-dual-stack.yml",
+            "networking-definition-valid-all-tools-dual-stack-partial-map-out.json",
+        ),
+        (
+            "networking-definition-valid.yml",
+            "networking-definition-valid-partial-map-out.json",
+        ),
+        (
+            "networking-definition-valid-all-tools-ipv6-only.yml",
+            "networking-definition-valid-all-tools-ipv6-only-partial-map-out.json",
+        ),
+        (
+            "networking-definition-valid-all-tools.yml",
+            "networking-definition-valid-all-tools-partial-map-out.json",
+        ),
+    ],
+)
+def test_networking_mapper_full_partial_map_ok(
+    test_input_config_file, test_golden_file
+):
+    mapper = networking_mapper.NetworkingDefinitionMapper(
+        net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
+    )
+    mapped_content = mapper.map_partial(
         net_map_stub_data.get_test_file_yaml_content(test_input_config_file)
     )
     assert mapped_content == net_map_stub_data.get_test_file_json_content(
@@ -53,6 +88,7 @@ def test_networking_mapper_search_domain_override_ok():
     )
     mapper = networking_mapper.NetworkingDefinitionMapper(
         net_map_stub_data.TEST_HOSTVARS,
+        net_map_stub_data.TEST_GROUPS,
         options=networking_mapper.NetworkingMapperOptions(
             search_domain_base="testing.local"
         ),
