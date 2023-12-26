@@ -599,6 +599,38 @@ class NetworkingDefinitionMapper:
         net_definition = self.__parse_validate_net_definition(network_definition_raw)
         return self.__safe_encode_to_primitives(self.__map(net_definition))
 
+    def map_complete(
+        self,
+        network_definition_raw: typing.Dict[str, typing.Any],
+        interfaces_info: typing.Dict[str, typing.Any],
+    ) -> typing.Dict[str, typing.Any]:
+        """
+        Parses, validates and maps a Networking Definition into a complete
+        networking_env_definitions.NetworkingEnvironmentDefinition.
+
+        The resulting mapping is a dictionary that only contains primitive types.
+
+        Args:
+            network_definition_raw: The Networking Definition to map.
+            interfaces_info: Dict containing the MAC addresses of each instance.
+
+        Returns: The Networking Environment Definition as a dictionary.
+        Raises:
+            exceptions.NetworkMappingValidationError:
+                If network_definition_raw or interfaces_info are not provided,
+                 or they are not a dictionary.
+            exceptions.NetworkMappingError: If any inconsistency is found
+                during the mapping process.
+        """
+        if not isinstance(interfaces_info, dict):
+            raise exceptions.NetworkMappingValidationError(
+                "interfaces_info is a mandatory dict"
+            )
+        net_definition = self.__parse_validate_net_definition(network_definition_raw)
+        return self.__safe_encode_to_primitives(
+            self.__map(net_definition, interfaces_info=interfaces_info)
+        )
+
     def __map(
         self,
         net_definition: networking_definition.NetworkingDefinition,
