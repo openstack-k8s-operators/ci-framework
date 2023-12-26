@@ -82,6 +82,40 @@ def test_networking_mapper_full_partial_map_ok(
     )
 
 
+@pytest.mark.parametrize(
+    "test_input_config_file,test_golden_file",
+    [
+        (
+            "networking-definition-valid-all-tools-dual-stack.yml",
+            "networking-definition-valid-all-tools-dual-stack-full-map-out.json",
+        ),
+        (
+            "networking-definition-valid.yml",
+            "networking-definition-valid-full-map-out.json",
+        ),
+        (
+            "networking-definition-valid-all-tools-ipv6-only.yml",
+            "networking-definition-valid-all-tools-ipv6-only-full-map-out.json",
+        ),
+        (
+            "networking-definition-valid-all-tools.yml",
+            "networking-definition-valid-all-tools-full-map-out.json",
+        ),
+    ],
+)
+def test_networking_mapper_full_map_ok(test_input_config_file, test_golden_file):
+    mapper = networking_mapper.NetworkingDefinitionMapper(
+        net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
+    )
+    mapped_content = mapper.map_complete(
+        net_map_stub_data.get_test_file_yaml_content(test_input_config_file),
+        net_map_stub_data.TEST_IFACES_INFO,
+    )
+    assert mapped_content == net_map_stub_data.get_test_file_json_content(
+        test_golden_file
+    )
+
+
 def test_networking_mapper_search_domain_override_ok():
     networks_definitions_raw = (
         net_map_stub_data.build_valid_network_definition_set_raw()
