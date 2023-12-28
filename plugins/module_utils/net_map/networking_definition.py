@@ -1463,7 +1463,7 @@ class GroupTemplateNetworkDefinition:
     group_name: str
     ipv6_range: HostNetworkRange = None
     ipv4_range: HostNetworkRange = None
-    skip_nm_configuration: bool = False
+    skip_nm_configuration: bool = None
 
     def __hash__(self) -> int:
         return hash(
@@ -1550,7 +1550,7 @@ class GroupTemplateDefinition:
             raise ValueError("group_name is a mandatory argument")
         self.__group_name = group_name
 
-        self.__skip_nm_configuration: bool = False
+        self.__skip_nm_configuration: typing.Optional[bool] = None
         self.__groups_networks_definitions = {}
         self.__parse_raw(raw_definition, network_definitions)
 
@@ -1560,7 +1560,7 @@ class GroupTemplateDefinition:
         return self.__groups_networks_definitions
 
     @property
-    def skip_nm_configuration(self) -> bool:
+    def skip_nm_configuration(self) -> typing.Optional[bool]:
         """Indicates that Network Manager configuration should be
         skipped for all the networks of the group."""
         return self.__skip_nm_configuration
@@ -1575,8 +1575,10 @@ class GroupTemplateDefinition:
         raw_definition: typing.Dict[str, typing.Any],
         network_definitions: typing.Dict[str, NetworkDefinition],
     ):
-        self.__skip_nm_configuration = bool(
-            raw_definition.get(self.__FIELD_SKIP_NM, False)
+        self.__skip_nm_configuration = (
+            bool(raw_definition[self.__FIELD_SKIP_NM])
+            if self.__FIELD_SKIP_NM in raw_definition
+            else None
         )
 
         networks = _validate_parse_field_type(
@@ -1628,8 +1630,10 @@ class GroupTemplateDefinition:
             templated_net_data, network_definition
         )
 
-        skip_nm_configuration = bool(
-            templated_net_data.get(self.__FIELD_NETWORK_SKIP_NM, False)
+        skip_nm_configuration = (
+            bool(templated_net_data[self.__FIELD_NETWORK_SKIP_NM])
+            if self.__FIELD_NETWORK_SKIP_NM in templated_net_data
+            else None
         )
 
         self.__groups_networks_definitions[
@@ -1712,9 +1716,9 @@ class GroupTemplateDefinition:
 @dataclasses.dataclass(frozen=True)
 class InstanceNetworkDefinition:
     network: NetworkDefinition
-    ipv4: typing.Union[ipaddress.IPv4Address] = None
-    ipv6: typing.Union[ipaddress.IPv6Address] = None
-    skip_nm_configuration: bool = False
+    ipv4: ipaddress.IPv4Address = None
+    ipv6: ipaddress.IPv6Address = None
+    skip_nm_configuration: bool = None
 
     def __hash__(self) -> int:
         return hash((self.network, self.ipv4, self.ipv6, self.skip_nm_configuration))
@@ -1779,7 +1783,7 @@ class InstanceDefinition:
             raise ValueError("name is a mandatory argument")
 
         self.__name = name
-        self.__skip_nm_configuration: bool = False
+        self.__skip_nm_configuration: typing.Optional[bool] = None
         self.__instances_network_definitions = {}
         self.__parse_raw(raw_definition, network_definitions)
 
@@ -1789,7 +1793,7 @@ class InstanceDefinition:
         return self.__instances_network_definitions
 
     @property
-    def skip_nm_configuration(self) -> bool:
+    def skip_nm_configuration(self) -> typing.Optional[bool]:
         """Indicates that Network Manager configuration should be skipped
         for all the networks of the instance."""
         return self.__skip_nm_configuration
@@ -1804,8 +1808,10 @@ class InstanceDefinition:
         raw_definition: typing.Dict[str, typing.Any],
         network_definitions: typing.Dict[str, NetworkDefinition],
     ):
-        self.__skip_nm_configuration = bool(
-            raw_definition.get(self.__FIELD_SKIP_NM, False)
+        self.__skip_nm_configuration = (
+            bool(raw_definition[self.__FIELD_SKIP_NM])
+            if self.__FIELD_SKIP_NM in raw_definition
+            else None
         )
         networks = raw_definition.get(self.__FIELD_NETWORKS, {})
         if not isinstance(networks, dict):
@@ -1840,8 +1846,10 @@ class InstanceDefinition:
             parent_name=self.__name,
         )
 
-        skip_nm_configuration = bool(
-            network_data.get(self.__FIELD_NETWORK_SKIP_NM, False)
+        skip_nm_configuration = (
+            bool(network_data[self.__FIELD_NETWORK_SKIP_NM])
+            if self.__FIELD_NETWORK_SKIP_NM in network_data
+            else None
         )
 
         self.__instances_network_definitions[network_name] = InstanceNetworkDefinition(

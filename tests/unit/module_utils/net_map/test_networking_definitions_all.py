@@ -192,7 +192,7 @@ def test_networking_definition_load_networking_definition_all_tools_dual_stack_o
     # Simple basic checks of the group template
     group1_def = test_net_1.group_templates["group-1"]
     assert group1_def.group_name == "group-1"
-    assert not group1_def.skip_nm_configuration
+    assert group1_def.skip_nm_configuration is None
     assert len(group1_def.networks) == 3
     assert "network-2" in group1_def.networks
     assert "network-3" in group1_def.networks
@@ -212,7 +212,7 @@ def test_networking_definition_load_networking_definition_all_tools_dual_stack_o
     # Simple basic checks of the explicit instance
     instance1_def = test_net_1.instances["instance-1"]
     assert instance1_def.name == "instance-1"
-    assert not instance1_def.skip_nm_configuration
+    assert instance1_def.skip_nm_configuration is None
     assert len(instance1_def.networks) == 2
     assert "network-1" in instance1_def.networks
     assert "network-3" in instance1_def.networks
@@ -296,7 +296,7 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     # Simple basic checks of the group template
     group1_def = test_net_1.group_templates["group-1"]
     assert group1_def.group_name == "group-1"
-    assert not group1_def.skip_nm_configuration
+    assert group1_def.skip_nm_configuration is None
     assert len(group1_def.networks) == 3
     assert "network-1" in group1_def.networks
     assert "network-2" in group1_def.networks
@@ -316,7 +316,7 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     # Simple basic checks of the explicit instance
     instance1_def = test_net_1.instances["instance-1"]
     assert instance1_def.name == "instance-1"
-    assert not instance1_def.skip_nm_configuration
+    assert instance1_def.skip_nm_configuration is None
     assert len(instance1_def.networks) == 2
     assert "network-1" in instance1_def.networks
     assert "network-3" in instance1_def.networks
