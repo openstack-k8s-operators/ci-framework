@@ -21,7 +21,7 @@ def test_group_template_definition_parse_simple_ok():
     group_template_definition = networking_definition.GroupTemplateDefinition(
         inventory_group, group_template_definition_raw, networks_definitions
     )
-    assert not group_template_definition.skip_nm_configuration
+    assert group_template_definition.skip_nm_configuration is None
     assert group_template_definition.group_name == inventory_group
     assert isinstance(group_template_definition.networks, dict)
 
@@ -81,7 +81,7 @@ def test_group_template_definition_parse_networks_v4_ok():
         stub_networks_definitions[net_map_stub_data.NETWORK_1_NAME]
         == group_template_net_1.network
     )
-    assert not group_template_net_1.skip_nm_configuration
+    assert group_template_net_1.skip_nm_configuration is None
     assert group_template_net_1.ipv4_range == networking_definition.HostNetworkRange(
         group_template_net_1.network.ipv4_network, start=100, length=30
     )
@@ -109,7 +109,7 @@ def test_group_template_definition_parse_networks_v4_ok():
         stub_networks_definitions[net_map_stub_data.NETWORK_3_NAME]
         == group_template_net_3.network
     )
-    assert not group_template_net_3.skip_nm_configuration
+    assert group_template_net_3.skip_nm_configuration is None
     assert group_template_net_3.ipv4_range is None
     assert group_template_net_3.ipv6_range is None
     assert group_template_net_3.group_name == group_template_definition.group_name
@@ -132,7 +132,7 @@ def test_group_template_definition_parse_networks_v6_ok():
         stub_networks_definitions[net_map_stub_data.NETWORK_1_NAME]
         == group_template_net_1.network
     )
-    assert not group_template_net_1.skip_nm_configuration
+    assert group_template_net_1.skip_nm_configuration is None
     assert group_template_net_1.ipv6_range == networking_definition.HostNetworkRange(
         group_template_net_1.network.ipv6_network, start=100, length=30
     )
@@ -158,7 +158,7 @@ def test_group_template_definition_parse_networks_v6_ok():
         stub_networks_definitions[net_map_stub_data.NETWORK_3_NAME]
         == group_template_net_3.network
     )
-    assert not group_template_net_3.skip_nm_configuration
+    assert group_template_net_3.skip_nm_configuration is None
     assert group_template_net_3.ipv4_range is None
     assert group_template_net_3.ipv6_range is None
 
@@ -171,7 +171,10 @@ def test_group_template_definition_parse_networks_mixed_ok():
     group_template_definition_raw = {
         "skip-nm-configuration": True,
         "networks": {
-            net_map_stub_data.NETWORK_1_NAME: {"range": {"start": 100, "length": 30}},
+            net_map_stub_data.NETWORK_1_NAME: {
+                "range": {"start": 100, "length": 30},
+                "skip-nm-configuration": False,
+            },
             net_map_stub_data.NETWORK_2_NAME: {
                 "range-v4": {"start": 150, "length": 60},
                 "range-v6": {"start": 150, "length": 2048},
@@ -195,7 +198,7 @@ def test_group_template_definition_parse_networks_mixed_ok():
         stub_networks_definitions[net_map_stub_data.NETWORK_1_NAME]
         == group_template_net_1.network
     )
-    assert not group_template_net_1.skip_nm_configuration
+    assert group_template_net_1.skip_nm_configuration is False
     assert group_template_net_1.ipv4_range == networking_definition.HostNetworkRange(
         group_template_net_1.network.ipv4_network, start=100, length=30
     )
@@ -223,7 +226,7 @@ def test_group_template_definition_parse_networks_mixed_ok():
         stub_networks_definitions[net_map_stub_data.NETWORK_3_NAME]
         == group_template_net_3.network
     )
-    assert not group_template_net_3.skip_nm_configuration
+    assert group_template_net_3.skip_nm_configuration is None
     assert group_template_net_3.ipv6_range == networking_definition.HostNetworkRange(
         group_template_net_3.network.ipv6_network, start=150, length=60
     )

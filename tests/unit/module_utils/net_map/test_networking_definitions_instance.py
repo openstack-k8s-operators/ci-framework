@@ -21,7 +21,6 @@ def test_instance_definition_parse_networks_no_tools_v4_ok():
     second_net = list(networks_definitions.values())[1]
     third_net = list(networks_definitions.values())[2]
     instance_definition_raw = {
-        "skip-nm-configuration": True,
         "networks": {
             first_net.name: {
                 "ip": net_map_stub_data.NETWORK_1_IPV4_NET[18],
@@ -36,7 +35,7 @@ def test_instance_definition_parse_networks_no_tools_v4_ok():
     )
 
     assert hash(instance_definition)
-    assert instance_definition.skip_nm_configuration
+    assert instance_definition.skip_nm_configuration is None
     assert instance_definition.name == instance_name
     assert isinstance(instance_definition.networks, dict)
     assert len(instance_definition.networks) == len(instance_definition_raw["networks"])
@@ -61,7 +60,7 @@ def test_instance_definition_parse_networks_no_tools_v4_ok():
 
     group_template_net_3 = instance_definition.networks[third_net.name]
     assert third_net == group_template_net_3.network
-    assert not group_template_net_3.skip_nm_configuration
+    assert group_template_net_3.skip_nm_configuration is None
     assert group_template_net_3.ipv4 is None
     assert group_template_net_3.ipv6 is None
 
@@ -75,7 +74,7 @@ def test_instance_definition_parse_networks_no_tools_v6_ok():
     second_net = list(networks_definitions.values())[1]
     third_net = list(networks_definitions.values())[2]
     instance_definition_raw = {
-        "skip-nm-configuration": True,
+        "skip-nm-configuration": False,
         "networks": {
             first_net.name: {
                 "ip": net_map_stub_data.NETWORK_1_IPV6_NET[77],
@@ -92,7 +91,7 @@ def test_instance_definition_parse_networks_no_tools_v6_ok():
     )
 
     assert hash(instance_definition)
-    assert instance_definition.skip_nm_configuration
+    assert instance_definition.skip_nm_configuration is False
     assert instance_definition.name == instance_name
     assert isinstance(instance_definition.networks, dict)
     assert len(instance_definition.networks) == len(instance_definition_raw["networks"])
@@ -117,7 +116,7 @@ def test_instance_definition_parse_networks_no_tools_v6_ok():
 
     group_template_net_3 = instance_definition.networks[third_net.name]
     assert third_net == group_template_net_3.network
-    assert not group_template_net_3.skip_nm_configuration
+    assert group_template_net_3.skip_nm_configuration is None
     assert group_template_net_3.ipv6 == net_map_stub_data.NETWORK_3_IPV6_NET[100]
     assert group_template_net_3.ipv4 is None
 
@@ -138,7 +137,7 @@ def test_instance_definition_parse_networks_no_tools_mixed_ok():
                 "skip-nm-configuration": True,
             },
             net_map_stub_data.NETWORK_2_NAME: {
-                "skip-nm-configuration": True,
+                "skip-nm-configuration": False,
                 "ip-v4": net_map_stub_data.NETWORK_2_IPV4_NET[77],
                 "ip-v6": net_map_stub_data.NETWORK_2_IPV6_NET[77],
             },
@@ -175,7 +174,7 @@ def test_instance_definition_parse_networks_no_tools_mixed_ok():
         net_map_stub_data.NETWORK_2_NAME
     ]
     assert second_net == instance_definition_net_2.network
-    assert instance_definition_net_2.skip_nm_configuration
+    assert instance_definition_net_2.skip_nm_configuration is False
     assert instance_definition_net_2.ipv4 == net_map_stub_data.NETWORK_2_IPV4_NET[77]
     assert instance_definition_net_2.ipv6 == net_map_stub_data.NETWORK_2_IPV6_NET[77]
 
@@ -183,7 +182,7 @@ def test_instance_definition_parse_networks_no_tools_mixed_ok():
         net_map_stub_data.NETWORK_3_NAME
     ]
     assert third_net == group_template_net_3.network
-    assert not group_template_net_3.skip_nm_configuration
+    assert group_template_net_3.skip_nm_configuration is None
     assert group_template_net_3.ipv4 is None
     assert group_template_net_3.ipv6 == net_map_stub_data.NETWORK_3_IPV6_NET[77]
 
