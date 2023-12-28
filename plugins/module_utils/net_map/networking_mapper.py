@@ -151,23 +151,26 @@ class NetworkingNetworksMapper:
     ) -> networking_env_definitions.MappedNetworkTools:
         metallb = (
             self.__build_network_tool_common(
-                net_def, networking_env_definitions.MappedMetallbNetworkConfig
+                net_def.metallb_config,
+                networking_env_definitions.MappedMetallbNetworkConfig,
             )
             if net_def.metallb_config
             else None
         )
         multus = (
             self.__build_network_tool_common(
-                net_def, networking_env_definitions.MappedMultusNetworkConfig
+                net_def.multus_config,
+                networking_env_definitions.MappedMultusNetworkConfig,
             )
             if net_def.multus_config
             else None
         )
         netconfig = (
             self.__build_network_tool_common(
-                net_def, networking_env_definitions.MappedNetconfigNetworkConfig
+                net_def.netconfig_config,
+                networking_env_definitions.MappedNetconfigNetworkConfig,
             )
-            if net_def.metallb_config
+            if net_def.netconfig_config
             else None
         )
 
@@ -175,7 +178,8 @@ class NetworkingNetworksMapper:
 
     @staticmethod
     def __build_network_tool_common(
-        net_def: networking_definition.NetworkDefinition, tool_type: typing.Type
+        tool_net_def: networking_definition.SubnetBasedNetworkToolDefinition,
+        tool_type: typing.Type,
     ) -> typing.Union[
         networking_env_definitions.MappedMetallbNetworkConfig,
         networking_env_definitions.MappedMultusNetworkConfig,
@@ -184,11 +188,11 @@ class NetworkingNetworksMapper:
         args_list = [
             [
                 _map_host_network_range_to_output(ip_range)
-                for ip_range in net_def.metallb_config.ranges_ipv4
+                for ip_range in tool_net_def.ranges_ipv4
             ],
             [
                 _map_host_network_range_to_output(ip_range)
-                for ip_range in net_def.metallb_config.ranges_ipv6
+                for ip_range in tool_net_def.ranges_ipv6
             ],
         ]
         return tool_type(*args_list)
