@@ -251,7 +251,7 @@ class NetworkingInstanceMapper:
     def __map_instance_network_interface_data(
         self,
     ) -> typing.Optional[typing.Dict[str, typing.Any]]:
-        if not self.__interface_info:
+        if self.__interface_info is None:
             return {}
         elif "mac" not in self.__interface_info:
             raise exceptions.NetworkMappingError(
@@ -264,7 +264,7 @@ class NetworkingInstanceMapper:
                 f"Cannot determine network interface for {self.__instance_name}. "
                 "Ensure ansible_interfaces is an available fact for the host"
             )
-
+        instance_mac = self.__interface_info["mac"].lower()
         for iface_name in ansible_interfaces:
             iface_fact_name = f"ansible_{iface_name}"
             ansible_iface_data = self.__host_vars.get(iface_fact_name, None)
@@ -274,9 +274,11 @@ class NetworkingInstanceMapper:
                     f"ansible_interfaces is present but {iface_fact_name} it's not."
                 )
             mac = ansible_iface_data.get("macaddress", None)
-            if mac and mac.lower() == self.__interface_info["mac"].lower():
+            if mac and mac.lower() == instance_mac:
                 return ansible_iface_data
-        return None
+        raise exceptions.NetworkMappingError(
+            f"Ansible instance with the given MAC, {instance_mac} was not found"
+        )
 
     def __map_instance_network_ips(
         self,
