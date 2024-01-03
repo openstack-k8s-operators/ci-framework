@@ -178,10 +178,11 @@ class NetworkingInstanceMapper:
             net_def.name, group_net_def, instance_net_definition
         )
         iface_data = self.__map_instance_network_interface_data()
-        parent_interface = (
-            f"{iface_data['device']}.{net_def.vlan}"
-            if "device" in iface_data and net_def.vlan
-            else None
+        device_name = iface_data.get("device", None)
+        interface_name = (
+            f"{device_name}.{net_def.vlan}"
+            if device_name and net_def.vlan
+            else device_name
         )
         mtu = iface_data.get("mtu", net_def.mtu)
         return networking_env_definitions.MappedInstanceNetwork(
@@ -193,7 +194,8 @@ class NetworkingInstanceMapper:
             ip_v6=ipv6,
             mtu=int(mtu) if mtu else None,
             vlan_id=net_def.vlan,
-            parent_interface=parent_interface,
+            parent_interface=device_name if net_def.vlan else None,
+            interface_name=interface_name,
             mac_addr=self.__map_instance_network_interface_mac(
                 iface_data.get("macaddress", None), net_def.vlan
             ),
