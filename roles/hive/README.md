@@ -100,7 +100,7 @@ cifmw_hive_namespace: openstack
 cifmw_hive_baremetal:
   cluster_name: unittest-01
   install_config: "{{ ansible_user_dir }}/install_config.yml"
-  ssh_key: 'ssh-ed25519 ...REDACTED'
+  ssh_key: 'ssh-cifw ...REDACTED'
   ocp_image: "quay.io/openshift-release-dev/ocp-release:4.13.0-x86_64"
 
 cifmw_operator_build_push_registry: "default-route-openshift-image-registry.unittest-01.openstack.ccitredhat.com"
@@ -161,7 +161,7 @@ platform:
                 enabled: true
                 dhcp: true
 pullSecret: ''
-sshKey: 'ssh-ed25519 ...'
+sshKey: 'ssh-cifw ...'
 ```
 
 ## Reference
