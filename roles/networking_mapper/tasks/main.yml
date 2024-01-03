@@ -1,0 +1,107 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure that networking and hostname facts are in place
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+      - platform
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ hostvars.keys() | list }}"
+
+- name: Load the Network Definition from file if not given
+  when: "cifmw_networking_definition is not defined"
+  block:
+    - name: Check for Networking Definition file existence
+      ansible.builtin.stat:
+        path: "{{ cifmw_networking_mapper_networking_def_path }}"
+      register: _net_def_stat
+
+    - name: Load the Networking Definition from file
+      when: "_net_def_stat.stat.exists"
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_networking_mapper_networking_def_path }}"
+        name: cifmw_networking_definition
+
+- name: Load the interfaces info from file if not given
+  when: "cifmw_networking_mapper_ifaces_info is not defined"
+  block:
+    - name: Check for interfaces info file existence
+      ansible.builtin.stat:
+        path: "{{ cifmw_networking_mapper_ifaces_info_path }}"
+      register: _ifaces_info_stat
+
+    - name: Load the interfaces info from file
+      when: "_ifaces_info_stat.stat.exists"
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_networking_mapper_ifaces_info_path }}"
+        name: cifmw_networking_mapper_ifaces_info
+
+- name: Call the networking mapper
+  cifmw.general.ci_net_map:
+    networking_definition: "{{ cifmw_networking_definition }}"
+    interfaces_info: >-
+      {{
+        cifmw_networking_mapper_ifaces_info |
+        default(omit)
+      }}
+    search_domain_base: >-
+      {{
+        cifmw_networking_mapper_search_domain_base |
+        default(omit)
+      }}
+    network_name: >-
+      {{
+        cifmw_networking_mapper_network_name | default(omit)
+      }}
+  register: _networking_mapper_out
+
+- name: Set networking mapper facts
+  ansible.builtin.set_fact:
+    # Set is as a fact in case it was not
+    cifmw_networking_definition: "{{ cifmw_networking_definition }}"
+    cifmw_networking_env_definition: >-
+      {{
+        _networking_mapper_out.networking_env_definition
+        if  _networking_mapper_out.complete_map else omit
+      }}
+    cifmw_networking_mapper_output: >-
+      {{
+        _networking_mapper_out.networking_env_definition
+      }}
+
+- name: Write mapping outputs to file
+  become: true
+  block:
+    - name: Ensure CI infrastructure dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_networking_mapper_infra_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Write the Networking Definition to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_networking_mapper_networking_def_path }}"
+        content: "{{ cifmw_networking_definition | to_nice_yaml }}"
+        mode: '0644'
+
+    - name: Write the Networking Environment Definition to file
+      when: _networking_mapper_out.complete_map
+      ansible.builtin.copy:
+        dest: "{{ cifmw_networking_mapper_networking_env_def_path }}"
+        content: "{{ _networking_mapper_out.networking_env_definition | to_nice_yaml }}"
+        mode: '0644'

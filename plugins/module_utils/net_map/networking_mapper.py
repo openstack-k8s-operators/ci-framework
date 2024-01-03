@@ -27,6 +27,24 @@ class NetworkingMapperOptions:
 
     search_domain_base: str = None
 
+    @classmethod
+    def from_dict(cls, data: typing.Dict[str, typing.Any]) -> "NetworkingMapperOptions":
+        """Creates a NetworkingMapperOptions from a dict.
+
+        Unknown keys are ignored.
+
+        Returns: The new NetworkingMapperOptions instance.
+
+        """
+        field_names = {field.name for field in dataclasses.fields(cls)}
+        return cls(
+            **{
+                field_name: value
+                for field_name, value in data.items()
+                if field_name in field_names
+            }
+        )
+
 
 class NetMapperJsonEncoder(json.JSONEncoder):
     """
