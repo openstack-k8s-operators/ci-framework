@@ -1,7 +1,17 @@
+import typing
+
+from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+    ansible_encoding,
+)
+
+
 class NetworkMappingError(Exception):
     def __init__(self, message) -> None:
         super().__init__(message)
         self.message = message
+
+    def to_dict(self) -> typing.Dict[str, typing.Any]:
+        return ansible_encoding.decode_ansible_raw(vars(self))
 
 
 class NetworkMappingValidationError(NetworkMappingError):
