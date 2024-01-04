@@ -30,6 +30,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_net_prefix_add` (Boolean) Adds `cifmw-` prefix to the network resources managed by this role. By default, it is set to `true`.
 * `cifmw_libvirt_manager_pub_net`: (String) Network name playing the "public" interface. Defaults to `public`.
 * `cifmw_libvirt_manager_vm_net_ip_set`: (Dict) Allow to extend the existing mapping for host family to IP mapping. Defaults to `{}`.
+* `cifmw_libvirt_manager_fixed_networks`: (List) Network names you don't want to prefix with `cifmw-`. It will be concatenated with cifmw_libvirt_manager_fixed_networks_defaults. Defaults to`[]`.
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 
