@@ -18,8 +18,17 @@
 - name: Set RHOL/CRC configuration options and if fail print
   block:
     - name: Set RHOL/CRC configuration options
-      ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} config set {{ item.key }} {{ item.value }}"
-      loop: "{{ cifmw_rhol_crc_config_defaults | ansible.builtin.combine(cifmw_rhol_crc_config) | dict2items }}"
+      ansible.builtin.shell:  # noqa risky-shell-pipe
+        cmd: >-
+          {{ cifmw_rhol_crc_binary }} config set
+          {{ item.key }} {{ item.value }} 2>&1 |
+          tee -a {{ cifmw_rhol_crc_basedir }}/logs/crc-config.log
+      loop: >-
+        {{
+          cifmw_rhol_crc_config_defaults |
+          ansible.builtin.combine(cifmw_rhol_crc_config) |
+          dict2items
+        }}
       register: configuration_result
   rescue:
     - name: If fails print RHOL/CRC configuration execution error
