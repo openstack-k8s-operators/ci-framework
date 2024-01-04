@@ -30,7 +30,7 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: Ensure file ownership and rights
+- name: "Ensure file ownership and rights for {{ vm_type }}"
   become: true
   ansible.builtin.file:
     path: >-
@@ -48,7 +48,7 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: Manipulate XMLs and load them if provided
+- name: "Manipulate XMLs and load them if provided for {{ vm_type }}"
   when:
     vm_data.value.xml_paths is defined
   block:
@@ -69,7 +69,7 @@
         index_var: "_xml_id"
         label: "{{ vm_type }}-{{ _xml_id }}"
 
-    - name: "Remove document description header for type ${{ vm_type }}"
+    - name: "Remove document description header for {{ vm_type }}"
       ansible.builtin.replace:
         path: "{{ _xml }}"
         regexp: "<\\?xml version='1.0' encoding='UTF-8'\\?>\n"
@@ -80,7 +80,7 @@
         index_var: "_xml_id"
         label: "{{ vm_type }}-{{ _xml_id }}"
 
-    - name: "Load VM XMLs for type {{ vm_type }}"
+    - name: "Load VM XMLs for {{ vm_type }}"
       register: _vm_xmls
       ansible.builtin.slurp:
         path: "{{ item }}"
@@ -89,7 +89,7 @@
         index_var: "_xml_id"
         label: "{{ vm_type }}-{{ _xml_id }}"
 
-    - name: "Define VMs with custom XML for type {{ vm_type }}"
+    - name: "Define VMs with custom XML for {{ vm_type }}"
       community.libvirt.virt:
         command: define
         xml: "{{ _xml['content'] | b64decode }}"
@@ -100,11 +100,11 @@
         label: "{{ vm_type }}-{{ vm_id }}"
         loop_var: '_xml'
 
-- name: Define the requested virtual machines.
+- name: "Define the requested virtual machines {{ vm_type }}"
   when:
     - vm_data.value.xml_paths is undefined
   block:
-    - name: Create the requested extra disks.
+    - name: "Create the requested extra disks for {{ vm_type }}"
       when:
         - vm_data.value.extra_disks_num is defined
         - vm_data.value.extra_disks_num | int != 0
@@ -129,7 +129,7 @@
         index_var: vm_id
         label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: Attach listed networks to the VMs
+- name: "Attach listed networks to the VMs {{ vm_type }}"
   vars:
     vm_item: "{{ vm_type }}-{{ vm_id }}"
     networks: "{{ vm_data.value.nets }}"
@@ -139,7 +139,7 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: Fetch per-vm ports
+- name: "Fetch per-vm ports for {{ vm_type }}"
   register: _vm_ports
   ansible.builtin.command:
     cmd: >-
@@ -150,7 +150,7 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: Format port list to something more consumable
+- name: "Format port list to something more consumable for {{ vm_type }}"
   vars:
     _fixed_net_name: >-
       {{
@@ -189,7 +189,17 @@
     index_var: index
     label: "{{ vm_type }}-{{ index }}"
 
-- name: Fix IPs for selected networks and VMs
+- name: "Assert we have public_net_nics and macs data for {{ vm_type }}"
+  ansible.builtin.assert:
+    that:
+      - macs | length > 0
+      - public_net_nics | length > 0
+    msg: >-
+      Something went wrong while trying to extract interfaces associated to
+      cifmw_libvirt_manager_pub_net ({{ cifmw_libvirt_manager_pub_net }}).
+      Please double-check your scenario!
+
+- name: "Fix IPs for selected networks and VMs for {{ vm_type }}"
   vars:
     vm_name: "cifmw-{{ mac_node.host }}"
     net_name: "{{ mac_node.network | replace('cifmw-', '') }}"
@@ -203,7 +213,7 @@
     loop_var: mac_node
     label: "{{ mac_node.host }}"
 
-- name: Start and grab IP if image is not blank
+- name: "Start and grab IP if image is not blank for {{ vm_type }}"
   when:
     - vm_data.value.disk_file_name != 'blank'
   ansible.builtin.include_tasks: start_manage_vms.yml
