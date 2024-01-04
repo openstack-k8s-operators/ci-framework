@@ -114,7 +114,7 @@
     # local .ssh/config, because ProxyJump doesn't take the
     # command line options, meaning ssh won't consume the various
     # options set in the ansible inventory.
-    - name: Inject ProxyJump configuration
+    - name: Inject remote hypervisor SSH configuration
       when:
         - hostvars[host]['priv_ssh_key'] is defined
       vars:
@@ -126,15 +126,52 @@
       ansible.builtin.blockinfile:
         create: true
         path: "/home/zuul/.ssh/config"
+        marker: "## {mark} {{ _ssh_host }}"
         block: |-
-          Host {{ _ssh_host }}
+          Host {{ _ssh_host }} {{ hostvars[host]['inventory_hostname'] }}
             IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
+            User {{ hostvars[host]['ansible_user'] | default(ansible_user_id) }}
       loop: "{{ hostvars.keys() }}"
       loop_control:
         label: "{{ host }}"
         loop_var: "host"
+
+    - name: Inject ProxyJump configuration for remote hypervisor VMs
+      when:
+        - _vm_data.target is defined
+      vars:
+        _vm_type: "{{ host | regex_replace('\\-[0-9]*', '') }}"
+        _vm_data: "{{ cifmw_libvirt_manager_configuration['vms'][_vm_type] }}"
+        _proxy_user: >-
+          {{
+            hostvars[_vm_data.target]['ansible_user'] |
+            default(ansible_user_id)
+          }}
+        _proxy_host: "{{ _vm_data.target }}"
+        _ssh_host: >-
+          {{
+            hostvars[_proxy_host]['ansible_host'] |
+            default(hostvars[_proxy_host]['inventory_hostname'])
+          }}
+        _vm_ip: "{{ hostvars[host]['ansible_host'] }}"
+      ansible.builtin.blockinfile:
+        path: "/home/zuul/.ssh/config"
+        marker: "## {mark} {{ host }}"
+        block: |-
+          Host {{ host }} {{ _vm_ip }}
+            Hostname {{ _vm_ip }}
+            IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          {% if _vm_data.target != cifmw_libvirt_manager_configuration.vms.controller.target %}
+            ProxyJump {{ _proxy_user }}@{{ _proxy_host }}
+          {% endif %}
+      loop: "{{ hostvars.keys() }}"
+      loop_control:
+        loop_var: host
+        label: "{{ host }}"
 
     - name: Create kube directory
       ansible.builtin.file:
