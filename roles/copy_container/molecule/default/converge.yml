@@ -1,0 +1,58 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  tasks:
+    - name: Run copy-container role
+      ansible.builtin.include_role:
+        name: copy_container
+
+    - name: Deploy Local Registry
+      ansible.builtin.include_role:
+        name: registry_deploy
+
+    - name: Create copy-quay-config.yaml
+      vars:
+        _data: |
+          ---
+          zuul_api: "https://review.rdoproject.org/zuul/api/"
+          pull_registry: "quay.rdoproject.org"
+          push_registry: "127.0.0.1:5001"
+          entries:
+            - name: "antelopecentos9"
+              release: "antelopecentos9"
+              job_name: "periodic-container-tcib-build-push-centos-9-antelope"
+              api_entry: "https://trunk.rdoproject.org/api-centos9-antelope"
+              from_namespace: "podified-antelope-centos9"
+              to_namespace: "podified-antelope-centos9"
+      ansible.builtin.copy:
+        dest: "/tmp/copy-quay-config.yaml"
+        content: "{{ _data }}"
+
+    - name: Copy containers from RDO quay to local registry
+      ansible.builtin.command:
+        cmd: >-
+          copy-quay --debug
+          --config /tmp/copy-quay-config.yaml
+          --release antelopecentos9 copy
+      args:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/roles/copy_container/files/copy-quay"
+
+    - name: Curl local registry
+      ansible.builtin.uri:
+        url: http://localhost:5001
