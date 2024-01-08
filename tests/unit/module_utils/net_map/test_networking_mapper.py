@@ -51,31 +51,58 @@ def test_networking_mapper_basic_networks_map_ok(
 
 
 @pytest.mark.parametrize(
-    "test_input_config_file,test_golden_file",
+    "test_input_config_file,test_golden_file,reduced_hosts",
     [
-        (
+        pytest.param(
+            "networking-definition-valid-all-tools-dual-stack.yml",
+            "networking-definition-valid-all-tools-dual-stack-partial-reduced"
+            "-map-out.json",
+            True,
+            id="reduced-dual-stack-all-tools",
+        ),
+        pytest.param(
             "networking-definition-valid-all-tools-dual-stack.yml",
             "networking-definition-valid-all-tools-dual-stack-partial-map-out.json",
+            False,
+            id="dual-stack-all-tools",
         ),
-        (
+        pytest.param(
             "networking-definition-valid.yml",
             "networking-definition-valid-partial-map-out.json",
+            False,
+            id="no-tools",
         ),
-        (
+        pytest.param(
             "networking-definition-valid-all-tools-ipv6-only.yml",
             "networking-definition-valid-all-tools-ipv6-only-partial-map-out.json",
+            False,
+            id="reduced-ipv6-only",
         ),
-        (
+        pytest.param(
+            "networking-definition-valid-all-tools-ipv6-only.yml",
+            "networking-definition-valid-all-tools-ipv6-only-partial-"
+            "reduced-map-out.json",
+            True,
+            id="ipv6-only",
+        ),
+        pytest.param(
             "networking-definition-valid-all-tools.yml",
             "networking-definition-valid-all-tools-partial-map-out.json",
+            False,
+            id="all-tools",
         ),
     ],
 )
 def test_networking_mapper_full_partial_map_ok(
-    test_input_config_file, test_golden_file
+    test_input_config_file: str, test_golden_file: str, reduced_hosts: bool
 ):
     mapper = networking_mapper.NetworkingDefinitionMapper(
-        net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
+        net_map_stub_data.TEST_HOSTVARS
+        if not reduced_hosts
+        else net_map_stub_data.TEST_HOSTVARS_REDUCED,
+        net_map_stub_data.TEST_GROUPS
+        if not reduced_hosts
+        else net_map_stub_data.TEST_GROUPS_REDUCED,
     )
     mapped_content = mapper.map_partial(
         net_map_stub_data.get_test_file_yaml_content(test_input_config_file)
@@ -252,6 +279,42 @@ def test_networking_mapper_search_domain_override_ok():
     assert (
         mapped_content[net_map_stub_data.NETWORK_1_NAME]["search_domain"]
         == overriden_search_domain
+    )
+
+
+def test_networking_mapper_invalid_instance_fail():
+    # Ensure that instances in the netdev are part of the inventory
+    with pytest.raises(exceptions.NetworkMappingError) as exc_info:
+        hostvars_copy = copy.deepcopy(net_map_stub_data.TEST_HOSTVARS)
+        groups_copy = copy.deepcopy(net_map_stub_data.TEST_GROUPS)
+        hostvars_copy.pop("instance-1")
+        for group_name, instances_names in groups_copy.items():
+            if "instance-1" in instances_names:
+                instances_names.remove("instance-1")
+                instances_names.append("non-existing-instance")
+        mapper = networking_mapper.NetworkingDefinitionMapper(
+            hostvars_copy, groups_copy
+        )
+
+        net_def_raw = net_map_stub_data.get_test_file_yaml_content(
+            "networking-definition-valid-all-tools-dual-stack.yml"
+        )
+        # Replace instance-1 with a new non-existing instance in the
+        # interfaces_info dict and net_def
+        net_def_instances_raw = net_def_raw["instances"]
+        net_def_instances_raw["non-existing-instance"] = net_def_instances_raw[
+            "instance-1"
+        ]
+        net_def_instances_raw.pop("instance-1")
+        ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
+        ifaces_info["non-existing-instance"] = ifaces_info["instance-1"]
+        ifaces_info.pop("instance-1")
+        mapper.map_complete(
+            net_def_raw,
+            ifaces_info,
+        )
+    assert "non-existing-instance instance is not part of the Ansible inventory" == str(
+        exc_info.value
     )
 
 
