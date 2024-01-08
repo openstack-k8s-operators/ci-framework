@@ -6,11 +6,17 @@
   ansible.builtin.shell:
     cmd: >-
       oc debug node/{{ item }} -T -- chroot /host
-      /usr/bin/bash -c "for i in `seq -w -s ' ' {{ cifmw_cls_pv_count }}`;
-      do echo \"{{ _msg }} dir {{ cifmw_cls_local_storage_name }}/pv\$i on {{ item }}\";
-      {{ cifmw_cls_action }} {{ cifmw_cls_local_storage_name }}/pv\$i; done"
+      /usr/bin/bash -c "for pvnum in $(seq -w -s ' ' 01 {{ cifmw_cls_pv_count }});
+      do echo \"{{ _msg }} dir {{ cifmw_cls_local_storage_name }}/pv\${pvnum} on {{ item }}\";
+      {{ cifmw_cls_action }} {{ cifmw_cls_local_storage_name }}/pv\${pvnum}; done"
   loop: "{{ _cls_nodes }}"
-  until: _worker_operation_out.rc == 0 and _worker_operation_out.stdout != ""
+  until:
+    - _worker_operation_out.rc == 0
+    - _worker_operation_out.stdout != ""
   register: _worker_operation_out
   retries: 10
   delay: 20
+
+- name: Print the output of Worker node operation
+  ansible.builtin.debug:
+    msg: "{{  _worker_operation_out }}"
