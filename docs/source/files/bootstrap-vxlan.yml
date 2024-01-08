@@ -1,0 +1,34 @@
+---
+- name: Prepare hypervisors vxlan
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Open VXLAN port
+      ansible.posix.firewalld:
+        immediate: true
+        permanent: true
+        port: 8472/udp
+        state: enabled
+        zone: public
+
+    - name: Create bridge for vxlan
+      community.general.nmcli:
+        conn_name: br-vxlan
+        type: bridge
+        state: present
+        method4: disabled
+        method6: disabled
+        mtu: 9000
+
+    # community.general.nmcli module doesn't work with vxlan
+    - name: Create vxlan
+      ansible.builtin.command:
+        cmd: >-
+          nmcli connection add type vxlan
+          slave-type bridge con-name rhoso ifname vxlan10
+          id {{ vxlan_id | default(10) }} local {{ vxlan_local_ip }}
+          remote {{  vxlan_remote_ip }} master br-vxlan
+
+    - name: Ensure we don't have any dangling facts
+      ansible.builtin.meta: clear_facts

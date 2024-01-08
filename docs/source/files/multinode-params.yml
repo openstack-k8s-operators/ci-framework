@@ -1,0 +1,109 @@
+---
+# Since we don't have zuul data, we have to provide some
+# networking information to the libvirt_manager so that it will be able to
+# generate the needed content for later usage
+cifmw_libvirt_manager_networks:
+  public:
+    range: "192.168.111.0/24"
+    static_ip: true
+    mtu: 1500
+  osp_trunk:
+    default: true
+    range: "192.168.122.0/24"
+    mtu: 1500
+  internal-api:
+    range: "172.17.0.0/24"
+    vlan: 20
+  storage:
+    range: "172.18.0.0/24"
+    vlan: 21
+  tenant:
+    range: "172.19.0.0/24"
+    vlan: 22
+  storage-mgmt:
+    range: "172.20.0.0/24"
+    vlan: 23
+
+# HERE, we have to manually segment the network.
+# computesb1 will run on hypervisor-1,
+# while computesb2 will run on hypervisor-2.
+cifmw_libvirt_manager_vm_net_ip_set:
+  computesb1: 100
+  computesb2: 110
+
+cifmw_libvirt_manager_configuration:
+  networks:
+    public: |-
+      <network>
+        <name>public</name>
+        <forward mode='nat'/>
+        <bridge name='public' stp='on' delay='0'/>
+        <mac address='52:54:00:6a:f2:dc'/>
+        <mtu size='{{ cifmw_libvirt_manager_networks.public.mtu }}'/>
+        <ip family='ipv4'
+        address='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(1) }}'
+        prefix='24'>
+          <dhcp>
+            <range
+            start='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(10) }}'
+            end='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(100) }}'/>
+          </dhcp>
+        </ip>
+      </network>
+    # HERE, we consume the vxlan bridge defined in the boostrap-vxlan playbook.
+    osp_trunk: |-
+      <network>
+        <name>osp_trunk</name>
+        <forward mode='bridge'/>
+        <bridge name='br-vxlan' />
+      </network>
+  vms:
+    computesb1:
+      target: hypervisor-1
+      amount: 4
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "centos-stream-9.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - public
+        - osp_trunk
+    computesb2:
+      target: hypervisor-2
+      amount: 2
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "centos-stream-9.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - public
+        - osp_trunk
+    controller:
+      target: hypervisor-1
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "centos-stream-9.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - public
+        - osp_trunk
+    crc:
+      target: hypervisor-1
+      admin_user: core
+      image_local_dir: "{{ ansible_user_dir }}/.crc/machines/crc/"
+      disk_file_name: "crc.qcow2"
+      disksize: "150"
+      memory: 32
+      cpus: 24
+      nets:
+        - public
+        - osp_trunk
