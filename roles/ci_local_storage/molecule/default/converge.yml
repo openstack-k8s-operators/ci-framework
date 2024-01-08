@@ -21,7 +21,10 @@
     cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
     cifmw_cls_storage_provisioner: crc-devsetup
     cifmw_cls_storage_class: molecule-storage
+    cifmw_cls_pv_count: 10
     cifmw_cls_namespace: openstack
+    cifmw_cls_storage_capacity: 100Mi
+    cifmw_cls_local_storage_name: /mnt/openstack
   tasks:
     - name: Run ci_local_storage role
       ansible.builtin.include_role:
@@ -37,18 +40,47 @@
           - provisioned-by={{ cifmw_cls_storage_provisioner }}
       register: _pv_info
 
-    - name: Get all pvs
-      ansible.builtin.set_fact:
-        _cls_pvs: >-
-          {{ _pv_info.resources |
-              selectattr("metadata.name", "defined") |
-              map(attribute="metadata.name")
-          }}
-
-    - name: Assert the created pvs
+    - name: Assert that we created the wanted number of pvs
       ansible.builtin.assert:
-        that:
-          - "cifmw_cls_storage_class in _cls_pvs[0]"
+        that: "_pv_info.resources | length | int == cifmw_cls_pv_count | int"
+
+    - name: Gather names from pvs
+      ansible.builtin.set_fact:
+        _pv_names: "{{ _pv_info.resources | selectattr('metadata.name', 'defined') | map(attribute='metadata.name') }}"
+
+    - name: Gather computed PV names
+      ansible.builtin.set_fact:
+        _generated_names: "{{ _generated_names | default([]) + [ cifmw_cls_storage_class ~ '%02d' | format(item) ~ '-' ~ _cls_nodes[0] ] }}"
+      loop: "{{ range(1, cifmw_cls_pv_count + 1) | list }}"
+
+    - name: Assert that the pvs names are correct
+      ansible.builtin.assert:
+        that: "item.0 == item.1"
+      loop: "{{ _pv_names | zip(_generated_names) | list }}"
+
+    - name: Gather mountpoints from pvs
+      ansible.builtin.set_fact:
+        _pv_mountpoint: "{{ _pv_info.resources | selectattr('spec.local.path', 'defined') | map(attribute='spec.local.path') }}"
+
+    - name: Gather computed mountpoints
+      ansible.builtin.set_fact:
+        _generated_mountpoint: "{{ _generated_mountpoint | default([]) + [ cifmw_cls_local_storage_name ~ '/pv' ~ '%02d' | format(item) ] }}"
+      loop: "{{ range(1, cifmw_cls_pv_count + 1) | list }}"
+
+    - name: Assert that the mountpoints in the pv are correct
+      ansible.builtin.assert:
+        that: "item.0 == item.1"
+      loop: "{{ _pv_mountpoint | zip(_generated_mountpoint) | list }}"
+
+    - name: Assert that the storage class is correct
+      ansible.builtin.assert:
+        that: "item == cifmw_cls_storage_class"
+      loop: "{{ _pv_info.resources | selectattr('spec.storageClassName', 'defined') | map(attribute='spec.storageClassName') }}"
+
+    - name: Assert that the storage capacity is correct
+      ansible.builtin.assert:
+        that: "item == cifmw_cls_storage_capacity"
+      loop: "{{ _pv_info.resources | selectattr('spec.capacity.storage', 'defined') | map(attribute='spec.capacity.storage') }}"
 
     - name: Delete the created pvs
       ansible.builtin.include_role:
