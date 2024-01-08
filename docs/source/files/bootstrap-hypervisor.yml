@@ -1,0 +1,87 @@
+---
+- hosts: "{{ cifmw_target_host | default('all') }}"
+  vars:
+    _user: "{{ remote_user | default('zuul') }}"
+  tasks:
+    - name: Create user on remote host
+      ansible.builtin.user:
+        name: "{{ _user }}"
+        state: present
+
+    - name: Look for local ssh pub key
+      delegate_to: localhost
+      block:
+        - name: Look for id_rsa.pub file
+          ansible.builtin.stat:
+            path: "{{ lookup('env', 'HOME') }}//.ssh/id_rsa.pub"
+          register: rsa_pub_key
+
+        - name: Look for id_ed25519.pub file
+          delegate_to: localhost
+          ansible.builtin.stat:
+            path: "{{ lookup('env', 'HOME') }}//.ssh/id_ed25519.pub"
+          register: ed_pub_key
+
+    - name: Assert at least one public key exists
+      ansible.builtin.assert:
+        that:
+          - rsa_pub_key.stat.exists or ed_pub_key.stat.exists
+        quiet: true
+        msg: |
+          FATAL: you need to have at least one public key in your ~/.ssh directory.
+          Please generate one using either ssh-keygen -t ed25519 -b 512 or
+          ssh-keygen -t rsa -b 4096.
+
+    - name: Add RSA pub key to authorized keys
+      when: rsa_pub_key.stat.exists
+      ansible.posix.authorized_key:
+        user: "{{ _user }}"
+        state: present
+        key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_rsa.pub') }}"
+
+    - name: Add ed25519 pub key to authorized keys
+      when: ed_pub_key.stat.exists
+      ansible.posix.authorized_key:
+        user: "{{ _user }}"
+        state: present
+        key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_ed25519.pub') }}"
+
+    - name: Grant sudo privileges to remote user
+      ansible.builtin.copy:
+        content: |
+          "{{ _user }}" ALL=(ALL) NOPASSWD:ALL
+        dest: "/etc/sudoers.d/{{ _user }}"
+        owner: root
+        group: root
+        mode: 0640
+
+    - name: Install basic packages
+      ansible.builtin.package:
+        name:
+          - git
+          - make
+          - libvirt
+          - libvirt-client
+          - libvirt-daemon
+          - libvirt-daemon-kvm
+          - virt-install
+          - qemu-kvm
+          - libguestfs
+          - guestfs-tools
+
+    - name: Allow qemu user on user home directory for VM storage accesses
+      ansible.posix.acl:
+        path: "/home/{{ _user }}"
+        entity: qemu
+        etype: user
+        permissions: rx
+        state: present
+
+    - name: Add non-root user to libvirt group
+      ansible.builtin.user:
+        name: "{{ _user }}"
+        groups: libvirt
+        append: true
+
+    - name: Clear facts from the hypervisor
+      ansible.builtin.meta: clear_facts

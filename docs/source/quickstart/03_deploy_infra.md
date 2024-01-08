@@ -43,6 +43,13 @@ all:
 In case you want to run the framework against your laptop/desktop, you can avoid the `hypervisor-1` host.
 ~~~
 
+#### Multi hypervisor case
+
+If you want to involve two hypervisors (or more), you have to provide some more custom parameters, as well
+as override some of the `3-nodes.yml` variable file. You can for instance take
+[this environment file](../files/multinode-params.yml) as an example. There are comments allowing you
+to understand the needed bits.
+
 ### Custom variables file
 
 You may want to override some of the default settings provided in the
@@ -68,6 +75,23 @@ Once you're ready, run:
     -e @custom/private-params.yml \
     reproducer.yml
 ```
+
+#### Multiple hypervisors
+
+If you're consuming multiple hypervisors, you want to pass the `multinode-params.yml` file as the
+very last one.:
+```Bash
+[laptop]$ ansible-playbook -i custom/inventory.yml \
+    reproducer.yml \
+    -e cifmw_target_host=hypervisors \
+    -e @scenarios/reproducers/3-nodes.yml \
+    -e @custom/private-params.yml [-e @custom/repositories.yml] \
+    -e @custom/multinode-params.yml
+```
+
+~~~{warning}
+Beware of the value passed to `cifmw_target_host`, it's using the `hypervisors` group!
+~~~
 
 #### Explanations
 

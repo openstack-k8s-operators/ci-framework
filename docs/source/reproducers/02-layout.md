@@ -48,18 +48,15 @@ all:
      [any other ansible connection options]
 ~~~
 
-## Usage
+## Deploy the layout
 Once the layout matches your needs, you just need to run the following:
 ```Bash
-[laptop]$ ansible-playbook -K -i custom/inventory.yml \
+[laptop]$ ansible-playbook -i custom/inventory.yml \
     reproducer.yml \
     -e cifmw_target_host=hypervisor \
     -e @scenarios/reproducers/3-nodes.yml \
     -e @custom/private-params.yml [-e @custom/repositories.yml]
 ```
-Note: the `-K` option instructs ansible to request `sudo` password. This is
-needed in case you don't have the `NOPASSWD` option in the sudoers. Of course,
-if you're using root as the remote user, you won't need that option either.
 
 ### Deploy succeeds, what's next?
 Once the deploy is over, you will end with ready-to-use virtual machines,
