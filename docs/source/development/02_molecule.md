@@ -30,9 +30,9 @@ your role.
 
 In order to consume a CRC node, you have to edit the following file:
 [ci/config/molecule.yaml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/ci/config/molecule.yaml)
-and add the directive `nodeset: centos-9-crc-xl` under the related job.
+and add the directive `nodeset: centos-9-stream-crc-2-19-0-xl` under the related job.
 For now, we "only" support the crc-xl nodeset. It should cover most of the
-needs for molecule. It matches the **centos-9-stream-crc-xl**
+needs for molecule. It matches the **centos-9-stream-crc-2-19-0-xl**
 [label in rdoproject](https://review.rdoproject.org/zuul/labels).
 
 Once you have edited the script, re-generate the molecule job:
