@@ -6,7 +6,6 @@
         (
          '/home/zuul',
          'ci-framework-data',
-         'artifacts'
          ) | path_join
       }}
 
@@ -27,21 +26,16 @@
           - '!all'
           - 'min'
 
-    - name: Ensure directory exists
+    - name: Ensure directories exist
       ansible.builtin.file:
-        path: "{{ _ctl_reproducer_basedir }}"
+        path: "{{ _ctl_reproducer_basedir }}/{{ item }}"
         state: directory
         owner: zuul
         group: zuul
         mode: "0755"
-
-    - name: Create data directory on controller-0
-      ansible.builtin.file:
-        path: "{{ _ctl_reproducer_basedir }}/parameters"
-        state: directory
-        owner: zuul
-        group: zuul
-        mode: "0755"
+      loop:
+        - parameters
+        - artifacts
 
     - name: Build job inventory for hook usage
       tags:
@@ -51,21 +45,23 @@
       ansible.builtin.shell:
         cmd: >-
           cat /home/zuul/reproducer-inventory/* >
-          {{  _ctl_reproducer_basedir }}/zuul_inventory.yml
+          {{  _ctl_reproducer_basedir }}/artifacts/zuul_inventory.yml
 
+    # You want to use the "name" parameter of the ansible.builtin.include_vars
+    # call, such as:
+    # - name: Load mac mapping
+    #   ansible.builtin.include_vars:
+    #     file: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
+    #     name: my_fancy_name
+    # Then you'll be able to access the mapping content via `my_fancy_name`.
     - name: Push the MAC mapping data
       tags:
         - bootstrap
       become: true
       become_user: zuul
-      vars:
-        content: >-
-          {{
-            {'cifmw_mac_mapping': cifmw_libvirt_manager_mac_map}
-          }}
       ansible.builtin.copy:
-        dest: "{{ _ctl_reproducer_basedir }}/mac-mapping.yml"
-        content: "{{ content | to_nice_yaml }}"
+        dest: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
+        content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
 
     - name: Ensure /etc/ci/env is created
       become: true
