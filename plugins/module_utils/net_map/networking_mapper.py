@@ -102,12 +102,12 @@ class NetworkingInstanceMapper:
         self,
         instance_name,
         pools_manager: ip_pools.IPPoolsManager,
-        host_vars: typing.Dict[str, typing.Any],
+        host_vars: typing.Dict[str, typing.Any] = None,
         group_templates: typing.Dict[
             str, networking_definition.GroupTemplateDefinition
         ] = None,
         instance_definition: networking_definition.InstanceDefinition = None,
-        interface_info: typing.Optional[typing.Dict[str, typing.Any]] = None,
+        interface_info: typing.Dict[str, typing.Any] = None,
     ):
         """Initializes a NetworkingInstanceMapper
 
@@ -253,7 +253,7 @@ class NetworkingInstanceMapper:
     def __map_instance_network_interface_data(
         self,
     ) -> typing.Optional[typing.Dict[str, typing.Any]]:
-        if self.__interface_info is None:
+        if self.__interface_info is None or self.__host_vars is None:
             return {}
         elif "mac" not in self.__interface_info:
             raise exceptions.NetworkMappingError(
@@ -415,8 +415,10 @@ class NetworkingInstanceMapper:
                 during the mapping process.
         """
         instance_nets = self.__map_instance_networks()
-        hostname = self.__host_vars.get("ansible_hostname", None)
-        if not hostname:
+        hostname = (
+            self.__host_vars.get("ansible_hostname", None) if self.__host_vars else None
+        )
+        if self.__host_vars is not None and not hostname:
             raise exceptions.NetworkMappingError(
                 f"Cannot determine hostname for {self.__instance_name}. "
                 "Ensure ansible_hostname is an available fact for the host"
@@ -718,14 +720,20 @@ class NetworkingDefinitionMapper:
                 raise exceptions.NetworkMappingError(
                     f"interfaces_info does not contain information for {instance_name}"
                 )
+            elif interfaces_info is not None and instance_name not in self.__host_vars:
+                raise exceptions.NetworkMappingError(
+                    f"{instance_name} instance is not part of the Ansible inventory"
+                )
+
             instance_interface_info = (
                 interfaces_info[instance_name] if interfaces_info else None
             )
+
             instance_nets_mappers.append(
                 NetworkingInstanceMapper(
                     instance_name,
                     pools_manager,
-                    self.__host_vars[instance_name],
+                    self.__host_vars.get(instance_name, None),
                     instance_definition=instance_definition,
                     group_templates=groups_template_definitions,
                     interface_info=instance_interface_info,
