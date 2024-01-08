@@ -253,3 +253,24 @@ def test_networking_mapper_search_domain_override_ok():
         mapped_content[net_map_stub_data.NETWORK_1_NAME]["search_domain"]
         == overriden_search_domain
     )
+
+
+def test_networking_mapper_map_duplicated_net_group_templates_fail():
+    # Ensure that a network, for an instance, can be defined only
+    # in a single group
+    with pytest.raises(exceptions.NetworkMappingError) as exc_info:
+        mapper = networking_mapper.NetworkingDefinitionMapper(
+            net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
+        )
+        net_def_raw = net_map_stub_data.get_test_file_yaml_content(
+            "networking-definition-valid-all-tools-ipv6-only.yml"
+        )
+        net_def_raw["group-templates"]["group-1"]["networks"]["network-2"] = {}
+        net_def_raw["group-templates"]["group-1"]["networks"]["network-3"] = {}
+        mapper.map_partial(
+            net_def_raw,
+        )
+    assert (
+        "networks network-2, network-3 for instance-1 instance are "
+        "defined by multiple groups" == str(exc_info.value)
+    )

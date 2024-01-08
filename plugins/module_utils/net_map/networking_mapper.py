@@ -130,7 +130,7 @@ class NetworkingInstanceMapper:
         self.__instance_definition: typing.Union[
             networking_definition.InstanceDefinition, None
         ] = instance_definition
-        self.__group_template: typing.Dict[
+        self.__group_templates: typing.Dict[
             str, networking_definition.GroupTemplateDefinition
         ] = (group_templates or {})
         self.__interface_info: typing.Optional[
@@ -354,38 +354,47 @@ class NetworkingInstanceMapper:
     def __map_instance_networks(
         self,
     ) -> typing.Dict[str, networking_env_definitions.MappedInstanceNetwork]:
-        net_names = set()
+        net_names_set = set()
         if self.__instance_definition:
-            net_names.update(self.__instance_definition.networks.keys())
+            net_names_set.update(self.__instance_definition.networks.keys())
 
-        group_template_nets = {
-            item.network.name: item
-            for sublist in self.__group_template.values()
+        group_template_nets = [
+            (item.network.name, item)
+            for sublist in self.__group_templates.values()
             for item in sublist.networks.values()
-        }
+        ]
+
+        group_template_net_names_list = [i[0] for i in group_template_nets]
         groups_duplications = [
             item
             for item, count in collections.Counter(
-                list(group_template_nets.keys())
+                group_template_net_names_list
             ).items()
             if count > 1
         ]
         if groups_duplications:
-            duplications_str = ",".join(groups_duplications).strip(",")
+            duplications_str = ", ".join(groups_duplications).strip(",").strip(" ")
             raise exceptions.NetworkMappingError(
                 f"networks {duplications_str} for {self.__instance_name} "
                 "instance are defined by multiple groups"
             )
 
         instance_nets = {}
-        net_names.update(list(group_template_nets.keys()))
-        for net_name in sorted(net_names):
+        net_names_set.update(group_template_net_names_list)
+        for net_name in sorted(net_names_set):
             instance_net = (
                 self.__instance_definition.networks.get(net_name, None)
                 if self.__instance_definition
                 else None
             )
-            group_template = group_template_nets.get(net_name, None)
+            group_template = next(
+                (
+                    group_net_tuple[1]
+                    for group_net_tuple in group_template_nets
+                    if group_net_tuple[0] == net_name
+                ),
+                None,
+            )
             instance_nets[net_name] = self.__map_instance_network(
                 instance_net_definition=instance_net,
                 group_net_def=group_template,

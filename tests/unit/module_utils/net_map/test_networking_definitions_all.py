@@ -294,23 +294,24 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     assert len(net3_def.netconfig_config.ranges_ipv6) == 1
     assert len(net3_def.metallb_config.ranges_ipv6) == 1
 
-    # Simple basic checks of the group template
+    # Simple basic checks of the group templates
     group1_def = test_net_1.group_templates["group-1"]
     assert group1_def.group_name == "group-1"
     assert group1_def.skip_nm_configuration is None
-    assert len(group1_def.networks) == 3
+    assert len(group1_def.networks) == 1
     assert "network-1" in group1_def.networks
-    assert "network-2" in group1_def.networks
-    assert "network-3" in group1_def.networks
+
     group1_net1_def = group1_def.networks["network-1"]
     assert group1_net1_def.ipv6_range
     assert not group1_net1_def.ipv4_range
 
-    group1_net2_def = group1_def.networks["network-2"]
+    group2_def = test_net_1.group_templates["group-2"]
+    group1_net2_def = group2_def.networks["network-2"]
     assert group1_net2_def.ipv6_range
     assert not group1_net2_def.ipv4_range
 
-    group1_net3_def = group1_def.networks["network-3"]
+    group3_def = test_net_1.group_templates["group-3"]
+    group1_net3_def = group3_def.networks["network-3"]
     assert group1_net3_def.ipv6_range
     assert not group1_net3_def.ipv4_range
 
