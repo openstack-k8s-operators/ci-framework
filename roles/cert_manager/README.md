@@ -15,6 +15,7 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_cert_manager_subscription_sourcenamespace`: (String) The Source namespace of `Subscription` resource to pull cert-manager operator content.
 * `cifmw_cert_manager_validate`: (Bool) Validate the cert-manager api. Default to `True`.
 * `cifmw_cert_manager_version`: (String) Version of cert_manager tool. Default to `latest`.
+* `cifmw_cert_manager_crds`: (List) List of cert-manager crds to cleanup.
 
 ## Examples
 ```YAML
