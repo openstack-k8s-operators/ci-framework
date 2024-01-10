@@ -136,33 +136,41 @@
 
     - name: Inject ProxyJump configuration for remote hypervisor VMs
       when:
-        - _vm_data.target is defined
+        - hostvars[host]['ansible_host'] is defined
       vars:
         _vm_type: "{{ host | regex_replace('\\-[0-9]*', '') }}"
         _vm_data: "{{ cifmw_libvirt_manager_configuration['vms'][_vm_type] }}"
         _proxy_user: >-
           {{
-            hostvars[_vm_data.target]['ansible_user'] |
-            default(ansible_user_id)
+            (hostvars[_vm_data.target]['ansible_user'] |
+            default(ansible_user_id)) |
+            default('')
           }}
-        _proxy_host: "{{ _vm_data.target }}"
+        _proxy_host: "{{ _vm_data.target | default('') }}"
         _ssh_host: >-
           {{
-            hostvars[_proxy_host]['ansible_host'] |
-            default(hostvars[_proxy_host]['inventory_hostname'])
+            (hostvars[_proxy_host]['ansible_host'] |
+            default(hostvars[_proxy_host]['inventory_hostname'])) |
+            default('')
           }}
-        _vm_ip: "{{ hostvars[host]['ansible_host'] }}"
+        _vm_ip: "{{ hostvars[host]['ansible_host'] | default('')}}"
       ansible.builtin.blockinfile:
         path: "/home/zuul/.ssh/config"
         marker: "## {mark} {{ host }}"
         block: |-
           Host {{ host }} {{ _vm_ip }}
             Hostname {{ _vm_ip }}
-            IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
+            User {{ _vm_data['admin_user'] | default('zuul') }}
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
-          {% if _vm_data.target != cifmw_libvirt_manager_configuration.vms.controller.target %}
+          {% if _vm_data.target is defined and
+             _vm_data.target != cifmw_libvirt_manager_configuration.vms.controller.target %}
+            IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
             ProxyJump {{ _proxy_user }}@{{ _proxy_host }}
+          {% elif host is match('^ocp.*') %}
+            IdentityFile ~/.ssh/devscripts_key
+          {% else %}
+            IdentityFile ~/.ssh/id_cifw
           {% endif %}
       loop: "{{ hostvars.keys() }}"
       loop_control:
