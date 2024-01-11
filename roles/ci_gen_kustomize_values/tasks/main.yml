@@ -1,0 +1,71 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ cifmw_ci_gen_kustomize_values_src_dir }}"
+    - "{{ cifmw_ci_gen_kustomize_values_dest_dir }}"
+
+- name: List snippets
+  register: _snippets
+  ansible.builtin.find:
+    paths: "{{ cifmw_ci_gen_kustomize_values_src_dir }}"
+    recurse: false
+
+- name: Load various snippet files
+  register: _snippets_content
+  ansible.builtin.slurp:
+    path: "{{ file.path }}"
+  loop: "{{ _snippets.files }}"
+  loop_control:
+    loop_var: file
+    label: "{{ file.path | basename }}"
+
+- name: Combine snippets
+  vars:
+    _parsed: >-
+      {{
+        item.content |
+        b64decode |
+        ansible.builtin.from_yaml
+      }}
+  ansible.builtin.set_fact:
+    cifmw_ci_gen_kustomize_values_content: >
+      {{
+        cifmw_ci_gen_kustomize_values_content |
+        default({}) |
+        combine(_parsed, recursive=true)
+      }}
+  loop: "{{ _snippets_content.results }}"
+
+- name: Output kustomize file
+  ansible.builtin.copy:
+    dest: >-
+      {{
+        (cifmw_ci_gen_kustomize_values_dest_dir,
+        cifmw_ci_gen_kustomize_values_dest_filename) | path_join
+      }}
+    content: >-
+      {{
+        cifmw_ci_gen_kustomize_values_header |
+        combine(cifmw_ci_gen_kustomize_values_content, recursive=true) |
+        to_nice_yaml
+      }}
+    mode: "0644"

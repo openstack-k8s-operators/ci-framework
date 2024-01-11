@@ -17,64 +17,25 @@
 
 - name: Converge
   hosts: all
+  vars:
+    cifmw_networking_mapper_infra_dir: >-
+      {{ (ansible_user_dir,
+          'ci-framework-data',
+          'artifacts',
+          'network-mapper') | path_join
+      }}
+    cifmw_networking_mapper_networking_def_path: >-
+      {{ cifmw_networking_mapper_infra_dir }}/networking-definition.yml
+    cifmw_networking_mapper_networking_env_def_path: >-
+      {{
+        (cifmw_networking_mapper_infra_dir,
+         'networking-environment-definition.yml') | path_join
+      }}
   tasks:
-    - name: Set testing facts
-      ansible.builtin.set_fact:
-        _testing_net_def:
-          networks:
-            ctlplane:
-              network: "192.168.122.0/24"
-              gateway: "192.168.122.1"
-              dns:
-                - "192.168.122.253"
-                - "192.168.122.254"
-              search-domain: "ctlplane.example.local"
-              mtu: 1500
-            internal-api:
-              network: "172.17.0.0/24"
-              gateway: "172.17.0.1"
-              vlan: 20
-              mtu: 1496
-            storage:
-              network: "172.18.0.0/24"
-              vlan: 21
-              mtu: 1496
-            tenant:
-              network: "172.19.0.0/24"
-              gateway-v4: "172.19.0.1"
-              search-domain: "tenant.example.local"
-              dns-v4:
-                - "8.8.8.8"
-                - "172.19.0.1"
-              vlan: 22
-              mtu: 1496
-          group-templates:
-            computes:
-              networks:
-                ctlplane:
-                  range: "192.168.122.10-192.168.122.14"
-                internal-api:
-                  range: "10-14"
-                tenant:
-                  range:
-                    start: 10
-                    length: 5
-                storage:
-                  range:
-                    start: 10
-                    length: 5
-          instances:
-            crc:
-              networks:
-                ctlplane:
-                  ip: "192.168.122.10"
-                storage:
-                  ip: "172.18.0.10"
-
-            controller:
-              networks:
-                ctlplane:
-                  ip: "192.168.122.5"
+    - name: Load testing input
+      ansible.builtin.include_vars:
+        file: input.yml
+        name: _testing_net_def
 
     - name: Call the networking mapper partial map
       vars:
@@ -84,7 +45,7 @@
 
     - name: Slurp the Networking Definition content
       ansible.builtin.slurp:
-        path: "/etc/ci/env/networking-definition.yml"
+        path: "{{ cifmw_networking_mapper_networking_def_path }}"
       register: _net_def_slurp
 
     - name: Assert the Networking Definition file content
@@ -181,7 +142,7 @@
 
     - name: Stat to check for Networking Env Definition file existence
       ansible.builtin.slurp:
-        path: "/etc/ci/env/networking-environment-definition.yml"
+        path: "{{ cifmw_networking_mapper_networking_env_def_path }}"
       register: _net_env_def_slurp
 
     - name: Assert the Networking Env Definition file content
@@ -214,3 +175,39 @@
                 _inventory_host_items | map(attribute='key') | list | sort
               )
             "
+
+    - name: Generate values for future deploy
+      ansible.builtin.import_role:
+        name: networking_mapper
+        tasks_from: network_config_values.yml
+
+    - name: Load generated file
+      register: _gen_snippet
+      ansible.builtin.slurp:
+        path: >-
+          {{
+            (ansible_user_dir, 'ci-framework-data',
+            'artifacts', 'ci_k8s_snippets',
+            'networking_mapper.yaml') | path_join
+          }}
+
+    - name: Load ctlplane expected output
+      ansible.builtin.include_vars:
+        file: ctlplane_output.yml
+        name: _ctlplane_output
+
+    - name: Load internal-api expected output
+      ansible.builtin.include_vars:
+        file: internalapi_output.yml
+        name: _internalapi_output
+
+    - name: Ensure content is consistent
+      vars:
+        _content: "{{ _gen_snippet.content | b64decode | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - _content.data.node_0 is defined
+          - _content.data.ctlplane is defined
+          - _content.data['internal-api'] is defined
+          - _content.data.ctlplane == _ctlplane_output.ctlplane
+          - _content.data['internal-api'] == _internalapi_output['internal-api']
