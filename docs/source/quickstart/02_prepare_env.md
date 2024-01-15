@@ -32,7 +32,6 @@ On the hypervisor, please ensure you have:
 Note: if you chose to require a password for `sudo`, please ensure to pass the `-K` option to any
 `ansible-playbook` command running against the hypervisor.
 
-
 ### Virtual network consideration
 
 For now, you have to manually destroy the `default` network provided by libvirt. This is mandatory, since
@@ -45,13 +44,15 @@ In order to do so, please use:
 [hypervisor]$ sudo virsh net-destroy default
 ```
 
-~~~{tip}
+```{tip}
 Later, we may not need to do this, if we can get rid of the hard-coded subnets currently consumed in the product.
-~~~
+```
 
 ### Multiple hypervisor
+
 In case you have multiple hypervisor, you may provide the following inventory
-~~~{code-block} YAML
+
+```{code-block} YAML
 :caption: custom/inventory.yml
 :linenos:
 ---
@@ -72,33 +73,38 @@ hypervisors:
       ansible_host: hypervisor-2.tld
       vxlan_local_ip: 10.10.1.12
       vxlan_remote_ip: 10.10.1.11
-~~~
+```
 
 As you can see, two custom parameters are passed via the inventory: `vxlan_remote_ip` and `vxlan_local_ip`.
-Those are needed only if you're provisioning a VXLAN connection between your two hypervisors using
-[this provided playbook](../files/bootstrap-vxlan.yml).
+Those are needed only if you're provisioning a VXLAN connection between your two hypervisors using `docs/source/files/bootstrap-vxlan.yml`.
 
 ## Bootstrap hypervisor
+
 Since we're using non-root user with some specificities, you may want to get an automated way to provision the
 hypervisor.
 
 ### Basics
-The [following playbook](../files/boostrap-hypervisor.yml) will help you create the user, ensuring some
+
+The boostrap-hypervisor.yml will help you create the user, ensuring some
 packages are present, as well as ensuring your user will be part of the needed group.
 
 You can run the playbook like this:
+
 ```Bash
+$ cd ci-framework
 $ ansible-playbook -i custom/inventory.yml \
-    -U root \
-    -e cifmw_target_host=[hypervisor|hypervisors]
-    bootstrap-hypervisor.yml
+    -e ansible_user=root \
+    -e cifmw_target_host=[hypervisor|hypervisors] \
+    docs/source/files/bootstrap-hypervisor.yml
 ```
 
 ### VXLAN
-Once you're finished with the basic bootstrap, and if you're having two hypervisors, you can consume the
-[bootstrap-vxlan.yml](../files/bootstrap-vxlan.yml):
+
+After completing the initial bootstrap process, if you are deploying on two hypervisors, you can consume the 'bootstrap-vxlan.yml' playbook.
+
 ```Bash
+$ cd ci-framework
 $ ansible-playbook -i custom/inventory.yml \
   -e cifmw_target_host=hypervisors \
-  bootstrap-vxlan.yml
+  docs/source/files/bootstrap-vxlan.yml
 ```
