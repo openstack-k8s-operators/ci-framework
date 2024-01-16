@@ -22,29 +22,14 @@
     cifmw_basedir: "/opt/basedir"
     cifmw_install_yamls_repo: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-    cifmw_libvirt_manager_networks:
+    _networks:
       public:
         range: "192.168.100.0/24"
       osp_trunk:
         default: true
         range: "192.168.140.0/24"
         mtu: 1500
-        static_ip: true
-      internal-api:
-        range: "172.20.0.0/24"
-        vlan: 20
-      storage:
-        range: "172.21.0.0/24"
-        vlan: 21
-      tenant:
-        range: "172.22.0.0/24"
-        vlan: 22
-      storage-mgmt:
-        range: "172.23.0.0/24"
-        vlan: 23
     cifmw_use_libvirt: true
-    cifmw_reproducer_crc_ip4: "{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(10) }}"
-    cifmw_reproducer_crc_gw4: "{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}"
     cifmw_libvirt_manager_configuration:
       vms:
         compute:
@@ -87,10 +72,10 @@
             <forward mode='nat'/>
             <bridge name='public' stp='on' delay='0'/>
             <mac address='52:54:00:6a:f2:dc'/>
-            <ip family='ipv4' address='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(1) }}' prefix='24'>
+            <ip family='ipv4' address='{{ _networks.public.range | ansible.utils.nthhost(1) }}' prefix='24'>
               <dhcp>
-                <range start='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(10) }}'
-                end='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(100) }}'/>
+                <range start='{{ _networks.public.range | ansible.utils.nthhost(10) }}'
+                end='{{ _networks.public.range | ansible.utils.nthhost(100) }}'/>
               </dhcp>
             </ip>
           </network>
@@ -100,7 +85,7 @@
             <forward mode='nat'/>
             <bridge name='osp_trunk' stp='on' delay='0'/>
             <mac address='52:54:00:fd:be:d0'/>
-            <ip family='ipv4' address='{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
+            <ip family='ipv4' address='{{ _networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
             </ip>
           </network>
   roles:
@@ -132,13 +117,26 @@
           ansible.builtin.stat:
             path: "{{ ansible_user_dir }}/ci-framework-data/parameters/interfaces-info.yml"
 
+        - name: Load crc inventory
+          register: _crc_inv
+          ansible.builtin.slurp:
+            src: "{{ ansible_user_dir }}/reproducer-inventory/crc-group.yml"
+
+        - name: Load compute inventory
+          register: _compute_inv
+          ansible.builtin.slurp:
+            src: "{{ ansible_user_dir }}/reproducer-inventory/compute-group.yml"
+
         - name: Ensure we can ping compute-0 on osp_trunk net
           register: _cmp0_ping
           failed_when: false
           vars:
+            _inv: >-
+              {{
+                _compute_inv.content | b64decode | from_yaml
+              }}
             _ip: >-
-              {{ cifmw_libvirt_manager_networks.osp_trunk.range |
-                 ansible.utils.nthhost(100) }}
+              {{ _inv.computes.hosts['compute-0'].ansible_host }}
           ansible.builtin.command:
             cmd: "ping -c1 -w1 {{ _ip }}"
 
@@ -146,9 +144,12 @@
           register: _crc_ping
           failed_when: false
           vars:
+            _inv: >-
+              {{
+                _crc_inv.content | b64decode | from_yaml
+              }}
             _ip: >-
-              {{ cifmw_libvirt_manager_networks.osp_trunk.range |
-                 ansible.utils.nthhost(10) }}
+              {{ _inv.crcs.hosts['crc-0'].ansible_host }}
           ansible.builtin.command:
             cmd: "ping -c1 -w1 {{ _ip }}"
 

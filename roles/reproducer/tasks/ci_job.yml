@@ -14,57 +14,10 @@
   ansible.builtin.set_fact:
     zuul_plays: "{{ extracted | map('last') | list }}"
 
-- name: Find all files related to networking data
-  register: network_data_files
-  ansible.builtin.find:
-    paths: "{{ cifmw_reproducer_basedir }}/reproducer-network-env/"
-    pattern: "*.yml"
-
-- name: Slurp networking data from hypervisor
-  register: network_data
-  ansible.builtin.slurp:
-    path: "{{ item.path }}"
-  loop: "{{ network_data_files.files }}"
-  loop_control:
-    label: "{{ item.path }}"
-
 - name: Run on controller-0
   delegate_to: controller-0
   remote_user: zuul
   block:
-    - name: Create crc_ci_bootstrap_networks_out fact
-      vars:
-        net_config_list: |-
-          {{
-            network_data.results |
-            map(attribute='content') |
-            map('b64decode') |
-            map('from_yaml')
-          }}
-      ansible.builtin.set_fact:
-        crc_ci_bootstrap_networks_out: >-
-          {{
-            crc_ci_bootstrap_networks_out |
-            default({}) |
-            combine(item)
-          }}
-      loop: >-
-        {{
-          net_config_list |
-          map(attribute='crc_ci_bootstrap_networks_out')
-        }}
-
-    - name: Inject generated networking-info.yml file on controller
-      become: true
-      ansible.builtin.copy:
-        dest: "/etc/ci/env/networking-info.yml"
-        content: >-
-          {{
-            {'crc_ci_bootstrap_networks_out': crc_ci_bootstrap_networks_out} |
-            to_nice_yaml
-          }}
-        mode: "0644"
-
     - name: CI reproducer dedicated tasks
       when:
         - cifmw_job_uri is defined
