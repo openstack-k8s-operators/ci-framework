@@ -5,12 +5,12 @@ from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
 )
 
 
-class NetworkMappingError(Exception):
+class NetworkMappingError(Exception, ansible_encoding.RawConvertibleObject):
     def __init__(self, message) -> None:
         super().__init__(message)
         self.message = message
 
-    def to_dict(self) -> typing.Dict[str, typing.Any]:
+    def to_raw(self) -> typing.Dict[str, typing.Any]:
         return ansible_encoding.decode_ansible_raw(vars(self))
 
 
