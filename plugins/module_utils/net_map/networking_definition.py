@@ -4,6 +4,10 @@ import dataclasses
 import ipaddress
 import typing
 
+from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+    ansible_encoding,
+)
+
 from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
     exceptions,
 )
@@ -433,7 +437,7 @@ def check_host_network_ranges_collisions(
     return None, None
 
 
-class HostNetworkRange:
+class HostNetworkRange(ansible_encoding.RawConvertibleObject):
     """Parser and validator of network ranges
 
     Handles the parsing and validation of a network range based on two
@@ -516,7 +520,7 @@ class HostNetworkRange:
 
     @property
     def network(self) -> typing.Union[ipaddress.IPv4Network, ipaddress.IPv6Network]:
-        """The network to which the range blongs to."""
+        """The network to which the range belongs to."""
         return self.__network
 
     @classmethod
@@ -559,6 +563,20 @@ class HostNetworkRange:
             )
 
         return start_version or end_version
+
+    def to_raw(self):
+        """Returns a builtin types based dict representation of the object.
+
+        Returns: A dictionary with the start IP of the range as a string with
+            key start_ip and the IP as a string, the last included IP as
+            end_ip also as a string and finally the network under the network
+            key and as a string too.
+        """
+        return {
+            "start_ip": str(self.__start_ip),
+            "end_ip": str(self.__end_ip),
+            "network": str(self.__network),
+        }
 
     @classmethod
     def from_raw(

@@ -51,6 +51,19 @@ def test_networking_definition_colliding_ranges_fail():
     )
     assert conflicting_net_name in exc_info.value.message
 
+    # Ensure the dict representation is fine
+    raw_collision_exception = exc_info.value.to_raw()
+    assert "range_1" in raw_collision_exception
+    assert "range_2" in raw_collision_exception
+    range_dict_1 = raw_collision_exception["range_1"]
+    range_dict_2 = raw_collision_exception["range_2"]
+    assert range_dict_1["start_ip"] == str(conflicting_net[0])
+    assert range_dict_2["start_ip"] == str(conflicting_net[29])
+    assert range_dict_1["end_ip"] == str(conflicting_net[29])
+    assert range_dict_2["end_ip"] == str(conflicting_net[58])
+    assert range_dict_1["network"] == str(conflicting_net)
+    assert range_dict_2["network"] == str(conflicting_net)
+
 
 def test_networking_definition_load_networking_definition_1_ok():
     raw_definition_1 = net_map_stub_data.get_test_file_yaml_content(
