@@ -61,14 +61,13 @@ Specific `type_name`: `^crc.*` and `^ocp.*` are enabling specific paths in the m
 #### Example
 
 ```YAML
-cifmw_libvirt_manager_networks:
+_networks:
   public:
     range: "192.168.100.0/24"
   osp_trunk:
     default: true
     range: "192.168.122.0/24"
     mtu: 9000
-    static_ip: true
 
 cifmw_libvirt_manager_configuration:
   vms:
@@ -98,12 +97,12 @@ cifmw_libvirt_manager_configuration:
         <forward mode='nat'/>
         <bridge name='public' stp='on' delay='0'/>
         <ip family='ipv4'
-         address='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(1) }}'
+         address='{{ _networks.public.range | ansible.utils.nthhost(1) }}'
          prefix='24'>
           <dhcp>
             <range
-             start='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(10) }}'
-             end='{{ cifmw_libvirt_manager_networks.public.range | ansible.utils.nthhost(100) }}'/>
+             start='{{ _networks.public.range | ansible.utils.nthhost(10) }}'
+             end='{{ _networks.public.range | ansible.utils.nthhost(100) }}'/>
           </dhcp>
         </ip>
       </network>
@@ -112,10 +111,10 @@ cifmw_libvirt_manager_configuration:
         <name>osp_trunk</name>
         <forward mode='nat'/>
         <bridge name='osp_trunk' stp='on' delay='0'/>
-        <mtu size='{{ cifmw_libvirt_manager_networks.osp_trunk.mtu }}'/>
+        <mtu size='{{ _networks.osp_trunk.mtu }}'/>
         <ip
          family='ipv4'
-         address='{{ cifmw_libvirt_manager_networks.osp_trunk.range | ansible.utils.nthhost(1) }}'
+         address='{{ _networks.osp_trunk.range | ansible.utils.nthhost(1) }}'
          prefix='24'>
         </ip>
       </network>
@@ -147,8 +146,6 @@ In order to do so, you have to provide specific variables:
 * `network`: (Data structure). Mandatory.
   * `name`: (String) Network or bridge name. Mandatory.
   * `cidr`: (String) Network CIDR. Mandatory.
-  * `mtu`: (Int) Network MTU. Optional (and not used in this specific case).
-  * `static_ip`: (Bool) Set it to `true` to get a fixed IP.
 * `cifmw_libvirt_manager_net_prefix_add`: (Bool) Toggle this to `true` if the network name needs to get the `cifmw-` prefix (advanced usage). Optional. Defaults to `true`.
 
 ### Example of a task
@@ -160,7 +157,6 @@ In order to do so, you have to provide specific variables:
     network:
       name: my-network
       cidr: 192.168.130.0/24
-      static_ip: true
   ansible.builtin.include_role:
     name: libvirt_manager
     tasks_from: attack_interface.yml

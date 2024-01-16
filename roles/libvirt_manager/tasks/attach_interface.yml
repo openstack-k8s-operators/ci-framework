@@ -18,9 +18,6 @@
 #   vm_name         Domain name to which the interface needs to be attached.
 #   network
 #     name          Name of the network
-#     cidr          network notation
-#     mtu           MTU applied on the interface.
-#     static_ip     boolean if static address is required.
 
 - name: Get existing networks and bridges
   block:
@@ -87,12 +84,6 @@
       ansible.builtin.set_fact:
         _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
 
-    - name: "Reserve an IP address for {{ vm_name }}"
-      when: network.static_ip | bool
-      vars:
-        mac_address: "{{ _lm_mac_address }}"
-      ansible.builtin.import_tasks: reserve_ip.yml
-
     - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
       when: _lm_mac_address is defined
       ansible.builtin.command:
@@ -105,3 +96,19 @@
           --model virtio
           --config
           --persistent
+
+    - name: Inject data in cifmw_libvirt_manager_mac_map
+      when: _lm_mac_address is defined
+      vars:
+        _vm_name: "{{ vm_name | replace('cifmw-', '') }}"
+        _dataset: >-
+          {{
+            {_vm_name: [{'mac': _lm_mac_address,
+                        'network': network.name}]}
+          }}
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_mac_map: >-
+          {{
+            cifmw_libvirt_manager_mac_map | default({}) |
+            combine(_dataset, recursive=true)
+          }}

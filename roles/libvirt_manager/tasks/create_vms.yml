@@ -154,14 +154,8 @@
   vars:
     _prefixed_net_names: >-
       {{
-        _fixed_ip_nets | dict2items |
-        map(attribute='key') |
+        _virt_nets.list_nets |
         map('regex_replace', '^', 'cifmw-')
-      }}
-    _fixed_net_names: >-
-      {{
-        _fixed_ip_nets | dict2items |
-        map(attribute='key')
       }}
     _vals: >-
       {{
@@ -181,12 +175,13 @@
     macs: >-
       {{
         (macs | default([]) + _macs) |
-        selectattr('network', 'in', _fixed_net_names + _prefixed_net_names)
+        selectattr('network', 'in', _virt_nets.list_nets + _prefixed_net_names)
       }}
     public_net_nics: >-
       {{
         (public_net_nics | default([]) + _macs) |
-        selectattr('network', 'match', '^(cifmw-)?' ~ cifmw_libvirt_manager_pub_net) |
+        selectattr('network',
+                   'match', '^(cifmw-)?' ~ cifmw_libvirt_manager_pub_net) |
         selectattr('host', 'match', '.*' ~ vm_type ~ '.*')
       }}
   loop: "{{ _vm_ports.results }}"
@@ -203,20 +198,6 @@
       Something went wrong while trying to extract interfaces associated to
       cifmw_libvirt_manager_pub_net ({{ cifmw_libvirt_manager_pub_net }}).
       Please double-check your scenario!
-
-- name: "Fix IPs for selected networks and VMs for {{ vm_type }}"
-  vars:
-    vm_name: "cifmw-{{ mac_node.host }}"
-    net_name: "{{ mac_node.network | replace('cifmw-', '') }}"
-    network:
-      cidr: "{{ _fixed_ip_nets[net_name]['range'] }}"
-      name: "{{ net_name }}"
-    mac_address: "{{ mac_node.mac }}"
-  ansible.builtin.include_tasks: reserve_ip.yml
-  loop: "{{ macs }}"
-  loop_control:
-    loop_var: mac_node
-    label: "{{ mac_node.host }}"
 
 - name: "Start and grab IP if image is not blank for {{ vm_type }}"
   when:

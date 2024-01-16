@@ -7,7 +7,6 @@
   loop:
     - workload
     - reproducer-inventory
-    - reproducer-network-env
     - volumes
 
 - name: Allow QEMU on workload directory
@@ -106,22 +105,11 @@
     cacheable: true
     cifmw_reproducer_network_data: {}
     cifmw_libvirt_manager_mac_map: {}
-    _fixed_ip_nets: >-
-      {{
-        cifmw_libvirt_manager_networks | default({}) |
-        dict2items |
-        selectattr('value.static_ip', 'defined') |
-        selectattr('value.static_ip', '==', true) |
-        items2dict
-      }}
 
-- name: Assert we have at least one network with fixed IPs
-  ansible.builtin.assert:
-    that:
-      - _fixed_ip_nets | length > 0
-    msg: >-
-      Please ensure at least one network has static_ip set
-      to true in your scenario file!
+- name: List existing networks
+  register: _virt_nets
+  community.libvirt.virt_net:
+    command: "list_nets"
 
 - name: Create and run VMs
   when:
@@ -151,6 +139,7 @@
   ansible.builtin.copy:
     dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/interfaces-info.yml"
     content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
+    force: false
 
 - name: Ensure we get proper access to CRC
   when:
@@ -172,8 +161,7 @@
         cmd: >-
           set -xe -o pipefail;
           ssh -i {{ crc_private_key}} core@crc-0 "mkdir -p .ssh";
-          scp -i {{ crc_private_key }} ~/.ssh/authorized_keys
-          core@crc-0:.ssh/authorized_keys
+          cat ~/.ssh/authorized_keys | ssh -i {{ crc_private_key }} core@crc-0 "cat >> .ssh/authorized_keys"
 
     - name: Enable root access on CRC
       ansible.builtin.shell:

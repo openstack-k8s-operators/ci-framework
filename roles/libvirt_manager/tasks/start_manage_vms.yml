@@ -54,7 +54,7 @@
       Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ proxy_hostname }}
         Hostname {{ extracted_ip }}
-        User {{ 'core' if vm_ip.nic.host.startswith('crc') else 'zuul' }}
+        User {{ 'core' if vm_ip.nic.host is match('^(crc|ocp).*') else 'zuul' }}
         StrictHostKeyChecking no
         UserKnownHostsFile /dev/null
   loop: "{{ vm_ips.results }}"
@@ -68,6 +68,7 @@
     identity_file: >-
       {{
         cifmw_reproducer_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type == 'ocp' else
+        ansible_user_dir ~ '/.crc/machines/crc/id_ecdsa' if vm_type == 'crc' else
         ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
       }}
   ansible.builtin.blockinfile:
@@ -78,7 +79,7 @@
     block: |-
       Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         Hostname {{ extracted_ip }}
-        User {{ 'core' if vm_ip.nic.host.startswith('crc') else 'zuul' }}
+        User {{ 'core' if vm_ip.nic.host is match('^(crc|ocp)') else 'zuul' }}
         IdentityFile {{ identity_file }}
         StrictHostKeyChecking no
         UserKnownHostsFile /dev/null
@@ -95,6 +96,7 @@
     name: "{{ vm_ip.nic.host }}"
     groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
     ansible_host: "{{ extracted_ip }}"
+    ansible_ssh_user: "{{ _layout.vms[vm_type].admin_user | default(_init_admin_user) }}"
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
@@ -121,14 +123,17 @@
     label: "{{ extracted_ip }}"
 
 - name: "Configure ssh access on type {{ vm_type }}"
-  when:
-    - vm_type is not match('^(crc|ocp).*$')
-  delegate_to: "{{ vm_ip.nic.host }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.posix.authorized_key:
-    user: "{{ _init_admin_user }}"
-    state: present
-    key: "{{ pub_key }}"
+  vars:
+    _user: >-
+      {{
+        (vm_type is match('^(crc|ocp).*$')) |
+        ternary('core', _init_admin_user)
+      }}
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      cat ~/.ssh/authorized_keys |
+      ssh {{ _user }}@{{ vm_ip.nic.host }} "cat >> ~/.ssh/authorized_keys"
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: "vm_ip"
@@ -188,16 +193,16 @@
     loop_var: "vm_ip"
     label: "{{ vm_ip.nic.host }}"
 
-- name: "Inject network configuration file on {{ vm_type }}"
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-network-env/{{ vm_type }}-{{ vm_id }}.yml"
-    src: >-
-      {{
-        (ci_job_networking is defined)
-        | ternary('ci-network-data.yml.j2', 'network-data.yml.j2')
-      }}
-    mode: "0644"
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+- name: Update inventory to consume correct user
+  delegate_to: localhost
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+  ansible.builtin.add_host:
+    name: "{{ vm_ip.nic.host }}"
+    groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
+    ansible_host: "{{ extracted_ip }}"
+    ansible_ssh_user: "{{ _layout.vms[vm_type].admin_user | default('zuul') }}"
+  loop: "{{ vm_ips.results }}"
   loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
+    loop_var: vm_ip
+    label: "{{ vm_ip.nic.host }}"
