@@ -286,7 +286,10 @@ class NetworkingInstanceMapper:
             )
         instance_mac = self.__interface_info["mac"].lower()
         for iface_name in ansible_interfaces:
-            iface_fact_name = f"ansible_{iface_name}"
+            # Ansible internally replaces `-` and `:` by _ to create safe facts names
+            iface_fact_name = f"ansible_{iface_name}".replace("-", "_").replace(
+                ":", "_"
+            )
             ansible_iface_data = self.__host_vars.get(iface_fact_name, None)
             if not ansible_iface_data:
                 raise exceptions.NetworkMappingError(
