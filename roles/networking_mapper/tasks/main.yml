@@ -14,15 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Ensure that networking and hostname facts are in place
-  ansible.builtin.setup:
-    gather_subset:
-      - network
-      - platform
-  delegate_to: "{{ item }}"
-  delegate_facts: true
-  loop: "{{ hostvars.keys() | list }}"
-
 - name: Load the Network Definition from file if not given
   when: "cifmw_networking_definition is not defined"
   block:
@@ -50,6 +41,46 @@
       ansible.builtin.include_vars:
         file: "{{ cifmw_networking_mapper_ifaces_info_path }}"
         name: cifmw_networking_mapper_ifaces_info
+
+- name: Prepare the list of relevant instances
+  vars:
+    _net_def_instances_filtered: >-
+      {{
+        (
+          cifmw_networking_definition.instances | default({})
+        ).keys() |
+        select("in", hostvars.keys() | list) |
+        list
+      }}
+    _net_def_groups_filtered: >-
+      {{
+        (
+          cifmw_networking_definition['group-templates'] | default({})
+        ).keys() |
+        select("in", groups.keys() | list) |
+        list
+      }}
+    _net_def_groups_instances: >-
+      {% set _instances = [] -%}
+      {% for group_name in _net_def_groups_filtered -%}
+      {%   set _ = _instances.extend(groups[group_name] | list) -%}
+      {% endfor -%}
+      {% set _instances = _instances | unique -%}
+      {{ _instances }}
+  ansible.builtin.set_fact:
+    _networking_mapper_instance_names: >-
+      {{
+        _net_def_groups_instances + _net_def_instances_filtered
+      }}
+
+- name: Ensure that networking and hostname facts are in place
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+      - platform
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ _networking_mapper_instance_names }}"
 
 - name: Call the networking mapper
   cifmw.general.ci_net_map:
