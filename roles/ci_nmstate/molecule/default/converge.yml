@@ -41,6 +41,7 @@
           - "!all"
           - "!min"
           - network
+          - dns
           - pkg_mgr
 
 - name: Converge
@@ -51,40 +52,60 @@
     cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
     cifmw_ci_nmstate_namespace: openshift-nmstate
   tasks:
-    - name: Prepare the networking var for the ci_nmstate role
-      vars:
-        instance_target_mtu: "{{ ansible_default_ipv4.mtu -50 }}"
+
+    - name: Set common molecule test facts
       ansible.builtin.set_fact:
-        _ci_nmstate_molecule_instance_target_mtu: "{{ instance_target_mtu }}"
-        cifmw_ci_nmstate_network_layout:
-          instance:
+        _ci_nmstate_molecule_instance_target_mtu: "{{ (ansible_default_ipv4.mtu - 50) | int }}"
+
+    - name: Prepare the Networking Env Definition for ci_nmstate role
+      vars:
+        cifmw_networking_definition:
+          networks:
             default:
-              connection: ci-private-network
-              gw: "{{ ansible_default_ipv4.gateway }}"
-              iface: "{{ ansible_default_ipv4.interface }}"
-              ip4: "{{ ansible_default_ipv4.address + '/' + ansible_default_ipv4.prefix }}"
-              mtu: "{{ instance_target_mtu | string }}" # Set a non-default MTU to test
+              network: >-
+                {{
+                  ansible_default_ipv4.network +
+                  '/' + hostvars.crc.ansible_default_ipv4.prefix
+                }}
+              gateway: "{{ ansible_default_ipv4.gateway }}"
               dns:
                 - 1.1.1.1
                 - 1.0.0.1
-          crc:
-            default:
-              connection: ci-private-network
-              gw: "{{ hostvars.crc.ansible_default_ipv4.gateway }}"
-              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
-              ip4: >-
+              mtu: "{{ _ci_nmstate_molecule_instance_target_mtu }}" # Set a non-default MTU to test
+            crc-net:
+              network: >-
                 {{
-                  hostvars.crc.ansible_default_ipv4.address +
-                    '/' + hostvars.crc.ansible_default_ipv4.prefix
+                  hostvars.crc.ansible_default_ipv4.network +
+                  '/' + hostvars.crc.ansible_default_ipv4.prefix
                 }}
-              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu }}"
-            test-vlan-connection:
-              connection: test-network-20
-              iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}.20"
-              ip4: 172.17.0.5/24
-              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu | string }}"
-              parent_iface: "{{ hostvars.crc.ansible_default_ipv4.interface }}"
+              gateway: "{{ hostvars.crc.ansible_default_ipv4.gateway }}"
+              dns: "{{ hostvars.crc.ansible_dns.nameservers }}"
+            testing:
+              network: "172.17.0.0/24"
+              gateway: "172.17.0.1"
               vlan: 20
+              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu | int }}"
+          instances:
+            crc:
+              networks:
+                crc-net:
+                  ip: "{{ hostvars.crc.ansible_default_ipv4.address }}"
+                testing:
+                  ip: "172.17.0.5"
+            instance:
+              networks:
+                default:
+                  ip: "{{ ansible_default_ipv4.address }}"
+        cifmw_networking_mapper_ifaces_info:
+          crc:
+            - mac: "{{ hostvars.crc.ansible_default_ipv4.macaddress }}"
+              network: "testing-net"
+          instance:
+            - mac: "{{ ansible_default_ipv4.macaddress }}"
+              network: "testing-net"
+        cifmw_networking_mapper_network_name: "testing-net"
+      ansible.builtin.include_role:
+        name: "networking_mapper"
 
     - name: Call the role under test
       ansible.builtin.include_role:

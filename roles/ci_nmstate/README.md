@@ -1,7 +1,6 @@
 # ci_nmstate
 Configures Ansible hosts networks by applying nmstate configurations
-generated from the content of the CI network definitions like
-`cifmw_network_layout` or `crc_ci_bootstrap_networks_out`.
+generated from the content of the CI Networking Env. Definition.
 
 ## Privilege escalation
 
@@ -18,34 +17,15 @@ nmstate changes as they manipulate networking.
 * `cifmw_ci_nmstate_operator_config`: (Dict) The `NMState` resource to be used to configure the installed nmstate operator.
 * `cifmw_ci_nmstate_nncp_config_template`: (Dict) The `NodeNetworkConfigurationPolicy` resource base used to create each OCP node NNCP resource.
 * `cifmw_ci_nmstate_unmanaged_config_template`: (Dict) The base nmstate state definition used to create each non OCP node nmstate state.
-* `cifmw_ci_nmstate_network_layout`: (Dict) Network layout to apply.
 * `cifmw_ci_nmstate_instance_config`: (Dict) That contains the nmstate configurations to apply to each instance in case the default generated ones are not enough.
+* `cifmw_ci_nmstate_instances_skip_list`: (List) Of Ansible instances to avoid configuring. Defaults to empty.
 
-## Network configuration layout
+## Network configuration input
 
-This dict has to represent all of the networks as follow:
-
-```YAML
-cifmw_ci_nmstate_network_layout:
-  <hostname>:
-    <network-name>:
-      iface:  # Mandatory. Interface name on the host.
-      mac:  # Optional. MAC address of the interface.
-      mtu:  # Optional. Defaults to 1500.
-      connection:  # Optional. Connection name. Defaults to "network-name" key value.
-      ip4:  # Mandatory. IPv4 address.
-      dns4:  # Optional. IPv4 DNS servers list.
-      gw4:  # Optional. IPv4 gateway for that network.
-      ip6:  # Optional. IPv6 address.
-      gw6:  # Optional. IPv6 gateway.
-      dns6:  # Optional. IPV6 DNS servers list.
-```
-`cifmw_ci_nmstate_network_layout` can be passed directly, but if not given it will default,
-by that order, to the following:
-1. The content of the `cifmw_network_layout` variable.
-2. The content of the `crc_ci_bootstrap_networks_out` variable.
-3. The content of the `crc_ci_bootstrap_networks_out` variable loaded from `/etc/ci/env`.
-
+This roles takes the output of the networking_mapper (Networking Environment Definition) as the main
+input to generate the needed NMstate configurations for each instance. The Networking Env. Definition
+is read from `cifmw_networking_env_definition`, and if not present, it's read from its default
+location, `/etc/ci/env/networking-environment-definition.yml`.
 
 ## The custom instance config dict
 In case the generated nmstate configuration is not enough for the given purpose it is possible
