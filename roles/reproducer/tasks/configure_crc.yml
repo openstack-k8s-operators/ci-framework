@@ -1,23 +1,27 @@
 ---
-- name: Slurp ssh key for CRC access
-  register: crc_priv_key
+- name: Get the networking-environment-definition from controller-0
+  delegate_to: controller-0
+  register: _net_conf
   ansible.builtin.slurp:
-    path: "{{ ansible_user_dir}}/.crc/machines/crc/id_ecdsa"
+    path: /etc/ci/env/networking-environment-definition.yml
 
 - name: Configure CRC services
   delegate_to: crc-0
-  remote_user: core
   block:
     - name: Ensure crc-0 knows about its second NIC
       become: true
+      vars:
+        _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
+        _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
+        _ctlplane: "{{ _parsed.networks.ctlplane }}"
       community.general.nmcli:
         autoconnect: true
         conn_name: private_net
         dns4: 127.0.0.1
-        ifname: "{{ cifmw_reproducer_crc_private_nic }}"
+        ifname: "{{ _crc.interface_name }}"
         type: ethernet
-        ip4: "{{ cifmw_reproducer_crc_ip4 }}/24"
-        gw4: "{{ cifmw_reproducer_crc_gw4 }}"
+        ip4: "{{ _crc.ip_v4 }}/24"
+        gw4: "{{ _ctlplane.gw_v4 }}"
         state: present
 
     - name: Ensure crc-0 does not get "public" DNS
@@ -39,21 +43,21 @@
           {% endfor %}
           {% endif %}
 
+    # TODO: ensure we know CRC IP on osp_trunk interface
+    # Needs the networking_mapper output.
     - name: Configure local DNS for CRC pod
       become: true
+      vars:
+        _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
+        _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
       register: last_modification
       ansible.builtin.replace:
         path: "/var/srv/dnsmasq.conf"
         regexp: "192.168.130.11"
-        replace: "{{ cifmw_reproducer_crc_ip4 }}"
+        replace: "{{ _crc.ip_v4 }}"
 
     - name: Reboot CRC node  # noqa: no-handler
       become: true
       when:
         - last_modification is changed
       ansible.builtin.reboot:
-
-- name: Get kubeconfig file from crc directory
-  register: _crc_kubeconfig
-  ansible.builtin.slurp:
-    path: "{{ cifmw_reproducer_kubecfg }}"

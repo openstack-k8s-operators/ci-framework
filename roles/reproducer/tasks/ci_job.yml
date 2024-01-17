@@ -16,7 +16,6 @@
 
 - name: Run on controller-0
   delegate_to: controller-0
-  remote_user: zuul
   block:
     - name: CI reproducer dedicated tasks
       when:
@@ -27,34 +26,34 @@
             - bootstrap
           ansible.builtin.copy:
             src: "{{ _reproducer_basedir }}/parameters/"
-            dest: "./{{ job_id }}-params"
+            dest: "/home/zuul/{{ job_id }}-params"
 
         - name: Inject reproducer dedicated parameter file
           tags:
             - bootstrap
           ansible.builtin.template:
             src: "reproducer_params.yml.j2"
-            dest: "./{{ job_id }}-params/reproducer_params.yml"
+            dest: "/home/zuul/{{ job_id }}-params/reproducer_params.yml"
 
         - name: Generate CI job playbook
           tags:
             - bootstrap
           ansible.builtin.template:
-            dest: "src/github.com/openstack-k8s-operators/ci-framework/{{ job_id }}_play.yml"
+            dest: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/{{ job_id }}_play.yml"
             src: "play.yml.j2"
 
         - name: Push extracted network data on controller-0
           tags:
             - bootstrap
           ansible.builtin.copy:
-            dest: zuul-network-data.yml
+            dest: /home/zuul/zuul-network-data.yml
             content: "{{ {'job_network': ci_job_networking} | to_nice_yaml}}"
 
     - name: Push pre-CI job playbook
       tags:
         - bootstrap
       ansible.builtin.copy:
-        dest: "src/github.com/openstack-k8s-operators/ci-framework/pre-ci-play.yml"
+        dest: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/pre-ci-play.yml"
         src: "pre-ci-play.yml"
 
     - name: Push zuul-params.yml to expected location
@@ -64,7 +63,7 @@
         - name: Get content of zuul-params.yml
           register: zuul_params
           ansible.builtin.slurp:
-            path: "{{ job_id }}-params/zuul-params.yml"
+            path: "/home/zuul/{{ job_id }}-params/zuul-params.yml"
 
         - name: Push extracted content
           vars:
@@ -77,7 +76,7 @@
                 items2dict
               }}
           ansible.builtin.copy:
-            dest: "ci-framework-data/artifacts/parameters/zuul-params.yml"
+            dest: "/home/zuul/ci-framework-data/artifacts/parameters/zuul-params.yml"
             content: "{{ zuul_params_filtered | to_nice_yaml }}"
 
     - name: Check for ansible logs file and rotate it
@@ -97,7 +96,7 @@
         ANSIBLE_LOG_PATH: "~/ansible-pre-ci.log"
         ANSIBLE_HOST_KEY_CHECKING: "false"
       ansible.builtin.command:
-        chdir: "src/github.com/openstack-k8s-operators/ci-framework/"
+        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/"
         cmd: >-
           ansible-playbook
           -i ~/ci-framework-data/artifacts/zuul_inventory.yml
@@ -109,7 +108,7 @@
       environment:
         ANSIBLE_LOG_PATH: "~/ansible-{{ job_id }}.log"
       ansible.builtin.command:
-        chdir: "src/github.com/openstack-k8s-operators/ci-framework"
+        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
         cmd: >-
           ansible-playbook
           -i ~/ci-framework-data/artifacts/zuul_inventory.yml

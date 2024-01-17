@@ -9,6 +9,8 @@
          ) | path_join
       }}
 
+# The dynamic inventory sets the ansible_ssh_user to zuul once we get the proper
+# ssh configuration accesses set.
 - name: Configure controller-0
   when:
     - (
@@ -17,21 +19,11 @@
       ) or
       cifmw_libvirt_manager_configuration.vms.controller.target is undefined
   delegate_to: controller-0
-  delegate_facts: true
-  remote_user: root
   block:
-    - name: Gather some facts
-      ansible.builtin.setup:
-        gather_subset:
-          - '!all'
-          - 'min'
-
     - name: Ensure directories exist
       ansible.builtin.file:
         path: "{{ _ctl_reproducer_basedir }}/{{ item }}"
         state: directory
-        owner: zuul
-        group: zuul
         mode: "0755"
       loop:
         - parameters
@@ -40,8 +32,6 @@
     - name: Build job inventory for hook usage
       tags:
         - bootstrap
-      become: true
-      become_user: zuul
       ansible.builtin.shell:
         cmd: >-
           cat /home/zuul/reproducer-inventory/* >
@@ -57,31 +47,10 @@
     - name: Push the MAC mapping data
       tags:
         - bootstrap
-      become: true
-      become_user: zuul
       ansible.builtin.copy:
         dest: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
         content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
-
-    - name: Ensure /etc/ci/env is created
-      become: true
-      ansible.builtin.file:
-        path: /etc/ci/env
-        state: directory
-        mode: "0755"
-
-    - name: Tweak dnf configuration
-      community.general.ini_file:
-        no_extra_spaces: true
-        option: "{{ config.option }}"
-        path: "/etc/dnf/dnf.conf"
-        section: "{{ config.section | default('main') }}"
-        state: "{{ config.state | default(omit) }}"
-        value: "{{ config.value | default(omit) }}"
-      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
-      loop_control:
-        label: "{{ config.option }}"
-        loop_var: 'config'
+        force: false
 
     - name: Inject other Hypervisor SSH keys
       when:
@@ -97,8 +66,6 @@
         dest: "/home/zuul/.ssh/ssh_{{ _ssh_host }}"
         content: "{{ _ssh_key }}"
         mode: "0600"
-        owner: "zuul"
-        group: "zuul"
       loop: "{{ hostvars.keys() }}"
       loop_control:
         label: "{{ host }}"
@@ -164,7 +131,7 @@
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
           {% if _vm_data.target is defined and
-             _vm_data.target != cifmw_libvirt_manager_configuration.vms.controller.target %}
+             _vm_data.target != _layout.vms.controller.target %}
             IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
             ProxyJump {{ _proxy_user }}@{{ _proxy_host }}
           {% elif host is match('^ocp.*') %}
@@ -219,6 +186,27 @@
         group: "zuul"
         mode: "0400"
 
+    - name: Ensure /etc/ci/env is created
+      become: true
+      ansible.builtin.file:
+        path: /etc/ci/env
+        state: directory
+        mode: "0755"
+
+    - name: Tweak dnf configuration
+      become: true
+      community.general.ini_file:
+        no_extra_spaces: true
+        option: "{{ config.option }}"
+        path: "/etc/dnf/dnf.conf"
+        section: "{{ config.section | default('main') }}"
+        state: "{{ config.state | default(omit) }}"
+        value: "{{ config.value | default(omit) }}"
+      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
+      loop_control:
+        label: "{{ config.option }}"
+        loop_var: 'config'
+
     - name: Inject CRC related content if needed
       when:
         - _layout.vms.crc is defined
@@ -232,6 +220,7 @@
             group: zuul
 
         - name: Inject crc related host entry
+          become: true
           ansible.builtin.lineinfile:
             path: /etc/hosts
             line: >-
@@ -243,6 +232,7 @@
               oauth-openshift.apps-crc.testing
 
     - name: RHEL repository setup for ansible-controller
+      become: true
       when:
         - cifmw_repo_setup_rhos_release_rpm is defined
       block:
@@ -262,6 +252,7 @@
             disable_gpg_check: true
 
     - name: Install some tools
+      become: true
       ansible.builtin.package:
         name:
           - bash-completion
@@ -286,7 +277,8 @@
           {{
             hostvars[inventory_hostname] | default({}) |
             dict2items |
-            selectattr('key', 'match', '^cifmw_(?!install_yamls|openshift|devscripts).*') |
+            selectattr('key', 'match',
+                       '^cifmw_(?!install_yamls|openshift|devscripts).*') |
             rejectattr('key', 'equalto', 'cifmw_target_host') |
             rejectattr('key', 'equalto', 'cifmw_basedir') |
             rejectattr('key', 'equalto', 'cifmw_path') |
@@ -300,3 +292,47 @@
       ansible.builtin.copy:
         dest: "/home/zuul/reproducer-variables.yml"
         content: "{{ _filtered_vars | to_nice_yaml }}"
+
+    - name: Get interfaces-info content
+      register: _nic_info
+      ansible.builtin.slurp:
+        src: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
+
+    # We detected OCP cluster may have some downtime even after it's supposed
+    # to be started.
+    # It means everything was right from the libvirt_manager point of view, it
+    # could get access, configure the needed bits and move on.
+    # But when we hit this step, cluster may be unresponsive - suspecting
+    # some NetworkManager or related tool doing some "late" tasks.
+    # This task here is to ensure all of the OCPs nodes are ready to be
+    # consumed by the networking_mapper - it will connect to all of the nodes
+    # in order to gather some facts of interest.
+    - name: Wait for OCP nodes to be ready
+      delegate_to: "{{ item }}"
+      ansible.builtin.wait_for_connection:
+        sleep: 2
+        timeout: 300
+      loop: "{{ groups.ocps }}"
+
+    - name: Generate networking definition
+      vars:
+        cifmw_networking_mapper_ifaces_info: >-
+          {{ _nic_info.content | b64decode | from_yaml }}
+        cifmw_networking_mapper_network_name: >-
+          {{ _layout.vms.controller.nets.1 }}
+      ansible.builtin.import_role:
+        name: networking_mapper
+
+    - name: Generate configMap snippet
+      vars:
+        cifmw_networking_mapper_config_generator_output: >-
+          /home/zuul/ci-framework-data/artifacts/ci_k8s_snippets
+      ansible.builtin.import_role:
+        name: networking_mapper
+        tasks_from: network_config_values.yml
+
+    - name: Generate values.yaml for EDPM deploy
+      vars:
+        cifmw_ci_gen_kustomize_values_basedir: "/home/zuul/ci-framework-data"
+      ansible.builtin.import_role:
+        name: ci_gen_kustomize_values
