@@ -1,0 +1,32 @@
+---
+- name: Load the Network Environment Definition from file if not given
+  when: "cifmw_networking_env_definition is not defined"
+  block:
+    - name: Check for Networking Environment Definition file existence
+      ansible.builtin.stat:
+        path: "{{ cifmw_networking_mapper_networking_env_def_path }}"
+      register: _net_env_def_stat
+
+    - name: Check for Networking Definition file existance
+      ansible.builtin.assert:
+        that:
+          - "_net_env_def_stat.stat.exists"
+        msg: >-
+          Ensure that the Networking Environment Definition file
+          exists in {{ cifmw_networking_mapper_networking_env_def_path }}
+        quiet: true
+
+    - name: Load the Networking Definition from file
+      ansible.builtin.slurp:
+        path: "{{ cifmw_networking_mapper_networking_env_def_path }}"
+      register: _net_env_def_slurp
+
+    - name: Set cifmw_networking_env_definition is present
+      ansible.builtin.set_fact:
+        cifmw_networking_env_definition: >-
+          {{
+             _net_env_def_slurp['content'] |
+             b64decode |
+             from_yaml
+          }}
+        cacheable: true
