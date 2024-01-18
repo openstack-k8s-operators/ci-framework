@@ -1,0 +1,206 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: OLM resources
+  block:
+    - name: Perform kustomization on the OLM directory
+      ansible.builtin.set_fact:
+        _cifmw_kustomize_deploy_olm_kustomization: "{{ lookup('kubernetes.core.kustomize', dir=cifmw_kustomize_deploy_olm_source_files) }}"
+
+    - name: Generate the OLM kustomization file
+      ansible.builtin.copy:
+        content: "{{ _cifmw_kustomize_deploy_olm_kustomization  }}"
+        dest: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+        mode: "0644"
+
+    - name: Apply the kustomized CRs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        wait: true
+        src: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+
+    - name: Wait until cert-manager resources are deployed
+      block:
+        - name: Wait for cert-manager-operator pods
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: cert-manager-operator
+            label_selectors:
+              - name = cert-manager-operator
+            wait: true
+            wait_condition:
+              type: Ready
+              status: "True"
+            wait_timeout: 300
+        - name: Wait for cainjector pods
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: cert-manager
+            label_selectors:
+              - app = cainjector
+            wait: true
+            wait_condition:
+              type: Ready
+              status: "True"
+            wait_timeout: 300
+        - name: Wait for webhook pods
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: cert-manager
+            label_selectors:
+              - app = webhook
+            wait: true
+            wait_condition:
+              type: Ready
+              status: "True"
+            wait_timeout: 300
+        - name: Wait for certmanager pods
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: cert-manager
+            label_selectors:
+              - app = cert-manager
+            wait: true
+            wait_condition:
+              type: Ready
+              status: "True"
+            wait_timeout: 300
+
+    - name: Wait until MetalLB operator resources are deployed
+      block:
+        - name: Wait for controller-manager pods
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: metallb-system
+            label_selectors:
+              - control-plane = controller-manager
+            wait: true
+            wait_condition:
+              type: Ready
+              status: "True"
+            wait_timeout: 300
+        - name: Wait for webhook-server pods
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: metallb-system
+            label_selectors:
+              - component = webhook-server
+            wait: true
+            wait_condition:
+              type: Ready
+              status: "True"
+            wait_timeout: 300
+
+    - name: Wait until NMstate operator resources are deployed
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Deployment
+        namespace: openshift-nmstate
+        name: nmstate-operator
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+
+- name: MetalLB resources
+  block:
+    - name: Perform kustomization on the MetalLB directory
+      ansible.builtin.set_fact:
+        _cifmw_kustomize_deploy_metallb_kustomization: "{{ lookup('kubernetes.core.kustomize', dir=cifmw_kustomize_deploy_metallb_source_files) }}"
+
+    - name: Generate MetalLB kustomization file
+      ansible.builtin.copy:
+        content: "{{ _cifmw_kustomize_deploy_metallb_kustomization  }}"
+        dest: "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+        mode: "0644"
+
+    - name: Apply the kustomized MetalLB CRs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        wait: true
+        src: "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+
+    - name: Wait for MetalLB speaker pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Pod
+        namespace: metallb-system
+        label_selectors:
+          - component = speaker
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+
+- name: NMstate resources
+  block:
+    - name: Perform kustomization on the NMstate directory
+      ansible.builtin.set_fact:
+        _cifmw_kustomize_deploy_nmstate_kustomization: "{{ lookup('kubernetes.core.kustomize', dir=cifmw_kustomize_deploy_nmstate_source_files) }}"
+
+    - name: Generate NMstate kustomization file
+      ansible.builtin.copy:
+        content: "{{ _cifmw_kustomize_deploy_nmstate_kustomization  }}"
+        dest: "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+        mode: "0644"
+
+    - name: Apply the kustomized NMstate CRs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        wait: true
+        src: "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+
+    - name: Wait for NMstate handler pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Pod
+        namespace: openshift-nmstate
+        label_selectors:
+          - component = kubernetes-nmstate-handler
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+
+    - name: Wait for NMstate webhook deployment
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Deployment
+        namespace: openshift-nmstate
+        name: nmstate-webhook
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300

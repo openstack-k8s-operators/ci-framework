@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Prepare
+  hosts: all
+  vars_files:
+    - ../../defaults/main.yml
+  pre_tasks:
+    - name: Ensure CRC is started
+      async: 1800
+      poll: 0
+      register: _crc_start
+      ansible.builtin.command:
+        cmd: crc start
+  roles:
+    - role: test_deps
+  tasks:
+    - name: Check for CRC status
+      ansible.builtin.async_status:
+        jid: "{{ _crc_start.ansible_job_id }}"
+      register: _crc_status
+      until: _crc_status.finished
+      retries: 100
+      delay: 10
+    - name: Create local storage
+      ansible.builtin.include_role:
+        name: ci_local_storage
+      vars:
+        cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+        cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+        cifmw_cls_storage_capacity: "1Gi"
+    - name: Attach the default network to crc vm
+      ansible.builtin.command:
+        cmd: "make crc_attach_default_interface"
+        chdir: "~/src/github.com/openstack-k8s-operators/install_yamls/devsetup"
+    - name: Deploy a compute vm
+      ansible.builtin.command:
+        cmd: "make edpm_compute"
+        chdir: "~/src/github.com/openstack-k8s-operators/install_yamls/devsetup"
+    - name: Create values.yml destination folder if it doesn't exists
+      ansible.builtin.file:
+        path: "{{ cifmw_kustomize_deploy_cp_values_src_file | dirname }}"
+        state: directory
+        mode: "0775"
+    - name: Copy sample values.yml to its destination
+      ansible.builtin.copy:
+        src: resources/values.yml
+        dest: "{{ cifmw_kustomize_deploy_cp_values_src_file }}"
