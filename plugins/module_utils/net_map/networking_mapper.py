@@ -209,7 +209,11 @@ class NetworkingInstanceMapper:
                 group_net_def, instance_net_definition
             ),
             ip_v4=ipv4,
+            netmask_v4=net_def.ipv4_network.netmask if ipv4 else None,
+            prefix_length_v4=net_def.ipv4_network.prefixlen if ipv4 else None,
             ip_v6=ipv6,
+            netmask_v6=net_def.ipv6_network.netmask if ipv6 else None,
+            prefix_length_v6=net_def.ipv6_network.prefixlen if ipv6 else None,
             mtu=int(mtu) if mtu else None,
             vlan_id=net_def.vlan,
             parent_interface=device_name if net_def.vlan else None,
