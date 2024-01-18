@@ -1,0 +1,55 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure that architecture repo exists
+  ansible.builtin.git: # noqa: latest
+    repo: "{{ cifmw_kustomize_deploy_architecture_repo_url }}"
+    dest: "{{ cifmw_kustomize_deploy_architecture_repo_dest_dir }}"
+    update: false
+    version: "{{ cifmw_kustomize_deploy_architecture_repo_version }}"
+
+- name: Ensure that the selected scenario exists
+  vars:
+    _va_scenario_dir: >-
+      {{
+        [
+          cifmw_kustomize_deploy_architecture_repo_dest_dir,
+          cifmw_kustomize_deploy_architecture_examples_va_path
+        ] | path_join
+      }}
+  block:
+    - name: Gather the list of scenario folders
+      ansible.builtin.find:
+        paths: "{{ _va_scenario_dir }}"
+        patterns: "kustomization.y*ml"
+        recurse: true
+      register: _va_scenario_dir_list
+    - name: Check if scenario is in the list
+      ansible.builtin.fail:
+        msg: >
+          You need to properly set the `cifmw_architecture_va_scenario` variable
+          in order to select the VA scenario to deploy. You can take a list of
+          scenario in the `examples/va` folder in the architecture repo.
+      when:
+        - cifmw_architecture_va_scenario is not defined
+        - cifmw_kustomize_deploy_architecture_repo_version not in \
+          _va_scenario_dir.results.path | dirname | relpath(_va_scenario_dir)
+
+- name: Ensure that destination directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}"
+    mode: "0755"
+    state: "directory"
