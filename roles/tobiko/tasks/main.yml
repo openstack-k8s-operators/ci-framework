@@ -33,6 +33,18 @@
     tasks_from: create-clouds-file
   when: not cifmw_tobiko_dry_run | bool
 
+- name: Create tobiko.conf
+  vars:
+    tobikoconf_combined: >-
+      {{
+          cifmw_tobiko_tobikoconf_default |
+          combine(cifmw_tobiko_tobikoconf, recursive=True)
+      }}
+  ansible.builtin.include_tasks: create-tobiko-conf.yml
+  loop: "{{ tobikoconf_combined | dict2items }}"
+  loop_control:
+    loop_var: tobikoconf_section
+
 - name: Copy CA bundle to cifmw_tobiko_artifacts_basedir
   ansible.builtin.copy:
     src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
@@ -66,20 +78,16 @@
     volume:
       - "{{ cifmw_tobiko_artifacts_basedir }}/:/var/lib/tobiko/external_files:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
+      - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/tls/certs/ca-bundle.trust.crt:Z"
+
     detach: false
     dns: "{{ cifmw_tobiko_dns_servers }}"
     env:
-      TOBIKO_DEBUG: "{{ cifmw_tobiko_debug }}"
       TOBIKO_TESTENV: "{{ cifmw_tobiko_testenv }}"
       TOBIKO_PREVENT_CREATE: "{{ cifmw_tobiko_prevent_create if cifmw_tobiko_prevent_create is not none else omit }}"
       TOBIKO_VERSION: "{{ cifmw_tobiko_version if cifmw_tobiko_version is not none else omit }}"
-      TOBIKO_UBUNTU_INTERFACE_NAME: "{{ cifmw_tobiko_ubuntu_interface_name if cifmw_tobiko_ubuntu_interface_name is not none else omit }}"
-      TOBIKO_KEYSTONE_INTERFACE: "{{ cifmw_tobiko_keystone_interface if cifmw_tobiko_keystone_interface is not none else omit }}"
-      TOBIKO_TESTCASE_TIMEOUT: "{{ cifmw_tobiko_testcase_timeout if cifmw_tobiko_testcase_timeout is not none else omit }}"
-      TOBIKO_TESTRUNNER_TIMEOUT: "{{ cifmw_tobiko_testrunner_timeout if cifmw_tobiko_testrunner_timeout is not none else omit }}"
       TOBIKO_PYTEST_ADDOPTS: "{{ cifmw_tobiko_pytest_addopts if cifmw_tobiko_pytest_addopts is not none else omit }}"
-      TOBIKO_REPORT_DIR: "{{ cifmw_tobiko_report_dir if cifmw_tobiko_report_dir is not none else omit }}"
-      TOBIKO_MANILA_SHARE_PROTOCOL: "{{ cifmw_tobiko_manila_share_protocol if cifmw_tobiko_manila_share_protocol is not none else omit }}"
+      TOBIKO_NUM_PROCESSES: "{{ cifmw_tobiko_num_processes if cifmw_tobiko_num_processes is not none else omit }}"
   when: not cifmw_tobiko_dry_run | bool
   register: tobiko_run_output
 
