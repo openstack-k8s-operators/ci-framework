@@ -51,7 +51,11 @@ class MappedInstanceNetwork:
         network_name: The name of the network.
         skip_nm: Skip configuring the interface.
         ip_v4: IPv4 address of the interface. Optional if ip_v6 is given.
+        netmask_v4: IPv4 netmask of the interface. Present if ip_v4 is given.
+        prefix_length_v4: IPv4's interface prefix length. Present if ip_v4 is given.
         ip_v6: IPv6 address of the interface. Optional if ip_v4 is given.
+        netmask_v6: IPv6 netmask of the interface. Present if ip_v6 is given.
+        prefix_length_v6: IPv6's interface prefix length. Present if ip_v6 is given.
         mtu: MTU of the interface. Optional.
         vlan_id: VLAN ID. Filled if the attached network is a VLAN.
         mac_addr: The MAC address of the interface attached to the network.
@@ -65,10 +69,14 @@ class MappedInstanceNetwork:
 
     network_name: str
     skip_nm: bool = False
-    mac_addr: typing.Optional[str] = None
-    interface_name: typing.Optional[str] = None
-    ip_v4: typing.Optional[ipaddress.IPv4Interface] = None
-    ip_v6: typing.Optional[ipaddress.IPv6Interface] = None
+    mac_addr: str = None
+    interface_name: str = None
+    ip_v4: ipaddress.IPv4Address = None
+    netmask_v4: ipaddress.IPv4Address = None
+    prefix_length_v4: int = None
+    ip_v6: ipaddress.IPv6Address = None
+    netmask_v6: ipaddress.IPv6Address = None
+    prefix_length_v6: int = None
     mtu: typing.Optional[int] = None
     parent_interface: typing.Optional[str] = None
     vlan_id: typing.Optional[int] = None
