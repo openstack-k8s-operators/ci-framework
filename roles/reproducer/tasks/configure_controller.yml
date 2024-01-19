@@ -336,3 +336,23 @@
         cifmw_ci_gen_kustomize_values_basedir: "/home/zuul/ci-framework-data"
       ansible.builtin.import_role:
         name: ci_gen_kustomize_values
+
+    - name: Debug
+      ansible.builtin.debug:
+        msg: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
+
+    - name: Configure ctlplane interface on controller-0
+      become: true
+      vars:
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
+        _controller_data: "{{ cifmw_networking_env_definition.instances['controller-0'].networks.ctlplane}}"
+        _prefix: "{{ _ctlplane_net.network_v4 | ansible.utils.ipaddr('prefix') }}"
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: ctlplane
+        dns4: "{{ _ctlplane_net.dns_v4.0 }}"
+        ifname: "{{ _controller_data.interface_name }}"
+        type: ethernet
+        ip4: "{{ _controller_data.ip_v4 }}/{{ _prefix }}"
+        gw4: "{{ _ctlplane_net.gw_v4 }}"
+        state: present

@@ -83,3 +83,25 @@
     - bootstrap
     - bootstrap_layout
   ansible.builtin.import_tasks: configure_crc.yml
+
+# We have to configure the compute ctlplane interface.
+# In order to do this, we'll consume the generated networking_mapper
+# environment file, and filter on the "^compute.*" match. It's slightly
+# limitting, but at least it's a consistent name, and would allow to
+# match the multi-hypervisor schema.
+- name: Configure compute network
+  when:
+    - compute.key is match('^compute.*')
+  vars:
+    _host: "{{ compute.key }}"
+    _dns4: "{{ cifmw_networking_env_definition.networks.ctlplane.dns_v4[0] }}"
+    _iface: "{{ compute.value.networks.ctlplane.interface_name }}"
+    _ip4: "{{ compute.value.networks.ctlplane.ip_v4 }}"
+    _gw4: "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
+    _controller_ip4: "{{ cifmw_networking_env_definition.instances['controller-0'].networks.ctlplane.ip_v4 }}"
+    _prefix: "{{cifmw_networking_env_definition.networks.ctlplane.network_v4 | ansible.utils.ipaddr('prefix') }}"
+  ansible.builtin.include_tasks: configure_computes.yml
+  loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
+  loop_control:
+    loop_var: compute
+    label: "{{ compute.key }}"
