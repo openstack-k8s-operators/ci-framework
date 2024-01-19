@@ -25,13 +25,19 @@
     path: "{{ cifmw_tobiko_artifacts_basedir }}"
     state: directory
 
-- name: Create clouds.yaml
-  vars:
-    cifmw_tempest_artifacts_basedir: "{{ cifmw_tobiko_artifacts_basedir }}"
-  ansible.builtin.import_role:
-    name: tempest
-    tasks_from: create-clouds-file
+- name: Get clouds.yaml
   when: not cifmw_tobiko_dry_run | bool
+  block:
+    - name: Check whether it exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_edpm_prepare_basedir }}/artifacts/clouds.yaml"
+      register: check_clouds_yaml
+
+    - name: Create clouds.yaml
+      ansible.builtin.import_role:
+        name: edpm_prepare
+        tasks_from: create-clouds-file
+      when: not check_clouds_yaml.stat.exists
 
 
 - name: Generate ssh keys used for the VMs that tobiko creates
@@ -94,7 +100,7 @@
       - "{{ cifmw_tobiko_artifacts_basedir }}/:/var/lib/tobiko/external_files:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/tls/certs/ca-bundle.trust.crt:Z"
-
+      - "{{ cifmw_edpm_prepare_basedir }}/artifacts/clouds.yaml:/var/lib/tobiko/.config/openstack/clouds.yaml:Z"
     detach: false
     dns: "{{ cifmw_tobiko_dns_servers }}"
     env:
