@@ -1,7 +1,9 @@
 # Zuul job
 
 ~~~{warning}
-This feature is still fresh. It should support most of the `multinode` jobs.
+This feature is currently broken. The ci-framework is slightly ahead of
+actual job definitions and we need to change them to provide the needed
+bits again.
 ~~~
 
 ~~~{tip}

@@ -71,6 +71,7 @@ Once you're ready, run:
 [laptop]$ cd ci-framework
 [laptop]$ ansible-playbook -i custom/inventory.yml \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @custom/private-params.yml \
     reproducer.yml
@@ -85,6 +86,7 @@ very last one.:
     reproducer.yml \
     -e cifmw_target_host=hypervisors \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/private-params.yml [-e @custom/repositories.yml] \
     -e @custom/multinode-params.yml
 ```
