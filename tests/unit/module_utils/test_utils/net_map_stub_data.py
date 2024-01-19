@@ -26,14 +26,17 @@ INSTANCE_1_MACADDR = "27:b9:47:74:b3:02"
 INSTANCE_1_LO_IFACE_DATA = {
     "device": "lo",
     "macaddress": "27:b9:47:74:b3:00",
+    "mtu": 65536,
 }
 INSTANCE_1_ETH0_IFACE_DATA = {
     "device": "eth0",
     "macaddress": "27:b9:47:74:b3:01",
+    "mtu": 1500,
 }
 INSTANCE_1_ETH1_IFACE_DATA = {
     "device": "eth1",
     "macaddress": INSTANCE_1_MACADDR,
+    "mtu": 1500,
 }
 INSTANCE_1_ETH2_IFACE_DATA = {
     "device": "eth2",
@@ -42,36 +45,44 @@ INSTANCE_1_ETH2_IFACE_DATA = {
 INSTANCE_1_OVS_SYSTEM_IFACE_DATA = {
     "device": "ovs-system",
     "macaddress": "c0:18:64:65:63:d9",
+    "mtu": 1500,
 }
 INSTANCE_2_MACADDR = "a1:69:da:21:aa:03"
 INSTANCE_2_LO_IFACE_DATA = {
     "device": "lo",
     "macaddress": "a1:69:da:21:aa:00",
+    "mtu": 65536,
 }
 INSTANCE_2_ETH0_IFACE_DATA = {
     "device": "eth0",
     "macaddress": "a1:69:da:21:aa:01",
+    "mtu": 1500,
 }
 INSTANCE_2_ETH1_IFACE_DATA = {
     "device": "eth1",
     "macaddress": "a1:69:da:21:aa:02",
+    "mtu": 1500,
 }
 INSTANCE_2_ETH2_IFACE_DATA = {
     "device": "eth2",
     "macaddress": INSTANCE_2_MACADDR,
+    "mtu": 1500,
 }
 INSTANCE_2_OVS_SYSTEM_IFACE_DATA = {
     "device": "ovs-system",
     "macaddress": "61:6f:54:a6:ee:12",
+    "mtu": 1500,
 }
 INSTANCE_3_MACADDR = "bf:99:4b:3f:5e:01"
 INSTANCE_3_LO_IFACE_DATA = {
     "device": "lo",
     "macaddress": "bf:99:4b:3f:5e:00",
+    "mtu": 65536,
 }
 INSTANCE_3_ETH0_IFACE_DATA = {
     "device": "eth0",
     "macaddress": INSTANCE_3_MACADDR,
+    "mtu": 1500,
 }
 INSTANCE_3_ETH1_IFACE_DATA = {
     "device": "eth1",
@@ -80,10 +91,12 @@ INSTANCE_3_ETH1_IFACE_DATA = {
 INSTANCE_3_ETH2_IFACE_DATA = {
     "device": "eth2",
     "macaddress": "bf:99:4b:3f:5e:03",
+    "mtu": 1500,
 }
 INSTANCE_3_OVS_SYSTEM_IFACE_DATA = {
     "device": "ovs-system",
     "macaddress": "1a:36:eb:a9:fc:33",
+    "mtu": 1500,
 }
 GROUP_ALL_NAME = "all"
 GROUP_1_NAME = "group-1"
