@@ -320,6 +320,6 @@ class ActionModule(ActionBase):
             result["networking_env_definition"] = mapping_result
             result["complete_map"] = is_complete_map
         except exceptions.NetworkMappingError as run_exception:
-            result = {**result, **(run_exception.to_dict()), "failed": True}
+            result = {**result, **(run_exception.to_raw()), "failed": True}
 
         return result
