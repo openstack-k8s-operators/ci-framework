@@ -54,6 +54,7 @@ Once the layout matches your needs, you just need to run the following:
 [laptop]$ ansible-playbook -i custom/inventory.yml \
     reproducer.yml \
     -e cifmw_target_host=hypervisor \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @scenarios/reproducers/3-nodes.yml \
     -e @custom/private-params.yml [-e @custom/repositories.yml]
 ```
