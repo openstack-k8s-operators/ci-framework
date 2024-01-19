@@ -202,7 +202,7 @@ class NetworkingInstanceMapper:
             if device_name and net_def.vlan
             else device_name
         )
-        mtu = iface_data.get("mtu", net_def.mtu)
+        mtu = net_def.mtu if net_def.mtu is not None else iface_data.get("mtu", None)
         return networking_env_definitions.MappedInstanceNetwork(
             net_def.name,
             skip_nm=self.__map_instance_net_skip_nm(

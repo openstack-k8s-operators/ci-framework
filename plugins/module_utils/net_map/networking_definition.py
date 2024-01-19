@@ -1092,7 +1092,7 @@ class NetworkDefinition:
         return self.__vlan
 
     @property
-    def mtu(self) -> typing.Union[int, None]:
+    def mtu(self) -> typing.Optional[int]:
         """MTU, if using a non-default value."""
         return self.__mtu
 
