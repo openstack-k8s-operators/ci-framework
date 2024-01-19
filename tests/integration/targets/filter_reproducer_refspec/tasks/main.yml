@@ -1,0 +1,133 @@
+- name: Test reproducer_refspec bad argument
+  vars:
+    input:
+      - "github.com"
+  ansible.builtin.debug:
+    var: "input | cifmw.general.reproducer_refspec"
+  register: _bad_reproducer_refspec_argument
+  ignore_errors: true
+
+- name: Verify reproducer_refspec showed an error message
+  ansible.builtin.assert:
+    that:
+      - _bad_reproducer_refspec_argument is failed
+      - "'reproducer_refspec requires a dict,' in _bad_reproducer_refspec_argument.msg"
+
+- name: Test reproducer_refspec bad argument, no project
+  vars:
+    input:
+      hostname: "github.com"
+      change: "abc"
+  ansible.builtin.debug:
+    var: "input | cifmw.general.reproducer_refspec"
+  register: _bad_reproducer_refspec_argument
+  ignore_errors: true
+
+- name: Verify reproducer_refspec showed an error message
+  ansible.builtin.assert:
+    that:
+      - _bad_reproducer_refspec_argument is failed
+      - "'repo information does not contain \\'project\\' field' in _bad_reproducer_refspec_argument.msg"
+
+- name: Test reproducer_refspec bad argument, no hostname
+  vars:
+    input:
+      project: {}
+      change: "abc"
+  ansible.builtin.debug:
+    var: "input | cifmw.general.reproducer_refspec"
+  register: _bad_reproducer_refspec_argument
+  ignore_errors: true
+
+- name: Verify reproducer_refspec showed an error message
+  ansible.builtin.assert:
+    that:
+      - _bad_reproducer_refspec_argument is failed
+      - "'repo information does not contain \\'canonical_hostname\\' field' in _bad_reproducer_refspec_argument.msg"
+
+- name: Test reproducer_refspec bad argument, no patchset
+  vars:
+    input:
+      project:
+        canonical_hostname: "rdoproject.com"
+      change: "abc"
+  ansible.builtin.debug:
+    var: "input | cifmw.general.reproducer_refspec"
+  register: _bad_reproducer_refspec_argument
+  ignore_errors: true
+
+- name: Verify reproducer_refspec showed an error message
+  ansible.builtin.assert:
+    that:
+      - _bad_reproducer_refspec_argument is failed
+      - "'repo information does not contain \\'patchset\\' field' in _bad_reproducer_refspec_argument.msg"
+
+- name: Test reproducer_refspec no patchset in github
+  vars:
+    input:
+      project:
+        canonical_hostname: "github.com"
+      change: "abc"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == 'pull/abc/head'"
+
+- name: Test reproducer_refspec no change
+  vars:
+    input:
+      project:
+        canonical_hostname: "github.com"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == ''"
+
+- name: Test reproducer_refspec periodic job
+  vars:
+    input:
+      project:
+        canonical_hostname: "review.rdoproject.org"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == ''"
+
+- name: Test reproducer_refspec github refspec
+  vars:
+    input:
+      project:
+        canonical_hostname: "github.org"
+      change: "1035"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == 'pull/1035/head'"
+
+- name: Test reproducer_refspec gitlab refspec
+  vars:
+    input:
+      project:
+        canonical_hostname: "gitlab.org"
+      change: "1035"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == 'pull/1035/head'"
+
+- name: Test reproducer_refspec gerrit refspec
+  vars:
+    input:
+      project:
+        canonical_hostname: "review.rdoproject.org"
+      change: "51319"
+      patchset: "6"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == 'refs/changes/19/51319/6'"
+
+- name: Test reproducer_refspec code.eng gerrit refspec
+  vars:
+    input:
+      project:
+        canonical_hostname: "review.code.eng.org"
+      change: "51319"
+      patchset: "6"
+  ansible.builtin.assert:
+    that:
+      - "input | cifmw.general.reproducer_refspec == 'refs/changes/19/51319/6'"
