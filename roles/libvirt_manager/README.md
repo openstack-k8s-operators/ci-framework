@@ -130,13 +130,7 @@ The parameters listed here are therefore merely proxies to the ones set in the r
 and have the same name, less the role prefix. Default values are the same as the
 reproducer role.
 
-* `cifmw_libvirt_manager_private_nic`: `{{ cifmw_reproducer_private_nic | default('eth1') }}`
-* `cifmw_libvirt_manager_ctl_ip4`: `{{ cifmw_reproducer_ctl_ip4 | default('192.168.122.11') }}`
-* `cifmw_libvirt_manager_ctl_gw4`: `{{ cifmw_reproducer_ctl_gw4 | default('192.168.122.1') }}`
-* `cifmw_libvirt_manager_crc_ip4`: `{{ cifmw_reproducer_crc_ip4 | default('192.168.122.10') }}`
-* `cifmw_libvirt_manager_crc_gw4`: `{{ cifmw_reproducer_crc_gw4 | default('192.168.122.1') }}`
 * `cifmw_libvirt_manager_dns_servers`: `{{ cifmw_reproducer_dns_servers | default(['1.1.1.1', '8.8.8.8']) }}`
-* `cifmw_libvirt_manager_crc_private_nic`: `{{ cifmw_reproducer_crc_private_nic | default('enp2s0') }}`
 
 ## Calling attach_network.yml from another role
 

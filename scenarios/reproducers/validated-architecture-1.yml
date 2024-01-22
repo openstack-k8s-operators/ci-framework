@@ -11,30 +11,9 @@ cifmw_reproducer_epel_pkgs:
   - python3-bcrypt
   - python3-passlib
 
-# Since we don't have zuul data, we have to provide some
-# networking information to the libvirt_manager so that it will be able to
-# generate the needed content for later usage
-_networks:
-  ocpbm:
-    range: "192.168.111.0/24"
-  osp_trunk:
-    default: true
-    range: "192.168.122.0/24"
-    mtu: 9000
-    static_ip: true
-  internal-api:
-    range: "172.17.0.0/24"
-    vlan: 20
-  storage:
-    range: "172.18.0.0/24"
-    vlan: 21
-  tenant:
-    range: "172.19.0.0/24"
-    vlan: 22
-  storage-mgmt:
-    range: "172.20.0.0/24"
-    vlan: 23
-
+# ocpbm network is managed by the dev-scripts 3rd party installer.
+# It replaces the usual "public" network we create - the one providing
+# Internet access for packages, containers and other content.
 cifmw_libvirt_manager_pub_net: ocpbm
 
 # This will instruct libvirt_manager to create 3 compute and
@@ -54,8 +33,11 @@ cifmw_libvirt_manager_configuration:
         <name>osp_trunk</name>
         <forward mode='nat'/>
         <bridge name='osp_trunk' stp='on' delay='0'/>
-        <mtu size='{{ _networks.osp_trunk.mtu }}'/>
-        <ip family='ipv4' address='{{ _networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
+        <ip family='ipv4'
+        address='{{ cifmw_networking_definition.networks.ctlplane.network |
+                    ansible.utils.nthhost(1) }}'
+        prefix='{{ cifmw_networking_definition.networks.ctlplane.network |
+                   ansible.utils.ipaddr('prefix') }}'>
         </ip>
       </network>
   vms:

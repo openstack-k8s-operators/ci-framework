@@ -208,30 +208,6 @@
         label: "{{ config.option }}"
         loop_var: 'config'
 
-    - name: Inject CRC related content if needed
-      when:
-        - _layout.vms.crc is defined
-      block:
-        - name: Inject CRC ssh key
-          ansible.builtin.copy:
-            dest: "/home/zuul/.ssh/crc_key"
-            content: "{{ crc_priv_key['content'] | b64decode }}"
-            mode: "0400"
-            owner: zuul
-            group: zuul
-
-        - name: Inject crc related host entry
-          become: true
-          ansible.builtin.lineinfile:
-            path: /etc/hosts
-            line: >-
-              {{ cifmw_reproducer_crc_ip4 }} api.crc.testing
-              canary-openshift-ingress-canary.apps-crc.testing
-              console-openshift-console.apps-crc.testing
-              default-route-openshift-image-registry.apps-crc.testing
-              downloads-openshift-console.apps-crc.testing
-              oauth-openshift.apps-crc.testing
-
     - name: RHEL repository setup for ansible-controller
       become: true
       when:
@@ -335,3 +311,29 @@
         ip4: "{{ _controller_data.ip_v4 }}/{{ _prefix }}"
         gw4: "{{ _ctlplane_net.gw_v4 }}"
         state: present
+
+    - name: Inject CRC related content if needed
+      when:
+        - _layout.vms.crc is defined
+      block:
+        - name: Inject CRC ssh key
+          ansible.builtin.copy:
+            dest: "/home/zuul/.ssh/crc_key"
+            content: "{{ crc_priv_key['content'] | b64decode }}"
+            mode: "0400"
+            owner: zuul
+            group: zuul
+
+        - name: Inject crc related host entry
+          become: true
+          vars:
+            _crc_data: "{{ cifmw_networking_env_definition.instances['crc-0'].networks.ctlplane}}"
+          ansible.builtin.lineinfile:
+            path: /etc/hosts
+            line: >-
+              {{ _crc_data.ip_v4 }} api.crc.testing
+              canary-openshift-ingress-canary.apps-crc.testing
+              console-openshift-console.apps-crc.testing
+              default-route-openshift-image-registry.apps-crc.testing
+              downloads-openshift-console.apps-crc.testing
+              oauth-openshift.apps-crc.testing
