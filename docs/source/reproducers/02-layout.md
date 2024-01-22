@@ -78,7 +78,7 @@ In order to clean the deployed layout, you can just call the `reproducer-clean.y
 playbook. It will clean the virtual machines:
 
 ```Bash
-[laptop]$ ansible-playbook -i inventory_hypervisor.yml reproducer-clean.yml
+[laptop]$ ansible-playbook -i custom/inventory.yml reproducer-clean.yml
 ```
 It doesn't require any environment file since it will list all of the existing
 virtual machines, and clean the ones which name starts with `cifmw-`.
