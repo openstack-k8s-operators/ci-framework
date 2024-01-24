@@ -7,6 +7,10 @@ None - writes happen only in the user home.
 
 ## Parameters
 * `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
+* `cifmw_artifacts_crc_host`: (String) Hostname of the CRC instance. Defaults to `api.crc.testing`.
+* `cifmw_artifacts_crc_user`: (String) Username to connect to the CRC instance. Defaults to `core`.
+* `cifmw_artifacts_crc_sshkey`: (String) Path to the private SSH key to connect to CRC. Defaults to `~/.crc/machines/crc/id_ecdsa`.
+* `cifmw_artifacts_gather_logs`: (Boolean) Force gathering of logs, even in the case of successful test run. Defaults to `false`
 * `cifmw_artifacts_gather_logs`: (Boolean) Enables must-gather logs fetching. Defaults to `true`
 
 ## Examples
