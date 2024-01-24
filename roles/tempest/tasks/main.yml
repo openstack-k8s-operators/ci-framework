@@ -58,11 +58,31 @@
   delay: 5
   until: _tempest_fetch_img is success
 
+- name: ELF Define new container image name"
+  ansible.builtin.set_fact:
+    telemetry_tempest_image: "localhost/openstack-tempest-all"
+    telemetry_tempest_tag: "telemetry-tempest-plugins"
+
+- name: ELF Create a new image to use the newer version of telemetry_tempest_plugin containers.podman.
+  ansible.builtin.shell:
+    cmd: |
+      podman build -t {{ telemetry_tempest_image }}:{{ telemetry_tempest_tag }} -f - <<EOF
+      FROM {{ cifmw_tempest_image }}:{{ cifmw_tempest_image_tag }}
+      RUN whoami
+      USER root
+      RUN dnf install -y python3-pip
+      USER tempest
+      RUN pip freeze | grep telemetry-tempest-plugin
+      RUN pip install git+http://github.com/openstack/telemetry-tempest-plugin@master
+      RUN pip freeze | grep telemetry-tempest-plugin
+      EOF
+
 - name: Run tempest
   ignore_errors: true
   containers.podman.podman_container:
     name: tempest
-    image: "{{ cifmw_tempest_image }}:{{ cifmw_tempest_image_tag }}"
+    #image: "{{ cifmw_tempest_image }}:{{ cifmw_tempest_image_tag }}"
+    image: "{{ telemetry_tempest_image }}:{{ telemetry_tempest_image_tag }}"
     state: started
     auto_remove: "{{ cifmw_tempest_remove_container }}"
     network: host
