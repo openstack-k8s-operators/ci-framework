@@ -51,6 +51,7 @@ cifmw_libvirt_manager_configuration:
       nets: (ordered list of networks to connect to)
       extra_disks_num: (integer, optional. Number of extra disks to be configured.)
       extra_disks_size: (string, optional. Storage capacity to be allocated. Example 1G, 512M)
+      password: (string, optional, defaults to fooBar. Root password for console access)
       target: (Hypervisor hostname you want to deploy the family on. Optional)
   networks:
     net_name: <XML definition of the network to create>
