@@ -30,7 +30,8 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_use_devscripts`: (Bool) toggle OpenShift deploying using devscripts role.
 * `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment.
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
-* `cifmw_config_network`: (Bool) toggle networking deployment based on CI-framework instead of install_yamls. Default to false.
+* `cifmw_config_nmstate`: (Bool) toggle NMstate networking deployment. Default to false.
+* `cifmw_config_certmanager`: (Bool) toggle cert-manager deployment. Default to false.
 
 ~~~{admonition} Words of caution
 :class: danger
