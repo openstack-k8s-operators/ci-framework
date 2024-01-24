@@ -7,6 +7,11 @@
 On the machine from where you launched the `ansible-playbook` command, you
 can access `~/ansible.log`.
 
+### What's the root password on the virtual machines?
+
+By default, the very secure `fooBar` password is set for all of the created machines. You can
+override it from within the [layout description](../roles/libvirt_manager.md#structure-for-cifmw-libvirt-manager-configuration)
+
 ### How can I see the deployed libvirt resources?
 
 On the hypervisor, you can check the deployed resources using `virsh` command, for instance:
