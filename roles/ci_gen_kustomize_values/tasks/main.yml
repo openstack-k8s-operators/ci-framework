@@ -14,60 +14,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Ensure directories exist
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    mode: "0755"
-  loop:
-    - "{{ cifmw_ci_gen_kustomize_values_src_dir }}"
-    - "{{ cifmw_ci_gen_kustomize_values_dest_dir }}"
+- name: Generate snippets files
+  ansible.builtin.include_tasks: generate_snippets.yml
 
-- name: List snippets
-  register: _snippets
-  ansible.builtin.find:
-    paths: "{{ cifmw_ci_gen_kustomize_values_src_dir }}"
-    recurse: false
-
-- name: Load various snippet files
-  register: _snippets_content
-  ansible.builtin.slurp:
-    path: "{{ file.path }}"
-  loop: "{{ _snippets.files }}"
-  loop_control:
-    loop_var: file
-    label: "{{ file.path | basename }}"
-
-- name: Combine snippets
-  vars:
-    _parsed: >-
-      {{
-        item.content |
-        b64decode |
-        ansible.builtin.from_yaml
-      }}
-  ansible.builtin.set_fact:
-    _content: >
-      {{
-        _content |
-        default({}) |
-        combine(_parsed, recursive=true)
-      }}
-  loop: "{{ _snippets_content.results }}"
-  loop_control:
-    label: "{{ item.source | basename }}"
-
-- name: Output kustomize file
-  ansible.builtin.copy:
-    dest: >-
-      {{
-        (cifmw_ci_gen_kustomize_values_dest_dir,
-        cifmw_ci_gen_kustomize_values_dest_filename) | path_join
-      }}
-    content: >-
-      {{
-        cifmw_ci_gen_kustomize_values_header |
-        combine(_content, recursive=true) |
-        to_nice_yaml
-      }}
-    mode: "0644"
+- name: Generate values file
+  ansible.builtin.include_tasks: generate_values.yml

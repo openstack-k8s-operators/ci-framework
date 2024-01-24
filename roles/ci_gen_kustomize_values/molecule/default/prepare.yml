@@ -26,58 +26,33 @@
       }}
   roles:
     - role: test_deps
+    - role: ci_setup
   tasks:
-    - name: Create snippet directory
+    - name: Ensure directory exists
+      become: true
       ansible.builtin.file:
-        path: "{{ cifmw_ci_gen_kustomize_values_src_dir }}"
+        path: "/etc/ci/env"
         state: directory
         mode: "0755"
 
-    - name: Push snippet-1
+    - name: Push networking environment definition file
+      become: true
       ansible.builtin.copy:
-        dest: "{{ cifmw_ci_gen_kustomize_values_src_dir }}/my-snippet-1.yaml"
-        content: |
-          data:
-            node_0:
-              name: crc
-              ctlplane_ip: 192.168.122.10
-              storage_ip: 172.18.0.10
+        src: "networking-environment-definition.yml"
+        dest: "/etc/ci/env/networking-environment-definition.yml"
+        mode: "0644"
 
-    - name: Push snippet-2
-      ansible.builtin.copy:
-        dest: "{{ cifmw_ci_gen_kustomize_values_src_dir }}/my-snippet-2.yaml"
-        content: |
-          data:
-            ctlplane:
-              dnsDomain: ctlplane.example.local
-              subnets:
-                - allocationRanges:
-                    - end: 192.168.122.120
-                      start: 192.168.122.100
-                    - end: 192.168.122.200
-                      start: 192.168.122.150
-                  cidr: 192.168.122.0/24
-                  gateway: 192.168.122.1
-                  name: subnet1
-              prefix-length: 24
-              mtu: 1500
-              iface: eth0
-              lb_addresses:
-                - 192.168.122.80-192.168.122.90
-              endpoint_annotations:
-                metallb.universe.tf/address-pool: ctlplane
-                metallb.universe.tf/allow-shared-ip: ctlplane
-                metallb.universe.tf/loadBalancerIPs: 192.168.122.80
-              net-attach-def: |
-                {
-                  "cniVersion": "0.3.1",
-                  "name": "ctlplane",
-                  "type": "macvlan",
-                  "master": "eth0",
-                  "ipam": {
-                    "type": "whereabouts",
-                    "range": "192.168.122.0/24",
-                    "range_start": "192.168.122.30",
-                    "range_end": "192.168.122.70"
-                  }
-                }
+    - name: Create nova migration keypair
+      register: _nova_key
+      community.crypto.openssh_keypair:
+        comment: "id_cifw"
+        path: >-
+          {{ (ansible_user_dir,
+             '.ssh/id_cifw') | path_join
+          }}
+        type: "ecdsa"
+
+    - name: Fetch architecture repository
+      ansible.builtin.git:  # noqa: latest[git]
+        repo: "https://github.com/openstack-k8s-operators/architecture"
+        dest: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/architecture"
