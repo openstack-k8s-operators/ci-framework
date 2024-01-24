@@ -1,0 +1,42 @@
+data:
+  ssh_keys:
+    authorized: |-
+{{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | replace('\n', '\\n') | indent(6, first=True) }}
+    private: |-
+{{ cifmw_ci_gen_kustomize_values_ssh_private_key | replace('\n', '\\n') | indent(6, first=True) }}
+    public: |-
+{{ cifmw_ci_gen_kustomize_values_ssh_public_key | replace('\n', '\\n') | indent(6, first=True) }}
+  nova:
+    migration:
+      ssh_keys:
+        private: |-
+{{ cifmw_ci_gen_kustomize_values_migration_priv_key | replace('\n', '\\n') | indent(10, first=True) }}
+        public: |-
+{{ cifmw_ci_gen_kustomize_values_migration_pub_key | replace('\n', '\\n') | indent(10, first=True) }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      timesync_ntp_servers:
+        - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+      edpm_sshd_allowed_ranges:
+{% for range in cifmw_ci_gen_kustomize_values_sshd_ranges %}
+        - "{{ range }}"
+{% endfor %}
+    nodes:
+{% for compute in cifmw_networking_env_definition.instances.keys() %}
+{%   if compute.startswith('compute') %}
+      edpm-{{ compute }}:
+        ansible:
+          host: {{ cifmw_networking_env_definition.instances[compute].networks.ctlplane.ip_v4 }}
+        hostName: {{ compute }}
+        networks:
+{%      for net in cifmw_networking_env_definition.instances[compute].networks.keys() %}
+          - name: {{ net }}
+            subnetName: subnet1
+{%        if net is match('ctlplane') %}
+            defaultRoute: true
+            fixedIP: {{ cifmw_networking_env_definition.instances[compute].networks.ctlplane.ip_v4 }}
+{%        endif%}
+{%      endfor %}
+{%   endif%}
+{% endfor %}

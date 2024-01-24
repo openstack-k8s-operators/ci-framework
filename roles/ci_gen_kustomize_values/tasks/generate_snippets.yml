@@ -1,0 +1,122 @@
+---
+- name: Ensure needed parameter is properly set
+  ansible.builtin.assert:
+    that:
+      - cifmw_ci_gen_kustomize_values_dt_src_file is defined
+      - cifmw_ci_gen_kustomize_values_dt_src_file is not none
+    msg: >-
+      cifmw_ci_gen_kustomize_values_dt_src_file must be provided.
+
+- name: Ensure source original values file exists
+  block:
+    - name: Get original values file state
+      register: _values_stat
+      ansible.builtin.stat:
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+        path: >-
+          {{
+            (cifmw_ci_gen_kustomize_values_architecure_repo,
+             cifmw_ci_gen_kustomize_values_dt_src_file) | path_join
+          }}
+
+    - name: Ensure file exists
+      ansible.builtin.assert:
+        that:
+          - _values_stat.stat.exists
+        msg: >-
+          {{ cifmw_ci_gen_kustomize_values_dt_src_file }} doesn't exist in
+          {{ cifmw_ci_gen_kustomize_values_architecure_repo }}
+
+- name: Load original values file
+  register: _original
+  ansible.builtin.slurp:
+    src: >-
+      {{
+        (cifmw_ci_gen_kustomize_values_architecure_repo,
+         cifmw_ci_gen_kustomize_values_dt_src_file) | path_join
+      }}
+
+- name: Generate content
+  vars:
+    _datatype: >-
+      {{
+        (_original.content |
+        b64decode |
+        from_yaml)['metadata']['name']
+      }}
+    _known:
+      - 'edpm-values'
+      - 'network-values'
+    _dest_dir: >-
+      {{
+        (cifmw_ci_gen_kustomize_values_snippets_dir,
+         _datatype) |path_join
+      }}
+  block:
+    - name: Debug some stuff
+      ansible.builtin.debug:
+        msg: "{{ _datatype }}"
+
+    - name: Ensure we're facing a known type
+      ansible.builtin.assert:
+        that:
+          - _datatype in _known
+        msg: >-
+          Unknown type {{ _datatype }}. Either update role, or ensure you're
+          providing any of {{ ', '.join(_known) }} as metadata.name
+
+    - name: Ensure we get the needed data depending on the values type
+      ansible.builtin.include_tasks: "{{ _datatype | replace('-', '_') }}.yml"
+
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ _dest_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy original values.yaml
+      ansible.builtin.copy:
+        content: >-
+          {{
+            _original.content |
+            b64decode |
+            from_yaml |
+            ansible.utils.remove_keys(target=['^nodes(_[0-9]+)?$'],
+                                      matching_parameter='regex') |
+            to_nice_yaml
+          }}
+        dest: >-
+          {{
+            (_dest_dir,
+             '01_original.yaml') | path_join
+          }}
+
+    - name: Generate CI snippet
+      ansible.builtin.template:
+        dest: >-
+          {{
+            (_dest_dir,
+             '02_ci_data.yaml') | path_join
+          }}
+        src: "{{ _datatype }}.j2"
+
+    - name: Push user provided dataset
+      ansible.builtin.copy:
+        dest: >-
+          {{
+            (_dest_dir,
+             '03_user_data.yaml') | path_join
+          }}
+        content: >-
+          {{
+            cifmw_ci_gen_kustomize_values_userdata |
+            default({}) |
+            to_nice_yaml
+          }}
+
+    - name: Expose the datatype for future usage
+      ansible.builtin.set_fact:
+        values_datatype: "{{ _datatype }}"
+        cacheable: false

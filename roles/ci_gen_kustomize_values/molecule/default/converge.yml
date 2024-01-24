@@ -18,29 +18,67 @@
 - name: Converge
   hosts: all
   vars:
-    _target_file: >-
+    cifmw_ci_gen_kustomize_values_basedir: >-
+      {{ ansible_user_dir }}/ci-framework-data
+    cifmw_ci_gen_kustomize_values_architecure_repo: >-
       {{
-        (ansible_user_dir, 'ci-framework-data/artifacts',
-         'ci_gen_kustomize_values/values.yaml') | path_join
+        (ansible_user_dir,
+         'src/github.com/openstack-k8s-operators/architecture') | path_join
       }}
-  roles:
-    - role: "ci_gen_kustomize_values"
   tasks:
-    - name: Check if file exists
-      register: _file_state
-      ansible.builtin.stat:
-        path: "{{ _target_file }}"
+    # We first create a dedicated keypair.
+    - name: Create nova migration keypair
+      register: _nova_key
+      community.crypto.openssh_keypair:
+        comment: "nova migration"
+        path: >-
+          {{ (cifmw_ci_gen_kustomize_values_basedir,
+             'artifacts/nova_migration_key') | path_join
+          }}
+        type: "ecdsa"
 
-    - name: Get file content
-      register: _file_content
-      ansible.builtin.slurp:
-        path: "{{ _target_file }}"
-
-    - name: Assert tests
+    - name: Generate needed facts out of local files
       vars:
-        _parsed: "{{ _file_content.content | b64decode | from_yaml }}"
-      ansible.builtin.assert:
-        that:
-          - _file_state.stat.exists | bool
-          - _parsed.metadata is defined
-          - _parsed.data.ctlplane is defined
+        priv_key: "{{ lookup('file', '~/.ssh/id_cifw') }}"
+        pub_key: "{{ lookup('file', '~/.ssh/id_cifw.pub') }}"
+        authorized_keys: "{{ lookup('file', '~/.ssh/authorized_keys') }}"
+        net_env: >-
+          {{
+            lookup('file',
+                   '/etc/ci/env/networking-environment-definition.yml')
+          }}
+        _nova_priv_key: "{{ lookup('file', _nova_key.filename) }}"
+      ansible.builtin.set_fact:
+        cifmw_networking_env_definition: "{{ net_env | from_yaml }}"
+        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+          {{ authorized_keys }}
+        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+          {{ priv_key }}
+        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+          {{ pub_key }}
+        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+          {{ _nova_key.public_key }}
+        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+          {{ _nova_priv_key }}
+        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+          {{
+            [(net_env | from_yaml)['networks']['ctlplane']['network_v4']]
+          }}
+
+    - name: Generate network-values
+      vars:
+        cifmw_ci_gen_kustomize_values_dt_src_file: >-
+          examples/va/nfv/sriov/values.yaml
+        cifmw_ci_gen_kustomize_values_dest_filename: 'network-values.yml'
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+
+    - name: Generate edpm-values
+      vars:
+        cifmw_ci_gen_kustomize_values_dt_src_file: >-
+          examples/va/nfv/sriov/edpm/values.yaml
+        cifmw_ci_gen_kustomize_values_userdata: >-
+          {{ cifmw_reproducer_user_edpm_values }}
+        cifmw_ci_gen_kustomize_values_dest_filename: 'edpm-values.yml'
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
