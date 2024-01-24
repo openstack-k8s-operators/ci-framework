@@ -1,0 +1,69 @@
+---
+- name: Generate values files
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cifmw_ci_gen_kustomize_values_basedir: >-
+      {{ ansible_user_dir }}/ci-framework-data
+    cifmw_ci_gen_kustomize_values_architecure_repo: >-
+      {{
+        (ansible_user_dir,
+         'src/github.com/openstack-k8s-operators/architecture') | path_join
+      }}
+  tasks:
+    - name: Create nova migration keypair
+      register: _nova_key
+      community.crypto.openssh_keypair:
+        comment: "nova migration"
+        path: >-
+          {{ (cifmw_ci_gen_kustomize_values_basedir,
+             'artifacts/nova_migration_key') | path_join
+          }}
+        type: "ecdsa"
+
+    - name: Generate needed facts out of local files
+      vars:
+        priv_key: "{{ lookup('file', '~/.ssh/id_cifw') }}"
+        pub_key: "{{ lookup('file', '~/.ssh/id_cifw.pub') }}"
+        authorized_keys: "{{ lookup('file', '~/.ssh/authorized_keys') }}"
+        net_env: >-
+          {{
+            lookup('file',
+                   '/etc/ci/env/networking-environment-definition.yml')
+          }}
+        _nova_priv_key: "{{ lookup('file', _nova_key.filename) }}"
+      ansible.builtin.set_fact:
+        cifmw_networking_env_definition: "{{ net_env | from_yaml }}"
+        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+          {{ authorized_keys }}
+        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+          {{ priv_key }}
+        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+          {{ pub_key }}
+        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+          {{ _nova_key.public_key }}
+        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+          {{ _nova_priv_key }}
+        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+          {{
+            [(net_env | from_yaml)['networks']['ctlplane']['network_v4']]
+          }}
+
+    - name: Generate network-values
+      vars:
+        cifmw_ci_gen_kustomize_values_dt_src_file: >-
+          examples/va/nfv/sriov/values.yaml
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+
+    - name: Generate edpm-values
+      vars:
+        cifmw_ci_gen_kustomize_values_dt_src_file: >-
+          examples/va/nfv/sriov/edpm/values.yaml
+        cifmw_ci_gen_kustomize_values_userdata: >-
+          {{ cifmw_reproducer_user_edpm_values }}
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+
+- name: Import original boostrap playbook
+  ansible.builtin.import_playbook: playbooks/01-bootstrap.yml
