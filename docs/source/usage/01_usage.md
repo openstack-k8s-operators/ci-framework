@@ -32,6 +32,8 @@ provisioned with virtual baremetal vs pre-provisioned VM.
 * `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 * `cifmw_config_nmstate`: (Bool) toggle NMstate networking deployment. Default to false.
 * `cifmw_config_certmanager`: (Bool) toggle cert-manager deployment. Default to false.
+* `cifmw_ssh_keytype`: (String) Type of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to `ecdsa`.
+* `cifmw_ssh_keysize`: (Integer) Size of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to 521.
 
 ~~~{admonition} Words of caution
 :class: danger
