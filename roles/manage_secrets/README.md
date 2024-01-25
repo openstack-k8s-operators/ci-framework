@@ -30,8 +30,8 @@ None
 
 ### SSH keypair secrets
 
-* `cifmw_manage_secrets_ssh_type`: SSH keypair algorithm, as listed by [community.crypto.openssh_keypair](https://docs.ansible.com/ansible/latest/collections/community/crypto/openssh_keypair_module.html#parameter-type). Defaults to `ecdsa`.
-* `cifmw_manage_secrets_ssh_size`: SSH private key size, as listed by [community.crypto.openssh_keypair](https://docs.ansible.com/ansible/latest/collections/community/crypto/openssh_keypair_module.html#parameter-size). Defaults to `521`.
+* `cifmw_manage_secrets_ssh_type`: SSH keypair algorithm, as listed by [community.crypto.openssh_keypair](https://docs.ansible.com/ansible/latest/collections/community/crypto/openssh_keypair_module.html#parameter-type). Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
+* `cifmw_manage_secrets_ssh_size`: SSH private key size, as listed by [community.crypto.openssh_keypair](https://docs.ansible.com/ansible/latest/collections/community/crypto/openssh_keypair_module.html#parameter-size). Defaults to `cifmw_ssh_keysize` which defaults to 512.
 * `cifmw_manage_secrets_dataplane_ssh_name`: File name for the dataplane SSH keypair. Defaults to `ansibleee-ssh-key-id_ecdsa`.
 * `cifmw_manage_secrets_dataplane_ssh_metaname`: Metadata for the dataplane ssh keypair. Defaults to `dataplane-ansible-ssh-private-key-secret`.
 

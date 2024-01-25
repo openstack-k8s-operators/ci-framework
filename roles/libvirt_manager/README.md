@@ -31,6 +31,8 @@ Used for checking if:
 * `cifmw_libvirt_manager_pub_net`: (String) Network name playing the "public" interface. Defaults to `public`.
 * `cifmw_libvirt_manager_vm_net_ip_set`: (Dict) Allow to extend the existing mapping for host family to IP mapping. Defaults to `{}`.
 * `cifmw_libvirt_manager_fixed_networks`: (List) Network names you don't want to prefix with `cifmw-`. It will be concatenated with cifmw_libvirt_manager_fixed_networks_defaults. Defaults to`[]`.
+* `cifmw_libvirt_manager_reproducer_key_type`: (String) Type of ssh key that will be injected into the controller VMs. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
+* `cifmw_libvirt_manager_reproducer_key_size`: (Integer) Size of the ecdsa ssh keys that will be injected into the controller VMs. Defaults to `cifmw_ssh_keysize` which default to 521.
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 

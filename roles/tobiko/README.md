@@ -11,6 +11,8 @@ become - Required to install required rpm packages
 * `cifmw_tobiko_dry_run`: (Boolean) Whether tobiko should run or not. Default to `false`
 * `cifmw_tobiko_remove_container`: (Boolean) Cleanup tobiko container after it is done. Default to `false`
 * `cifmw_tobiko_testenv`: (String) Executed tobiko testenv. See tobiko `tox.ini` file for further details. Some allowed values: scenario, sanity, faults, neutron, octavia, py3, etc
+* `cifmw_tobiko_ssh_key_type`: (String) Type of ssh key that tobiko will use to connect to the VM instances it creates. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
+* `cifmw_tobiko_ssh_key_size`: (Integer) Size of ssh key that tobiko will use to connect to the VM instances it creates. Defaults to `cifmw_ssh_keysize` which defaults to 512.
 
 ## Parameters with default values from tcib or tobiko default configurations
 The default values from the following parameters are not taken from this tobiko role, but from the tobiko image defined on the tcib project or from the config.py files within the tobiko project.
