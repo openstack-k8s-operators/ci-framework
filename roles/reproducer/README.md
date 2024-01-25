@@ -6,6 +6,7 @@ None
 
 ## Parameters
 * `cifmw_reproducer_basedir`: (String) Base directory. Defaults to `cifmw_basedir`, which defaults to `~/ci-framework-data`.
+* `cifmw_reproducer_compute_repos`: (List[mapping]) List of yum repository that must be deployed on the compute nodes during their creation. Defaults to `[]`.
 * `cifmw_reproducer_ctl_ip4`: (String) IPv4 address for ansible controller on the *private* interface. Defaults to 192.168.122.10.
 * `cifmw_reproducer_ctl_gw4`: (String) IPv4 gateway for ansible controller on the *private* interface. Defaults to 192.168.122.1.
 * `cifmw_reproducer_crc_ip4`: (String) IPv4 address for CRC node on the *private* interface. Defaults to 192.168.122.11.

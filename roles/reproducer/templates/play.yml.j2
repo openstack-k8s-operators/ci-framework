@@ -7,20 +7,14 @@
   tasks:
     - name: Load interfaces-info.yml
       ansible.builtin.include_vars:
-        file: "{{ ansible_user_dir }}/ci-framework-data/artifacts/interfaces-info.yml"
-        name: cifmw_mac_mapping
+        file: "/etc/ci/env/networking-environment-definition.yml"
+        name: _net_env
 
     - name: Set cifmw_rp_registry_ip
       ansible.builtin.set_fact:
         cacheable: true
         cifmw_rp_registry_ip: >-
-          {{
-            ((cifmw_mac_mapping | dict2items |
-            selectattr('key', 'match', '.*controller-0') |
-            first)['value'] |
-            selectattr('network', 'match', '.*osp_trunk') |
-            first)['IP']
-          }}
+          {{ _net_env.instances['controller-0'].networks.ctlplane.ip_v4 }}
 
 
 - name: Configure OCPs for insecure registry
@@ -58,7 +52,6 @@
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
-        - "{{ ansible_user_dir }}/ci-framework-data/artifacts/interfaces-info.yml"
         - "{{ ansible_user_dir }}/{{ job_id }}-params/zuul-params.yml"
         - "./scenarios/centos-9/base.yml"
         - "./scenarios/centos-9/content_provider.yml"
@@ -114,45 +107,6 @@
           }}
 {% endraw %}
 {% endif %}
-
-{% raw %}
-- name: Configure NetworkManager on controller-0
-  hosts: localhost
-  gather_facts: false
-  become: true
-  tasks:
-    - name: Instruct NetworkManager to not manage DNS
-      community.general.ini_file:
-        path: "/etc/NetworkManager/NetworkManager.conf"
-        option: dns
-        section: main
-        value: none
-
-    - name: Restart NetworkManager
-      ansible.builtin.service:
-        name: NetworkManager
-        state: restarted
-
-    - name: Inject proper DNS resolver
-      vars:
-        _net: "{{ cifmw_rp_registry_ip }}/24"
-        _crc_resolver: >-
-          {{
-            _net | ansible.utils.ipaddr('host/prefix') |
-            ansible.utils.nthhost(80)
-          }}
-        _pub_resolver: >-
-          {{
-            _net | ansible.utils.ipaddr('host/prefix') |
-            ansible.utils.nthhost(1)
-          }}
-      ansible.builtin.copy:
-        dest: "/etc/resolv.conf"
-        content: |
-          # Managed by ansible/cifmw reproducer role
-          nameserver {{ _crc_resolver }}
-          nameserver {{ _pub_resolver }}
-{% endraw %}
 
 {% for play in zuul_plays %}
 - name: "Reproducer for {{ job_id }}: {{ play }}"
