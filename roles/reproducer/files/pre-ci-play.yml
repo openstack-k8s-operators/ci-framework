@@ -1,39 +1,83 @@
 ---
-- name: Configure networking on all nodes
-  hosts: all,!localhost
+- name: Generate and inject old networking-info based on networking_mapper
+  hosts: localhost
   gather_facts: false
-  become: true
-  vars:
-    cifmw_network_generated_layout: "/etc/ci/env/networking-info.yml"
   tasks:
-    - name: Create ci-env directory tree
-      when:
-        - inventory_hostname != 'controller-0'
-      ansible.builtin.file:
-        path: "/etc/ci/env"
-        state: directory
-    - name: Copy networking-info to hosts
-      when:
-        - inventory_hostname != 'controller-0'
-      ansible.builtin.copy:
-        src: "{{ cifmw_network_generated_layout }}"
-        dest: "{{ cifmw_network_generated_layout }}"
-    - name: Configure networking on nodes
-      ansible.builtin.import_role:
-        role: ci_network
+    - name: Load networking-environment-definition
+      ansible.builtin.include_vars:
+        file: "/etc/ci/env/networking-environment-definition.yml"
+        name: _net_env
 
-- name: Reboot CRC and wait for its services
-  hosts: crc-0
-  gather_facts: false
-  tasks:
-    - name: Reboot CRC node
+    - name: Map networking_mapper environment to networking-info
       become: true
-      ansible.builtin.reboot:
+      ansible.builtin.copy:
+        dest: "/etc/ci/env/networking-info.yml"
+        content: |-
+          crc_ci_bootstrap_networks_out:
+          {% for instance in _net_env.instances.keys() %}
+            {{ instance | replace('controller-0', 'controller') }}:
+          {%   for net in _net_env.instances[instance].networks.keys() %}
+          {%     if net == 'ctlplane' %}
+              default:
+                connection: ci-private-network
+                gw: {{ _net_env.networks[net].gw_v4 }}
+          {%     else %}
+              {{ net | replace('internalapi', 'internal-api') }}:
+                vlan: {{ _net_env.networks[net].vlan_id | default('foo') }}
+          {%     endif %}
+                iface: {{ _net_env.instances[instance]['networks'][net]['interface_name']}}
+                ip: {{ _net_env.instances[instance]['networks'][net]['ip_v4'] }}/24
+                mac: {{ _net_env.instances[instance]['networks'][net]['mac_addr'] }}
+                mtu: {{ _net_env.instances[instance]['networks'][net]['mtu'] }}
+                skip_nm: false
+          {%   endfor %}
+          {% endfor %}
 
-- name: Disable cloud-init on computes
+    - name: Configure NetworkManager to not override /etc/resolv.conf
+      become: true
+      community.general.ini_file:
+        path: "/etc/NetworkManager/NetworkManager.conf"
+        option: dns
+        section: main
+        value: none
+
+    - name: Restart NetworkManager to ensure we apply new configuration
+      become: true
+      ansible.builtin.service:
+        name: NetworkManager
+        state: restarted
+
+    - name: Inject custom nameservers in /etc/resolv.conf
+      become: true
+      vars:
+        _pub_resolver: >-
+          {{ _net_env.networks.ctlplane.dns_v4.0 }}
+        _crc_resolver: >-
+          {{ _net_env.networks.ctlplane.tools.metallb.ipv4_ranges.0.start }}
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf"
+        content: |
+          nameserver {{ _crc_resolver }}
+          nameserver {{ _pub_resolver }}
+
+- name: Prepare computes for next steps
   hosts: computes
   gather_facts: false
   tasks:
+    - name: Ensure /etc/ci/env directory exists
+      become: true
+      ansible.builtin.file:
+        path: /etc/ci/env
+        state: directory
+        mode: "0755"
+
+    - name: Push networking-info.yml
+      become: true
+      ansible.builtin.copy:
+        src: /etc/ci/env/networking-info.yml
+        dest: /etc/ci/env/networking-info.yml
+        mode: "0644"
+
     - name: Disable cloud-init
       become: true
       ansible.builtin.service:
