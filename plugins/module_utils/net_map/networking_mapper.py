@@ -151,9 +151,9 @@ class NetworkingInstanceMapper:
         self.__group_templates: typing.Dict[
             str, networking_definition.GroupTemplateDefinition
         ] = (group_templates or {})
-        self.__interface_info: typing.Optional[
-            typing.Dict[str, typing.Any]
-        ] = interface_info
+        self.__interface_info: typing.Optional[typing.Dict[str, typing.Any]] = (
+            interface_info
+        )
         self.__add_instance_reservation(instance_definition, pools_manager)
 
     @property

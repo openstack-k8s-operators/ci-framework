@@ -97,12 +97,16 @@ def test_networking_mapper_full_partial_map_ok(
     test_input_config_file: str, test_golden_file: str, reduced_hosts: bool
 ):
     mapper = networking_mapper.NetworkingDefinitionMapper(
-        net_map_stub_data.TEST_HOSTVARS
-        if not reduced_hosts
-        else net_map_stub_data.TEST_HOSTVARS_REDUCED,
-        net_map_stub_data.TEST_GROUPS
-        if not reduced_hosts
-        else net_map_stub_data.TEST_GROUPS_REDUCED,
+        (
+            net_map_stub_data.TEST_HOSTVARS
+            if not reduced_hosts
+            else net_map_stub_data.TEST_HOSTVARS_REDUCED
+        ),
+        (
+            net_map_stub_data.TEST_GROUPS
+            if not reduced_hosts
+            else net_map_stub_data.TEST_GROUPS_REDUCED
+        ),
     )
     mapped_content = mapper.map_partial(
         net_map_stub_data.get_test_file_yaml_content(test_input_config_file)
