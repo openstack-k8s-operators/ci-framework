@@ -1654,14 +1654,14 @@ class GroupTemplateDefinition:
             else None
         )
 
-        self.__groups_networks_definitions[
-            network_name
-        ] = GroupTemplateNetworkDefinition(
-            network_definition,
-            self.__group_name,
-            ipv4_range=ipv4_network_range,
-            ipv6_range=ipv6_network_range,
-            skip_nm_configuration=skip_nm_configuration,
+        self.__groups_networks_definitions[network_name] = (
+            GroupTemplateNetworkDefinition(
+                network_definition,
+                self.__group_name,
+                ipv4_range=ipv4_network_range,
+                ipv6_range=ipv6_network_range,
+                skip_nm_configuration=skip_nm_configuration,
+            )
         )
 
     def __parse_raw_net_ranges(
