@@ -25,15 +25,27 @@
         (ansible_user_dir,
          'src/github.com/openstack-k8s-operators/architecture') | path_join
       }}
+    artifacts: "{{ cifmw_ci_gen_kustomize_values_basedir }}/artifacts"
   tasks:
-    # We first create a dedicated keypair.
+    - name: Ensure architecture repository is building
+      ansible.builtin.shell:
+        chdir: "{{ cifmw_ci_gen_kustomize_values_architecure_repo }}/{{ item.path }}"
+        cmd: >-
+          {{ ansible_user_dir }}/bin/kustomize build >
+          {{ artifacts }}/vanilla-{{ item.name }}.yaml
+      loop:
+        - name: 'dataplane'
+          path: 'examples/va/nfv/sriov/edpm'
+        - name: 'ctlplane'
+          path: 'examples/va/nfv/sriov'
+
     - name: Create nova migration keypair
       register: _nova_key
       community.crypto.openssh_keypair:
         comment: "nova migration"
         path: >-
-          {{ (cifmw_ci_gen_kustomize_values_basedir,
-             'artifacts/nova_migration_key') | path_join
+          {{ (artifacts,
+             'nova_migration_key') | path_join
           }}
         type: "ecdsa"
 
@@ -69,7 +81,6 @@
       vars:
         cifmw_ci_gen_kustomize_values_dt_src_file: >-
           examples/va/nfv/sriov/values.yaml
-        cifmw_ci_gen_kustomize_values_dest_filename: 'network-values.yml'
       ansible.builtin.include_role:
         name: ci_gen_kustomize_values
 
@@ -79,6 +90,51 @@
           examples/va/nfv/sriov/edpm/values.yaml
         cifmw_ci_gen_kustomize_values_userdata: >-
           {{ cifmw_reproducer_user_edpm_values }}
-        cifmw_ci_gen_kustomize_values_dest_filename: 'edpm-values.yml'
       ansible.builtin.include_role:
         name: ci_gen_kustomize_values
+
+    - name: Get generated files status
+      register: stat_values
+      ansible.builtin.stat:
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+        path: >-
+          {{
+            (artifacts, 'ci_gen_kustomize_values',
+             item, 'values.yaml') |
+             path_join }}
+      loop:
+        - network-values
+        - edpm-values
+
+    - name: Assert generated values.yaml exists
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+      loop: "{{ stat_values.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Copy generated values to correct location
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ artifacts }}/ci_gen_kustomize_values/{{ item.key }}/values.yaml"
+        dest: "{{ cifmw_ci_gen_kustomize_values_architecure_repo }}/{{ item.value }}"
+      loop:
+        - key: 'network-values'
+          value: 'examples/va/nfv/sriov/values.yaml'
+        - key: 'edpm-values'
+          value: 'examples/va/nfv/sriov/edpm/values.yaml'
+
+    - name: Ensure kustomize is able to build
+      ansible.builtin.shell:
+        chdir: "{{ cifmw_ci_gen_kustomize_values_architecure_repo }}/{{ item.path }}"
+        cmd: >-
+          {{ ansible_user_dir }}/bin/kustomize build >
+          {{ artifacts }}/{{ item.name }}.yaml
+      loop:
+        - name: 'dataplane'
+          path: 'examples/va/nfv/sriov/edpm'
+        - name: 'ctlplane'
+          path: 'examples/va/nfv/sriov'
