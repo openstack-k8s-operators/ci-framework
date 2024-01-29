@@ -122,6 +122,20 @@ exec > >(tee -i %(logpath)s) 2>&1
 
 
 class ActionModule(ActionBase):
+    __OUTPUT_DIR_ARG = "output_dir"
+    __SCRIPT_ARG = "script"
+    __DRY_RUN_ARG = "dry_run"
+    __EXTRA_ARGS_ARG = "extra_args"
+    __CHDIR_ARG = "chdir"
+
+    __CIFMW_PLUGIN_ARGS = [
+        __OUTPUT_DIR_ARG,
+        __SCRIPT_ARG,
+        __DRY_RUN_ARG,
+        __EXTRA_ARGS_ARG,
+        __CHDIR_ARG
+    ]
+
     def __init__(self, **kwargs):
         super(ActionModule, self).__init__(**kwargs)
         self.__script_file_path = (
@@ -154,38 +168,33 @@ class ActionModule(ActionBase):
         super(ActionModule, self).run(tmp, task_vars)
 
         task_args = ansible_encoding.decode_ansible_raw(self._task.args)
-        if "output_dir" not in task_args:
-            raise AnsibleActionFail("output_dir parameter is missing")
+        output_dir = (
+            pathlib.Path(task_args.get(self.__OUTPUT_DIR_ARG))
+            if self.__OUTPUT_DIR_ARG in task_args
+            else None
+        )
+        if not output_dir:
+            raise AnsibleActionFail(f"{self.__OUTPUT_DIR_ARG} parameter is missing")
 
-        if "script" not in task_args:
-            raise AnsibleActionFail("script parameter is missing")
+        if self.__SCRIPT_ARG not in task_args:
+            raise AnsibleActionFail(f"{self.__SCRIPT_ARG} parameter is missing")
 
-        output_dir = pathlib.Path(task_args.pop("output_dir"))
-        if not output_dir.is_dir():
-            raise AnsibleActionFail("output_dir points to a non-existing directory")
+        file_task = self._task.copy()
 
-        logs_dir = output_dir.parent.joinpath("logs")
-        if not logs_dir.is_dir():
-            raise AnsibleActionFail(f"logs dir, {logs_dir} doesn't exist")
-
-        # Remove cmd if not passed, we are going to use _raw_params
-        # to pass the cmd we create here
-        if "cmd" in task_args:
-            task_args.pop("cmd")
-
-        # Are we running dry-run?
-        dry_run = False
-        if "dry_run" in task_args:
-            dry_run = basic.boolean(task_args.pop("dry_run"))
+        # Remove custom options from our plugin that are not part of Ansible's one
+        for arg_name in self.__CIFMW_PLUGIN_ARGS:
+            file_task.args.pop(arg_name, None)
 
         fnum = len(glob.glob(f"{output_dir}/ci_script_*"))
         t_name = re.sub(r"([^\x00-\x7F]|\s)+", "_", self._task.name).lower()
-        chdir_path = task_args.pop("chdir", None)
+        chdir_path = task_args.get("chdir", None)
         script_template_data = {
-            "extra_args": self.__build_exports(task_args.pop("extra_args", None)),
-            "content": task_args.pop("script"),
-            "logpath": logs_dir.joinpath(
-                f"ci_script_{fnum:03}_{t_name}.log"
+            "extra_args": self.__build_exports(
+                task_args.get(self.__EXTRA_ARGS_ARG, None)
+            ),
+            "content": task_args[self.__SCRIPT_ARG],
+            "logpath": output_dir.parent.joinpath(
+                "logs", f"ci_script_{fnum:03}_{t_name}.log"
             ).as_posix(),
             "opts": self.__build_options(task_vars),
             "pushcmd": f"pushd {chdir_path}" if chdir_path else "",
@@ -205,12 +214,12 @@ class ActionModule(ActionBase):
             [remote_script_path_str], self._play_context.remote_user, execute=True
         )
 
-        file_task = self._task.copy()
         file_task.args.update(
-            {"_raw_params": script_path_str, "chdir": output_dir.as_posix()}
+            {"_raw_params": script_path_str, self.__CHDIR_ARG: output_dir.as_posix()}
         )
 
-        if not dry_run:
+        # Are we running dry-run?
+        if not basic.boolean(task_args.get(self.__DRY_RUN_ARG, False)):
             return self._shared_loader_obj.action_loader.get(
                 "ansible.builtin.script",
                 task=file_task,
