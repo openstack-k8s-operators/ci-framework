@@ -1,0 +1,290 @@
+- name: Run pre_deploy hooks
+  vars:
+    hooks: "{{ pre_deploy | default([]) }}"
+    step: pre_deploy
+  ansible.builtin.import_playbook: ./hooks.yml
+
+- name: Deploy podified control plane
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Load parameters files
+      ansible.builtin.include_vars:
+        dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+    - name: Load Networking Environment Definition
+      ansible.builtin.include_role:
+        name: networking_mapper
+        tasks_from: load_env_definition.yml
+
+    - name: Check requirements
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: check_requirements.yml
+
+    - name: Install OSP operators
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: install_operators.yml
+
+    - name: Generate the needed value files
+      vars:
+        _arch_scenario_path: >-
+          {{
+            [
+              (
+                cifmw_architecture_repo |
+                default([
+                ansible_user_dir,
+                'src',
+                'github.com',
+                'openstack-k8s-operators',
+                'architecture'
+                ] | path_join)
+              ),
+              'examples/va',
+              cifmw_architecture_va_scenario
+              ] | path_join
+          }}
+        _ctrlplane_values_path: >-
+          {{
+            [
+              _arch_scenario_path ,
+              'control-plane/values.yaml',
+            ] | path_join
+          }}
+      block:
+        - name: Happy (not that happy) hacking
+          ansible.builtin.copy:
+            remote_src: true
+            src: >-
+              {{
+                [
+                  _arch_scenario_path ,
+                  'control-plane/nncp/values.yaml',
+                ] | path_join
+              }}
+            dest: "{{ _ctrlplane_values_path }}"
+
+        - name: Generate network-values
+          vars:
+            cifmw_ci_gen_kustomize_values_dt_src_file: "{{ _ctrlplane_values_path }}"
+          ansible.builtin.include_role:
+            name: ci_gen_kustomize_values
+
+    - name: Configure Storage Class
+      ansible.builtin.include_role:
+        name: ci_local_storage
+
+    - name: Install OSP control plane
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: install_controlplane.yml
+
+    - name: Extract and install OpenStackControlplane CA
+      ansible.builtin.include_role:
+        role: install_openstack_ca
+
+- name: Run post_ctlplane_deploy hooks
+  vars:
+    hooks: "{{ post_ctlplane_deploy | default([]) }}"
+    step: post_ctlplane_deploy
+  ansible.builtin.import_playbook: ./hooks.yml
+
+- name: Deploy podified data-plane
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  vars:
+    _arch_scenario_path: >-
+      {{
+        [
+          (
+            cifmw_architecture_repo |
+            default([
+            ansible_user_dir,
+            'src',
+            'github.com',
+            'openstack-k8s-operators',
+            'architecture'
+            ] | path_join)
+          ),
+          'examples/va',
+          cifmw_architecture_va_scenario
+          ] | path_join
+      }}
+  gather_facts: false
+  tasks:
+    - name: Load parameters files
+      ansible.builtin.include_vars:
+        dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+    - name: Load Networking Environment Definition
+      ansible.builtin.include_role:
+        name: networking_mapper
+        tasks_from: load_env_definition.yml
+
+    - name: Create nova migration keypair
+      register: _nova_key
+      community.crypto.openssh_keypair:
+        comment: "nova migration"
+        path: >-
+          {{ (
+              cifmw_basedir,
+              'artifacts/nova_migration_key',
+              ) | path_join
+          }}
+        type: "ecdsa"
+
+    - name: Fetch controller-0 network facts
+      when: "'ansible_interfaces' not in hostvars['controller-0']"
+      ansible.builtin.setup:
+        gather_subset: network
+      delegate_to: controller-0
+      delegate_facts: true
+
+    - name:  Generate edpm-values
+      vars:
+        _ifaces_vars: >-
+          {{
+            hostvars['controller-0'].ansible_interfaces |
+            map('regex_replace', '^(.*)$', 'ansible_\1')
+          }}
+        _controller_host: "{{ hostvars['controller-0'].ansible_host }}"
+        _ipv4_network_data: >-
+          {{
+            hostvars['controller-0'] | dict2items |
+            selectattr('key', 'in', _ifaces_vars) |
+            selectattr('value.ipv4.address', 'defined') |
+            selectattr('value.ipv4.address', 'equalto', _controller_host) |
+            map(attribute='value.ipv4') | first | default({})
+          }}
+        _nova_priv_key: "{{ lookup('file', _nova_key.filename, rstrip=False) }}"
+        _nova_pub_key: "{{ lookup('file', _nova_key.filename + '.pub', rstrip=False) }}"
+        _ssh_pub_key: "{{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}"
+        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+          {{ _ssh_pub_key }}
+        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+          {{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}
+        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+          {{ _ssh_pub_key }}
+        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+          {{ _nova_pub_key }}
+        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+          {{ _nova_priv_key }}
+        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+          {{
+            [cifmw_networking_env_definition['networks']['ctlplane']['network_v4']] +
+            (
+              [
+                 _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
+              ]
+            ) if (_ipv4_network_data | length > 0) else []
+          }}
+        cifmw_ci_gen_kustomize_values_dt_src_file: >-
+          {{
+            [
+              _arch_scenario_path,
+              'edpm-pre-ceph/values.yaml'
+            ] | path_join
+          }}
+        cifmw_ci_gen_kustomize_values_userdata: >-
+          {{
+              {
+                'data': {
+                  'nodeset': {
+                    'ansible': {
+                      'ansibleVars': {
+                        'edpm_bootstrap_command': edpm_bootstrap_command
+                      }
+                    }
+                  }
+                }
+              } if edpm_bootstrap_command is defined else {}
+          }}
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+
+    - name: Install OSP dataplaneplane
+      vars:
+        cifmw_kustomize_deploy_dp_values_src_file: >-
+          {{
+            [
+              cifmw_basedir,
+              'artifacts/ci_gen_kustomize_values/edpm-values/values.yaml'
+            ] | path_join
+          }}
+        cifmw_kustomize_deploy_dp_values_dest_file: >-
+          {{
+            [
+              _arch_scenario_path,
+              'edpm-pre-ceph/values.yaml'
+            ] | path_join
+          }}
+        cifmw_kustomize_deploy_dp_source_files: >-
+          {{
+            [
+              _arch_scenario_path,
+              'edpm-pre-ceph'
+            ] | path_join
+          }}
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: install_dataplane.yml
+
+- name: Run post_edpm_first_deploy hooks
+  vars:
+    hooks: "{{ post_edpm_first_deploy | default([]) }}"
+    step: post_edpm_first_deploy
+  ansible.builtin.import_playbook: ./hooks.yml
+
+- name: Run the second data-plane deployment
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  vars:
+    _arch_scenario_path: >-
+      {{
+        [
+          (
+            cifmw_architecture_repo |
+            default([
+            ansible_user_dir,
+            'src',
+            'github.com',
+            'openstack-k8s-operators',
+            'architecture'
+            ] | path_join)
+          ),
+          'examples/va',
+          cifmw_architecture_va_scenario
+          ] | path_join
+      }}
+  gather_facts: false
+  tasks:
+    - name: Deploy the second OSP dataplaneplane
+      vars:
+        cifmw_kustomize_deploy_dp_values_src_file: >-
+          {{
+            [
+              _arch_scenario_path,
+              'values.yaml'
+            ] | path_join
+          }}
+        cifmw_kustomize_deploy_dp_values_dest_file: >-
+          {{
+            [
+              _arch_scenario_path,
+              'values.yaml'
+            ] | path_join
+          }}
+        cifmw_kustomize_deploy_dp_source_files: "{{ _arch_scenario_path }}"
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: install_dataplane.yml
+
+    - name: Run nova host discover process
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        nova-cell0-conductor-0
+        nova-manage cell_v2 discover_hosts --verbose

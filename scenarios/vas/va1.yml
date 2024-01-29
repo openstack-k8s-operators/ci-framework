@@ -1,0 +1,76 @@
+---
+ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+
+cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+
+cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.kube/config"
+cifmw_openshift_user: "kubeadmin"
+cifmw_openshift_password_file: "{{ ansible_user_dir }}/.kube/kubeadmin-password"
+cifmw_openshift_skip_tls_verify: true
+
+cifmw_openshift_setup_skip_internal_registry_tls_verify: true
+
+cifmw_use_crc: false
+cifmw_use_libvirt: false
+cifmw_deploy_va: true
+
+cifmw_config_certmanager: false
+cifmw_config_nmstate: false
+
+cifmw_repo_setup_enable_rhos_release: true
+cifmw_repo_setup_os_release: rhel
+cifmw_edpm_build_images_base_image: "registry-proxy.engineering.redhat.com/rh-osbs/rhel-els:9.2.0"
+cifmw_repo_setup_rhos_release_args: "rhel -r 9.2"
+cifmw_repo_setup_rhos_release_rpm: "http://download.devel.redhat.com/rcm-guest/puddles/OpenStack/rhos-release/rhos-release-latest.noarch.rpm"
+cifmw_repo_setup_branch: osp18
+cifmw_repo_setup_env:
+  CURL_CA_BUNDLE: "/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt"
+cifmw_repo_setup_dlrn_uri: "https://osp-trunk.hosted.upshift.rdu2.redhat.com/"
+cifmw_repo_setup_rdo_mirror: "{{ cifmw_repo_setup_dlrn_uri }}"
+
+cifmw_architecture_va_scenario: hci
+
+## VA-1 (HCI) Tempest vars
+cifmw_run_tests: true
+cifmw_run_tempest: true
+cifmw_tempest_tests_allowed:
+  - tempest.scenario.test_network_basic_ops.TestNetworkBasicOps
+
+## VA-1 (HCI) Ceph vars
+cifmw_cephadm_default_container: false
+cifmw_cephadm_container_ns: registry-proxy.engineering.redhat.com/rh-osbs
+cifmw_cephadm_container_image: rhceph
+cifmw_cephadm_container_tag: 7
+cifmw_cephadm_ceph_spec_fqdn: false
+cifmw_cephadm_haproxy_container_image: "{{ cifmw_cephadm_container_ns }}/haproxy:latest"
+cifmw_cephadm_keepalived_container_image: "{{ cifmw_cephadm_container_ns }}/keepalived:latest"
+cifmw_cephadm_prometheus_container_ns: registry-proxy.engineering.redhat.com/prometheus
+cifmw_cephadm_alertmanager_container_image: "{{ cifmw_cephadm_prometheus_container_ns }}/alertmanager:latest"
+cifmw_cephadm_grafana_container_image: "{{ cifmw_cephadm_container_ns }}/grafana:latest"
+cifmw_cephadm_node_exporter_container_image: "{{ cifmw_cephadm_prometheus_container_ns }}/node-exporter:latest"
+cifmw_cephadm_prometheus_container_image: "{{ cifmw_cephadm_prometheus_container_ns }}/prometheus:latest"
+_architecture_repo_path: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/architecture"
+_arch_scenario_path: "{{ [_architecture_repo_path, 'examples/va', cifmw_architecture_va_scenario] | path_join}}"
+cifmw_ceph_client_values_post_ceph_path_src: >-
+  {{
+    [
+      _arch_scenario_path,
+      'values.yaml'
+    ] | path_join
+  }}
+cifmw_ceph_client_values_post_ceph_path_dst: "{{ cifmw_ceph_client_values_post_ceph_path_src }}"
+cifmw_ceph_client_service_values_post_ceph_path_dst: >-
+  {{
+    [
+      _arch_scenario_path,
+      'service-values.yaml'
+    ] | path_join
+  }}
+cifmw_ceph_client_service_values_post_ceph_path_src: "{{ cifmw_ceph_client_service_values_post_ceph_path_dst }}"
+
+post_edpm_first_deploy:
+  - name: Deploy Ceph
+    type: playbook
+    inventory: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+    source: "../../playbooks/ceph.yml"
