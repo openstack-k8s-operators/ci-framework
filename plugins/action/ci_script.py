@@ -133,7 +133,7 @@ class ActionModule(ActionBase):
         __SCRIPT_ARG,
         __DRY_RUN_ARG,
         __EXTRA_ARGS_ARG,
-        __CHDIR_ARG
+        __CHDIR_ARG,
     ]
 
     def __init__(self, **kwargs):
