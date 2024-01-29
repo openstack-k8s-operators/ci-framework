@@ -161,12 +161,7 @@ class ActionModule(ActionBase):
             raise AnsibleActionFail("script parameter is missing")
 
         output_dir = pathlib.Path(task_args.pop("output_dir"))
-        if not output_dir.is_dir():
-            raise AnsibleActionFail("output_dir points to a non-existing directory")
-
         logs_dir = output_dir.parent.joinpath("logs")
-        if not logs_dir.is_dir():
-            raise AnsibleActionFail(f"logs dir, {logs_dir} doesn't exist")
 
         # Remove cmd if not passed, we are going to use _raw_params
         # to pass the cmd we create here
@@ -209,6 +204,10 @@ class ActionModule(ActionBase):
         file_task.args.update(
             {"_raw_params": script_path_str, "chdir": output_dir.as_posix()}
         )
+        file_task.args.pop('output_dir')
+        file_task.args.pop('script')
+        if 'dry_run' in file_task.args:
+            file_task.args.pop('dry_run')
 
         if not dry_run:
             return self._shared_loader_obj.action_loader.get(
