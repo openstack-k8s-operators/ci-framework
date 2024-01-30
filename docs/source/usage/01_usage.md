@@ -37,6 +37,7 @@ are shared among multiple roles:
 - `cifmw_architecture_repo`: (String) Path of the architecture repository on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
 - `cifmw_architecture_va_scenario`: (String) The selected VA scenario to deploy.
+- `cifmw_ceph_target`: (String) the Ansible inventory group where ceph is deployed. Defaults to `computes`.
 
 ```{admonition} Words of caution
 :class: danger
