@@ -49,10 +49,20 @@
 - name: Enable IP forwarding in the Network Operator.
   when:
     - cifmw_devscripts_config['network_type'] == 'OVNKubernetes'
-    - "cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=')"
-  ansible.builtin.copy:
-    src: "files/forwarding.yaml"
-    dest: "{{ cifmw_devscripts_config['assets_extra_folder'] }}/forwarding.yaml"
+    - ("cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=')") or
+      (cifmw_devscripts_host_routing | bool)
+  vars:
+    ip_forward: "{{ cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=') }}"
+    host_routing: "{{ cifmw_devscripts_host_routing | bool }}"
+  ansible.builtin.template:
+    src: "templates/ovn_config.j2"
+    dest: >-
+      {{
+        [
+          cifmw_devscripts_config['assets_extra_folder'],
+          'ovn_k8s_config.yaml'
+        ] | ansible.builtin.path_join
+      }}
     owner: "{{ cifmw_devscripts_user }}"
     group: "{{ cifmw_devscripts_user }}"
     mode: "0644"
