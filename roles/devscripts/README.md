@@ -32,6 +32,7 @@ managed services.
 * `cifmw_devscripts_use_layers` (bool) Toggle overlay support. Specifically, this boolean will instruct the role to
   shutdown the whole OCP cluster, dump the XML, undefine the nodes, and prevents running the "post" tasks. Defaults to `false`.
 * `cifmw_devscripts_remove_default_net` (bool) Remove the default virtual network. Defaults to `false`.
+* `cifmw_devscripts_host_routing` (bool) Enable routing via host for OCP nodes in case of OVNKubernetes. Defaults to `false`.
 
 ### Secrets management
 
