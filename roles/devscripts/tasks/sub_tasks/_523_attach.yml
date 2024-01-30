@@ -37,6 +37,17 @@
     vms: "{{ vms + [item] }}"
   loop: "{{ vms_list.stdout_lines }}"
 
+- name: "Power OFF virtual machine {{ item }}"
+  when:
+    - vms is defined
+    - vms | length > 0
+    - cifmw_devscripts_extra_networks | length > 1
+  community.libvirt.virt:
+    command: "destroy"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ vms }}"
+
 - name: Attach an interface for each extra_network
   when:
     - vms is defined
@@ -44,10 +55,22 @@
   vars:
     vm_name: "{{ item[0] }}"
     network: "{{ item[1] }}"
+    offline: "{{ cifmw_devscripts_extra_networks | length > 1 }}"
   ansible.builtin.include_role:
     name: libvirt_manager
     tasks_from: attach_interface.yml
   loop: "{{ vms | product(cifmw_devscripts_extra_networks) }}"
+
+- name: "Power ON virtual machine {{ item }}"
+  when:
+    - vms is defined
+    - vms | length > 0
+    - cifmw_devscripts_extra_networks | length > 1
+  community.libvirt.virt:
+    command: "start"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ vms }}"
 
 - name: Add vlan tags to the attached interfaces.
   become: true

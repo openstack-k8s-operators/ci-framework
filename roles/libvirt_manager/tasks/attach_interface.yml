@@ -77,15 +77,17 @@
         _extracted_xml.matches | default([]) |
         selectattr('source.bridge', 'equalto', _local_bridge_name) | default([])
       }}
+    _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
   when:
     - _attached_bridges | length == 0
   block:
-    - name: "Generate a random MAC address for {{ vm_name }}"
-      ansible.builtin.set_fact:
-        _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
-
     - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
-      when: _lm_mac_address is defined
+      vars:
+        _cmd_suffix: >-
+          {{
+            (offline | default(false)) |
+            ternary('--config', '--config --persistent')
+          }}
       ansible.builtin.command:
         cmd: >-
           virsh -c qemu:///system
@@ -94,11 +96,9 @@
           --type bridge
           --mac "{{ _lm_mac_address }}"
           --model virtio
-          --config
-          --persistent
+          {{ _cmd_suffix }}
 
     - name: Inject data in cifmw_libvirt_manager_mac_map
-      when: _lm_mac_address is defined
       vars:
         _vm_name: "{{ vm_name | replace('cifmw-', '') }}"
         _dataset: >-
@@ -110,5 +110,6 @@
         cifmw_libvirt_manager_mac_map: >-
           {{
             cifmw_libvirt_manager_mac_map | default({}) |
-            combine(_dataset, recursive=true)
+            combine(_dataset, list_merge='append', recursive=true)
           }}
+        cacheable: true
