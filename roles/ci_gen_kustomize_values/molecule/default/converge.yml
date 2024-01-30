@@ -20,24 +20,25 @@
   vars:
     cifmw_ci_gen_kustomize_values_basedir: >-
       {{ ansible_user_dir }}/ci-framework-data
-    cifmw_ci_gen_kustomize_values_architecure_repo: >-
+    architecture_repo: >-
       {{
         (ansible_user_dir,
          'src/github.com/openstack-k8s-operators/architecture') | path_join
       }}
     artifacts: "{{ cifmw_ci_gen_kustomize_values_basedir }}/artifacts"
+    to_kustomize:
+      - name: 'dataplane'
+        path: 'examples/va/nfv/sriov/edpm'
+      - name: 'ctlplane'
+        path: 'examples/va/nfv/sriov'
   tasks:
     - name: Ensure architecture repository is building
       ansible.builtin.shell:
-        chdir: "{{ cifmw_ci_gen_kustomize_values_architecure_repo }}/{{ item.path }}"
+        chdir: "{{ architecture_repo }}/{{ item.path }}"
         cmd: >-
           {{ ansible_user_dir }}/bin/kustomize build >
           {{ artifacts }}/vanilla-{{ item.name }}.yaml
-      loop:
-        - name: 'dataplane'
-          path: 'examples/va/nfv/sriov/edpm'
-        - name: 'ctlplane'
-          path: 'examples/va/nfv/sriov'
+      loop: "{{ to_kustomize }}"
 
     - name: Create nova migration keypair
       register: _nova_key
@@ -79,15 +80,13 @@
 
     - name: Generate network-values
       vars:
-        cifmw_ci_gen_kustomize_values_dt_src_file: >-
-          examples/va/nfv/sriov/values.yaml
+        cifmw_architecture_va_scenario: "nfv/sriov/nncp"
       ansible.builtin.include_role:
         name: ci_gen_kustomize_values
 
     - name: Generate edpm-values
       vars:
-        cifmw_ci_gen_kustomize_values_dt_src_file: >-
-          examples/va/nfv/sriov/edpm/values.yaml
+        cifmw_architecture_va_scenario: "nfv/sriov/edpm"
         cifmw_ci_gen_kustomize_values_userdata: >-
           {{ cifmw_reproducer_user_edpm_values }}
       ansible.builtin.include_role:
@@ -120,7 +119,7 @@
       ansible.builtin.copy:
         remote_src: true
         src: "{{ artifacts }}/ci_gen_kustomize_values/{{ item.key }}/values.yaml"
-        dest: "{{ cifmw_ci_gen_kustomize_values_architecure_repo }}/{{ item.value }}"
+        dest: "{{ architecture_repo }}/{{ item.value }}"
       loop:
         - key: 'network-values'
           value: 'examples/va/nfv/sriov/values.yaml'
@@ -129,12 +128,8 @@
 
     - name: Ensure kustomize is able to build
       ansible.builtin.shell:
-        chdir: "{{ cifmw_ci_gen_kustomize_values_architecure_repo }}/{{ item.path }}"
+        chdir: "{{ architecture_repo }}/{{ item.path }}"
         cmd: >-
           {{ ansible_user_dir }}/bin/kustomize build >
           {{ artifacts }}/{{ item.name }}.yaml
-      loop:
-        - name: 'dataplane'
-          path: 'examples/va/nfv/sriov/edpm'
-        - name: 'ctlplane'
-          path: 'examples/va/nfv/sriov'
+      loop: "{{ to_kustomize }}"
