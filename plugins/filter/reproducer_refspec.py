@@ -65,6 +65,8 @@ class FilterModule:
             patchset = repo["patchset"]
             # changes coming from gerrit
             return f"refs/changes/{change[-2:]}/{change}/{patchset}"
+        elif "gitlab" in hostname:
+            return f"merge-requests/{change}/head"
         else:
             # changes coming from github
             return f"pull/{change}/head"
