@@ -1,0 +1,117 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure that values.yaml file for control plane deployment exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_kustomize_deploy_nncp_values_src_file }}"
+  register: _cifmw_kustomize_deploy_nncp_values_exists
+  failed_when: not _cifmw_kustomize_deploy_nncp_values_exists.stat.exists
+
+- name: Copy values.yaml file to NNCP directory
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ cifmw_kustomize_deploy_nncp_values_src_file }}"
+    dest: "{{ cifmw_kustomize_deploy_nncp_values_dest_file }}"
+    mode: "0644"
+
+- name: Generate the NNCP kustomization file
+  ansible.builtin.copy:
+    content: >-
+      {{
+        lookup
+        (
+          'kubernetes.core.kustomize',
+          dir=cifmw_kustomize_deploy_nncp_source_files
+        )
+      }}
+    dest: "{{ cifmw_kustomize_deploy_nncp_dest_file }}"
+    mode: "0644"
+
+- name: NNCP resources
+  when: not cifmw_kustomize_deploy_generate_crs_only
+  block:
+    - name: Apply the NNCP CR
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: openstack
+        state: present
+        src: "{{ cifmw_kustomize_deploy_nncp_dest_file }}"
+
+    - name: Wait for NNCP resources
+      kubernetes.core.k8s_info:
+        api_version: nmstate.io/v1
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: nncp
+        namespace: openstack
+        label_selectors:
+          - osp/nncm-config-type = standard
+        wait: true
+        wait_condition:
+          type: SuccessfullyConfigured
+          status: "True"
+        wait_timeout: 300
+
+- name: Generate the control plane kustomization file
+  ansible.builtin.copy:
+    content: >-
+      {{
+        lookup
+        (
+          'kubernetes.core.kustomize',
+          dir=cifmw_kustomize_deploy_cp_source_files
+        )
+      }}
+    dest: "{{ cifmw_kustomize_deploy_cp_dest_file }}"
+    mode: "0644"
+
+- name: Control Plane resources
+  when: not cifmw_kustomize_deploy_generate_crs_only
+  block:
+    - name: Apply the control plane CR
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: openstack
+        state: present
+        src: "{{ cifmw_kustomize_deploy_cp_dest_file }}"
+      register: _cifmw_kustomize_deploy_controlplane_apply_out
+
+    - name: Wait for the dataplane to be deployed
+      vars:
+        _applied_controlplane_cr: >-
+          {{
+            (
+              _cifmw_kustomize_deploy_controlplane_apply_out.result.results |
+              selectattr('result.kind', 'equalto', 'OpenStackControlPlane') |
+              first
+            ).result
+          }}
+      kubernetes.core.k8s_info:
+        api_version: "{{ _applied_controlplane_cr.apiVersion }}"
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: "{{ _applied_controlplane_cr.kind }}"
+        name: "{{ _applied_controlplane_cr.metadata.name }}"
+        namespace: "{{ _applied_controlplane_cr.metadata.namespace }}"
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 800

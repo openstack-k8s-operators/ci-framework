@@ -18,51 +18,33 @@
   hosts: all
   vars_files:
     - ../../defaults/main.yml
-  vars:
-    _install_yamls_path: >-
-      {{
-        cifmw_installyamls_repos |
-        default(
-          '~/src/github.com/openstack-k8s-operators/install_yamls',
-          true
-        )
-      }}
-  pre_tasks:
-    - name: Ensure CRC is started
-      async: 1800
-      poll: 0
-      register: _crc_start
-      ansible.builtin.command:
-        cmd: crc start
+    - resources/vars.yml
   tasks:
-    - name: Check for CRC status
-      ansible.builtin.async_status:
-        jid: "{{ _crc_start.ansible_job_id }}"
-      register: _crc_status
-      until: _crc_status.finished
-      retries: 100
-      delay: 10
-    - name: Create local storage
-      ansible.builtin.include_role:
-        name: ci_local_storage
-      vars:
-        cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-        cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
-        cifmw_cls_storage_capacity: "1Gi"
-    - name: Attach the default network to crc vm
-      ansible.builtin.command:
-        cmd: "make crc_attach_default_interface"
-        chdir: "{{ _install_yamls_path ~ '/devsetup' }}"
-    - name: Deploy a compute vm
-      ansible.builtin.command:
-        cmd: "make edpm_compute"
-        chdir: "{{ _install_yamls_path ~ '/devsetup' }}"
-    - name: Create values.yml destination folder if it doesn't exists
+    - name: Create values destination folders if they don't exist
       ansible.builtin.file:
-        path: "{{ cifmw_kustomize_deploy_cp_values_src_file | dirname }}"
+        path: "{{ item }}"
         state: directory
         mode: "0775"
-    - name: Copy sample values.yml to its destination
+      loop:
+        - "{{ cifmw_kustomize_deploy_nncp_values_src_file | dirname }}"
+        - "{{ _dp_pre_ceph_deploy_dir }}"
+        - "{{ _dp_post_ceph_deploy_dir }}"
+
+    - name: Check requirements
+      ansible.builtin.include_role:
+        name: kustomize_deploy
+        tasks_from: check_requirements.yml
+
+    - name: Copy sample values.yml files to their destination
       ansible.builtin.copy:
-        src: resources/values.yml
-        dest: "{{ cifmw_kustomize_deploy_cp_values_src_file }}"
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: true
+        mode: "0644"
+      loop:
+        - src: "{{ cifmw_kustomize_deploy_nncp_values_dest_file }}"
+          dest: "{{ cifmw_kustomize_deploy_nncp_values_src_file }}"
+        - src: "{{ _dp_pre_ceph_deploy_dest_values_file }}"
+          dest: "{{ _dp_pre_ceph_deploy_src_values_file }}"
+        - src: "{{ cifmw_kustomize_deploy_dp_values_dest_file }}"
+          dest: "{{ _dp_post_ceph_deploy_src_values_file }}"
