@@ -42,6 +42,15 @@
             dest: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/{{ job_id }}_play.yml"
             src: "play.yml.j2"
 
+        - name: Push content-provider playbook if needed
+          tags:
+            - bootstrap
+          when:
+            - use_content_provider | default(false) | bool
+          ansible.builtin.template:
+            dest: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/{{ job_id }}_content-provider.yml"
+            src: "content-provider.yml.j2"
+
         - name: Push extracted network data on controller-0
           tags:
             - bootstrap
@@ -102,11 +111,24 @@
           -i ~/ci-framework-data/artifacts/zuul_inventory.yml
           pre-ci-play.yml
 
+    - name: Run content-provider
+      when:
+        - use_content_provider | default(false) | bool
+        - cifmw_reproducer_run_content_provider | bool
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-content-provider-{{ job_id }}.log"
+      ansible.builtin.command:
+        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook
+          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+          {{ job_id }}_content-provider.yml
+
     - name: Run job
       when:
         - cifmw_reproducer_run_job | bool
       environment:
-        ANSIBLE_LOG_PATH: "~/ansible-{{ job_id }}.log"
+        ANSIBLE_LOG_PATH: "~/ansible-ci-job-{{ job_id }}.log"
       ansible.builtin.command:
         chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
         cmd: >-

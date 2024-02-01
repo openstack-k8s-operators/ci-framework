@@ -10,10 +10,23 @@ None
 * `cifmw_reproducer_kubecfg`: (String) Path to the CRC kubeconfig file. Defaults to the image_local_dir defined in the cifmw_libvirt_manager_configuration dict.
 * `cifmw_reproducer_repositories`: (List[mapping]) List of repositories you want to synchronize from your local machine to the ansible controller.
 * `cifmw_reproducer_run_job`: (Bool) Run actual CI job. Defaults to `true`.
+* `cifmw_reproducer_run_content_provider`: (Bool) Run content-provider job. Defaults to `true`.
 * `cifmw_reproducer_params`: (Dict) Specific parameters you want to pass to the reproducer. Defaults to `{}`.
 * `cifmw_reproducer_dns_servers`: List of dns servers which should be used by the CRC VM as upstream dns servers. Defaults to 1.1.1.1, 8.8.8.8.
 * `cifmw_reproducer_hp_rhos_release`: (Bool) Allows to consume rhos-release on the hypervisor. Defaults to `false`.
 * `cifmw_reproducer_dnf_tweaks`: (List) Options you want to inject in dnf.conf, both on controller-0 and hypervisor. Defaults to `[]`.
+
+### run_job and run_content_provider booleans and risks.
+
+- For jobs with content-provider, both steps will be running by default.
+- For jobs without content-provider, only the job will run by default.
+- If a job with content-provider is launched with `cifmw_reproducer_run_job: false`, it will
+  then run the content-provider, and stop.
+- If a job with content-provider is launched for a second time with `cifmw_reproducer_run_content_provider: false`,
+  if the first run did deploy the content-provider, it will pass.
+- If a job with content-provider is launched a **first** time with `cifmw_reproducer_run_content_provider: false`,
+  it will NOT RUN the content-provider, **leading to a crash of the job run**.
+
 
 ## Warning
 This role isn't intended to be called outside of the `reproducer.yml` playbook.
