@@ -20,10 +20,14 @@
     name: podman
     state: present
 
-- name: Create tobiko directories
+- name: Create tobiko directories setting proper permission
+  become: true
   ansible.builtin.file:
     path: "{{ cifmw_tobiko_artifacts_basedir }}"
     state: directory
+    recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
 - name: Create clouds.yaml
   vars:
@@ -32,7 +36,6 @@
     name: tempest
     tasks_from: create-clouds-file
   when: not cifmw_tobiko_dry_run | bool
-
 
 - name: Generate ssh keys used for the VMs that tobiko creates
   block:
@@ -74,6 +77,22 @@
     cmd: "podman unshare chown 42495:42495 -R {{ cifmw_tobiko_artifacts_basedir }}"
   when: not cifmw_tobiko_dry_run | bool
 
+- name: prepare oc binary and kubeconfig to mount them on the tobiko container
+  block:
+    - name: Obtain path to oc
+      ansible.builtin.command: which oc
+      register: oc_path
+
+    - name: Grant x permissions for any user
+      ansible.builtin.file:
+        path: "{{ oc_path.stdout | trim }}"
+        mode: "a+x"
+
+    - name: Grant r permissions for any user
+      ansible.builtin.file:
+        path: "{{ cifmw_openshift_kubeconfig | default(ansible_user_dir + '/.kube/config') }}"
+        mode: "a+r"
+
 - name: Ensure we have tobiko container image
   register: _tobiko_fetch_img
   containers.podman.podman_image:
@@ -94,6 +113,8 @@
       - "{{ cifmw_tobiko_artifacts_basedir }}/:/var/lib/tobiko/external_files:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/tls/certs/ca-bundle.trust.crt:Z"
+      - "{{ oc_path.stdout | trim }}:/usr/local/bin/oc:Z"
+      - "{{ cifmw_openshift_kubeconfig | default(ansible_user_dir + '/.kube/config') }}:/var/lib/tobiko/.kube/config:Z"
 
     detach: false
     dns: "{{ cifmw_tobiko_dns_servers }}"
