@@ -26,9 +26,8 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_tempest_tests_include_override_scenario`: (Boolean) Whether to override the scenario `cifmw_tempest_tests_allowed` definition. Default value: `false`
 * `cifmw_test_operator_tempest_tests_exclude_override_scenario`: (Boolean) Whether to override the scenario `cifmw_tempest_tests_skipped` definition. Default value: `false`
 
-<!-- # Please refer to https://openstack-k8s-operators.github.io/test-operator/guide.html#executing-tempest-tests -->
 * `cifmw_test_operator_tempest_config`: (Object) Definition of Tempest CRD instance that is passed to the test-operator. Default value:
-```
+  ```
   apiVersion: test.openstack.org/v1beta1
   kind: Tempest
   metadata:
@@ -44,4 +43,5 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
       concurrency: "{{ cifmw_test_operator_concurrency }}"
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
     tempestconfRun: "{{ cifmw_tempest_tempestconf_config | default(omit) }}"
-```
+  ```
+  For more information about defining the Tempest CR, please refer to https://openstack-k8s-operators.github.io/test-operator/guide.html#executing-tempest-tests
