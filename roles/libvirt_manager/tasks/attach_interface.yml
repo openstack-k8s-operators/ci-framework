@@ -58,8 +58,9 @@
         xpath: "/domain/devices/interface/source"
         content: "attribute"
 
-- name: Attach new port if needed
+- name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
   vars:
+    _lm_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
     # add prefix if needed/wanted
     _net_name: >-
       {{
@@ -79,36 +80,13 @@
       }}
   when:
     - _attached_bridges | length == 0
-  block:
-    - name: "Generate a random MAC address for {{ vm_name }}"
-      ansible.builtin.set_fact:
-        _lm_mac_address: "{{ '0A:02' | community.general.random_mac }}"
-
-    - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
-      when: _lm_mac_address is defined
-      ansible.builtin.command:
-        cmd: >-
-          virsh -c qemu:///system
-          attach-interface "{{ vm_name }}"
-          --source "{{ _local_bridge_name }}"
-          --type bridge
-          --mac "{{ _lm_mac_address }}"
-          --model virtio
-          --config
-          --persistent
-
-    - name: Inject data in cifmw_libvirt_manager_mac_map
-      when: _lm_mac_address is defined
-      vars:
-        _vm_name: "{{ vm_name | replace('cifmw-', '') }}"
-        _dataset: >-
-          {{
-            {_vm_name: [{'mac': _lm_mac_address,
-                        'network': network.name}]}
-          }}
-      ansible.builtin.set_fact:
-        cifmw_libvirt_manager_mac_map: >-
-          {{
-            cifmw_libvirt_manager_mac_map | default({}) |
-            combine(_dataset, recursive=true)
-          }}
+  ansible.builtin.command:
+    cmd: >-
+      virsh -c qemu:///system
+      attach-interface "{{ vm_name }}"
+      --source "{{ _local_bridge_name }}"
+      --type bridge
+      --mac "{{ _lm_mac_address }}"
+      --model virtio
+      --config
+      --persistent
