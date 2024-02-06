@@ -9,85 +9,134 @@
       ansible.builtin.slurp:
         src: "/etc/ci/env/networking-info.yml"
 
-    - name: Harcode crc-pre script
-      become: true
+    - name: Check which dnsmasq config we must edit
+      register: _dnsmasq
+      ansible.builtin.stat:
+        path: '/srv/dnsmasq.conf'
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Shared parameter across blocks
       vars:
-        _decoded_net_env: "{{ _cifmw_multinode_customizations_crc_net_env_slurp['content'] | b64decode | from_yaml }}"
+        _decoded_net_env: >-
+          {{
+            _cifmw_multinode_customizations_crc_net_env_slurp['content'] |
+            b64decode | from_yaml
+          }}
         _crc_default_net_ip: >-
           {{
-            _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.ip | ansible.utils.ipaddr('address')
+            _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.ip
           }}
-        _crc_default_net_dns: "{{ _decoded_net_env.crc_ci_bootstrap_provider_dns | default([]) }}"
-      ansible.builtin.copy:
-        dest: "/usr/local/bin/configure-pre-crc.sh"
-        mode: '0755'
-        owner: root
-        group: root
-        content: |-
-          #!/bin/bash
+      block:
+        - name: Manage name resolution and interfaces
+          become: true
+          vars:
+            _crc_default_iface: >-
+              {{
+                 _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.iface
+              }}
+            _crc_default_gw: >-
+              {{
+                 _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.gw
+              }}
+            _crc_private_connection_name: >-
+              {{
+                 _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.connection
+              }}
+          block:
+            - name: Ensure crc knows about its second NIC
+              community.general.nmcli:
+                autoconnect: true
+                conn_name: "{{ _crc_private_connection_name }}"
+                dns4: 127.0.0.1
+                ifname: "{{ _crc_default_iface }}"
+                type: ethernet
+                ip4: "{{ _crc_default_net_ip }}"
+                gw4: "{{ _crc_default_gw }}"
+                state: present
 
-          set -x
+            - name: Ensure crc does not get "public" DNS
+              become: true
+              community.general.nmcli:
+                autoconnect: true
+                conn_name: "Wired connection 1"
+                dns4_ignore_auto: true
+                state: present
 
-          cat << EOL | sudo tee /var/srv/dnsmasq.conf
-          user=root
-          port=53
-          bind-interfaces
-          expand-hosts
-          log-queries
-          no-negcache
-          local=/crc.testing/
-          domain=crc.testing
-          address=/apps-crc.testing/{{ _crc_default_net_ip }}
-          address=/api.crc.testing/{{ _crc_default_net_ip }}
-          address=/api-int.crc.testing/{{ _crc_default_net_ip }}
-          address=/crc-74q6p-master-0.crc.testing/{{ _crc_default_net_ip }}
-          {% for dns_server in _crc_default_net_dns -%}
-          server={{ dns_server }}
-          {% endfor %}
-          EOL
+            - name: Restart NetworkManager
+              ansible.builtin.service:
+                name: NetworkManager
+                state: reloaded
 
-          cat << EOL | sudo tee /etc/resolv.conf
-          nameserver {{ _crc_default_net_ip }}
-          EOL
+        - name: Configure dnsmasq
+          vars:
+            _dnsmasq_config: >-
+              {{
+                _dnsmasq.stat.exists |
+                ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
+              }}
+            _crc_default_net_dns: >-
+              {{
+                 _decoded_net_env.crc_ci_bootstrap_provider_dns |
+                default([])
+              }}
+          block:
+            - name: Configure dns forwarders
+              become: true
+              ansible.builtin.blockinfile:
+                path: "{{ _dnsmasq_config }}"
+                block: |-
+                  {% for dns_server in _crc_default_net_dns %}
+                  server={{ dns_server }}
+                  {% endfor %}
 
-          # stop overwriting /etc/resolv.conf after reboot
-          cat << EOL | sudo tee /etc/NetworkManager/conf.d/00-custom-crc.conf
-          [main]
-          dns=none
-          EOL
+            - name: Configure local DNS for CRC pod
+              become: true
+              register: last_modification
+              ansible.builtin.replace:
+                path: "{{ _dnsmasq_config }}"
+                regexp: "192.168.130.11"
+                replace: >-
+                  {{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}
 
-          sudo systemctl reload NetworkManager
-
-    - name: Restart the service because zuul base job is overwriting /etc/resolv.conf
+    - name: Reload dnsmasq service if used
       become: true
-      ansible.builtin.systemd:
-        state: restarted
-        name: crc-pre
+      when:
+        - not _dnsmasq.stat.exists
+      ansible.builtin.service:
+        name: dnsmasq
+        state: reloaded
 
-    # Avoid 'state: restarted' due to issues with IP not available when crc-dnsmasq starts
-    - name: Stop dnsmasq
-      become: true
-      ansible.builtin.systemd:
-        state: stopped
-        name: crc-dnsmasq
+    - name: Manage old dnsmasq container
+      when:
+        - _dnsmasq.stat.exists
+      block:
+        # Avoid 'state: restarted' due to issues with IP not
+        # available when crc-dnsmasq starts
+        - name: Stop dnsmasq
+          become: true
+          ansible.builtin.systemd:
+            state: stopped
+            name: crc-dnsmasq
 
-    - name: Make sure that crc-dnsmasq is not running
-      containers.podman.podman_container:
-        name: crc-dnsmasq
-        state: absent
+        - name: Make sure that crc-dnsmasq is not running
+          containers.podman.podman_container:
+            name: crc-dnsmasq
+            state: absent
 
-    - name: Start dnsmasq
-      become: true
-      ansible.builtin.systemd:
-        state: started
-        name: crc-dnsmasq
-      register: _dnsmasq_start_reg
-      retries: 15
-      delay: 20
-      until:
-        - _dnsmasq_start_reg.failed is false
-        - _dnsmasq_start_reg.status is defined
-        - _dnsmasq_start_reg.status.ActiveState == "active"
+        - name: Start dnsmasq
+          become: true
+          ansible.builtin.systemd:
+            state: started
+            name: crc-dnsmasq
+          register: _dnsmasq_start_reg
+          retries: 15
+          delay: 20
+          until:
+            - _dnsmasq_start_reg.failed is false
+            - _dnsmasq_start_reg.status is defined
+            - _dnsmasq_start_reg.status.ActiveState == "active"
 
     - name: Wait for CRC to be ready
       register: wait_crc
