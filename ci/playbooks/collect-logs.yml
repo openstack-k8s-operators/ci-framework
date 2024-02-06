@@ -69,12 +69,19 @@
               pip3 freeze >> ./python.log;
               dmesg -T > ./dmesg.log;
 
+        - name: Generate list of logs to collect in home directory
+          ansible.builtin.find:
+            paths: "{{ ansible_user_dir }}"
+            patterns: "*.log"
+          register: files_to_copy
+
         - name: Copy logs from home directory
           ignore_errors: true  # noqa: ignore-errors
-          ansible.builtin.command:
-            chdir: "{{ ansible_user_dir }}/zuul-output/logs/"
-            cmd: |
-              cp {{ ansible_user_dir }}/*.log .;
+          ansible.builtin.copy:
+            src: "{{ item.path }}"
+            dest: "{{ ansible_user_dir }}/zuul-output/logs/"
+            remote_src: true
+          loop: "{{ files_to_copy.files }}"
 
         - name: Copy crio stats log file
           when: cifmw_openshift_crio_stats | default(true)
