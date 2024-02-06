@@ -148,10 +148,14 @@
     wait_condition:
       type: Complete
       status: true
+  ignore_errors: true
+  register: tempest
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Start test-operator-logs-pod
-  when: not cifmw_test_operator_dry_run | bool
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - not tempest.failed
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -190,7 +194,9 @@
   until: logs_pod.resources[0].status.phase == "Running"
   delay: 10
   retries: 20
-  when: not cifmw_test_operator_dry_run | bool
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - not tempest.failed
 
 - name: Get logs from test-operator-logs-pod
   environment:
@@ -199,7 +205,9 @@
   ansible.builtin.shell: >
     oc cp -n {{ cifmw_test_operator_namespace }} openstack/test-operator-logs-pod:mnt/
     {{ cifmw_test_operator_artifacts_basedir }}
-  when: not cifmw_test_operator_dry_run | bool
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - not tempest.failed
 
 - name: Get list of all pods
   kubernetes.core.k8s_info:
