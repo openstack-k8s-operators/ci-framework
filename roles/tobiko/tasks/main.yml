@@ -20,10 +20,14 @@
     name: podman
     state: present
 
-- name: Create tobiko directories
+- name: Create tobiko directories setting proper permission
+  become: true
   ansible.builtin.file:
     path: "{{ cifmw_tobiko_artifacts_basedir }}"
     state: directory
+    recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
 - name: Create clouds.yaml
   vars:
@@ -32,7 +36,6 @@
     name: tempest
     tasks_from: create-clouds-file
   when: not cifmw_tobiko_dry_run | bool
-
 
 - name: Generate ssh keys used for the VMs that tobiko creates
   block:
@@ -70,11 +73,16 @@
     remote_src: true
 
 - name: Set proper permission for tobiko directory
-  ansible.builtin.command:
-    cmd: "podman unshare chown 42495:42495 -R {{ cifmw_tobiko_artifacts_basedir }}"
-  when: not cifmw_tobiko_dry_run | bool
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_tobiko_artifacts_basedir }}"
+    state: directory
+    recurse: true
+    owner: "root"
+    group: "root"
 
 - name: Ensure we have tobiko container image
+  become: true
   register: _tobiko_fetch_img
   containers.podman.podman_image:
     name: "{{ cifmw_tobiko_image }}:{{ cifmw_tobiko_image_tag }}"
@@ -83,6 +91,7 @@
   until: _tobiko_fetch_img is success
 
 - name: Run tobiko
+  become: true
   ignore_errors: true
   containers.podman.podman_container:
     name: tobiko
@@ -90,11 +99,13 @@
     state: started
     auto_remove: "{{ cifmw_tobiko_remove_container }}"
     network: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     volume:
       - "{{ cifmw_tobiko_artifacts_basedir }}/:/var/lib/tobiko/external_files:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
       - "{{ cifmw_tobiko_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/tls/certs/ca-bundle.trust.crt:Z"
-
     detach: false
     dns: "{{ cifmw_tobiko_dns_servers }}"
     env:
@@ -107,6 +118,14 @@
   when: not cifmw_tobiko_dry_run | bool
   register: tobiko_run_output
 
+- name: Save logs from podman
+  become: true
+  when: not cifmw_tobiko_dry_run | bool
+  ansible.builtin.copy:
+    dest: "{{ cifmw_tobiko_artifacts_basedir }}/podman_tobiko.log"
+    content: |
+      "{{ tobiko_run_output.stdout }}"
+
 - name: Change tobiko directory permission back to original
   become: true
   ansible.builtin.file:
@@ -115,13 +134,6 @@
     recurse: true
     owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
-
-- name: Save logs from podman
-  when: not cifmw_tobiko_dry_run | bool
-  ansible.builtin.copy:
-    dest: "{{ cifmw_tobiko_artifacts_basedir }}/podman_tobiko.log"
-    content: |
-      "{{ tobiko_run_output.stdout }}"
 
 - name: Fail if podman container did not succeed
   when: not cifmw_tobiko_dry_run | bool
