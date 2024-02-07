@@ -33,6 +33,7 @@ managed services.
   shutdown the whole OCP cluster, dump the XML, undefine the nodes, and prevents running the "post" tasks. Defaults to `false`.
 * `cifmw_devscripts_remove_default_net` (bool) Remove the default virtual network. Defaults to `false`.
 * `cifmw_devscripts_host_routing` (bool) Enable routing via host for OCP nodes in case of OVNKubernetes. Defaults to `false`.
+* `cifmw_devscripts_enable_iscsi` (bool) Enable iSCSI services on the OCP nodes having role as `worker`. Defaults to `false`.
 
 ### Secrets management
 
