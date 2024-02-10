@@ -20,6 +20,25 @@ None
   read and written (default `/tmp`)
 * `cifmw_ceph_client_k8s_secret_name`: name of the k8s secret CR (default `ceph-conf-files`)
 * `cifmw_ceph_client_k8s_namespace`: namespace of the k8s secret CR (default `openstack`)
+* `cifmw_ceph_client_values_post_ceph_path_src`: path to an HCI post
+  Ceph values file as found in the openstack-k8s-operators
+  `architecture` repository under `examples/va/hci/values.yaml`
+    (default `''`)
+* `cifmw_ceph_client_values_post_ceph_path_dst`: path to a modified
+  HCI post file but with CHANGEME values set to actual values based
+  on the Ceph deployment created by the `cifmw_cephadm` role
+  (default `/tmp/edpm_values_post_ceph.yaml`); this file will not be
+  created unless `cifmw_ceph_client_values_post_ceph_path_src` is set
+* `cifmw_ceph_client_service_values_post_ceph_path_src`: path to an HCI
+  post Ceph service values file as found in the openstack-k8s-operators
+  `architecture` repository under `examples/va/hci/service-values.yaml`
+  (default `''`)
+* `cifmw_ceph_client_service_values_post_ceph_path_dst`: path to a modified
+  HCI post file but with CHANGEME values set to actual values based
+  on the Ceph deployment created by the `cifmw_cephadm` role
+  (default `/tmp/edpm_service_values_post_ceph.yaml`); this file will not
+  be created unless `cifmw_ceph_client_service_values_post_ceph_path_src`
+  is set
 
 ## Examples
 
@@ -51,4 +70,36 @@ metadata:
   namespace: openstack
 type: Opaque
 ```
-The user should then run `kubectl create -f /tmp/k8s_ceph_secret.yml`.
+The user could then run `kubectl create -f /tmp/k8s_ceph_secret.yml`.
+
+Alternatively, a copy of
+https://github.com/openstack-k8s-operators/architecture
+may be cloned to `/home/zuul` and the role may be called like this:
+
+```yaml
+- name: Render Ceph client configuration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cifmw_ceph_client_vars: /tmp/ceph_client.yml
+    cifmw_ceph_client_values_post_ceph_path_src: /home/zuul/architecture/examples/va/hci/values.yaml
+    cifmw_ceph_client_service_values_post_ceph_path_src: /home/zuul/architecture/examples/service-values.yaml
+  tasks:
+    - name: Export configuration for ceph client
+      ansible.builtin.import_role:
+        name: cifmw_ceph_client
+```
+
+After the above Ansible runs, two files, `/tmp/edpm_values_post_ceph.yaml`
+and `/tmp/edpm_service_values_post_ceph.yaml`, will be created and the
+following may be run.
+
+```bash
+cp /tmp/edpm_values_post_ceph.yaml /home/zuul/architecture/examples/va/hci/values.yaml
+cp /tmp/edpm_service_values_post_ceph.yaml /home/zuul/architecture/examples/va/hci/service-values.yaml
+kustomize build /home/zuul/architecture/examples/va/hci/
+```
+The resultant `ceph-nova` and `service-values` ConfigMaps as well
+as the `ceph-conf-files` secret should contain the values from the
+deployed Ceph cluster client variables found in `/tmp/ceph_client.yml`
+(as created by the `cifmw_cephadm` role).

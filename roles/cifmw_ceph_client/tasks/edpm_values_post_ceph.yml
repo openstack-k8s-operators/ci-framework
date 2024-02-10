@@ -1,0 +1,44 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Read HCI post Ceph values source file
+  ansible.builtin.slurp:
+    path: "{{ cifmw_ceph_client_values_post_ceph_path_src }}"
+  register: yaml_content
+
+- name: Write source values to destination with modified keys
+  ansible.builtin.copy:
+    content: "{{ yaml_content.content | b64decode | from_yaml
+      | combine(modified_keys, recursive=True) | to_nice_yaml }}"
+    dest: "{{ cifmw_ceph_client_values_post_ceph_path_dst }}"
+  vars:
+    modified_keys:
+      data:
+        ceph:
+          conf: "{{ cifmw_ceph_client_conf_file_b64.content }}"
+          keyring: "{{ cifmw_ceph_client_key_file_b64.content }}"
+        nova:
+          ceph:
+            conf: |-
+              [libvirt]
+              images_type=rbd
+              images_rbd_pool=vms
+              images_rbd_ceph_conf=/etc/ceph/{{ cifmw_ceph_client_cluster }}.conf
+              images_rbd_glance_store_name=default_backend
+              images_rbd_glance_copy_poll_interval=15
+              images_rbd_glance_copy_timeout=600
+              rbd_user={{ keys[0].name | replace('client.', '') }}
+              rbd_secret_uuid={{ cifmw_ceph_client_fsid }}
