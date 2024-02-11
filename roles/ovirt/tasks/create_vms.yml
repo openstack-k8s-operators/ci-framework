@@ -1,0 +1,64 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Generate list of networks
+  when: vm_layout.nets | length > 0
+  ansible.builtin.set_fact:
+    _nics_list: "{{ _nics_list | default([]) + [{'name': 'nic' ~ (index + 1) , 'profile_name': item}] }}"
+  loop: "{{ vm_layout.nets }}"
+  loop_control:
+    index_var: index
+
+- name: Gather vnic profiles info
+  loop: "{{ _nics_list }}"
+  register: _network_info
+  ovirt.ovirt.ovirt_vnic_profile_info:
+    auth: "{{ ovirt_auth }}"
+    name: "{{ item.profile_name }}"
+
+- name: Fail if any of the vnic profiles does not exist
+  when: item.ovirt_vnic_profiles | length == 0
+  loop: "{{ _network_info.results }}"
+  ansible.builtin.fail:
+    msg: "Network profile {{ item.item.profile_name }} does not exist"
+
+- name: Create VMs from the imported template
+  ovirt.ovirt.ovirt_vm:
+    auth: "{{ ovirt_auth }}"
+    name: "cifmw-{{ cifmw_ovirt_env_prefix }}-{{ vm_layout.name }}{{ '%02d' | format(index + 1) }}"
+    type: server
+    cluster: "{{ cifmw_ovirt_cluster_name }}"
+    template: "{{ vm_layout.template }}"
+    cpu_cores: "{{ vm_layout.cpu | default ('1') }}"
+    memory: "{{ vm_layout.memory | default ('4') }}GiB"
+    state: "{{ cifmw_ovirt_vm_state }}"
+    comment: "{{ cifmw_ovirt_vm_comment }}"
+    clone: true
+    nics: "{{ _nics_list }}"
+    wait: true
+    timeout: "{{ cifmw_ovirt_vm_timeout }}"
+    cloud_init: "{{ cifmw_ovirt_cloud_init | default(omit) }}"
+  loop: "{{ range(0, vm_layout.amount | default(1) | int ) }}"
+  loop_control:
+    index_var: index
+
+- name: Fetch IP addresses
+  vars:
+    indexed_vm_name: "cifmw-{{ cifmw_ovirt_env_prefix }}-{{ vm_layout.name }}{{ '%02d' | format(index + 1) }}"
+  ansible.builtin.include_tasks: retrieve_vm_ip.yml
+  loop: "{{ range(0, vm_layout.amount | default(1) | int ) }}"
+  loop_control:
+    index_var: index
