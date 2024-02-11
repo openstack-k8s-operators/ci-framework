@@ -1,0 +1,102 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.1
+
+- name: Check if variables are defined and have specific values
+  ansible.builtin.assert:
+    fail_msg: >-
+      One or more variables are not defined or do not have expected values!
+    that:
+      - (cifmw_ovirt_engine.url is defined) or (lookup('env','OVIRT_URL'))
+      - (cifmw_ovirt_engine.username is defined) or (lookup('env','OVIRT_USERNAME'))
+      - (cifmw_ovirt_engine.password is defined) or (lookup('env','OVIRT_PASSWORD'))
+      - (cifmw_ovirt_engine.insecure is defined) or (lookup('env','OVIRT_INSECURE'))
+      - (cifmw_ovirt_cluster_name is defined) or (lookup('env','OVIRT_CLUSTER_NAME'))
+      - cifmw_ovirt_template_rhel_guest_image is defined
+
+- name: Install oVirt SDK package
+  become: true
+  ansible.builtin.package:
+    name: "{{ cifmw_ovirt_sdk_package }}"
+    state: present
+    disable_gpg_check: true
+
+- name: Ensure artifacts directory present
+  ansible.builtin.file:
+    path: "{{ cifmw_ovirt_artifacts_basedir }}"
+    state: directory
+
+- name: Ensure ssh key exists
+  when: cifmw_ovirt_ssh_public_key | length > 0
+  register: _ssh_public_key
+  community.crypto.openssh_keypair:
+    path: "{{ ansible_user_dir  }}/.ssh/id_{{ cifmw_ovirt_ssh_key_type }}"
+    type: "{{ cifmw_ovirt_ssh_key_type }}"
+    size: "{{ cifmw_ovirt_ssh_key_size }}"
+
+- name: Login to oVirt
+  when: cifmw_ovirt_engine is defined or not cifmw_ovirt_engine
+  ovirt.ovirt.ovirt_auth:
+    url: "{{ cifmw_ovirt_engine.url | default(lookup('env','OVIRT_URL')) | default(omit) }}"
+    username: "{{ cifmw_ovirt_engine.username | default(lookup('env','OVIRT_USERNAME')) | default(omit) }}"
+    password: "{{ cifmw_ovirt_engine.password | default(lookup('env','OVIRT_PASSWORD')) | default(omit) }}"
+    insecure: "{{ cifmw_ovirt_engine.insecure | default(lookup('env','OVIRT_INSECURE')) | default(false) }}"
+
+- name: Tasks to perform on ovirt
+  block:
+    - name: Set an environment prefix
+      when: cifmw_ovirt_env_prefix is undefined
+      ansible.builtin.set_fact:
+        cifmw_ovirt_env_prefix: >-
+          {{
+            lookup('community.general.random_string',
+                    length=5,
+                    lower=true,
+                    upper=false,
+                    special=false)
+          }}
+
+    - name: Gather template info
+      register: _template_info
+      ovirt.ovirt.ovirt_template_info:
+        auth: "{{ ovirt_auth }}"
+        pattern: "name={{ cifmw_ovirt_template_rhel_guest_image }}"
+
+    - name: Fail if template does not exist
+      when: _template_info.ovirt_templates | length == 0
+      ansible.builtin.fail:
+        msg: "Template {{ cifmw_ovirt_template_rhel_guest_image }} does not exist"
+
+    - name: Loop over cifmw_ovirt_layout and include tasks
+      ansible.builtin.include_tasks: create_vms.yml
+      loop: "{{ cifmw_ovirt_layout }}"
+      loop_control:
+        loop_var: vm_layout
+
+    - name: Export some variables as an artifacts
+      vars:
+        ovirt_info:
+          cifmw_ovirt_env_prefix: "{{ cifmw_ovirt_env_prefix }}"
+          cifmw_ovirt_vms: "{{ _vm_ip_addresses }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_ovirt_artifacts_basedir }}/ovirt-vms-info.yml"
+        content: |
+          {{ ovirt_info | to_nice_yaml(indent=2) }}
+
+  always:
+    - name: Logout from oVirt
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth }}"
