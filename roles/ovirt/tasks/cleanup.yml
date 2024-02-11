@@ -1,0 +1,63 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if variables are defined and have specific values
+  ansible.builtin.assert:
+    fail_msg: >-
+      One or more variables are not defined or do not have expected values!
+    that:
+      - (cifmw_ovirt_engine.url is defined) or (lookup('env','OVIRT_URL'))
+      - (cifmw_ovirt_engine.username is defined) or (lookup('env','OVIRT_USERNAME'))
+      - (cifmw_ovirt_engine.password is defined) or (lookup('env','OVIRT_PASSWORD'))
+      - (cifmw_ovirt_engine.insecure is defined) or (lookup('env','OVIRT_INSECURE'))
+
+- name: Ensure artifact file exists
+  register: _artifact_file
+  ansible.builtin.stat:
+    path: "{{ cifmw_ovirt_artifacts_basedir }}/ovirt-vms-info.yml"
+
+- name: Tasks to perform on ovirt
+  when: _artifact_file.stat.exists
+  block:
+    - name: Login to oVirt
+      when: cifmw_ovirt_engine is defined or not cifmw_ovirt_engine
+      ovirt.ovirt.ovirt_auth:
+        url: "{{ cifmw_ovirt_engine.url | default(lookup('env','OVIRT_URL')) | default(omit) }}"
+        username: "{{ cifmw_ovirt_engine.username | default(lookup('env','OVIRT_USERNAME')) | default(omit) }}"
+        password: "{{ cifmw_ovirt_engine.password | default(lookup('env','OVIRT_PASSWORD')) | default(omit) }}"
+        insecure: "{{ cifmw_ovirt_engine.insecure | default(lookup('env','OVIRT_INSECURE')) | default(false) }}"
+
+    - name: Include variable file
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_ovirt_artifacts_basedir }}/ovirt-vms-info.yml"
+
+    - name: Delete VMs from artifact file
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth }}"
+        name: "{{ item.name }}"
+        state: "absent"
+      loop: "{{ cifmw_ovirt_vms }}"
+
+  always:
+    - name: Logout from oVirt
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth }}"
+
+- name: Remove ovirt artifacts file
+  ansible.builtin.file:
+    path: "{{ cifmw_ovirt_artifacts_basedir }}/ovirt-vms-info.yml"
+    state: absent
