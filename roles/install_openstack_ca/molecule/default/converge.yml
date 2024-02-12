@@ -1,0 +1,51 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_install_openstack_ca_dest_path: "{{ ansible_user_dir }}/ci-framework-data"
+  tasks:
+    - name: Extract and install OpenStackControlplane CA
+      ansible.builtin.include_role:
+        role: install_openstack_ca
+
+    - name: Check if OpenStackControlplane CA file is present
+      register: _ca_bundle_file
+      ansible.builtin.stat:
+        path: "{{ cifmw_install_openstack_ca_dest_path  }}/tls-ca-bundle.pem"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Assert that CA file is present
+      ansible.builtin.assert:
+        that: _ca_bundle_file.stat.exists
+
+    - name: Check that CA file was installed in the right place
+      register: _ca_installed_file
+      ansible.builtin.stat:
+        path: "/etc/pki/ca-trust/source/anchors/tls-ca-bundle.pem"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Assert that installed CA file is present
+      ansible.builtin.assert:
+        that: _ca_installed_file.stat.exists
