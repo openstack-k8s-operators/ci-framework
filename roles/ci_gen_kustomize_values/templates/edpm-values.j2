@@ -1,27 +1,28 @@
 data:
   ssh_keys:
-    authorized: |-
-{{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | replace('\n', '\\n') | indent(6, first=True) }}
-    private: |-
-{{ cifmw_ci_gen_kustomize_values_ssh_private_key | replace('\n', '\\n') | indent(6, first=True) }}
-    public: |-
-{{ cifmw_ci_gen_kustomize_values_ssh_public_key | replace('\n', '\\n') | indent(6, first=True) }}
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
+    public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
   nova:
     migration:
       ssh_keys:
-        private: |-
-{{ cifmw_ci_gen_kustomize_values_migration_priv_key | replace('\n', '\\n') | indent(10, first=True) }}
-        public: |-
-{{ cifmw_ci_gen_kustomize_values_migration_pub_key | replace('\n', '\\n') | indent(10, first=True) }}
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
   nodeset:
     ansible:
       ansibleUser: "zuul"
-      timesync_ntp_servers:
-        - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
-      edpm_sshd_allowed_ranges:
-{% for range in cifmw_ci_gen_kustomize_values_sshd_ranges %}
-        - "{{ range }}"
-{% endfor %}
+      ansibleVars:
+        timesync_ntp_servers:
+          - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+        edpm_network_config_os_net_config_mappings:
+          edpm-compute:
+            nic2: {{ (cifmw_networking_env_definition.instances | dict2items | selectattr('key', 'match', '^compute') | first).value.networks['ctlplane']['interface_name']  }}
+{% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0 %}
+        edpm_sshd_allowed_ranges:
+{%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges %}
+          - "{{ range }}"
+{%  endfor %}
+{% endif %}
     nodes:
 {% for compute in cifmw_networking_env_definition.instances.keys() %}
 {%   if compute.startswith('compute') %}
