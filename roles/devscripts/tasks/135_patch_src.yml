@@ -14,29 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
-- name: Clone the dev-scripts repository.
-  tags:
-    - bootstrap
-  ansible.builtin.git:
-    repo: "{{ cifmw_devscripts_repo }}"
-    dest: "{{ cifmw_devscripts_repo_dir }}"
-    depth: 1
-    single_branch: true
-    force: true
-    version: HEAD  # noqa: latest[git]
-  register: clone_out
-  retries: 3
-  delay: 15
-  until: "clone_out is not failed"
-
 # An upstream patch is also proposed
 # https://github.com/openshift-metal3/dev-scripts/pull/1607
-- name: Patch dev-scripts for libvirt stability
-  tags:
-    - bootstrap
+- name: Patch dev-scripts for enabling proxy daemon.
   ansible.posix.patch:
-    src: virtproxyd.patch
+    src: proxy.patch
     dest: "{{ cifmw_devscripts_repo_dir }}/02_configure_host.sh"
 
 - name: Read the vm_setup_vars contents.
@@ -44,50 +26,30 @@
     src: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"
   register: vm_setup_data
 
-- name: Load the vm_setup_vars to a variable
-  ansible.builtin.set_fact:
-    _vm_setup_vars: "{{ vm_setup_data.content | b64decode | from_yaml }}"
-
 # Note: Override When external network is being reused.
-- name: Verify dev-scripts vm_setup_vars to reflects external network address
+- name: Ensure dev-scripts vm_setup_vars reflects external network address
   when:
     - "'manage_br_bridge' in cifmw_devscripts_config"
     - cifmw_devscripts_config['manage_br_bridge'] == 'n'
   vars:
+    _vm_setup_vars: "{{ vm_setup_data.content | b64decode | from_yaml }}"
     _to_merge:
       - name: "{{ '{{' }} baremetal_network_name {{ '}}' }}"
-        address_v4: "{{ ansible_default_ipv4.address }}"
-  ansible.builtin.set_fact:
-    _modify_vm_setup: true
+        address_v4: >-
+          {{
+            cifmw_devscripts_host_bm_net_ip_addr |
+            default(ansible_default_ipv4.address)
+          }}
     _merge_ext_net:
       external_network: >-
         {{
           _vm_setup_vars.external_network |
           community.general.lists_mergeby(_to_merge, 'name')
         }}
-
-# Extra disks are need only for the extra workers
-- name: Verify only extra worker nodes can additional disks attached
-  when:
-    - cifmw_devscripts_config.vm_extradisks is defined
-    - cifmw_devscripts_config.vm_extradisks | bool
-  ansible.builtin.set_fact:
-    _modify_vm_setup: true
-    _merge_flavors:
-      flavors:
-        master:
-          extradisks: false
-        worker:
-          extradisks: false
-
-- name: Write the modified contents.
-  when: _modify_vm_setup | default(false)
-  vars:
     _merged_data: >-
       {{
         _vm_setup_vars |
-        combine(_merge_ext_net | default({}), recursive=true) |
-        combine(_merge_flavors | default({}), recursive=true)
+        combine(_merge_ext_net | default({}), recursive=true)
       }}
   ansible.builtin.copy:
     dest: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"

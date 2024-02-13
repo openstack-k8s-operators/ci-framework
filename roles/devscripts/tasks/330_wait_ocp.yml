@@ -1,0 +1,41 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+# We would wait till forbidden error is received. It indicates the endpoint
+# is reachable.
+- name: Wait until the OCP API endpoint is reachable.
+  ansible.builtin.uri:
+    url: "{{ cifmw_openshift_api }}"
+    return_content: true
+    validate_certs: false
+    status_code: 403
+  register: ocp_api_result
+  until: ocp_api_result.status == 403
+  retries: 30
+  delay: 5
+
+- name: Wait until OCP login succeeds.
+  kubernetes.core.k8s_auth:
+    host: "{{ cifmw_openshift_api }}"
+    password: "{{ cifmw_openshift_password }}"
+    state: present
+    username: "{{ cifmw_openshift_user }}"
+    validate_certs: false
+  register: _oc_login_result
+  until: _oc_login_result.k8s_auth is defined
+  retries: 30
+  delay: 5
