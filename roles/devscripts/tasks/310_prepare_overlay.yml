@@ -15,13 +15,13 @@
 # under the License.
 
 
-- name: Get OCP related nodes
-  register: _current_vms
+- name: Gather all of the OpenShift nodes.
   community.libvirt.virt:
     command: "list_vms"
     uri: "qemu:///system"
+  register: _current_vms
 
-- name: Stop all nodes part of OpenShift platform
+- name: Stop all the OpenShift nodes.
   failed_when: false
   vars:
     matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
@@ -34,12 +34,12 @@
 - name: Get XMLs of all nodes part of OpenShift platform
   vars:
     matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
-  register: _ocp_xmls
   community.libvirt.virt:
     command: "get_xml"
     name: "{{ item }}"
     uri: "qemu:///system"
   loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+  register: _ocp_xmls
 
 - name: Undefine all nodes part of OpenShift platform
   vars:
@@ -48,6 +48,7 @@
     command: "undefine"
     flags:
       - "keep_nvram"
+      - "snapshots_metadata"
     name: "{{ item }}"
     uri: "qemu:///system"
   loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
@@ -71,3 +72,9 @@
     loop_var: "ocp_node"
     label: "{{ ocp_node.item }}"
     index_var: "ocp_id"
+
+- name: Disable online cluster flag
+  when:
+    - cifmw_devscripts_ocp_online | bool
+  ansible.builtin.set_fact:
+    cifmw_devscripts_ocp_online: false

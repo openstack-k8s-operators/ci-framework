@@ -15,45 +15,14 @@
 # under the License.
 
 
-- name: Ensure the devscripts required directories exists.
-  become: true
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: "directory"
-    owner: "{{ cifmw_devscripts_user }}"
-    group: "{{ cifmw_devscripts_user }}"
-    mode: "0755"
-  loop:
-    - "{{ cifmw_devscripts_repo_dir }}"
-    - "{{ cifmw_devscripts_config['working_dir'] }}"
-    - "{{ cifmw_devscripts_config['assets_extra_folder'] }}"
-
-- name: Generate SSH keys for accessing OCP cluster
-  community.crypto.openssh_keypair:
-    comment: "cifmw generated key for ocp access"
-    path: >-
-      {{ cifmw_devscripts_artifacts_dir }}/cifmw_ocp_access_key
-    type: "ecdsa"
-  register: cifmw_devscripts_ssh_key
-
-- name: Verify sudoers privileges
-  become: true
-  ansible.builtin.copy:
-    dest: "/etc/sudoers.d/{{ cifmw_devscripts_user }}"
-    owner: root
-    group: root
-    mode: "0640"
-    content: |
-      {{ cifmw_devscripts_user }}    ALL=(ALL)    NOPASSWD: ALL
-
 - name: Enable IP forwarding in the Network Operator.
   when:
     - cifmw_devscripts_config['network_type'] == 'OVNKubernetes'
     - ("cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=')") or
-      (cifmw_devscripts_host_routing | bool)
+      (cifmw_devscripts_enable_ocp_nodes_host_routing | bool)
   vars:
     ip_forward: "{{ cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=') }}"
-    host_routing: "{{ cifmw_devscripts_host_routing | bool }}"
+    host_routing: "{{ cifmw_devscripts_enable_ocp_nodes_host_routing | bool }}"
   ansible.builtin.template:
     src: "templates/ovn_config.j2"
     dest: >-
@@ -61,6 +30,21 @@
         [
           cifmw_devscripts_config['assets_extra_folder'],
           'ovn_k8s_config.yaml'
+        ] | ansible.builtin.path_join
+      }}
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"
+
+- name: Enable iSCSI services on the OpenShift Nodes.
+  when: cifmw_devscripts_enable_iscsi_on_ocp_nodes | bool
+  ansible.builtin.copy:
+    src: files/ocp_iscsi.yml
+    dest: >-
+      {{
+        [
+          cifmw_devscripts_config.assets_extra_folder,
+          enable_iscsi.yaml
         ] | ansible.builtin.path_join
       }}
     owner: "{{ cifmw_devscripts_user }}"

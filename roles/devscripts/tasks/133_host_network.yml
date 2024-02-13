@@ -15,30 +15,23 @@
 # under the License.
 
 
-- name: Copy the CI token file in devscripts source directory
+- name: Remove default virt-net from the system.
+  when: cifmw_devscripts_remove_libvirt_net_default | bool
   vars:
-    cifmw_manage_secrets_citoken_dest: >-
-     {{
-       (cifmw_devscripts_repo_dir, 'ci_token') |
-       path_join
-     }}
+    net_name: "default"
   ansible.builtin.include_role:
-    name: manage_secrets
-    tasks_from: ci_token.yml
+    name: libvirt_manager
+    tasks_from: delete_network.yml
 
-- name: Copy the OCP config file.
-  ansible.builtin.template:
-    src: templates/conf_ciuser.sh.j2
-    dest: >-
-      {{ cifmw_devscripts_repo_dir }}/config_{{ cifmw_devscripts_user }}.sh
-
-- name: Copy pull-secret file
-  vars:
-    cifmw_manage_secrets_pullsecret_dest: >-
-      {{
-        (cifmw_devscripts_repo_dir, 'pull_secret.json') |
-        path_join
-      }}
+- name: Ensure the required network configurations are applied.
+  when:
+    - cifmw_ci_nmstate_instance_config is defined
+    - "inventory_hostname in cifmw_ci_nmstate_instance_config"
   ansible.builtin.include_role:
-    name: manage_secrets
-    tasks_from: pull_secret.yml
+    name: ci_nmstate
+
+- name: Configure local DNS
+  when: cifmw_network_local_dns is defined
+  ansible.builtin.include_role:
+    name: ci_network
+    tasks_from: apply-dns.yml
