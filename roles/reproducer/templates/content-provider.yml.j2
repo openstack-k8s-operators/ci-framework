@@ -39,13 +39,14 @@
       ansible.builtin.import_tasks: ci/playbooks/tasks/set_crc_insecure_registry.yml
 {% endraw %}
 
-- name: "Content Provider"
+- name: "Operator Content Provider"
   hosts: localhost
   gather_facts: false
   vars:
     cifmw_rp_registry_firewall: false
     job_id: "{{ job_id }}"
   tasks:
+{% if operator_content_provider | default('false') | bool %}
 {% raw %}
     - name: Load env variables
       ansible.builtin.include_vars:
@@ -105,3 +106,32 @@
             } | to_nice_yaml
           }}
 {% endraw %}
+{% endif %}
+
+{% if openstack_content_provider | default('false') | bool %}
+{% raw %}
+    - name: Run tcib playbook
+      environment:
+        ANSIBLE_LOG_PATH: "~/ansible-openstack-content-provider-{{job_id }}.log"
+      ansible.builtin.command:
+        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook ci/playbooks/tcib/tcib.yml
+          -i "~/ci-framework-data/artifacts/zuul_inventory.yml"
+          -e @./scenarios/centos-9/base.yml
+          -e @./scenarios/centos-9/tcib.yml
+          -e cifmw_zuul_target_host=controller-0
+          -e "cifmw_rp_registry_ip="{{ hostvars['localhost']['cifmw_rp_registry_ip'] }}""
+          -e "@{{ ansible_user_dir }}/reproducer-variables.yml"
+          --skip-tags build_openstack_packages
+
+    - name: Output needed content into consumable environment
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/{{ job_id }}-params/content-provider.yml"
+        content: |-
+          {{
+            {'content_provider_registry_ip': cifmw_rp_registry_ip
+            } | to_nice_yaml
+          }}
+{% endraw %}
+{% endif %}
