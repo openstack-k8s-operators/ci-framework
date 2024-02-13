@@ -26,95 +26,29 @@
       }}
     cacheable: true
 
-- name: Fail in case of deprecated parameter
-  block:
-    - name: Fail if cifmw_devscripts_ci_token is defined
-      when:
-        - cifmw_devscripts_ci_token is defined
-      ansible.builtin.fail:
-        msg: |
-          cifmw_devscripts_ci_token is deprecated, please use
-          cifmw_manage_secrets_citoken_content instead!
-
-    - name: Fail if cifmw_devscripts_ci_token_file is defined
-      when:
-        - cifmw_devscripts_ci_token_file is defined
-      ansible.builtin.fail:
-        msg: |
-          cifmw_devscripts_ci_token_file is deprecated, please use
-          cifmw_manage_secrets_citoken_file instead!
-
-    - name: Fail if cifmw_devscripts_pull_secret is defined
-      when:
-        - cifmw_devscripts_pull_secret is defined
-      ansible.builtin.fail:
-        msg: |
-          cifmw_devscripts_pull_secret is deprecated, please use
-          cifmw_manage_secrets_citoken_content instead!
-
-    - name: Fail if cifmw_devscripts_pull_secret_file is defined
-      when:
-        - cifmw_devscripts_pull_secret_file is defined
-      ansible.builtin.fail:
-        msg: |
-          cifmw_devscripts_pull_secret_file is deprecated, please use
-          cifmw_manage_secrets_pullsecret_file instead !
-
-- name: Initialize manage_secrets role
+- name: Check and prepare the environment
   tags:
     - always
-  ansible.builtin.import_role:
-    name: manage_secrets
+  ansible.builtin.import_tasks: 100_pre.yml
 
-- name: Ensure the required folders are present.
-  tags:
-    - always
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-  loop:
-    - "{{ cifmw_devscripts_data_dir }}"
-    - "{{ cifmw_devscripts_artifacts_dir }}"
-    - "{{ cifmw_devscripts_logs_dir }}"
-    - "{{ cifmw_devscripts_output_dir }}"
-
-- name: Perform pre-checks
-  tags:
-    - always
-  ansible.builtin.import_tasks: 00_pre_check.yml
-
-- name: Prepare for OCP deployment.
-  tags:
-    - devscripts_prepare
-    - devscripts_deploy
-  when:
-    - not cifmw_devscripts_skip_deploy | default(false)
-    - not cifmw_devscripts_use_base_layer | default(false)
-  block:
-    - name: Prepare the host for execution of dev-scripts.
-      ansible.builtin.import_tasks: 01_prepare_host.yml
-
-    - name: Gather the host and dev-scripts required information.
-      ansible.builtin.import_tasks: 02_gather_env_details.yml
-
-- name: Running dev-scripts.
+- name: Deploy OpenShift cluster
   tags:
     - devscripts_deploy
-  when:
-    - not cifmw_devscripts_skip_deploy | default(false)
-    - not cifmw_devscripts_use_base_layer | default(false)
-  ansible.builtin.import_tasks: 03_install.yml
-
-- name: Prepare for image overlay
-  when:
-    - cifmw_devscripts_use_layers | bool
-    - not cifmw_devscripts_skip_deploy | default(false)
-  ansible.builtin.import_tasks: 04_overlays.yml
-
-- name: Executing dev-scripts post-install tasks.
-  tags:
-    - devscripts_post
+    - bootstrap
   when:
     - not cifmw_devscripts_dry_run | bool
-    - not cifmw_devscripts_use_layers | bool
-  ansible.builtin.import_tasks: 05_post.yml
+    - >-
+      (
+        not (
+          (cifmw_devscripts_ocp_exists | bool) or
+          (cifmw_devscripts_ocp_online | bool)
+        )
+      )
+  community.general.make:
+    chdir: "{{ cifmw_devscripts_repo_dir }}"
+    target: "all"
+
+- name: Executing dev-scripts post-install tasks.
+  when:
+    - not cifmw_devscripts_dry_run | bool
+  ansible.builtin.include_tasks: 300_post.yml

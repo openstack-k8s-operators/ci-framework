@@ -6,38 +6,46 @@ libvirt/kvm virtual machines.
 
 ## Privilege escalation
 
-Yes, requires privilege escalation to install dependant packages on the system. Along with performing
-network configuration, repository setup and libvirt networks.
+Yes, requires privilege escalation to install dependant packages on the system.
+Along with performing network configuration, repository setup and libvirt
+networks.
 
 ## Exposed tags
 
-* `devscripts_prepare`: Selects tasks related to "preparing the host" and building the various
-needed files.
-* `devscripts_deploy`: Overlaps with the previous tag, and adds the actual deployment of devscripts
-managed services.
+* `devscripts_prepare`: Selects tasks related to "preparing the host" and
+  building the various needed files.
+* `devscripts_deploy`: Overlaps with the previous tag, and adds the actual
+  deployment of devscripts managed services.
 * `devscripts_post`: Only runs the post-installation tasks.
 
 ## Parameters
 
-* `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the role artifacts.
-* `cifmw_devscripts_config_overrides` (dict) key/value pairs to be used for overriding the default
-  configuration. Refer [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more information.
+* `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the
+  role artifacts.
+* `cifmw_devscripts_config_overrides` (dict) key/value pairs to be used for
+  overriding the default configuration. Refer
+  [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more
+  information.
 * `cifmw_devscripts_dry_run` (bool) If enabled, the workflow is evaluated.
-* `cifmw_devscripts_make_target` (str) Optional, the target to be used with dev-scripts.
-* `cifmw_devscripts_ocp_version` (str) The version of OpenShift to be deployed.
-* `cifmw_devscripts_osp_compute_nodes` (list) A list of nodes which has key/value pairs
-  containing details about OpenStack compute nodes. Refer
-  [section](#supported-keys-in-cifmw_devscripts_osp_compute_nodes) for more information.
 * `cifmw_devscripts_src_dir` (str) The parent folder of dev-scripts repository.
-* `cifmw_devscripts_use_layers` (bool) Toggle overlay support. Specifically, this boolean will instruct the role to
-  shutdown the whole OCP cluster, dump the XML, undefine the nodes, and prevents running the "post" tasks. Defaults to `false`.
-* `cifmw_devscripts_remove_default_net` (bool) Remove the default virtual network. Defaults to `false`.
-* `cifmw_devscripts_host_routing` (bool) Enable routing via host for OCP nodes in case of OVNKubernetes. Defaults to `false`.
+* `cifmw_devscripts_remove_libvirt_net_default` (bool) Remove the default
+  virtual network. Defaults to `false`.
+* `cifmw_devscripts_enable_ocp_nodes_host_routing` (bool) Enable routing via
+  host for OCP nodes in case of OVNKubernetes. Defaults to `false`.
+* `cifmw_devscripts_enable_iscsi_on_ocp_nodes` (bool) Enable iSCSI services on
+  the OpenShift nodes having role as `worker`. Defaults to `false`.
+* `cifmw_devscripts_host_bm_net_ip_addr` (str) The IP address of the host to be
+  assigned.
+* `cifmw_devscripts_use_static_ip_addr` (bool) Use static IP addresses for the
+  OCP nodes. Defaults to `false`
+* `cifmw_devscripts_layout_overrides` (dict) key/value pairs to be used for
+  overriding the default devscripts test layout. Refer
+  [cifmw_libvirt_manager_configuration](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/libvirt_manager#structure-for-cifmw_libvirt_manager_configuration)
 
 ### Secrets management
 
-This role calls the [manage_secrets](./manage_secrets.md) role. It allows to copy or create
-the needed secrets.
+This role calls the [manage_secrets](./manage_secrets.md) role. It allows to
+copy or create the needed secrets.
 
 #### pull-secret
 
@@ -76,7 +84,6 @@ If you provide neither, or both, it will fail.
 | --- | ------------- | ----------- |
 | ip_stack | `v4` | IP stack for the cluster. Supported values are `v4\|v6\|v6v4`. |
 | network_type | `OVNKubernetes` | Sets the network type for the OpenShift cluster. Supported values are `OpenShiftSDN\|OVNKubernetes`. |
-| ovn_local_gateway_mode | `false` | Enables local gateway mode, only applicable for `OVNKubernetes`. Supported values are `true\|false`. |
 | provisioning_network_profile | `Managed` | Allow the script to manage the provisioning network. Supported values are `Disabled\|Managed`. |
 | manage_pro_bridge | `y` | Allow dev-scripts to manage the provisioning bridge. Supported values are `y\|n`. |
 | provisioning_network | | The subnet CIDR to be used for the provisioning network. |
@@ -85,7 +92,7 @@ If you provide neither, or both, it will fail.
 | int_if | | The network interface to be attached to the internal cluster bridge. |
 | manage_br_bridge | `y` | Allow dev-scripts to manage the external bridge. Supported values are `y\|n`. |
 | ext_if | | The network interface to be attached to the external bridge. |
-| external_subnet_v4 | | The external subnet CIDR part of IPv4 family. Includes checks before default is set. |
+| external_subnet_v4 | `192.168.111.0/24` | The external subnet CIDR part of IPv4 family. |
 | external_subnet_v6 | | The external subnet CIDR belonging to IPv6 family required when IP stack is other than `v4`. |
 | cluster_subnet_v4 | `192.168.16.0/20` | The cluster network cidr for the OpenShift cluster. |
 | cluster_subnet_v6 | | The cluster network cidr belonging to IPv6 family. Required when IP stack is other than `v4`. |
@@ -111,37 +118,6 @@ If you provide neither, or both, it will fail.
 | extra_worker_disk | | The disk size to be set for each extra nodes. |
 | extra_worker_vcpu | | The number of vCPUs to be configured for each extra nodes. |
 
-### Supported keys in cifmw_devscripts_osp_compute_nodes
-
-| Key | Description |
-| --- | ----------- |
-| name | Name of the physical server. |
-| bmc | Management board details Refer [section](#supported-keys-in-bmc) |
-| boot_mac_addr | MAC address of physical system connected to provisioning network. |
-| boot_mode | The mode to be used for booting. Choices are `legacy \| UEFI \| UEFISecureBoot`. |
-| extra_spec | Key/value pairs as supported by [baremetal-operator](https://github.com/metal3-io/baremetal-operator/blob/main/docs/api.md) |
-
-#### Supported keys in bmc
-
-The keys supported in `cifmw_devscripts_osp_compute_nodes.bmc` are
-
-| Key | Description |
-| --- | ----------- |
-| address | URL to the servers BMC. Refer notes for additional information. |
-| username | Name of the BMC user encoded with base64. |
-| password | Password for the above user encoded with base64. |
-
-##### Notes
-
-The BMC address format is `<protocol>://<fqdn_or_ip_address>[:port]/[redfish-system-id]`. Some of the examples are
-
-* `redfish-virtualmedia://compute-bmc.foo.bar/redfish/v1/Systems/<uuid>`
-* `idrac://compute-bmc.subdomain.domain`
-* `idrac-virtualmedia://compute-bmc.foo.bar/redfish/v1/Systems/<uuid>`
-* `redfish://compute-bmc.foo.bar/redfish/v1/Systems/<uuid>`
-
-Additional information can be found [here](https://github.com/metal3-io/baremetal-operator/blob/main/docs/api.md#bmc)
-
 ## Examples
 
 * Sample config for deploying a compact OpenShift platform with extra nodes, existing external network,
@@ -152,14 +128,17 @@ Additional information can be found [here](https://github.com/metal3-io/baremeta
   ...
   cifmw_use_devscripts: True
 
-  cifmw_devscripts_ci_token: REDACTED
-  cifmw_devscripts_pull_secret: |
-    REDACTED
+  cifmw_manage_secrets_citoken_file: "{{ lookup('env', 'HOME')/ci_token }}"
+  cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME')/pull_secret }}"
 
-  cifmw_devscripts_src_dir: "/home/ciuser/src/dev-scripts"
+  cifmw_devscripts_config_overrides:
+    provisioning_network_profile: "Disabled"
+    num_extra_workers: 2
+    extra_worker_memory_mb: 16384
+    extra_worker_disk: 50
+    worker_vcpu: 8
 
-  cifmw_devscripts_ocp_version: '4.13.13'
-  cifmw_devscripts_crb_repo: 'https://mirror.stream.centos.org/9-stream/CRB/x86_64/os/'
+  cifmw_devscripts_extra_networks: ['osp_trunk']
   ...
   ```
 
@@ -169,55 +148,16 @@ Additional information can be found [here](https://github.com/metal3-io/baremeta
   ```YAML
   cifmw_use_devscripts: True
 
-  cifmw_devscripts_ci_token: REDACTED
-  cifmw_devscripts_pull_secret: |
+  cifmw_manage_secrets_citoken_content: REDACTED
+  cifmw_manage_secrets_pullsecret_content: |
     REDACTED
 
-  cifmw_devscripts_ocp_version: '4.13.13'
-
   cifmw_devscripts_config_overrides:
-    provisioning_network_profile: "Managed"
-    provisioning_network: "172.22.0.0/16"
+    openshift_version: "4.16.0"
     num_workers: 3
     worker_memory: 16384
     worker_disk: 100
     worker_vcpu: 10
-  ```
-
-* Sample vars for a hybrid test environment (virtual OpenShift with physical servers for OpenStack compute).
-
-  ```YAML
-  cifmw_use_devscripts: True
-
-  cifmw_devscripts_ci_token: REDACTED
-  cifmw_devscripts_pull_secret: |
-    REDACTED
-
-  cifmw_devscripts_ocp_version: '4.13.13'
-
-  cifmw_devscripts_config_overrides:
-    provisioning_network_profile: "Managed"
-    provisioning_network: "172.22.0.0/16"
-    num_workers: 3
-    worker_memory: 16384
-    worker_disk: 100
-    worker_vcpu: 10
-
-  cifmw_devscripts_osp_compute_nodes:
-    - name: osp-compute-0
-      bmc:
-        address: "idrac://osp-compute-0.bmc.foo.bar"
-        username: "Zm9v"
-        password: "YmFy"
-      boot_mac_addr: "00:00:00:00:00:00"
-      boot_mode: UEFI
-    - name: osp-compute-1
-      bmc:
-        address: "redfish://osp-compute-1.bmc.foo.bar/redfish/v1/Systems/1"
-        username: "Zm9v"
-        password: "YmFy"
-      boot_mac_addr: "00:00:00:00:00:01"
-      boot_mode: "legacy"
   ```
 
 ## References
