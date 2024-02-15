@@ -10,51 +10,97 @@ to select the proper VA scenario to deploy. If not provided, the role will fail
 with a message.
 ```
 
-- `cifmw_kustomize_deploy_destfiles_basedir`: Base directory for the ci-framework artifacts.
-  Defaults to `~/ci-framework-data/`
-- `cifmw_kustomize_deploy_architecture_repo_url`: URL of the "architecture" repository, where the VA scenarios are defined.
+### default resources
+
+- `cifmw_kustomize_deploy_destfiles_basedir`: _(string)_ Base directory for the
+  ci-framework artifacts. Defaults to `~/ci-framework-data/`
+- `cifmw_kustomize_deploy_architecture_repo_url`: _(string)_ URL of The
+  "architecture" repository, where the VA scenarios are defined.
   Defaults to `https://github.com/openstack-k8s-operators/architecture`
-- `cifmw_kustomize_deploy_architecture_repo_dest_dir`: Directory where the architecture repo is cloned on the controller node.
+- `cifmw_kustomize_deploy_architecture_repo_dest_dir`: _(string)_ Directory
+  where the architecture repo is cloned on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
-- `cifmw_kustomize_deploy_architecture_repo_version`: Default branch of the architecture repo to clone.Defaults to `HEAD`
-- `cifmw_kustomize_deploy_kustomizations_dest_dir`: Path for the generated CR files.
-  Defaults to `cifmw_kustomize_deploy_destfiles_basedir + /artifacts/kustomize_deploy`
-- `cifmw_kustomize_deploy_olm_dest_file`: Path of the generated CR file for OLM resources.
-  Defaults to `cifmw_kustomize_deploy_kustomizations_dest_dir + olm.yml`
-- `cifmw_kustomize_deploy_olm_source_files`: Path of the source kustomization files for OLM resources.
-  Defaults to `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/olm`
-- `cifmw_kustomize_deploy_metallb_dest_file`: Path of the generated CR file for MetalLB resources.
-  Defaults to `cifmw_kustomize_deploy_kustomizations_dest_dir + metallb.yml`
-- `cifmw_kustomize_deploy_metallb_source_files`: Path of the source kustomization files for MetalLB resources.
-  Defaults to `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/metallb/`
-- `cifmw_kustomize_deploy_nmstate_dest_file`: Path of the generated CR file for NMstate resources.
-  Defaults to `cifmw_kustomize_deploy_kustomizations_dest_dir + nmstate.yml`
-- `cifmw_kustomize_deploy_nmstate_source_files`: Path of the source kustomization files for NMstate resources.
-  Defaults to `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/nmstate`
-- `cifmw_kustomize_deploy_cp_values_src_file`: Path of the `values.yaml` file for the control-plane customization.
-  Defaults to `~/ci-framework-data/artifacts/ci_gen_kustomize_values/values.yaml`
-- `cifmw_kustomize_deploy_cp_source_files`: Path of the control-plane kustomize source files.
-  Defaults to `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/va/hci/`
-- `cifmw_kustomize_deploy_cp_values_dest_file`: Path of the generated CR file for the control-plane deploy.
-  Defaults to `cifmw_kustomize_deploy_cp_source_files + values.yml`
-- `cifmw_kustomize_deploy_cp_dest_file`: Path of the generated CR file for OSP control-plane resources.
-  Defaults to `cifmw_kustomize_deploy_kustomizations_dest_dir + control-plane.yml`
-- `cifmw_kustomize_deploy_architecture_examples_common_path`: Relative path of the common CRs in the architecture repo.
-  Defaults to `/examples/common`
-- `cifmw_kustomize_deploy_architecture_examples_va_path`: Relative path of the VA scenario list in the operator repo.
-  Defaults to `/examples/va`
+- `cifmw_kustomize_deploy_architecture_repo_version`: _(string)_ Default branch
+  of the architecture repo to clone.Defaults to `HEAD`
+- `cifmw_kustomize_deploy_architecture_examples_common_path`: _(string)_
+  Relative path of the common CRs in the architecture repo. Defaults to
+  `/examples/common`
+- `cifmw_kustomize_deploy_architecture_examples_va_path`: _(string)_ Relative
+  path of the VA scenario list in the operator repo. Defaults to `/examples/va`
+- `cifmw_kustomize_deploy_kustomizations_dest_dir`: _(string)_ Path for the
+  generated CR files. Defaults to
+  `cifmw_kustomize_deploy_destfiles_basedir + /artifacts/kustomize_deploy`
+- `cifmw_kustomize_deploy_generate_crs_only`: _(boolean)_ The generated CRs
+  aren't applied (dry-run). Defaults to `false`
+- `cifmw_kustomize_deploy_keep_generated_crs`: _(boolean)_ Keep the generated
+  CRs in the destination folder. Defaults to `true`
+
+### operators resources
+
+- `cifmw_kustomize_deploy_olm_source_files`: _(string)_ Path of the source
+  kustomization files for OLM resources. Defaults to
+  `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/olm`
+- `cifmw_kustomize_deploy_olm_dest_file`: _(string)_ Path of the generated CR
+  file for OLM resources. Defaults to
+  `cifmw_kustomize_deploy_kustomizations_dest_dir + olm.yml`
+- `cifmw_kustomize_deploy_metallb_source_files`: _(string)_ Path of the source
+  kustomization files for MetalLB resources. Defaults to
+  `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/metallb/`
+- `cifmw_kustomize_deploy_metallb_dest_file`: _(string)_ Path of the generated
+  CR file for MetalLB resources. Defaults to
+  `cifmw_kustomize_deploy_kustomizations_dest_dir + metallb.yml`
+- `cifmw_kustomize_deploy_nmstate_source_files`: _(string)_ Path of the source
+  kustomization files for NMstate resources. Defaults to
+  `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/nmstate`
+- `cifmw_kustomize_deploy_nmstate_dest_file`: _(string)_ Path of the generated
+  CR file for NMstate resources. Defaults to
+  `cifmw_kustomize_deploy_kustomizations_dest_dir + nmstate.yml`
+
+### controlplane resources
+
+- `cifmw_kustomize_deploy_nncp_source_files`: _(string)_ Path of the NNCP
+  kustomize source files.
+  Defaults to `cifmw_kustomize_deploy_cp_source_files + /nncp/`
+- `cifmw_kustomize_deploy_nncp_values_dest_file`: _(string)_ Path of the
+  generated CR file for the NNCP resources deploy. Defaults to
+  `cifmw_kustomize_deploy_nncp_source_files + values.yaml`
+- `cifmw_kustomize_deploy_nncp_dest_file`: _(string)_ Path of the generated CR
+  file for NNCP resources. Defaults to
+  `cifmw_kustomize_deploy_kustomizations_dest_dir + nncp.yaml`
+- `cifmw_kustomize_deploy_cp_source_files`: _(string)_ Path of the
+  control-plane kustomize source files. Defaults to
+  `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/va/hci/control-plane`
+- `cifmw_kustomize_deploy_nncp_values_src_file`: _(string)_ Path of the
+  `values.yaml` file for the NNCP customization. Defaults to
+  `~/ci-framework-data/artifacts/ci_gen_kustomize_values/network-values/values.yaml`
+- `cifmw_kustomize_deploy_cp_dest_file`: _(string)_ Path of the generated CR
+  file for OSP control-plane resources. Defaults to
+  `cifmw_kustomize_deploy_kustomizations_dest_dir + control-plane.yaml`
+
+### dataplane resources
+
+- `cifmw_kustomize_deploy_dp_source_files`: _(string)_ Path of the
+  dataplane kustomize source files. Defaults to
+  `cifmw_kustomize_deploy_architecture_repo_dest_dir +`
+  `cifmw_kustomize_deploy_architecture_examples_va_path +`
+  `cifmw_architecture_va_scenario`
+- `cifmw_kustomize_deploy_dp_values_src_file`: _(string)_ Path of the
+  generated `values.yaml` for dataplane resources. Defaults to
+  `~/ci-framework-data/artifacts/ci_gen_kustomize_values/edpm-values/values.yaml`
+- `cifmw_kustomize_deploy_dp_values_dest_file`: _(string)_ Path of the
+  `values.yaml` file for dataplane resources. Defaults to
+  `cifmw_kustomize_deploy_dp_source_files + values.yaml`
+- `cifmw_kustomize_deploy_dp_dest_file`: _(string)_ Path of the generated
+  CR file for the DataPlane resources deploy. Defaults to
+  `cifmw_kustomize_deploy_kustomizations_dest_dir + dataplane.yaml`
 
 ## Examples
 
 ```yaml
 - name: Call kustomize_deploy role
   vars:
-    cifmw_kustomize_deploy_cp_values_src_file: /tmp/values.yml
+    cifmw_kustomize_deploy_nncp_values_src_file: /tmp/values.yml
     cifmw_architecture_va_scenario: hci
   ansible.builtin.include_role:
     name: "kustomize_deploy"
 ```
-
-## TODO
-
-- Implement all the steps

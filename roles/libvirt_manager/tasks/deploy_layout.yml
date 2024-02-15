@@ -105,7 +105,6 @@
   ansible.builtin.set_fact:
     cacheable: true
     cifmw_reproducer_network_data: {}
-    cifmw_libvirt_manager_mac_map: {}
 
 - name: List existing networks
   register: _virt_nets
@@ -136,7 +135,24 @@
     dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
     src: "all-inventory.yml.j2"
 
+- name: List running virtual machines.
+  community.libvirt.virt:
+    command: list_vms
+    state: running
+    uri: "qemu:///system"
+  register: _vms
+
+- name: Gather the networking information of running virtual machines.
+  when: "domain_name.startswith('cifmw')"
+  ansible.builtin.include_tasks: gather_vm_networks.yml
+  loop: "{{ _vms.list_vms }}"
+  loop_control:
+    label: "{{ domain_name }}"
+    loop_var: domain_name
+
+# The destination is intentional and does not match with other references.
 - name: Dump MAC mapping
+  when: cifmw_libvirt_manager_mac_map is defined
   ansible.builtin.copy:
     dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/interfaces-info.yml"
     content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
