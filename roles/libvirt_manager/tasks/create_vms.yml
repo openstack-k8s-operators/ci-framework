@@ -14,91 +14,56 @@
         ternary(_base_img_name ~ "_" ~ vm_id ~ ".qcow2",
                 _base_img_name)
       }}
-  ansible.builtin.command:
-    cmd: >-
-      qemu-img create
-      {% if vm_data.value.disk_file_name != 'blank' %}
-      -o backing_file={{ _img }},backing_fmt=qcow2
-      {% endif %}
-      -f qcow2
-      "{{ vm_type }}-{{ vm_id }}.qcow2"
-      "{{ vm_data.value.disksize|default ('40') }}G"
-    creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
-    chdir: "{{ cifmw_libvirt_manager_basedir }}/workload"
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
-
-- name: "Ensure file ownership and rights for {{ vm_type }}"
-  become: true
-  ansible.builtin.file:
-    path: >-
-      {{
-        (cifmw_libvirt_manager_basedir, 'workload',
-        vm_type ~ '-' ~ vm_id ~ '.qcow2') |
-        path_join
-      }}
-    group: "qemu"
-    mode: "0664"
-    owner: "{{ ansible_user_id }}"
-    state: file
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
-
-- name: "Manipulate XMLs and load them if provided for {{ vm_type }}"
-  when:
-    vm_data.value.xml_paths is defined
+    _workload: "{{ cifmw_libvirt_manager_basedir }}/workload"
+    _ocp_pool: "{{ ansible_libvirt_pools['oooq_pool']['path'] | default('') }}"
+    _chdir: >-
+      {{ (vm_type is match('.*ocp.*')) | ternary(_ocp_pool, _workload) }}
   block:
-    - name: "Set disk path for {{ vm_type }}"
-      community.general.xml:
-        path: "{{ _xml }}"
-        xpath: "/domain/devices/disk/source"
-        attribute: "file"
-        value: >-
-          {{ (cifmw_libvirt_manager_basedir,
-              'workload',
-              vm_type ~ '-' ~ _xml_id ~ '.qcow2') |
-              path_join
-          }}
-      loop: "{{ vm_data.value.xml_paths }}"
-      loop_control:
-        loop_var: "_xml"
-        index_var: "_xml_id"
-        label: "{{ vm_type }}-{{ _xml_id }}"
-
-    - name: "Remove document description header for {{ vm_type }}"
-      ansible.builtin.replace:
-        path: "{{ _xml }}"
-        regexp: "<\\?xml version='1.0' encoding='UTF-8'\\?>\n"
-        replace: ""
-      loop: "{{ vm_data.value.xml_paths }}"
-      loop_control:
-        loop_var: "_xml"
-        index_var: "_xml_id"
-        label: "{{ vm_type }}-{{ _xml_id }}"
-
-    - name: "Load VM XMLs for {{ vm_type }}"
-      register: _vm_xmls
-      ansible.builtin.slurp:
-        path: "{{ item }}"
-      loop: "{{ vm_data.value.xml_paths }}"
-      loop_control:
-        index_var: "_xml_id"
-        label: "{{ vm_type }}-{{ _xml_id }}"
-
-    - name: "Define VMs with custom XML for {{ vm_type }}"
-      community.libvirt.virt:
-        command: define
-        xml: "{{ _xml['content'] | b64decode }}"
-        uri: "qemu:///system"
-      loop: "{{ _vm_xmls.results }}"
+    - name: "Create VM overlay for {{ vm_type }}"
+      vars:
+        _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+      ansible.builtin.command:
+        cmd: >-
+          qemu-img create
+          {% if vm_data.value.disk_file_name != 'blank' %}
+          -o backing_file={{ _img }},backing_fmt=qcow2
+          {% endif %}
+          -f qcow2
+          "{{ _vm_img }}"
+          "{{ vm_data.value.disksize|default ('40') }}G"
+        creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        chdir: "{{ _chdir }}"
+      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
         index_var: vm_id
         label: "{{ vm_type }}-{{ vm_id }}"
-        loop_var: '_xml'
+
+    - name: "Ensure file ownership and rights for {{ vm_type }}"
+      become: true
+      vars:
+        _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+      ansible.builtin.file:
+        path: "{{ (_chdir, _vm_img) | path_join }}"
+        group: "qemu"
+        mode: "0664"
+        owner: "{{ ansible_user_id }}"
+        state: file
+      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+      loop_control:
+        index_var: vm_id
+        label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Manipulate XMLs and load them if provided for {{ vm_type }}"
+  when:
+    - vm_data.value.xml_paths is defined
+  block:
+    - name: Load OCP VMs
+      ansible.builtin.include_tasks: ocp_xml.yml
+      loop: "{{ vm_data.value.xml_paths }}"
+      loop_control:
+        loop_var: "_xml"
+        index_var: "_xml_id"
+        label: "{{ vm_type }}-{{ _xml_id }}"
 
 - name: "Define the requested virtual machines {{ vm_type }}"
   when:
