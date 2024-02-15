@@ -8,6 +8,7 @@ networking details of a given environment.
 * `cifmw_networking_definition`: The Networking Definition as a dictionary.
 * `cifmw_networking_mapper_ifaces_info`: The interface information dictionary that holds low-level info for full maps.
 * `cifmw_networking_mapper_network_name`: The network name to filter `cifmw_networking_mapper_ifaces_info` interfaces.
+* `cifmw_networking_mapper_assert_env_load`: Ensures that calling the Networking Environment Definition ends with a valid one loaded. Defaults to `true`.
 
 ## Important definitions
 - Networking Definition: The input to the CI-framework that defines all the networking-needed data.

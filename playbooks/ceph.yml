@@ -123,6 +123,31 @@
       when:
         - hostvars[item][ceph_hostname_var] is defined
       loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
+    - name: Load network ranges from Networking Environment Definition if not provided
+      when: >-
+        storage_network_range is not defined or
+        storage_mgmt_network_range is not defined
+      block:
+        - name: Load Networking Environment Definition
+          vars:
+            cifmw_networking_mapper_assert_env_load: false
+          ansible.builtin.import_role:
+            name: networking_mapper
+            tasks_from: load_env_definition.yml
+
+        - name: Set network ranges vars
+          when: "cifmw_networking_env_definition is defined"
+          ansible.builtin.set_fact:
+            storage_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storage.network_v4
+              }}
+            storage_mgmt_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storagemgmt.network_v4
+              }}
+
   roles:
     - role: cifmw_ceph_spec
       cifmw_ceph_spec_host_to_ip: "{{ host_to_ip }}"
