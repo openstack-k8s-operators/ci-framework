@@ -5,6 +5,11 @@
     command: list_vms
     uri: "qemu:///system"
 
+- name: Get pool configuration
+  community.libvirt.virt_pool:
+    command: facts
+    uri: "qemu:///system"
+
 - name: Filter out target environment
   ansible.builtin.set_fact:
     cleanup_vms: "{{ vms_list.list_vms | select('match', '^cifmw-.*$') }}"
@@ -93,6 +98,16 @@
   vars:
     action: "delete"
   ansible.builtin.include_tasks: storage_pool.yml
+
+- name: Remove custom images from oooq_pool if exists
+  when:
+    - item is match('^ocp-[0-9]\.qcow2+$')
+  ansible.builtin.command:
+    cmd: >-
+      virsh -c qemu:///system vol-delete
+      --vol {{ item }}
+      --pool oooq_pool
+  loop: "{{ ansible_libvirt_pools['oooq_pool'].volumes | default([]) }}"
 
 - name: Get temporary key status
   register: _tmp_key
