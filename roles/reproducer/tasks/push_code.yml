@@ -27,18 +27,35 @@
       loop: "{{ zuul['items'] | zip(repos_dir_stats.results) | list }}"
 
     - name: Fetch zuul.items repositories
-      vars:
-        _skip_refspec: "{{ job_id is not defined or repo.change is not defined }}"
-      ansible.builtin.git:
-        dest: "{{ repo.project.src_dir }}"
-        repo: "https://{{ repo.project.canonical_hostname }}/{{ repo.project.canonical_hostname | reproducer_gerrit_infix }}{{ repo.project.name }}"
-        refspec: "{{ omit if _skip_refspec else repo | reproducer_refspec ~ ':' ~ job_id }}"
-        version: "{{ omit if _skip_refspec else job_id }}"
-        force: true
-      loop: "{{ zuul['items'] }}"
-      loop_control:
-        loop_var: repo
-        label: "{{ repo.project.name }}"
+      block:
+        - name: Fetch zuul.items repositories
+          vars:
+            _skip_refspec: "{{ job_id is not defined or repo.change is not defined }}"
+          ansible.builtin.git:
+            dest: "{{ repo.project.src_dir }}"
+            repo: "https://{{ repo.project.canonical_hostname }}/{{ repo.project.canonical_hostname | reproducer_gerrit_infix }}{{ repo.project.name }}"
+            refspec: "{{ omit if _skip_refspec else repo | reproducer_refspec ~ ':' ~ job_id }}"
+            version: "{{ omit if _skip_refspec else job_id }}"
+            force: true
+          loop: "{{ zuul['items'] }}"
+          loop_control:
+            loop_var: repo
+            label: "{{ repo.project.name }}"
+      rescue:
+        - name: Rebase on top of existing change if we tried to pull on the same repo twice
+          vars:
+            refspec: "{{ item['invocation']['module_args']['refspec'] }}"
+            dest_dir: "{{ item['invocation']['module_args']['dest'] }}"
+          when:
+            - item.failed
+            - '"Failed to download remote objects and refs:" in item.msg'
+            - '"fatal: refusing to fetch into branch" in item.msg'
+            - '"checked out at" in item.msg'
+          ansible.builtin.command: # noqa: command-instead-of-module
+            chdir: "{{ dest_dir }}"
+            cmd: "git -c 'user.name=zuul' -c 'user.email=zuul@controller-0.com' pull --rebase origin {{ refspec | regex_replace(':.*', '') }}"
+          loop: "{{ ansible_failed_result['results'] }}"
+
 
     - name: Fetch zuul.projects repositories for dependencies
       when:
