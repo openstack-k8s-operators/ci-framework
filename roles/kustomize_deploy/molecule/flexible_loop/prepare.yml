@@ -1,0 +1,64 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Prepare
+  hosts: all
+  vars_files:
+    - ../../defaults/main.yml
+    - ./resources/vars.yml
+  tasks:
+    - name: Check requirements
+      ansible.builtin.import_role:
+        role: kustomize_deploy
+        tasks_from: check_requirements.yml
+
+    - name: Ensure we have networking mapper definition
+      become: true
+      block:
+        - name: Ensure ci directory exists
+          ansible.builtin.file:
+            path: "/etc/ci/env"
+            state: directory
+            mode: "0755"
+
+        - name: Copy networking-environment-definition.yml if needed
+          ansible.builtin.copy:
+            src: "networking-environment-definition.yml"
+            dest: "/etc/ci/env/networking-environment-definition.yml"
+            mode: "0644"
+            force: false
+
+    - name: Create nova migration keypair
+      community.crypto.openssh_keypair:
+        comment: "nova migration"
+        path: "{{ _nova_key }}"
+        type: "ecdsa"
+
+    - name: Create user keypair
+      community.crypto.openssh_keypair:
+        comment: "user"
+        path: "{{ _user_key }}"
+        type: "ecdsa"
+
+    - name: Create fake kubeconfig
+      ansible.builtin.copy:
+        dest: "{{ cifmw_openshift_kubeconfig }}"
+        content: |
+          {}
+
+- name: Download tools
+  ansible.builtin.import_playbook: >-
+    /home/zuul/src/github.com/openstack-k8s-operators/install_yamls/devsetup/download_tools.yaml

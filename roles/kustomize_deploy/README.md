@@ -12,7 +12,7 @@ with a message.
 
 ### default resources
 
-- `cifmw_kustomize_deploy_destfiles_basedir`: _(string)_ Base directory for the
+- `cifmw_kustomize_deploy_basedir`: _(string)_ Base directory for the
   ci-framework artifacts. Defaults to `~/ci-framework-data/`
 - `cifmw_kustomize_deploy_architecture_repo_url`: _(string)_ URL of The
   "architecture" repository, where the VA scenarios are defined.
@@ -93,6 +93,40 @@ with a message.
 - `cifmw_kustomize_deploy_dp_dest_file`: _(string)_ Path of the generated
   CR file for the DataPlane resources deploy. Defaults to
   `cifmw_kustomize_deploy_kustomizations_dest_dir + dataplane.yaml`
+
+## Automation specificities
+
+### Task tagging
+
+Tags are dynamically associated to each stage of the automated deployment.
+This allows to discard specific stages by passing the following parameter
+to `ansible-playbook`:
+```Bash
+$ ansible-playbook deploy-edpm.yml \
+  -e @scenarios/reproducers/validated-architecture-1.yml \
+  -e @scenarios/reproducers/networking-definition.yml \
+  --skip-tags deploy_va_stage_0
+```
+This would skip the first stage described in the automation file.
+
+### Break point
+
+You can also stop the automated deploy by setting `cifmw_deploy_va_stopper`
+parameter to a specific value.
+
+Break point names are built using the stage ID, and the code currently supports
+three different stopper:
+
+- Before calling `kustomize build`: `pre_kustomize_stage_ID`
+- Before applying the CR: `post_kustomize_stage_ID`
+- After applying the CR (and after the validation): `post_apply_stage_ID`
+
+#### Example
+
+```Bash
+$ ansible-playbook deploy-edpm.yml [...] \
+  -e cifmw_deploy_va_stopper=post_kustomize_stage_3
+```
 
 ## Examples
 
