@@ -1,0 +1,87 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+- name: Create tobiko.conf
+  vars:
+    tobikoconf_combined: >-
+      {{
+          cifmw_test_operator_tobiko_default_conf |
+          combine(cifmw_test_operator_tobiko_override_conf, recursive=True)
+      }}
+  ansible.builtin.include_tasks: create-tobiko-conf.yml
+  loop: "{{ tobikoconf_combined | dict2items }}"
+  loop_control:
+    loop_var: tobikoconf_section
+
+- name: Add config section to tobiko CR
+  ansible.builtin.set_fact:
+    cifmw_test_operator_tobiko_config: >-
+      {{
+          cifmw_test_operator_tobiko_config |
+          combine({'spec': {'config':
+                             lookup('file',
+                                    cifmw_test_operator_artifacts_basedir + '/tobiko.conf')
+                  }}, recursive=true)
+      }}
+
+- name: Add ssh keys used for the VMs that tobiko creates to tobiko CR
+  block:
+    - name: Check if the ssh keys already exist
+      ansible.builtin.stat:
+        path: "{{ cifmw_test_operator_artifacts_basedir }}/id_{{ cifmw_test_operator_tobiko_ssh_keytype }}"
+      register: check_ssh_key
+
+    - name: Create the ssh keys
+      community.crypto.openssh_keypair:
+        path: "{{ cifmw_test_operator_artifacts_basedir }}/id_{{ cifmw_test_operator_tobiko_ssh_keytype }}"
+        type: "{{ cifmw_test_operator_tobiko_ssh_keytype }}"
+        size: "{{ cifmw_test_operator_tobiko_ssh_keysize }}"
+      when: not check_ssh_key.stat.exists
+
+    - name: Add private and public keys to tobiko CR
+      vars:
+        keyname: "{{ item }}Key"
+        keyfilename: "id_{{ cifmw_test_operator_tobiko_ssh_keytype }}{{ '.pub' if item == 'public' else '' }}"
+      ansible.builtin.set_fact:
+        cifmw_test_operator_tobiko_config: >-
+          {{
+              cifmw_test_operator_tobiko_config |
+              combine({'spec': {keyname:
+                                lookup('file',
+                                       cifmw_test_operator_artifacts_basedir + '/' + keyfilename)
+                      }}, recursive=true)
+          }}
+      with_items:
+        - private
+        - public
+
+- name: Ensure a secret for the kubeconfig file exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ cifmw_test_operator_tobiko_kubeconfig_secret }}"
+        namespace: "{{ cifmw_test_operator_namespace }}"
+      data:
+        config: "{{ lookup('file', cifmw_openshift_kubeconfig) | b64encode }}"
+  when: not cifmw_test_operator_dry_run | bool

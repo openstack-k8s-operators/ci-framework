@@ -1,22 +1,28 @@
-- name: "Run pre_tests hooks for {{ test_fw | default('tempest') }}"
+- name: "Run pre_tests hooks"
   vars:
     hooks: "{{ pre_tests | default([]) }}"
     step: pre_tests
   ansible.builtin.import_playbook: ./hooks.yml
 
-- name: "Test playbook for {{ run_test_fw }}"
-  vars:
-    run_test_fw: "{{ test_fw | default('tempest') }}"
+- name: "Test playbook"
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
-    - name: "Run {{ run_test_fw }}"
+    - name: "Run tests"
+      vars:
+        tempest_bool: cifmw_run_tempest | default('true') | bool
+        tobiko_bool: cifmw_run_tobiko | default('false') | bool
+        test_role: >-
+          {{ cifmw_run_test_role |
+             default('tempest' if tempest_bool
+                     else ('tobiko' if tobiko_bool else None))
+          }}
       tags:
         - tests
       ansible.builtin.import_role:
-        name: "{{ run_test_fw }}"
+        name: "{{ test_role }}"
 
-- name: "Run post_tests hooks for {{ test_fw | default('tempest') }}"
+- name: "Run post_tests hooks"
   vars:
     hooks: "{{ post_tests | default([]) }}"
     step: post_tests
