@@ -270,6 +270,41 @@
         dest: "/home/zuul/reproducer-variables.yml"
         content: "{{ _filtered_vars | to_nice_yaml }}"
 
+    - name: Inject local environment parameters
+      ansible.builtin.copy:
+        dest: "/home/zuul/openshift-environment.yml"
+        content: |-
+          {% raw %}
+          ---
+          cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+          cifmw_openshift_login_password_file: >-
+            {{ ansible_user_dir }}/.kube/kubeadmin-password
+          cifmw_openshift_login_kubeconfig: >-
+            {{ ansible_user_dir }}/.kube/config
+          cifmw_openshift_user: "kubeadmin"
+          cifmw_openshift_skip_tls_verify: true
+          cifmw_installyamls_repos: >-
+            {{
+              (ansible_user_dir,
+               'src/github.com/openstack-k8s-operators',
+               'install_yamls') | path_join
+            }}
+          cifmw_architecture_automation_file: >-
+            {{
+              (ansible_user_dir,
+               'src/github.com/openstack-k8s-operators',
+               'architecture/automation/vars/default.yaml') |
+               path_join
+            }}
+          pre_infra:
+            - name: Download needed tools
+              inventory: 'localhost,'
+              connection: local
+              type: playbook
+              source: >-
+                {{ cifmw_installyamls_repos }}/devsetup/download_tools.yaml
+          {% endraw %}
+
     - name: Get interfaces-info content
       register: _nic_info
       ansible.builtin.slurp:
