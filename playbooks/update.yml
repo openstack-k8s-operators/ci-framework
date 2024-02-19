@@ -4,7 +4,7 @@
     step: pre_update
   ansible.builtin.import_playbook: ./hooks.yml
 
-- name: Update playbook
+- name: Update repos playbook
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
@@ -12,6 +12,20 @@
       ansible.builtin.include_role:
         name: repo_setup
 
+- name: Sync repos for controller to compute
+  hosts: computes
+  gather_facts: true
+  tasks:
+    - name: Copy repositories from controller to computes
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/yum.repos.d/"
+        src: "{{ cifmw_basedir }}/artifacts/repositories/"
+
+- name: Run update role
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
     - name: Run update
       tags:
         - update
