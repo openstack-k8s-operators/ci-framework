@@ -22,5 +22,36 @@
       NAMESPACE: openstack
       OPERATOR_NAMESPACE: openstack-operators
     cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+    cifmw_openshift_setup_ca_registry_to_add: test.registry.com
   roles:
     - role: "openshift_setup"
+  tasks:
+    - name: Check that config map is created
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: ConfigMap
+        namespace: openshift-config
+        name: registry-cas
+      register: _configmap
+
+    - name: Assert that configmap was created
+      ansible.builtin.assert:
+        that:
+          - _configmap.api_found
+
+    - name: Check that Image cluster is patched
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        api_version: config.openshift.io/v1
+        kind: Image
+        name: cluster
+      register: _image_patch
+
+    - name: Assert that cluster was patched
+      ansible.builtin.assert:
+        that:
+          - _image_patch.resources[0].spec.additionalTrustedCA.name == "registry-cas"
