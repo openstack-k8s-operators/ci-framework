@@ -13,6 +13,10 @@ our capabilities to access remote package repositories, among possible targets.
 * `cifmw_install_ca_bundle_src`: (String) Path to the CA bundle we want to inject.
 * `cifmw_install_ca_trust_dir`: (String) Directory where we put custom CA. Must be known by the update-ca-trust command. Defaults to `/etc/pki/ca-trust/source/anchors/`.
 * `cifmw_install_ca_update_cmd`: (String) Command to run in order to update the CA trust ring. Defaults to `update-ca-trust`.
+* `cifmw_install_ca_url`: (String) URL pointing to a CA bundle that will be stored in `cifmw_install_ca_trust_dir`.
+* `cifmw_install_ca_url_validate_certs`: (Bool) Whether to validate SSL
+certificates when pulling a CA bundle from a url, will have no effect if
+`cifmw_install_ca_url` is not set.
 
 ## Examples
 ```YAML
@@ -28,6 +32,12 @@ our capabilities to access remote package repositories, among possible targets.
         -----BEGIN CERTIFICATE-----
         ....
         -----END CERTIFICATE-----
+  ansible.builtin.include_role:
+    role: install_ca
+
+- name: Inject custom CA from url
+  vars:
+    cifmw_install_ca_url: https://dummyurl.com/ca_file.pem
   ansible.builtin.include_role:
     role: install_ca
 ```
