@@ -16,14 +16,16 @@ with a message.
   Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_ci_gen_kustomize_values_architecture_repo`: (String) architecture repository location.
   Defaults to `cifmw_architecture_repo` (`~/src/github.com/openstack-k8s-operators/architecture`).
-* `cifmw_ci_gen_kustomize_values_dt_src_file`: (String) Absolute path to the `values.yaml` file you want to edit.
+* `cifmw_ci_gen_kustomize_values_src_file`: (String) Absolute path to the `values.yaml` file you want to edit.
   Defaults to `cifmw_ci_gen_kustomize_values_architecture_repo/cifmw_ci_gen_kustomize_values_architecture_examples_va_path/cifmw_architecture_va_scenario/values.yaml`
-* `cifmw_ci_gen_kustomize_values_snippets_dir`: (String) Location for the values snippets.
+* `cifmw_ci_gen_kustomize_values_snippets_basedir`: (String) Location for the values snippets.
   Defaults to `~/ci-framework-data/artifacts/ci_k8s_snippets`.
+* `cifmw_ci_gen_kustomize_values_snippets_dir_prefix`: (String) Prefix for snippet directory. Defaults to `""`.
 * `cifmw_ci_gen_kustomize_values_generated_dir`: (String) Location of the generated values.yaml.
   Defaults to `~/ci-framework-data/artifacts/ci_gen_kustomize_values`.
+* `cifmw_ci_gen_kustomize_values_dest_fname_prefix`: (String) Prefix for generated file name. Defaults to `""`.
 * `cifmw_ci_gen_kustomize_values_dest_filename`: (String) Name of the generated output file.
-  Defaults to `values.yaml`.
+  Defaults to `{{ cifmw_ci_gen_kustomize_values_dest_fname_prefix }}values.yaml`.
 * `cifmw_ci_gen_kustomize_values_nameservers`: (List) List of name servers you want to inject.
   Defaults to `[]`.
 * `cifmw_ci_gen_kustomize_values_userdata`: (Dict) Data structure you want to combine in the generated output.
