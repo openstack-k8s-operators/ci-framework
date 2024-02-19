@@ -14,24 +14,42 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Ensure directories exist
-  ansible.builtin.file:
-    path: "{{ cifmw_ci_gen_kustomize_values_generated_dir }}/{{ values_datatype | default('') }}"
-    state: directory
-    mode: "0755"
-
-- name: List snippets
-  register: _snippets
-  ansible.builtin.find:
-    paths: "{{ cifmw_ci_gen_kustomize_values_snippets_dir }}/{{ values_datatype | default('') }}"
-    recurse: false
-
-- name: Assert we do have content to combine
+- name: Ensure we have needed parameter
   ansible.builtin.assert:
     that:
-      - _snippets.files | length > 0
+      - values_datatype is defined
+      - values_datatype != ''
     msg: >-
-      No file found in {{ cifmw_ci_gen_kustomize_values_snippets_dir }}
+      Please do not call this tasks file without
+      calling the generate_snippet.yml first!
+
+- name: Ensure we have content to combine
+  vars:
+    _dir_name: >-
+      {{
+        cifmw_ci_gen_kustomize_values_snippets_dir_prefix ~
+        values_datatype
+      }}
+    _dir_path: >-
+      {{
+        snippet_datadir | default(
+          (cifmw_ci_gen_kustomize_values_snippets_basedir,
+           _dir_name) | path_join
+        )
+      }}
+  block:
+    - name: List snippets
+      register: _snippets
+      ansible.builtin.find:
+        paths: "{{ _dir_path }}"
+        recurse: false
+
+    - name: Assert we do have content to combine
+      ansible.builtin.assert:
+        that:
+          - _snippets.files | length > 0
+        msg: >-
+          No file found in {{ _dir_path }}
 
 - name: Ensure _content is empty
   ansible.builtin.set_fact:
@@ -64,16 +82,30 @@
   loop_control:
     label: "{{ item.source | basename }}"
 
-- name: Output values file
-  ansible.builtin.copy:
-    dest: >-
+- name: Generate values.yaml equivalent
+  vars:
+    _destdir: >-
       {{
         (cifmw_ci_gen_kustomize_values_generated_dir,
-        (values_datatype | default('')),
-        cifmw_ci_gen_kustomize_values_dest_filename) | path_join
+         values_datatype | default('')
+         ) | path_join
       }}
-    content: >-
-      {{
-        _content | to_nice_yaml
-      }}
-    mode: "0644"
+  block:
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ _destdir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Output values file
+      ansible.builtin.copy:
+        dest: >-
+          {{
+            (_destdir,
+            cifmw_ci_gen_kustomize_values_dest_filename) | path_join
+          }}
+        content: >-
+          {{
+            _content | to_nice_yaml
+          }}
+        mode: "0644"
