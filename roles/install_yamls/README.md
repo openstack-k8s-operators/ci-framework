@@ -10,6 +10,8 @@ It contains a set of playbooks to deploy podified control plane.
 * `cifmw_install_yamls_repo`: (String) `install_yamls` repo path. Defaults to `{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls`.
 * `cifmw_install_yamls_whitelisted_vars`: (List) Allowed variables in `cifmw_install_yamls_vars` that are not part of `install_yamls` Makefiles.
 * `cifmw_install_yamls_edpm_dir`: (String) Output directory for EDPM related artifacts (OUTPUT_BASEDIR). Defaults to `{{ cifmw_install_yamls_out_dir_basedir ~ '/artifacts/edpm' }}`
+* `cifmw_install_yamls_checkout_openstack_ref`: (String) Enable the checkout from openstack-operator references
+when cloning operator's repository using install_yamls make targets. Defaults to `"true"`
 
 ## Use case
 This module uses [a custom plugin](https://github.com/openstack-k8s-operators/ci-framework/blob/main/plugins/modules/generate_make_tasks.py) created to generate the role with tasks from Makefile.
