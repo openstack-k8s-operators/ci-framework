@@ -14,6 +14,21 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Define minimal set of repo variables when not running on Zuul
+  when:
+    - zuul is not defined
+    - cifmw_operator_build_output is defined
+    - cifmw_operator_build_meta_name in operators_build_output.operators
+  tags:
+    - always
+  vars:
+    operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
+  ansible.builtin.set_fact:
+    _install_yamls_repos:
+      OPENSTACK_BRANCH: ""
+      GIT_CLONE_OPTS': "-l"
+      OPENSTACK_REPO': "{{ operators_build_output[cifmw_operator_build_meta_name].git_src_dir  }}"
+
 - name: Set install_yamls Makefile environment variables
   tags:
     - always
@@ -24,6 +39,7 @@
       {{
         cifmw_install_yamls_environment |
         combine({'PATH': cifmw_path}) |
+        combine(_install_yamls_repos | default({})) |
         combine(cifmw_edpm_prepare_extra_vars | default({}))
       }}
     cifmw_edpm_prepare_make_openstack_env: |
@@ -32,11 +48,6 @@
       {% endif %}
     cifmw_edpm_prepare_make_openstack_deploy_prep_env: |
       CLEANUP_DIR_CMD: "true"
-      {% if cifmw_operator_build_meta_name is defined and cifmw_operator_build_meta_name in operators_build_output %}
-      OPENSTACK_BRANCH: ""
-      GIT_CLONE_OPTS: "-l"
-      OPENSTACK_REPO: {{ operators_build_output[cifmw_operator_build_meta_name].git_src_dir }}
-      {% endif %}
     cifmw_edpm_prepare_operators_build_output: "{{ operators_build_output }}"
 
 - name: Prepare storage in CRC

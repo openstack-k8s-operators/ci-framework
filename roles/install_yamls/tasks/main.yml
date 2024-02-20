@@ -25,11 +25,19 @@
     - "{{ cifmw_install_yamls_tasks_out }}"
     - "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters"
 
+- name: Create variables with local repos based on Zuul items
+  tags:
+    - bootstrap
+  ansible.builtin.include_role:
+    name: install_yamls
+    tasks_from: zuul_set_operators_repo.yml
+
 - name: Set environment override cifmw_install_yamls_environment fact
   tags:
     - bootstrap
   vars:
     install_yamls_override_vars: "{{ cifmw_install_yamls_vars| default({}) }}"
+    install_yamls_operators_repos: "{{ cifmw_install_yamls_operators_repo | default({}) }}"
   ansible.builtin.set_fact:
     cifmw_install_yamls_environment: >-
       {{
@@ -39,8 +47,10 @@
         items2dict(key_name=0, value_name=1) |
         combine({
           'OUT': cifmw_install_yamls_manifests_dir,
-          'OUTPUT_DIR': cifmw_install_yamls_edpm_dir
-        })
+          'OUTPUT_DIR': cifmw_install_yamls_edpm_dir,
+          'CHECKOUT_FROM_OPENSTACK_REF': cifmw_install_yamls_checkout_openstack_ref
+        }) |
+        combine(install_yamls_operators_repos)
       }}
     cacheable: true
 

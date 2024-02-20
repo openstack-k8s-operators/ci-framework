@@ -1,0 +1,36 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# When using CI (Zuul) to deploy operators and its dependencies with install_yamls,
+#  it may be needed to set operator's repo variable to properly clone PR's
+#  code, instead of getting latest promoted content. This task search for all
+#  modified operators in zuul.items[] and set install_yaml variables.
+- name: Create variables with local repos based on Zuul items
+  when:
+    - zuul is defined
+    - "'operator' in zuul_item.project.short_name"
+  vars:
+    _repo_operator_name: "{{ zuul_item.project.short_name | regex_search('(?:openstack-)?(.*)-operator', '\\1') | first }}"
+    _repo_operator_info:
+      - key: "{{ _repo_operator_name | upper }}_REPO"
+        value: "{{ ansible_user_dir }}/{{ zuul_item.project.src_dir }}"
+      - key: "{{ _repo_operator_name | upper }}_BRANCH"
+        value: ""
+  ansible.builtin.set_fact:
+    cifmw_install_yamls_operators_repo: "{{ cifmw_install_yamls_operators_repo | default({}) | combine(_repo_operator_info | items2dict) }}"
+  loop: "{{ zuul['items'] }}"
+  loop_control:
+    loop_var: zuul_item
