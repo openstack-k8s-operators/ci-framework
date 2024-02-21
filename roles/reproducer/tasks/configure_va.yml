@@ -10,8 +10,23 @@
         group: "zuul"
         content: |-
           pushd src/github.com/openstack-k8s-operators/ci-framework
+          export ANSIBLE_LOG_PATH="~/ansible-deploy-va.log"
           ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml \
             -e @~/ci-framework-data/artifacts/parameters/custom-params.yml \
             -e @~/openshift-environment.yml \
             deploy-edpm.yml $@
           popd
+
+    - name: Rotate some logs
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - ansible-deploy-va.log
+
+    - name: Run deployment if instructed to
+      when:
+        - cifmw_deploy_va | default(false) | bool
+      no_log: true
+      ansible.builtin.command:
+        cmd: "/home/zuul/deploy-va.sh"
