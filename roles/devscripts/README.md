@@ -38,9 +38,6 @@ networks.
   assigned.
 * `cifmw_devscripts_use_static_ip_addr` (bool) Use static IP addresses for the
   OCP nodes. Defaults to `false`
-* `cifmw_devscripts_layout_overrides` (dict) key/value pairs to be used for
-  overriding the default devscripts test layout. Refer
-  [cifmw_libvirt_manager_configuration](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/libvirt_manager#structure-for-cifmw_libvirt_manager_configuration)
 
 ### Secrets management
 
@@ -126,19 +123,30 @@ If you provide neither, or both, it will fail.
   ```yaml
   ---
   ...
-  cifmw_use_devscripts: True
+  cifmw_use_libvirt: true
+  cifmw_libvirt_manager_configuration:
+    vms:
+      ocp:
+        amount: 3
+        admin_user: core
+        image_local_dir: "/home/dev-scripts/pool"
+        disk_file_name: "ocp_master"
+        disksize: "105"
+        xml_paths:
+          - /home/dev-scripts/ocp_master_0.xml
+          - /home/dev-scripts/ocp_master_1.xml
+          - /home/dev-scripts/ocp_master_2.xml
 
   cifmw_manage_secrets_citoken_file: "{{ lookup('env', 'HOME')/ci_token }}"
   cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME')/pull_secret }}"
 
+  cifmw_use_devscripts: true
   cifmw_devscripts_config_overrides:
     provisioning_network_profile: "Disabled"
     num_extra_workers: 2
     extra_worker_memory_mb: 16384
     extra_worker_disk: 50
     worker_vcpu: 8
-
-  cifmw_devscripts_extra_networks: ['osp_trunk']
   ...
   ```
 
@@ -146,7 +154,31 @@ If you provide neither, or both, it will fail.
   is enabled and separate RH OSP networks.
 
   ```YAML
-  cifmw_use_devscripts: True
+  cifmw_use_libvirt: true
+  cifmw_libvirt_manager_configuration:
+    networks:
+      osp_trunk: |
+        <network>
+          <name>osp_trunk</name>
+          <forward mode='nat'/>
+          <bridge name='osp_trunk' stp='on' delay='0'/>
+          <ip family='ipv4' address='192.168.122.1' prefix='24'> </ip>
+        </network>
+    vms:
+      ocp:
+        amount: 3
+        admin_user: core
+        image_local_dir: "/home/dev-scripts/pool"
+        disk_file_name: "ocp_master"
+        disksize: "105"
+        xml_paths:
+          - /home/dev-scripts/ocp_master_0.xml
+          - /home/dev-scripts/ocp_master_1.xml
+          - /home/dev-scripts/ocp_master_2.xml
+        nets:
+          - osp_trunk
+
+  cifmw_use_devscripts: true
 
   cifmw_manage_secrets_citoken_content: REDACTED
   cifmw_manage_secrets_pullsecret_content: |
@@ -164,4 +196,3 @@ If you provide neither, or both, it will fail.
 
 * [dev-scripts](https://github.com/openshift-metal3/dev-scripts)
 * [Additional overrides](https://github.com/openshift-metal3/dev-scripts/blob/master/config_example.sh)
-* [Baremetal-operator](https://github.com/metal3-io/baremetal-operator/blob/main/docs/api.md)
