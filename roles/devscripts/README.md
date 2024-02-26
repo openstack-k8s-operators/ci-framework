@@ -35,7 +35,7 @@ networks.
 * `cifmw_devscripts_enable_iscsi_on_ocp_nodes` (bool) Enable iSCSI services on
   the OpenShift nodes having role as `worker`. Defaults to `false`.
 * `cifmw_devscripts_host_bm_net_ip_addr` (str) The IP address of the host to be
-  assigned.
+  assigned. Must be from the specified external network.
 * `cifmw_devscripts_use_static_ip_addr` (bool) Use static IP addresses for the
   OCP nodes. Defaults to `false`
 
