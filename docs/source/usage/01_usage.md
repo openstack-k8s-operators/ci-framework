@@ -7,6 +7,7 @@ are shared among multiple roles:
 
 - `cifmw_basedir`: The base directory for all of the artifacts. Defaults to
   `~/ci-framework-data`.
+- `cifmw_target_host`: (String) The target machine for ci-framework to execute its playbooks against. Defaults to `localhost`.
 - `cifmw_crc_hostname`: Allow to set the actual CRC inventory hostname. Mostly used in the fetch_compute_facts hook.
   in the multinode layout, especially for the reproducer case.
 - `cifmw_edpm_deploy_baremetal`: (Bool) Toggle whether to deploy edpm on compute nodes.
@@ -38,6 +39,11 @@ are shared among multiple roles:
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
 - `cifmw_architecture_va_scenario`: (String) The selected VA scenario to deploy.
 - `cifmw_ceph_target`: (String) the Ansible inventory group where ceph is deployed. Defaults to `computes`.
+- `cifmw_run_tests`: (Bool) Specifies whether tests should be executed.
+  Defaults to false.
+- `cifmw_run_test_role`: (String) Specifies which ci-framework role will be used to run tests. Allowed options are `test_operator` and `tempest`. Defaults to `tempest`.
+- `cifmw_run_tempest`: (bool) specifies whether tempest tests should be run.  Notice tempest tests can be executed with either `test_operator` or `tempest` roles. Defaults to true.
+- `cifmw_run_tobiko`: (bool) specifies whether tobiko tests should be run. Notice tobiko tests can only be executed with the `test_operator` role. Defaults to false.
 
 ```{admonition} Words of caution
 :class: danger
