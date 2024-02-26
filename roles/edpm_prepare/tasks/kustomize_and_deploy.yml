@@ -1,0 +1,84 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Perform kustomizations to the OpenStackControlPlane CR
+  vars:
+    cifmw_edpm_prepare_openstack_crs_path: >-
+      {{
+        [
+          cifmw_edpm_prepare_manifests_dir,
+          cifmw_install_yamls_defaults['NAMESPACE'],
+          'openstack',
+          'cr'
+        ] | ansible.builtin.path_join
+      }}
+  ci_kustomize:
+    target_path: "{{ cifmw_edpm_prepare_openstack_crs_path }}"
+    sort_ascending: false
+    kustomizations: "{{ cifmw_edpm_prepare_kustomizations }}"
+    kustomizations_paths: >-
+      {{
+        [
+          (
+            [
+              cifmw_edpm_prepare_manifests_dir,
+              'kustomizations',
+              'controlplane'
+            ] | ansible.builtin.path_join
+          )
+        ]
+      }}
+  register: cifmw_edpm_prepare_crs_kustomize_result
+
+- name: Log the CR that is about to be applied
+  ansible.builtin.debug:
+    var: cifmw_edpm_prepare_crs_kustomize_result
+
+- name: Apply the OpenStackControlPlane CR
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_edpm_prepare_basedir }}/artifacts"
+    script: "oc apply -f {{ cifmw_edpm_prepare_crs_kustomize_result.output_path }}"
+
+- name: Wait for control plane to change its status
+  # If we are modifying the control plane, it can be in a 'ready' status, so
+  # we need to wait a few seconds so it changes to a 'non-ready' status first.
+  ansible.builtin.pause:
+    seconds: "{{ cifmw_edpm_prepare_wait_controplane_status_change_sec }}"
+
+- name: Wait for OpenStack controlplane to be deployed
+  vars:
+    cr_name: >-
+      {{
+        (
+          cifmw_edpm_prepare_crs_kustomize_result.result |
+          selectattr('kind', 'defined') |
+          selectattr('metadata.name', 'defined') |
+          selectattr('kind', 'equalto', 'OpenStackControlPlane') |
+          first
+        ).metadata.name
+      }}
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait OpenStackControlPlane {{ cr_name }}
+      --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      --for=condition=ready
+      --timeout={{ cifmw_edpm_prepare_timeout }}m
