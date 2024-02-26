@@ -1,0 +1,42 @@
+---
+cifmw_install_yamls_vars:
+  BMO_SETUP: false
+  INSTALL_CERT_MANAGER: false
+
+cifmw_edpm_prepare_skip_crc_storage_creation: true
+
+post_deploy:
+  - name: Kustomize OpenStack CR with Ceph
+    type: playbook
+    source: control_plane_ceph_backends.yml
+  - name: Kustomize and update Control Plane
+    type: playbook
+    source: control_plane_kustomize_deploy.yml
+
+cifmw_services_manila_enabled: true
+
+pre_tempest:
+  - name: Create manila resources
+    type: playbook
+    source: manila_create_default_resources.yml
+
+cifmw_run_tests: true
+cifmw_tempest_container: openstack-tempest-all
+cifmw_tempest_default_groups: &test_operator_list
+  - openstack-operator
+  - cinder-operator
+  - keystone-operator
+  - manila-operator
+cifmw_tempest_default_jobs: *test_operator_list
+
+cifmw_tempest_tests_allowed_override_scenario: true
+
+cifmw_tempest_tempestconf_profile:
+  create: true
+  debug: true
+  os_cloud: default
+  overrides:
+    identity.v3_endpoint_type: public
+    share.run_share_group_tests: "False"
+    share.capability_storage_protocol: CEPHFS
+    share.suppress_errors_in_cleanup: "True"
