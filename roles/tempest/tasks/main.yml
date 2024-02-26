@@ -28,9 +28,19 @@
 - name: Setup tempest tests
   ansible.builtin.include_tasks: tempest-tests.yml
 
-- name: Create clouds.yaml
-  ansible.builtin.include_tasks: create-clouds-file.yml
+- name: Get clouds.yaml
   when: not cifmw_tempest_dry_run | bool
+  block:
+    - name: Check whether it exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_edpm_prepare_basedir }}/artifacts/clouds.yaml"
+      register: check_clouds_yaml
+
+    - name: Create clouds.yaml
+      ansible.builtin.import_role:
+        name: edpm_prepare
+        tasks_from: create-clouds-file
+      when: not check_clouds_yaml.stat.exists
 
 - name: Configure tempest
   ansible.builtin.include_tasks: configure-tempest.yml
@@ -69,6 +79,7 @@
     volume:
       - "{{ cifmw_tempest_artifacts_basedir }}/:/var/lib/tempest/external_files:Z"
       - "{{ cifmw_tempest_artifacts_basedir }}/tls-ca-bundle.pem:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
+      - "{{ cifmw_edpm_prepare_basedir }}/artifacts/clouds.yaml:/var/lib/tempest/.config/openstack/clouds.yaml"
     detach: false
     dns: "{{ cifmw_tempest_dns_servers }}"
     env:
