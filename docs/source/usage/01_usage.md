@@ -37,7 +37,7 @@ are shared among multiple roles:
 - `cifmw_ssh_keysize`: (Integer) Size of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to 521.
 - `cifmw_architecture_repo`: (String) Path of the architecture repository on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
-- `cifmw_architecture_va_scenario`: (String) The selected VA scenario to deploy.
+- `cifmw_architecture_scenario`: (String) The selected VA scenario to deploy.
 - `cifmw_ceph_target`: (String) the Ansible inventory group where ceph is deployed. Defaults to `computes`.
 - `cifmw_run_tests`: (Bool) Specifies whether tests should be executed.
   Defaults to false.
