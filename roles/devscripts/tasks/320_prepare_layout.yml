@@ -18,30 +18,67 @@
 - name: Gather the golden file definition path.
   ansible.builtin.find:
     paths: "{{ cifmw_devscripts_config.working_dir }}"
-    patterns: "{{ cifmw_devscripts_config.cluster_name }}_*.xml"
+    patterns: "{{ cifmw_devscripts_config.cluster_name }}_master_*.xml"
     recurse: false
-  register: _xml_files_result
+  register: _ctrl_vm_xml
 
-- name: Prepare the file path list.
-  when: not _xml_files_result.failed | default(true)
-  ansible.builtin.set_fact:
-    _xml_files: "{{ (_xml_files | default([]) ) + [item.path] }}"
-  loop: "{{ _xml_files_result.files }}"
-
-- name: Override the default xml paths.
+- name: Align the OCP type information.
+  when:
+    - not _ctrl_vm_xml.failed | default(true)
   vars:
     _data:
       vms:
         ocp:
-          amount: >-
-            {{
-              (cifmw_devscripts_config.num_masters | int) +
-              (cifmw_devscripts_config.num_workers | int)
-            }}
-          xml_paths: "{{ _xml_files }}"
+          amount: "{{ cifmw_devscripts_config.num_masters | int }}"
+          image_local_dir: "{{ cifmw_devscripts_config.working_dir }}/pool"
+          xml_paths: "{{ _ctrl_vm_xml.files | map(attribute='path') | list }}"
+          disk_file_name: "{{ cifmw_devscripts_config.cluster_name }}_master"
+          disksize: "{{ cifmw_devscripts_config.master_disk | int + 20 }}"
   ansible.builtin.set_fact:
-    cifmw_libvirt_manager_configuration: >-
+    cifmw_libvirt_manager_configuration_gen: >-
       {{
-        cifmw_libvirt_manager_configuration |
+        cifmw_libvirt_manager_configuration_gen |
+        default(cifmw_libvirt_manager_configuration) |
         combine(_data, recursive=true)
       }}
+
+- name: Ensure OCP worker data is aligned.
+  when:
+    - cifmw_devscripts_config.num_workers > 0
+  block:
+    - name: Gather the worker nodes xml file definitions.
+      ansible.builtin.find:
+        paths: "{{ cifmw_devscripts_config.working_dir }}"
+        patterns: "{{ cifmw_devscripts_config.cluster_name }}_worker_*.xml"
+        recurse: false
+      register: _wrk_vm_xml
+
+    - name: Align the worker data.
+      when:
+        - _wrk_vm_xml.failed | default(true)
+      vars:
+        _wrk_data:
+          vms:
+            ocp_worker:
+              amount: "{{ cifmw_devscripts_config.num_workers | int }}"
+              admin_user: "core"
+              image_local_dir: "{{ cifmw_devscripts_config.working_dir }}/pool"
+              disk_file_name: >-
+                {{
+                  cifmw_devscripts_config.cluster_name + '_worker'
+                }}
+              disksize: >-
+                {{
+                  cifmw_devscripts_config.worker_disk | default(30) | int + 20
+                }}
+              xml_paths: >-
+                {{
+                  _wrk_vm_xml.files | map(attribute='path') | list
+                }}
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_configuration_gen: >-
+          {{
+            cifmw_libvirt_manager_configuration_gen |
+            default(cifmw_libvirt_manager_configuration) |
+            combine(_wrk_data, recursive=true)
+          }}
