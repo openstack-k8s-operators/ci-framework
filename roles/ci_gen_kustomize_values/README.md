@@ -7,7 +7,7 @@ None
 ## Parameters
 
 ```{warning}
-The top level parameter `cifmw_architecture_va_scenario` is required in order
+The top level parameter `cifmw_architecture_scenario` is required in order
 to select the proper VA scenario to deploy. If not provided, the role will fail
 with a message.
 ```
@@ -17,7 +17,7 @@ with a message.
 * `cifmw_ci_gen_kustomize_values_architecture_repo`: (String) architecture repository location.
   Defaults to `cifmw_architecture_repo` (`~/src/github.com/openstack-k8s-operators/architecture`).
 * `cifmw_ci_gen_kustomize_values_src_file`: (String) Absolute path to the `values.yaml` file you want to edit.
-  Defaults to `cifmw_ci_gen_kustomize_values_architecture_repo/cifmw_ci_gen_kustomize_values_architecture_examples_va_path/cifmw_architecture_va_scenario/values.yaml`
+  Defaults to `cifmw_ci_gen_kustomize_values_architecture_repo/cifmw_ci_gen_kustomize_values_architecture_examples_path/cifmw_architecture_scenario/values.yaml`
 * `cifmw_ci_gen_kustomize_values_snippets_basedir`: (String) Location for the values snippets.
   Defaults to `~/ci-framework-data/artifacts/ci_k8s_snippets`.
 * `cifmw_ci_gen_kustomize_values_snippets_dir_prefix`: (String) Prefix for snippet directory. Defaults to `""`.
@@ -54,7 +54,7 @@ Note that all of the SSH keys should be in `ecdsa` format to comply with FIPS di
 
 - name: Generate controlplane without any custom user input
   vars:
-    cifmw_architecture_va_scenario: "nfv/sriov"
+    cifmw_architecture_scenario: "nfv/sriov"
     cifmw_networking_env_definition: "{{ _net_env.content | b64decode | from_yaml }}"
   ansible.builtin.import_role:
     name: ci_gen_kustomize_values
@@ -68,7 +68,7 @@ Note that all of the SSH keys should be in `ecdsa` format to comply with FIPS di
 
 - name: Generate controlplane with custom user input
   vars:
-    cifmw_architecture_va_scenario: "nfv/sriov"
+    cifmw_architecture_scenario: "nfv/sriov"
     cifmw_networking_env_definition: "{{ _net_env.content | b64decode | from_yaml }}"
     cifmw_ci_gen_kustomize_values_userdata:
       data:
@@ -88,7 +88,7 @@ Note that all of the SSH keys should be in `ecdsa` format to comply with FIPS di
 
 - name: Generate dataplane without any custom user input
   vars:
-    cifmw_architecture_va_scenario: "nfv/sriov/edpm"
+    cifmw_architecture_scenario: "nfv/sriov/edpm"
     cifmw_networking_env_definition: "{{ _net_env.content | b64decode | from_yaml }}"
   ansible.builtin.import_role:
     name: ci_gen_kustomize_values
