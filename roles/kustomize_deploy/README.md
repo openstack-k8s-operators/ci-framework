@@ -5,7 +5,7 @@ Ansible role designed to deploy VA scenarios using the kustomize tool.
 ## Parameters
 
 ```{warning}
-The top level parameter `cifmw_architecture_va_scenario` is required in order
+The top level parameter `cifmw_architecture_scenario` is required in order
 to select the proper VA scenario to deploy. If not provided, the role will fail
 with a message.
 ```
@@ -25,7 +25,7 @@ with a message.
 - `cifmw_kustomize_deploy_architecture_examples_common_path`: _(string)_
   Relative path of the common CRs in the architecture repo. Defaults to
   `/examples/common`
-- `cifmw_kustomize_deploy_architecture_examples_va_path`: _(string)_ Relative
+- `cifmw_kustomize_deploy_architecture_examples_path`: _(string)_ Relative
   path of the VA scenario list in the operator repo. Defaults to `/examples/va`
 - `cifmw_kustomize_deploy_kustomizations_dest_dir`: _(string)_ Path for the
   generated CR files. Defaults to
@@ -82,8 +82,8 @@ with a message.
 - `cifmw_kustomize_deploy_dp_source_files`: _(string)_ Path of the
   dataplane kustomize source files. Defaults to
   `cifmw_kustomize_deploy_architecture_repo_dest_dir +`
-  `cifmw_kustomize_deploy_architecture_examples_va_path +`
-  `cifmw_architecture_va_scenario`
+  `cifmw_kustomize_deploy_architecture_examples_path +`
+  `cifmw_architecture_scenario`
 - `cifmw_kustomize_deploy_dp_values_src_file`: _(string)_ Path of the
   generated `values.yaml` for dataplane resources. Defaults to
   `~/ci-framework-data/artifacts/ci_gen_kustomize_values/edpm-values/values.yaml`
@@ -105,13 +105,13 @@ to `ansible-playbook`:
 $ ansible-playbook deploy-edpm.yml \
   -e @scenarios/reproducers/validated-architecture-1.yml \
   -e @scenarios/reproducers/networking-definition.yml \
-  --skip-tags deploy_va_stage_0
+  --skip-tags deploy_architecture_stage_0
 ```
 This would skip the first stage described in the automation file.
 
 ### Break point
 
-You can also stop the automated deploy by setting `cifmw_deploy_va_stopper`
+You can also stop the automated deploy by setting `cifmw_deploy_architecture_stopper`
 parameter to a specific value.
 
 Break point names are built using the stage ID, and the code currently supports
@@ -125,7 +125,7 @@ three different stopper:
 
 ```Bash
 $ ansible-playbook deploy-edpm.yml [...] \
-  -e cifmw_deploy_va_stopper=post_kustomize_stage_3
+  -e cifmw_deploy_architecture_stopper=post_kustomize_stage_3
 ```
 
 ## Examples
@@ -134,7 +134,7 @@ $ ansible-playbook deploy-edpm.yml [...] \
 - name: Call kustomize_deploy role
   vars:
     cifmw_kustomize_deploy_nncp_values_src_file: /tmp/values.yml
-    cifmw_architecture_va_scenario: hci
+    cifmw_architecture_scenario: hci
   ansible.builtin.include_role:
     name: "kustomize_deploy"
 ```
