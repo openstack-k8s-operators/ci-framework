@@ -17,12 +17,7 @@ job parameter:
 - job:
     name: my-job-with-2-nodes
     parent: podified-multinode-edpm-deployment-crc
-    nodeset:
-      nodes:
-        - name: controller
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: crc
-          label: coreos-crc-extracted-xxl
+    nodeset: centos-9-medium-crc-extracted-2-30-0-3xl
     vars:
       cifmw_deploy_edpm: false
       podified_validation: true
