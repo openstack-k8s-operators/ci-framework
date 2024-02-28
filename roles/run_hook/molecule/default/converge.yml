@@ -17,21 +17,23 @@
 
 - name: Converge
   hosts: all
-  vars:
-    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
-    step: molecule
-    hooks:
-      - name: Default noop hook
-        source: noop.yml
-        type: playbook
-      - name: With extra-vars
-        source: /tmp/dummy.yml
-        type: playbook
-        extra_vars:
-          foo: bar
-          file: '/tmp/dummy-env.yml'
+  vars_files:
+    - ./resources/vars.yml
   tasks:
-    - name: Hook project provided noop.yml
+    - name: No hook
+      vars:
+        step: no_hook
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Ensure we do not have ceph_uuid
+      ansible.builtin.assert:
+        that:
+          - ceph_uuid is undefined
+
+    - name: Combined hooks
+      vars:
+        step: run_molecule
       ansible.builtin.include_role:
         name: run_hook
 
@@ -39,3 +41,60 @@
       ansible.builtin.assert:
         that:
           - ceph_uuid is defined
+          - ceph_uuid == 'dummy-1.yml'
+
+    - name: Only listed hooks
+      vars:
+        step: list_hooks
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Ensure we have the ceph_uuid variable now
+      ansible.builtin.assert:
+        that:
+          - ceph_uuid is defined
+          - ceph_uuid == 'dummy-3.yml'
+
+    - name: Only filtered hooks
+      vars:
+        step: filtered_hooks
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Ensure we have the ceph_uuid variable now
+      ansible.builtin.assert:
+        that:
+          - ceph_uuid is defined
+          - ceph_uuid == 'dummy-4.yml'
+
+    - name: Direct hooks
+      vars:
+        step: no_hook
+        hooks:
+          - name: Dummy-5
+            source: /tmp/dummy-5.yml
+            type: playbook
+            extra_vars:
+              foo: bar
+              file: '/tmp/dummy-env.yml'
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Ensure we have the ceph_uuid variable now
+      ansible.builtin.assert:
+        that:
+          - ceph_uuid is defined
+          - ceph_uuid == 'dummy-5.yml'
+
+    - name: Direct hooks as param
+      vars:
+        step: no_hook
+        hooks: "{{ my_hook }}"
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Ensure we have the ceph_uuid variable now
+      ansible.builtin.assert:
+        that:
+          - ceph_uuid is defined
+          - ceph_uuid == 'dummy-6.yml'
