@@ -71,7 +71,11 @@ The framework is able to leverage hooks located in various locations. Using
 proper parameter name, you may run arbitrary playbook or load custom CRDs at
 specific points in the standard run.
 
-Allowed parameter names are:
+Hooks may be presented in two ways:
+- as a list
+- as a single hook in a parameter
+
+If you want to list multiple hooks, you have to use the following parameter names:
 
 - `pre_infra`: before bootstrapping the infrastructure
 - `post_infra`: after bootstrapping the infrastructure
@@ -88,6 +92,13 @@ Allowed parameter names are:
 - `post_admin_setup`: before admin setup
 - `pre_reporting`: before running reporting
 - `post_reporting`: after running reporting
+
+Since we're already providing hooks as list, you may want to just add one or two hooks
+using your own environment file. Parameter structure is simple: `PREFIX_HOOKNAME: {hook struct}`
+
+PREFIX must match the above parameters (`pre_infra`, `post_reporting` and so on).
+
+The `{hook struct}` is the same as a listed hook, but you'll remove the `name` entry.
 
 Since steps may be skipped, we must ensure proper post/pre exists for specific
 steps.
