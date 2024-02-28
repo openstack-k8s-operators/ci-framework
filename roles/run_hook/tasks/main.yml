@@ -14,8 +14,52 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Loop on the passed hooks and call correct action
-  ansible.builtin.include_tasks: "{{ hook.type }}.yml"
-  loop: "{{ hooks }}"
-  loop_control:
-    loop_var: 'hook'
+- name: "Combine hooks and run them for {{ step }}"
+  vars:
+    _list_hooks: >-
+      {{
+        hostvars[inventory_hostname][step] |
+        default([])
+      }}
+    _matcher: "^{{ step }}_(.*)$"
+    _filtered_hooks: >-
+      {{
+        hostvars[inventory_hostname] |
+        dict2items |
+        selectattr('key', 'match', _matcher)
+      }}
+    _single_hooks: >-
+      {% for _hook in _filtered_hooks -%}
+      - name: {{ _hook.key | regex_replace(_matcher, '\1') |
+                 replace('_', ' ') | capitalize }}
+      {{ _hook.value | to_nice_yaml | indent(width=2, first=true) }}
+      {% endfor -%}
+  block:
+    - name: Assert parameters are valid
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _filtered_hooks is not string
+          - _filtered_hooks is not mapping
+          - _filtered_hooks is iterable
+          - _list_hooks is not string
+          - _list_hooks is not mapping
+          - _list_hooks is iterable
+          - (hooks | default([])) is not string
+          - (hooks | default([])) is not mapping
+          - (hooks | default([])) is iterable
+
+    - name: "Loop on hooks for {{ step }}"
+      vars:
+        _hooks: >-
+          {{
+            (
+              (_single_hooks | from_yaml | default([], true)) +
+              (hooks | default([], true)) +
+              _list_hooks
+            ) | sort(attribute='name')
+          }}
+      ansible.builtin.include_tasks: "{{ hook.type }}.yml"
+      loop: "{{ _hooks }}"
+      loop_control:
+        loop_var: 'hook'
