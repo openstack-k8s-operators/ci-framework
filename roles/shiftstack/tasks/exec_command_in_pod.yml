@@ -1,0 +1,51 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Command execution block
+  block:
+    - name: Execute in the pod the command '{{ command }}'
+      environment:
+        PATH: "{{ cifmw_path }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.command:
+        cmd: "oc rsh -n {{ namespace }} {{ pod }} bash -c '{{ command }}'"
+      register: command_result
+
+  rescue:
+    - name: Fail when the command module fails
+      ansible.builtin.fail:
+        msg: "'{{ command }}' command execution failed, see logs for more information."
+
+  always:
+    - name: Command execution log saving block
+      when: log_file_name | default(false)
+      block:
+        - name: Get current date and time
+          ansible.builtin.command:
+            cmd: date +"%Y_%m_%d-%H_%M_%S"
+          register: current_date
+
+        - name: Save the command execution information in the log file in '{{ cifmw_shiftstack_basedir }}'
+          vars:
+            command_info:
+              namespace: "{{ namespace }}"
+              pod: "{{ pod }}"
+              command: "{{ command }}"
+              command_result: "{{ command_result }}"
+          ansible.builtin.copy:
+            content: "{{ command_info | to_nice_yaml }}"
+            dest: "{{ cifmw_shiftstack_basedir }}/{{ current_date.stdout }}.{{ log_file_name }}"
+            mode: "0644"
