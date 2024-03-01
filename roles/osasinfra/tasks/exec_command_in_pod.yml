@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get current date and time
+  ansible.builtin.shell:
+    cmd: date +"%Y_%m_%d-%H_%M_%S"
+  register: current_date
+
+#- name: Execute the command '{{ command }}' in the pod '{{ namespace }}/{{ pod }}'
+#  kubernetes.core.k8s_exec:
+#    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+#    namespace: "{{ namespace }}"
+#    pod: "{{ pod }}"
+#    command: "{{ command }}"
+#  register: command_result
+#  ignore_errors: True
+
+- name: Execute the command '{{ command }}' in the pod '{{ namespace }}/{{ pod }}'
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc rsh -n {{ namespace }} {{ pod }} bash -c '{{ command }}'"
+  register: command_result
+  ignore_errors: True
+
+- name: Check last command return code
+  ansible.builtin.debug:
+    msg: "cmd failed"
+  when: command_result.rc != 0
+
+- name: Print command output
+  ansible.builtin.debug:
+    var: command_result.stdout_lines
+  when: command_result.rc == 0
+
+- name: Generate YAML parameter for '{{ log_file_name }}'
+  ansible.builtin.set_fact:
+    command_info:
+      namespace: "{{ namespace }}"
+      pod: "{{ pod }}"
+      command: "{{ command }}"
+      command_result: "{{ command_result }}"
+
+- name: Save the command info in the log file in '{{ cifmw_osasinfra_artifacts_basedir }}'
+  ansible.builtin.copy:
+    content: "{{ command_info | to_nice_yaml }}"
+    dest: "{{ cifmw_osasinfra_artifacts_basedir }}/{{ current_date.stdout }}.{{ log_file_name }}"
