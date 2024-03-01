@@ -1,0 +1,253 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Pre-requisites for deploying external ceph
+  hosts: localhost
+  vars:
+    cifmw_ceph_dir: "{{ ansible_user_dir }}/ci-framework-data/manifests/ceph"
+    cifmw_ceph_node_num: "{{ cifmw_ceph_node_num | default(3) }}"
+  tasks:
+    - name: Prepare inventory for ceph nodes
+      block:
+
+        - name: Add hosts to ceph group
+          ansible.builtin.add_host:
+            name: "{{ item }}"
+            groups: ceph
+          loop: "{{ groups['computes'][-cifmw_ceph_node_num:] }}"  
+          when: groups['computes'] | length > {{ cifmw_ceph_node_num }}
+          run_once: true
+          
+        - name: Remove ceph nodes from the compute group
+          ansible.builtin.add_host:
+            name: "{{ item }}"
+            groups: computes
+            state: absent
+          loop: "{{ groups['ceph'] }}"
+          when: item in groups['computes']
+          
+    - name: Gather IP of the ceph nodes
+      block:
+        - name: Run command to get IP
+          ansible.builtin.shell:
+            cmd: "ip a | grep 192.168.122 | awk '{print $2}' | cut -d '/' -f 1"
+          register: ip_result
+          with_items: "{{ groups['ceph'] }}"
+          delegate_to: "{{ item }}"
+
+        - name: Store IPs in a dictionary
+          set_fact:
+            ceph_ips_dict: "{{ ceph_ips_dict | default({}) | combine({item.item: item.stdout_lines[0]}) }}"
+          with_items: "{{ ip_result.results }}"
+
+
+    - name: Create a nodeset for ceph
+      block:
+        - name: Ensure that directory exists
+          ansible.builtin.file:
+            path: "{{ cifmw_ceph_dir }}"
+            state: directory
+
+        - name: Get sample nodeset file from URL
+          get_url:
+            url: "https://raw.githubusercontent.com/openstack-k8s-operators/dataplane-operator/main/config/samples/dataplane_v1beta1_openstackdataplanenodeset.yaml"
+            dest: "{{ cifmw_ceph_dir }}/ceph-nodeset-sample.yml"
+
+        - name: Customize the nodeset for ceph
+          ansible.builtin.copy:
+            dest: "{{ cifmw_ceph_dir }}/kustomization.yml"
+            content: |-
+              apiVersion: kustomize.config.k8s.io/v1beta1
+              kind: Kustomization
+              resources:
+                - ceph-nodeset-sample.yml  
+              namespace: openstack
+              patches:
+                - target:
+                    kind: OpenStackDataPlaneNodeSet
+                  patch: |-
+                    - op: replace
+                      path: /metadata/name
+                      value: ceph-nodeset
+                    - op: replace
+                      path: /spec/nodes
+                      value: {}
+              {% for ceph_node_key, ceph_node_value in ceph_ips_dict.items() %}
+                    - op: add
+                      path: /spec/nodes/{{ ceph_node_key}}
+                      value:
+                        ansible:
+                          ansibleHost: {{ ceph_node_value }}
+                        hostName: {{ ceph_node_key }}
+                        networks:
+                        - defaultRoute: true
+                          fixedIP: {{ ceph_node_value }}
+                          name: CtlPlane
+                          subnetName: subnet1
+                        - name: InternalApi
+                          subnetName: subnet1
+                        - name: Storage
+                          subnetName: subnet1
+                        - name: StorageMgmt
+                          subnetName: subnet1
+                        - name: Tenant
+                          subnetName: subnet1
+              {% endfor %}
+                    - op: replace
+                      path: /spec/services
+                      value:
+                          - repo-setup-custom
+                          - bootstrap
+                          - configure-network
+                          - validate-network
+                          - install-os
+                          - ceph-hci-pre
+                    - op: add
+                      path: /spec/nodeTemplate/managementNetwork
+                      value: ctlplane
+                    - op: add
+                      path: /spec/nodeTemplate/networks
+                      value:
+                        - defaultRoute: true
+                          name: CtlPlane
+                          subnetName: subnet1
+                        - name: InternalApi
+                          subnetName: subnet1
+                        - name: Storage
+                          subnetName: subnet1
+                        - name: Tenant
+                          subnetName: subnet1
+                        - name: StorageMgmt
+                          subnetName: subnet1
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansiblePort
+                      value: 22
+
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleUser
+                      value: zuul
+
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/edpm_ceph_hci_pre_enabled_services
+                      value:
+                        - ceph_mon
+                        - ceph_mgr
+                        - ceph_osd
+                        - ceph_rgw
+                        - ceph_nfs
+                        - ceph_rgw_frontend
+                        - ceph_nfs_frontend
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/storage_mtu
+                      value: 1500
+
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_mtu
+                      value: 1500
+
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_vlan_id
+                      value: 23
+                  
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_host_routes
+                      value: []
+
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/storage_mgmt_cidr
+                      value: 24
+
+                    - op: add
+                      path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
+                      value:
+                        ---
+                        {% set mtu_list = [ctlplane_mtu] %}
+                        {% for network in role_networks %}
+                        {{ mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) }}
+                        {%- endfor %}
+                        {% set min_viable_mtu = mtu_list | max %}
+                        network_config:
+                        - type: ovs_bridge
+                          name: {{ neutron_physical_bridge_name }}
+                          mtu: {{ min_viable_mtu }}
+                          use_dhcp: false
+                          dns_servers: {{ ctlplane_dns_nameservers }}
+                          domain: {{ dns_search_domains }}
+                          addresses:
+                          - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_cidr }}
+                          routes: {{ ctlplane_host_routes }}
+                          members:
+                          - type: interface
+                            name: eth1
+                            mtu: {{ min_viable_mtu }}
+                            # force the MAC address of the bridge to this interface
+                            primary: true
+                        {% for network in role_networks %}
+                          - type: vlan
+                            mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
+                            vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                            addresses:
+                            - ip_netmask:
+                                {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+                            routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
+                        {% endfor %}
+
+
+        - name: Apply the kustomization
+          ansible.builtin.shell:
+            cmd: >-
+              kustomize build {{ cifmw_ceph_dir }} > {{ cifmw_ceph_dir }}/ceph-nodeset.yml
+
+        - name: Apply the nodeset CR
+          kubernetes.core.k8s:
+            state: present
+            definition: "{{ lookup('file', '{{ cifmw_ceph_dir }}/ceph-nodeset.yml') }}"
+         
+    - name: Create a deployment for ceph
+      block:
+        - name: Create the deployment CR
+          ansible.builtin.copy:
+            dest: "{{ cifmw_ceph_dir }}/ceph-deployment.yml"
+            content: |-
+              apiVersion: dataplane.openstack.org/v1beta1
+              kind: OpenStackDataPlaneDeployment
+              metadata:
+                name: ceph-deployment
+                namespace: openstack
+              spec:
+                nodeSets:
+                - ceph-nodeset
+
+        - name: Apply the deployment CR
+          kubernetes.core.k8s:
+            state: present
+            definition: "{{ lookup('file', '{{ cifmw_ceph_dir }}/ceph-deployment.yml') }}"
+
+        - name: Wait for OpenStackDataPlaneDeployment to be complete
+          ansible.builtin.command:
+            cmd: >-
+              oc wait osdpd ceph-deployment
+              --namespace=openstack
+              --for=condition=ready
+              --timeout=10m
+
+- name: Deploy ceph 
+  vars:
+    ceph_spec_fqdn: true
+    storage_network_range: 172.18.0.0/24
+    storage_mgmt_network_range: 172.20.0.0/24
+    cifmw_ceph_target: ceph
+  ansible.builtin.import_playbook: ceph.yml
