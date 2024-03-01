@@ -1,0 +1,78 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Clone the repository '{{ cifmw_osasinfra_shiftstack_qa_repo }}'
+  ansible.builtin.include_tasks: tasks/exec_command_in_pod.yml
+  vars:
+    namespace: "{{ cifmw_osasinfra_client_pod_namespace }}"
+    pod: "{{ cifmw_osasinfra_client_pod_name }}"
+    command: "git clone {{ cifmw_osasinfra_shiftstack_qa_repo }}"
+    log_file_name: "clone_shiftstack_qa_repo.log"
+
+- name: Install the ansible collection requirements
+  ansible.builtin.include_tasks: tasks/exec_command_in_pod.yml
+  vars:
+    namespace: "{{ cifmw_osasinfra_client_pod_namespace }}"
+    pod: "{{ cifmw_osasinfra_client_pod_name }}"
+    command: "cd shiftstack-qa && ansible-galaxy collection install -f -r requirements.yaml"
+    log_file_name: "install_requirements.log"
+
+#TODO: check the "{{ cifmw_run_test_osasinfra_testconfig }}" exists
+
+- name: OCP install and test block
+  block:
+    - name: Test Openshift on Openstack with '{{ cifmw_run_test_osasinfra_testconfig }}' test configuration
+      ansible.builtin.include_tasks: tasks/exec_command_in_pod.yml
+      vars:
+        namespace: "{{ cifmw_osasinfra_client_pod_namespace }}"
+        pod: "{{ cifmw_osasinfra_client_pod_name }}"
+        command: "cd shiftstack-qa && ansible-navigator run playbooks/ocp_testing.yaml -e @jobs_definitions/{{ cifmw_run_test_osasinfra_testconfig }}"
+        log_file_name: "ocp_testing.log"
+
+  rescue:
+    - ansible.builtin.debug:
+        msg: "OCP install/test block failed, perform required actions here."
+
+  always:
+    - name: Create the '{{ cifmw_osasinfra_artifacts_basedir }}/{{ cifmw_osasinfra_installer_artifacts_dir }}' directory for the installer artifacts
+      ansible.builtin.file:
+        path: "{{ cifmw_osasinfra_artifacts_basedir }}/{{ cifmw_osasinfra_installer_artifacts_dir }}"
+        state: directory
+
+    - name: Create the '{{ cifmw_osasinfra_artifacts_basedir }}/{{ cifmw_osasinfra_ansible_artifacts_dir }}' directory for the ansible logs
+      ansible.builtin.file:
+        path: "{{ cifmw_osasinfra_artifacts_basedir }}/{{ cifmw_osasinfra_ansible_artifacts_dir }}"
+        state: directory
+
+    - name: Copy the ansible logs from the '{{ pod }}' pod
+      environment:
+        PATH: "{{ cifmw_path }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.command:
+        cmd: >
+          oc rsync -n {{ cifmw_osasinfra_client_pod_namespace }}
+          {{ cifmw_osasinfra_client_pod_name }}:/home/cloud-admin/{{ cifmw_osasinfra_ansible_artifacts_dir }}/.
+          {{ cifmw_osasinfra_artifacts_basedir }}/{{ cifmw_osasinfra_ansible_artifacts_dir }}/
+
+    - name: Copy the installer artifacts from the '{{ pod }}' pod
+      environment:
+        PATH: "{{ cifmw_path }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.command:
+        cmd: >
+          oc rsync -n {{ cifmw_osasinfra_client_pod_namespace }}
+          {{ cifmw_osasinfra_client_pod_name }}:/home/cloud-admin/{{ cifmw_osasinfra_installer_artifacts_dir }}/.
+          {{ cifmw_osasinfra_artifacts_basedir }}/{{ cifmw_osasinfra_installer_artifacts_dir }}/
