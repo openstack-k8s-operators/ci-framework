@@ -1,0 +1,95 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Copy the daemon set to the target host
+  ansible.builtin.copy:
+    src: "files/regenerate-certificate.yml"
+    dest: "/tmp/regenerate-certificate.yaml"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: "0640"
+
+- name: Generate new certificate.
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: "oc apply -f /tmp/regenerate-certificate.yaml"
+
+- name: Removing csr-signer certs
+  kubernetes.core.k8s:
+    kind: secret
+    namespace: openshift-kube-controller-manager-operator
+    name: "{{ item }}"
+    state: absent
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    validate_certs: false
+  loop:
+    - csr-signer-signer
+    - csr-signer
+  loop_control:
+    label: "{{ item }}"
+
+- name: Wait unit the OpenShift cluster is stable.
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: "oc adm wait-for-stable-cluster --minimum-stable-period=3m"
+
+- name: Gather the kubelet signer secret.
+  kubernetes.core.k8s_info:
+    kind: secret
+    namespace: openshift-kube-controller-manager-operator
+    name: csr-signer-signer
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    validate_certs: false
+  register: _api_cert
+
+- name: Ensure certificate regenerated file exists.
+  ansible.builtin.copy:
+    content: "{{ _api_cert.resources[0].data['tls.crt'] | b64decode }}"
+    dest: "/tmp/gen_api.crt"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: "0440"
+
+- name: Read the certificate details.
+  openssl_certificate_info:
+    path: "/tmp/gen_api.crt"
+  register: _gen_api_cert
+
+- name: Write the expiration date of the generated certificate.
+  ansible.builtin.copy:
+    content: >-
+      {{
+        _gen_api_cert.not_after | ansible.builtin.to_datetime("%Y%m%d%H%M%SZ")
+      }}
+    dest: "{{ cifmw_openshift_adm_cert_expire_date_file }}"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: "0440"
+
+- name: Remove all the temporary files created.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/regenerate-certificate.yaml"
+    - "/tmp/gen_api.crt"
+  loop_control:
+    label: "{{ item }}"

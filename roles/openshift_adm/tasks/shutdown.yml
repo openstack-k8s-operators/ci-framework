@@ -1,0 +1,83 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Initiates a graceful shutdown of the OpenShift cluster.
+
+
+- name: Check for regenerated certificate file.
+  when:
+    - not cifmw_openshift_adm_dry_run
+  ansible.builtin.stat:
+    path: "{{ cifmw_openshift_adm_cert_expire_date_file }}"
+  register: _regenerated_file
+
+# Current implementation works only once hence the check.
+- name: Regenerate the API certificates.
+  when:
+    - not _regenerated_file.stat.exists | default(false)
+    - not cifmw_openshift_adm_dry_run
+  ansible.builtin.include_tasks: api_cert.yml
+
+- name: Gather the list of nodes
+  kubernetes.core.k8s_info:
+    kind: Node
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    validate_certs: false
+  register: _nodes
+
+- name: Shutdown the nodes participating in the cluster.
+  when:
+    - not cifmw_openshift_adm_dry_run
+  vars:
+    _node_names: >-
+      {{
+        _nodes.resources | map(attribute='metadata.name') | list
+      }}
+    _node_ips: >-
+      {{
+        _nodes.resources |
+        map(attribute='status.addresses') |
+        flatten |
+        selectattr('type', 'match', 'InternalIP') |
+        map(attribute='address') |
+        list
+      }}
+  block:
+    - name: Mark the nodes as unschedulable.
+      kubernetes.core.k8s_drain:
+        name: "{{ item }}"
+        state: cordon
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        validate_certs: false
+      loop: "{{ _node_names }}"
+
+    - name: Initiate shutdown
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell:
+        cmd: >-
+          for node in $(oc get nodes -o jsonpath='{.items[*].metadata.name}');
+          do oc debug node/${node} -- chroot /host shutdown -h 3; done
+
+    - name: Wait till SSH connection is closed.
+      ansible.builtin.wait_for:
+        host: "{{ item }}"
+        port: 22
+        state: drained
+      loop: "{{ _node_ips }}"
+      loop_control:
+        label: "{{ item }}"
