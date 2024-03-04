@@ -53,7 +53,7 @@ func createNewRepository(namespace, containerName string) (string, error) {
 }
 
 func tagExist(namespace, repositoryName, tag string) bool {
-	url := fmt.Sprintf("https://quay.io/api/v1/repository/%s/%s/tag/%s/images", namespace, repositoryName, tag)
+	url := fmt.Sprintf("https://quay.io/api/v1/repository/%s/%s/tag/?specificTag=%s", namespace, repositoryName, tag)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return false
@@ -76,10 +76,10 @@ func tagExist(namespace, repositoryName, tag string) bool {
 		return false
 	}
 
-	if obj["images"] != nil {
+	if tags, ok := obj["tags"].([]string); ok && len(tags) > 0 {
 		return true
 	}
-	return true
+	return false
 }
 
 func getImageManifest(namespace, repositoryName string, specificTag string) (string, error) {
