@@ -19,6 +19,7 @@ This role does not need privilege escalation.
 * `cifmw_dlrn_report_result`: (boolean) Whether to report DLRN results. Can be disabled if a test run should not be registered to DLRN. Default `true`
 * `cifmw_dlrn_report_krb_user_realm`: (string) Name of valid Kerberos REALM.
 * `cifmw_dlrn_report_keytab`: (string) file path to valid keytab file for performing kinit.
+* `cifmw_dlrn_report_zuul_log_path`: (string) Zuul log path url.
 
 ## Dependencies
 
