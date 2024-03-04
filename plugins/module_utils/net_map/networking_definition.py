@@ -129,6 +129,39 @@ def _validate_parse_field_type(
     return raw_value
 
 
+def _validate_parse_trunk_parent_field(
+    field_name: str,
+    raw_definition: typing.Dict[str, typing.Any],
+    parent_name: str = None,
+    parent_type: str = None,
+    trunk_parents: set = None,
+) -> typing.Any:
+    if trunk_parents is None:
+        trunk_parents = set()
+
+    trunk_parent = _validate_parse_field_type(
+        field_name,
+        raw_definition,
+        expected_type=str,
+        parent_name=parent_name,
+        parent_type=parent_type,
+        mandatory=False,
+    )
+    if trunk_parent and trunk_parent not in trunk_parents:
+        raise exceptions.NetworkMappingTrunkParentValidationError(
+            message=(
+                f"trunk parent '{trunk_parent}' does not exist in "
+                f"'{parent_type}' '{parent_name}'"
+            ),
+            field=field_name,
+            invalid_value=trunk_parent,
+            parent_name=parent_name,
+            parent_type=parent_type,
+        )
+
+    return trunk_parent
+
+
 def _validate_fields_one_of(
     fields_list: typing.List[str],
     raw_definition: typing.Dict[str, typing.Any],
@@ -1008,6 +1041,106 @@ class NetconfigNetworkDefinition(SubnetBasedNetworkToolDefinition):
         super().__init__(network, raw_config, self.__OBJECT_NAME)
 
 
+class RouterDefinition:
+    """Parser and validator of a signle router config element
+
+    Handles the parsing and validation of a router item in the
+    dict of routers of the Networking Definition.
+
+    The network definition that this class parses should follow
+    this format:
+
+    .. code-block:: YAML
+
+       <router-name>:
+         external_network: <external gateway network: optional>
+         networks:  <List of networks attached to the router>
+           - <Network 1>
+
+    Raises:
+        ValueError: If name it's not provided.
+        exceptions.NetworkMappingValidationError: When the format
+            of the provided instance is not correct.
+    """
+
+    __OBJECT_NAME = "router"
+
+    __FIELD_EXTERNAL_NETWORK = "external_network"
+    __FIELD_NETWORKS = "networks"
+
+    def __init__(self, name: str, raw_definition: typing.Dict[str, typing.Any]) -> None:
+        """Initializes a RouterDefinition from dict with its parameters
+
+        Args:
+            name: The name of router.
+            raw_definitions: The dictionary that contains the configuration
+                of the router
+
+        Raises:
+            ValueError: If name is not provided.
+        """
+        if not name:
+            raise ValueError("name is a mandatory argument")
+
+        self.__name = name
+        self.__external_network = None
+        self.__networks = []
+        self.__parse_raw(raw_definition)
+
+    @property
+    def name(self) -> str:
+        """Name of the network."""
+        return self.__name
+
+    @property
+    def external_network(self) -> typing.Optional[str]:
+        """External gateway network"""
+        return self.__external_network
+
+    @property
+    def networks(self) -> typing.List[str]:
+        """List of networks to attach to the router"""
+        return self.__networks
+
+    def __parse_raw(self, raw_definition: typing.Dict[str, typing.Any]):
+        self.__external_network = _validate_parse_field_type(
+            self.__FIELD_EXTERNAL_NETWORK,
+            raw_definition,
+            str,
+            parent_name=self.__name,
+            parent_type=self.__OBJECT_NAME,
+            mandatory=False,
+        )
+
+        self.__networks = _validate_parse_field_type(
+            self.__FIELD_NETWORKS,
+            raw_definition,
+            list,
+            parent_name=self.name,
+            parent_type=self.__OBJECT_NAME,
+            mandatory=True,
+        )
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.__name,
+                self.__external_network,
+                frozenset(self.__networks),
+            )
+        )
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, RouterDefinition):
+            return False
+
+        return (
+            self.__external_network == other.__external_network
+            and self.__networks == other.__networks
+            and self.__name == other.__name
+        )
+
+
 class NetworkDefinition:
     """Parser and validator of a single network config element
 
@@ -1475,6 +1608,10 @@ class GroupTemplateNetworkDefinition:
         skip_nm_configuration: Indicates if the instances of the
             group should skip configuring Network Manager for the
             given network.
+        is_trunk_parent: indicates wheater the instance nic for
+            this network is parent for trunked vlans.
+        trunk_parent: idicates which instance network is vlan
+            parent for this network.
     """
 
     network: NetworkDefinition
@@ -1482,6 +1619,8 @@ class GroupTemplateNetworkDefinition:
     ipv6_range: HostNetworkRange = None
     ipv4_range: HostNetworkRange = None
     skip_nm_configuration: bool = None
+    is_trunk_parent: bool = None
+    trunk_parent: str = None
 
     def __hash__(self) -> int:
         return hash(
@@ -1491,6 +1630,8 @@ class GroupTemplateNetworkDefinition:
                 self.ipv4_range,
                 self.ipv6_range,
                 self.skip_nm_configuration,
+                self.is_trunk_parent,
+                self.trunk_parent,
             )
         )
 
@@ -1544,6 +1685,8 @@ class GroupTemplateDefinition:
     __FIELD_NETWORK_RANGE = "range"
     __FIELD_NETWORK_RANGE_IPV4 = "range-v4"
     __FIELD_NETWORK_RANGE_IPV6 = "range-v6"
+    __FIELD_IS_TRUNK_PARENT = "is_trunk_parent"
+    __FIELD_TRUNK_PARENT = "trunk_parent"
 
     def __init__(
         self,
@@ -1567,6 +1710,7 @@ class GroupTemplateDefinition:
         if not group_name:
             raise ValueError("group_name is a mandatory argument")
         self.__group_name = group_name
+        self.__trunk_parents = set()
 
         self.__skip_nm_configuration: typing.Optional[bool] = None
         self.__groups_networks_definitions = {}
@@ -1620,13 +1764,25 @@ class GroupTemplateDefinition:
                 or {}
             )
 
+            # Process trunk parents to populate self.__trunk_parents
             for network_name, network_data in networks.items():
-                self.__parse_raw_net(
-                    network_name,
-                    network_data,
-                    network_template_raw,
-                    network_definitions,
-                )
+                if network_data.get(self.__FIELD_IS_TRUNK_PARENT):
+                    self.__parse_raw_net(
+                        network_name,
+                        network_data,
+                        network_template_raw,
+                        network_definitions,
+                    )
+
+            # Process non trunk parents
+            for network_name, network_data in networks.items():
+                if not network_data.get(self.__FIELD_IS_TRUNK_PARENT):
+                    self.__parse_raw_net(
+                        network_name,
+                        network_data,
+                        network_template_raw,
+                        network_definitions,
+                    )
 
     def __parse_raw_net(
         self,
@@ -1654,6 +1810,25 @@ class GroupTemplateDefinition:
             else None
         )
 
+        is_trunk_parent = _validate_parse_field_type(
+            self.__FIELD_IS_TRUNK_PARENT,
+            templated_net_data,
+            bool,
+            parent_name=self.group_name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            mandatory=False,
+        )
+        if is_trunk_parent:
+            self.__trunk_parents.add(network_name)
+
+        trunk_parent = _validate_parse_trunk_parent_field(
+            self.__FIELD_TRUNK_PARENT,
+            templated_net_data,
+            self.group_name,
+            self.__OBJECT_TYPE_NAME,
+            self.__trunk_parents,
+        )
+
         self.__groups_networks_definitions[network_name] = (
             GroupTemplateNetworkDefinition(
                 network_definition,
@@ -1661,6 +1836,8 @@ class GroupTemplateDefinition:
                 ipv4_range=ipv4_network_range,
                 ipv6_range=ipv6_network_range,
                 skip_nm_configuration=skip_nm_configuration,
+                is_trunk_parent=is_trunk_parent,
+                trunk_parent=trunk_parent,
             )
         )
 
@@ -1737,9 +1914,20 @@ class InstanceNetworkDefinition:
     ipv4: ipaddress.IPv4Address = None
     ipv6: ipaddress.IPv6Address = None
     skip_nm_configuration: bool = None
+    is_trunk_parent: bool = None
+    trunk_parent: str = None
 
     def __hash__(self) -> int:
-        return hash((self.network, self.ipv4, self.ipv6, self.skip_nm_configuration))
+        return hash(
+            (
+                self.network,
+                self.ipv4,
+                self.ipv6,
+                self.skip_nm_configuration,
+                self.is_trunk_parent,
+                self.trunk_parent,
+            )
+        )
 
 
 class InstanceDefinition:
@@ -1777,6 +1965,8 @@ class InstanceDefinition:
     __FIELD_NETWORKS = "networks"
     __FIELD_NETWORKS_IP = "ip"
     __FIELD_NETWORK_SKIP_NM = "skip-nm-configuration"
+    __FIELD_IS_TRUNK_PARENT = "is_trunk_parent"
+    __FIELD_TRUNK_PARENT = "trunk_parent"
 
     def __init__(
         self,
@@ -1803,6 +1993,7 @@ class InstanceDefinition:
         self.__name = name
         self.__skip_nm_configuration: typing.Optional[bool] = None
         self.__instances_network_definitions = {}
+        self.__trunk_parents: typing.Set = set()
         self.__parse_raw(raw_definition, network_definitions)
 
     @property
@@ -1838,8 +2029,23 @@ class InstanceDefinition:
                 field=self.__FIELD_NETWORKS,
             )
 
+        # Process trunk parents to populate self.__trunk_parents
         for network_name, network_data in networks.items():
-            self.__parse_raw_net(network_name, network_data, network_definitions)
+            if network_data.get(self.__FIELD_IS_TRUNK_PARENT):
+                self.__parse_raw_net(
+                    network_name,
+                    network_data,
+                    network_definitions,
+                )
+
+        # Process non trunk parents
+        for network_name, network_data in networks.items():
+            if not network_data.get(self.__FIELD_IS_TRUNK_PARENT):
+                self.__parse_raw_net(
+                    network_name,
+                    network_data,
+                    network_definitions,
+                )
 
     def __parse_raw_net(
         self,
@@ -1870,11 +2076,32 @@ class InstanceDefinition:
             else None
         )
 
+        is_trunk_parent = _validate_parse_field_type(
+            self.__FIELD_IS_TRUNK_PARENT,
+            network_data,
+            bool,
+            parent_name=self.name,
+            parent_type=self.__OBJECT_TYPE_NAME,
+            mandatory=False,
+        )
+        if is_trunk_parent:
+            self.__trunk_parents.add(network_name)
+
+        trunk_parent = _validate_parse_trunk_parent_field(
+            self.__FIELD_TRUNK_PARENT,
+            network_data,
+            self.name,
+            self.__OBJECT_TYPE_NAME,
+            self.__trunk_parents,
+        )
+
         self.__instances_network_definitions[network_name] = InstanceNetworkDefinition(
             network_definition,
             ipv4=ipv4,
             ipv6=ipv6,
             skip_nm_configuration=skip_nm_configuration,
+            is_trunk_parent=is_trunk_parent,
+            trunk_parent=trunk_parent,
         )
 
     def __hash__(self) -> int:
@@ -1918,6 +2145,7 @@ class NetworkingDefinition:
     __FIELD_NETWORKS = "networks"
     __FIELD_GROUP_TEMPLATES = "group-templates"
     __FIELD_INSTANCES = "instances"
+    __FIELD_ROUTERS = "routers"
 
     def __init__(self, raw_definition: typing.Dict[str, typing.Any]):
         """Initializes a NetworkingDefinition from dict with its parameters
@@ -1933,6 +2161,7 @@ class NetworkingDefinition:
         self.__networks: typing.Dict[str, NetworkDefinition] = {}
         self.__group_templates: typing.Dict[str, GroupTemplateDefinition] = {}
         self.__instances = {}
+        self.__routers = {}
 
         self.__parse_raw(raw_definition)
 
@@ -1947,6 +2176,10 @@ class NetworkingDefinition:
     @property
     def instances(self) -> typing.Dict[str, InstanceDefinition]:
         return self.__instances
+
+    @property
+    def routers(self) -> typing.Dict[str, RouterDefinition]:
+        return self.__routers
 
     def __parse_raw(self, raw_definition: typing.Dict[str, typing.Any]):
         networks_raw = (
@@ -1979,6 +2212,16 @@ class NetworkingDefinition:
             or {}
         )
 
+        routers_raw = (
+            _validate_parse_field_type(
+                self.__FIELD_ROUTERS,
+                raw_definition,
+                dict,
+                mandatory=False,
+            )
+            or {}
+        )
+
         self.__networks = {
             net_name: NetworkDefinition(net_name, net_raw)
             for net_name, net_raw in networks_raw.items()
@@ -1992,6 +2235,10 @@ class NetworkingDefinition:
                 instance_name, instance_raw, self.__networks
             )
             for instance_name, instance_raw in instances_raw.items()
+        }
+        self.__routers = {
+            router_name: RouterDefinition(router_name, router_raw)
+            for router_name, router_raw in routers_raw.items()
         }
 
         self.__check_overlapping_ranges()
