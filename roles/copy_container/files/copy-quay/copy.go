@@ -43,6 +43,10 @@ func (opts *copyOptions) run(cmd *cobra.Command, args []string) error {
                 tagToPush = opts.global.pushHash
             }
 
+            if (tagExist(opts.global.toNamespace, image, tagToPush)) {
+                return fmt.Errorf("Tag %s already exist on the destination registry", tagToPush)
+            }
+
             from := fmt.Sprintf("docker://%s/%s/%s:%s", opts.global.pullRegistry, opts.global.fromNamespace, image, opts.global.hash)
             to := fmt.Sprintf("docker://%s/%s/%s:%s", opts.global.pushRegistry, opts.global.toNamespace, image, tagToPush)
             if _, err := copyImage(from, to); err != nil {
@@ -81,6 +85,11 @@ func (opts *copyOptions) run(cmd *cobra.Command, args []string) error {
                     logrus.Errorln("Failed to create repository: ", err)
                     continue
                 }
+            }
+
+            if (tagExist(opts.global.toNamespace, res[0], tagToPush)) {
+                logrus.Errorf("Tag %s already exist on the destination registry\n", tagToPush)
+                continue
             }
             // from := fmt.Sprintf("docker://%s/%s/%s:current-tripleo", opts.global.pullRegistry, opts.global.fromNamespace, res[0])
             from := fmt.Sprintf("docker://%s/%s/%s:%s", opts.global.pullRegistry, opts.global.fromNamespace, res[0], tagToPull)
