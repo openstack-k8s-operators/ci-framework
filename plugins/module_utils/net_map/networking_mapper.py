@@ -221,6 +221,12 @@ class NetworkingInstanceMapper:
             mac_addr=self.__map_instance_network_interface_mac(
                 iface_data.get("macaddress", None), net_def.vlan
             ),
+            is_trunk_parent=self.__map_instance_net_is_trunk_parent(
+                group_net_def, instance_net_definition
+            ),
+            trunk_parent=self.__map_instance_net_trunk_parent(
+                group_net_def, instance_net_definition
+            ),
         )
 
     def __map_instance_net_skip_nm(
@@ -250,6 +256,49 @@ class NetworkingInstanceMapper:
                 else False
             )
         return skip_nm
+
+    def __map_instance_net_is_trunk_parent(
+        self,
+        group_net_def: typing.Optional[
+            networking_definition.GroupTemplateNetworkDefinition
+        ],
+        instance_net_definition: typing.Optional[
+            networking_definition.InstanceNetworkDefinition
+        ],
+    ):
+        is_trunk_parent = (
+            instance_net_definition.is_trunk_parent
+            if instance_net_definition
+            and instance_net_definition.is_trunk_parent is not None
+            else (
+                group_net_def.is_trunk_parent
+                if group_net_def and group_net_def.is_trunk_parent is not None
+                else None
+            )
+        )
+
+        return is_trunk_parent
+
+    def __map_instance_net_trunk_parent(
+        self,
+        group_net_def: typing.Optional[
+            networking_definition.GroupTemplateNetworkDefinition
+        ],
+        instance_net_definition: typing.Optional[
+            networking_definition.InstanceNetworkDefinition
+        ],
+    ):
+        trunk_parent = (
+            instance_net_definition.trunk_parent
+            if instance_net_definition
+            and instance_net_definition.trunk_parent is not None
+            else (
+                group_net_def.trunk_parent
+                if group_net_def and group_net_def.trunk_parent is not None
+                else None
+            )
+        )
+        return trunk_parent
 
     @staticmethod
     def __map_instance_network_interface_mac(
@@ -570,6 +619,31 @@ class NetworkingNetworksMapper:
         return tool_type(*args_list)
 
 
+class NetworkingRoutersMapper:
+    """
+    Handles the mapping of Networking Definition routers section
+    """
+
+    def map_routers(
+        self,
+        router_definitions: typing.Dict[str, networking_definition.RouterDefinition],
+    ) -> typing.Dict[str, networking_env_definitions.MappedRouter]:
+        return {
+            router_name: self.__map_single_router(router_name, router_def)
+            for router_name, router_def in router_definitions.items()
+        }
+
+    @staticmethod
+    def __map_single_router(
+        router_name: str, router_def: networking_definition.RouterDefinition
+    ) -> networking_env_definitions.MappedRouter:
+        return networking_env_definitions.MappedRouter(
+            router_name,
+            router_def.networks,
+            router_def.external_network,
+        )
+
+
 class NetworkingDefinitionMapper:
     """
     Converts the Networking Definition into the Networking Environment Definition
@@ -596,6 +670,7 @@ class NetworkingDefinitionMapper:
         self.__groups = groups
         self.__options = options or NetworkingMapperOptions()
         self.__networks_mapper = NetworkingNetworksMapper(self.__options)
+        self.__routers_mapper = NetworkingRoutersMapper()
 
     def map_networks(self, network_definition_raw: typing.Dict[str, typing.Any]):
         """
@@ -615,6 +690,24 @@ class NetworkingDefinitionMapper:
 
         networks = self.__networks_mapper.map_networks(net_definition.networks)
         return self.__safe_encode_to_primitives(networks)
+
+    def map_routers(self, network_definition_raw: typing.Dict[str, typing.Any]):
+        """
+        Parses, validates and maps a Networking Definition into a router dictionary
+
+        The resulting mapping is a dictionary that only contains primitive types.
+
+        Args:
+            network_definition_raw: The Networking Definition to map.
+        Returns: The mapped routers as a dictionary.
+        Raises:
+            exceptions.NetworkMappingValidationError:
+                If not provided, or it's not a dictionary.
+        """
+        net_definition = self.__parse_validate_net_definition(network_definition_raw)
+        routers = self.__routers_mapper.map_routers(net_definition.routers)
+
+        return self.__safe_encode_to_primitives(routers)
 
     def map_partial(
         self, network_definition_raw: typing.Dict[str, typing.Any]
@@ -690,8 +783,10 @@ class NetworkingDefinitionMapper:
         }
         networks = self.__networks_mapper.map_networks(net_definition.networks)
 
+        routers = self.__routers_mapper.map_routers(net_definition.routers)
+
         return networking_env_definitions.NetworkingEnvironmentDefinition(
-            networks, instances
+            networks, instances, routers
         )
 
     @staticmethod

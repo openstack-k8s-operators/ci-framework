@@ -297,3 +297,103 @@ def test_instance_definition_parse_invalid_ip_version_fail():
     assert exc_info.value.invalid_value == str(net_map_stub_data.NETWORK_1_IPV6_NET[50])
     assert exc_info.value.field == "ip-v4"
     assert "should be a ipv4" in str(exc_info.value).lower()
+
+
+def test_instance_definition_parse_trunk_parent_ok():
+    # Test valid trunk parent
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    instance_definition_raw = {
+        "networks": {
+            net_a.name: {"trunk_parent": net_b.name},
+            net_b.name: {"is_trunk_parent": True},
+        },
+    }
+
+    instance_def = networking_definition.InstanceDefinition(
+        "instance-1",
+        instance_definition_raw,
+        networks_definitions,
+    )
+    assert hash(instance_def)
+    assert instance_def.name == "instance-1"
+    assert isinstance(instance_def.networks, dict)
+    assert len(instance_def.networks) == len(instance_definition_raw["networks"])
+    # Ensure nets were parsed
+    assert net_a.name in instance_def.networks
+    assert net_b.name in instance_def.networks
+    assert instance_def.networks[net_a.name].trunk_parent == net_b.name
+    assert instance_def.networks[net_b.name].is_trunk_parent is True
+
+
+def test_instance_definition_parse_trunk_parent_fail():
+    # Test invalid trunk parent
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    instance_definition_raw = {
+        "networks": {
+            net_a.name: {"is_trunk_parent": True},
+            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+        },
+    }
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.InstanceDefinition(
+            "instance-1",
+            instance_definition_raw,
+            networks_definitions,
+        )
+    assert exc_info.value.invalid_value == "does-not-exist-parent"
+    assert "does not exist in " in str(exc_info.value)
+
+
+def test_instance_definition_parse_no_trunk_parent_fail():
+    # Test invalid no is_trunk_parent
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    instance_definition_raw = {
+        "networks": {
+            net_a.name: {},
+            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+        },
+    }
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.InstanceDefinition(
+            "instance-1",
+            instance_definition_raw,
+            networks_definitions,
+        )
+    assert exc_info.value.invalid_value == "does-not-exist-parent"
+    assert "does not exist in " in str(exc_info.value)
+
+
+def test_instance_definition_parse_trunk_parent_no_trunks():
+    # Test valid no trunks
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    instance_definition_raw = {
+        "networks": {
+            net_a.name: {},
+            net_b.name: {},
+        },
+    }
+
+    instance_def = networking_definition.InstanceDefinition(
+        "instance-1",
+        instance_definition_raw,
+        networks_definitions,
+    )
+    assert hash(instance_def)
+    assert instance_def.name == "instance-1"
+    assert isinstance(instance_def.networks, dict)
+    assert len(instance_def.networks) == len(instance_definition_raw["networks"])
+    # Ensure nets were parsed
+    assert net_a.name in instance_def.networks
+    assert net_b.name in instance_def.networks
+    assert instance_def.networks[net_a.name].trunk_parent is None
+    assert instance_def.networks[net_b.name].is_trunk_parent is None
