@@ -1,6 +1,6 @@
 data:
   ssh_keys:
-    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
     private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
     public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
   nova:
@@ -24,20 +24,28 @@ data:
 {%  endfor %}
 {% endif %}
     nodes:
-{% for compute in cifmw_networking_env_definition.instances.keys() %}
-{%   if compute.startswith('compute') %}
-      edpm-{{ compute }}:
+{% set instances_names = []                                                                             %}
+{% set _original_nodeset = (original_content.data | default({})).nodeset | default({})                  %}
+{% set _original_nodes = _original_nodeset.nodes | default({})                                          %}
+{% set _has_computes = _original_nodes.keys() | select('contains', 'compute') | length > 0                %}
+{% set _has_cephs = _original_nodes.keys() | select('contains', 'ceph') | length > 0                      %}
+{% for _inst in cifmw_networking_env_definition.instances.keys()                                        %}
+{%   if _inst.startswith('compute') and _has_computes or  _inst.startswith('ceph') and _has_cephs       %}
+{%     set _ = instances_names.append(_inst)                                                            %}
+{%   endif                                                                                              %}
+{%- endfor %}
+{% for instance in instances_names %}
+      edpm-{{ instance }}:
         ansible:
-          host: {{ cifmw_networking_env_definition.instances[compute].networks.ctlplane.ip_v4 }}
-        hostName: {{ compute }}
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+        hostName: {{ instance }}
         networks:
-{%      for net in cifmw_networking_env_definition.instances[compute].networks.keys() %}
+{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
           - name: {{ net }}
             subnetName: subnet1
 {%        if net is match('ctlplane') %}
             defaultRoute: true
-            fixedIP: {{ cifmw_networking_env_definition.instances[compute].networks.ctlplane.ip_v4 }}
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
 {%        endif%}
 {%      endfor %}
-{%   endif%}
 {% endfor %}

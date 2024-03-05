@@ -19,14 +19,13 @@
   ansible.builtin.slurp:
     src: "{{ cifmw_ci_gen_kustomize_values_src_file }}"
 
-- name: Expose the datatype for future usage
+- name: Expose common data for future usage
   vars:
+    _original_content: "{{ _original.content | b64decode | from_yaml }}"
     _datatype: >-
       {{
-        cifmw_ci_gen_kustomize_values_name | default(
-        (_original.content |
-        b64decode |
-        from_yaml).metadata.name, true)
+        cifmw_ci_gen_kustomize_values_name |
+        default(_original_content.metadata.name, true)
       }}
     _dest_dir: >-
       {{
@@ -37,6 +36,7 @@
   ansible.builtin.set_fact:
     values_datatype: "{{ _datatype }}"
     snippet_datadir: "{{ _dest_dir }}"
+    original_content: "{{ _original_content }}"
     cacheable: false
 
 - name: Ensure we get the needed data depending on the values type
@@ -57,9 +57,7 @@
     force: false  # Do not override in case of second run
     content: >-
       {{
-        _original.content |
-        b64decode |
-        from_yaml |
+        original_content |
         ansible.utils.remove_keys(target=['^nodes(_[0-9]+)?$'],
                                   matching_parameter='regex') |
         to_nice_yaml
