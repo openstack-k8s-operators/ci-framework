@@ -15,9 +15,11 @@ The functionality is as follow:
 Building
 --------
 
+You're gonna need Go v1.18 as stated in the `go.mod` file.
+
 Just run:
 
-    $ go build -o copy-quay main.go copy.go utils.go quayapi.go
+    $ go build -o copy-quay main.go config.go tag.go copy.go utils.go quayapi.go
 
 An executable copy-quay will be created
 
