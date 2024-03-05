@@ -1,0 +1,72 @@
+---
+# source: bgp/edpm-nodeset-values/values.yaml.j2
+{% set instances_names = []                                                            %}
+{% set _original_nodeset = (original_content.data | default({})).nodeset | default({}) %}
+{% set _original_nodes = _original_nodeset.nodes | default({})                         %}
+{% set _vm_type = (_original_nodes.keys() | first).split('-')[1]                       %}
+{% for _inst in cifmw_networking_env_definition.instances.keys()                       %}
+{%   if _inst.startswith(_vm_type)                                                     %}
+{%     set _ = instances_names.append(_inst)                                           %}
+{%   endif                                                                             %}
+{% endfor                                                                              %}
+data:
+  ssh_keys:
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
+    public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      ansibleVars:
+        edpm_fips_mode: "{{ 'enabled' if cifmw_fips_enabled|default(false)|bool else 'check' }}"
+        timesync_ntp_servers:
+          - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+{% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
+        edpm_sshd_allowed_ranges:
+{%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
+          - "{{ range }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+    nodes:
+{% for instance in instances_names                                                     %}
+      {{ instance }}:
+        ansibleVars:
+{%        set rack_number = instance.split('-')[1]                                     %}
+          edpm_ovn_bgp_agent_local_ovn_peer_ips:
+            - 100.64.{{ rack_number }}.1
+            - 100.65.{{ rack_number }}.1
+          edpm_frr_bgp_peers:
+            - 100.64.{{ rack_number }}.1
+            - 100.65.{{ rack_number }}.1
+        ansible:
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+        hostName: {{ instance }}
+        networks:
+{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
+{%        if net is not match('storagemgmt')                                           %}
+          - name: {{ net }}
+            subnetName: subnet1
+{%          if net is match('ctlplane')                                                %}
+            defaultRoute: true
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+{%          endif                                                                      %}
+{%        endif                                                                        %}
+{%      endfor                                                                         %}
+          - name: BgpNet0
+            subnetName: subnet{{ rack_number }}
+            fixedIP: 100.64.{{ rack_number }}.2
+          - name: BgpNet1
+            subnetName: subnet{{ rack_number }}
+            fixedIP: 100.65.{{ rack_number }}.2
+          - name: BgpMainNet
+            subnetName: subnet{{ rack_number }}
+            fixedIP: 172.30.{{ rack_number }}.2
+          - name: BgpMainNetV6
+            subnetName: subnet{{ rack_number }}
+            fixedIP: f00d:f00d:f00d:f00d:f00d:f00d:f00d:00{{ (rack_number | int) + 1 }}2
+{% endfor                                                                              %}
