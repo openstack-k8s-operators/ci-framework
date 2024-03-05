@@ -1,0 +1,54 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Gather the deployed cluster authentication information.
+  ansible.builtin.import_tasks: set_cluster_fact.yml
+
+- name: Login to the deployed OpenShift cluster.
+  kubernetes.core.k8s_auth:
+    host: "{{ cifmw_openshift_api }}"
+    password: "{{ cifmw_openshift_password }}"
+    state: present
+    username: "{{ cifmw_openshift_user }}"
+    validate_certs: false
+  register: _login_result
+  failed_when: false
+
+- name: Authentication successful to existing cluster.
+  when:
+    - _login_result.k8s_auth.api_key is defined
+  ansible.builtin.set_fact:
+    cifmw_devscripts_ocp_online: true
+
+- name: Print the encountered error.
+  when:
+    - _login_result.failed
+  ansible.builtin.debug:
+    var: _login_result
+
+- name: Executing cleanup of stale OpenShift cluster.
+  when:
+    - _login_result.failed
+    - "'No route to host' not in _login.result.msg"
+  block:
+    - name: Set existences to false
+      ansible.builtin.set_fact:
+        cifmw_devscripts_ocp_exists: false
+        cifmw_devscripts_force_cleanup: true
+
+    - name: Run clean up tasks.
+      ansible.builtin.include_tasks: cleanup.yml
