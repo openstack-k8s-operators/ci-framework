@@ -1,0 +1,145 @@
+---
+# source: bgp/network-values/values.yaml.j2
+{% set ns = namespace(interfaces={},
+                      ocp_index=0,
+                      lb_tools={}) %}
+data:
+{% for host in cifmw_networking_env_definition.instances.keys() -%}
+{%   for network in cifmw_networking_env_definition.instances[host]['networks'].values() -%}
+{%     set ns.interfaces = ns.interfaces |
+                           combine({network.network_name: (network.parent_interface |
+                                                           default(network.interface_name)
+                                                          )
+                                   },
+                                   recursive=true) -%}
+{%   endfor -%}
+{%   if host is match('^(ocp|crc).*') %}
+  node_{{ ns.ocp_index }}:
+    name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}
+{%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
+    {{ network.network_name }}_ip: {{ network.ip_v4 }}
+{%     endfor %}
+{%     set node_net_orig_content = original_content.data.bgp['net-attach-def']['node' ~ ns.ocp_index] %}
+{%     set node_bgp_net0 = node_net_orig_content.bgpnet0 | from_json %}
+{%     set node_bgp_net1 = node_net_orig_content.bgpnet1 | from_json %}
+    bgp_peers:
+      - {{ node_bgp_net0.ipam.range_start }}
+      - {{ node_bgp_net1.ipam.range_start }}
+    bgp_ip:
+      - {{ node_bgp_net0.ipam.range_start | ansible.utils.ipmath(1) }}
+      - {{ node_bgp_net1.ipam.range_start | ansible.utils.ipmath(1) }}
+{#     loopback_ip and loopback_ipv6 correspond to subnet3 because all ocp nodes are deployed on rack3 #}
+{%     set loopback_ip = original_content.data.bgp.subnets.bgpmainnet[3].allocationRanges[0].start |
+                         ansible.utils.ipmath(ns.ocp_index) %}
+{%     set loopback_ipv6 = original_content.data.bgp.subnets.bgpmainnetv6[3].allocationRanges[0].start |
+                           ansible.utils.ipmath(ns.ocp_index) %}
+    loopback_ip: {{ loopback_ip }}
+    loopback_ipv6: {{ loopback_ipv6 }}
+{%     set ns.ocp_index = ns.ocp_index+1 %}
+{%   endif %}
+{% endfor %}
+
+{% for network in cifmw_networking_env_definition.networks.values() %}
+{% set ns.lb_tools = {} %}
+  {{ network.network_name }}:
+    dnsDomain: {{ network.search_domain }}
+{%  if network.tools is defined and network.tools.keys() | length > 0 %}
+    subnets:
+{%    for tool in network.tools.keys() %}
+{%      if tool is match('.*lb$') %}
+{%        set _ = ns.lb_tools.update({tool: []}) %}
+{%      endif %}
+{%    endfor %}
+      - allocationRanges:
+{%    for range in network.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%    endfor %}
+        cidr: {{ network.network_v4 }}
+{%      if network.gw_v4 is defined %}
+        gateway: {{ network.gw_v4 }}
+{%      endif %}
+        name: subnet1
+{%  if network.vlan_id is defined  %}
+        vlan: {{ network.vlan_id }}
+{%  endif %}
+{%    if ns.lb_tools | length > 0 %}
+    lb_addresses:
+{%      for tool in ns.lb_tools.keys() %}
+{%        for lb_range in network.tools[tool].ipv4_ranges %}
+      - {{ lb_range.start }}-{{ lb_range.end }}
+{%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
+{%        endfor %}
+    endpoint_annotations:
+      {{ tool }}.universe.tf/address-pool: {{ network.network_name }}
+      {{ tool }}.universe.tf/allow-shared-ip: {{ network.network_name }}
+      {{ tool }}.universe.tf/loadBalancerIPs: {{ ','.join(ns.lb_tools[tool]) }}
+{%      endfor %}
+{%    endif %}
+{%  endif %}
+    prefix-length: {{ network.network_v4 | ansible.utils.ipaddr('prefix') }}
+    mtu: {{ network.mtu | default(1500) }}
+{%  if network.vlan_id is defined  %}
+    vlan: {{ network.vlan_id }}
+{%    if ns.interfaces[network.network_name] is defined %}
+    iface: {{ network.network_name }}
+    base_iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
+{%  else %}
+{%    if ns.interfaces[network.network_name] is defined %}
+    iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
+{%  endif %}
+{%  if network.tools.multus is defined %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "{{ network.network_name }}",
+        "type": "macvlan",
+{%  if network.vlan_id is defined%}
+        "master": "{{ network.network_name }}",
+{%  elif network.network_name == "ctlplane" %}
+        "master": "ospbr",
+{%  else %}
+        "master": "{{ ns.interfaces[network.network_name] }}",
+{%  endif %}
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network.network_v4 }}",
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+        }
+      }
+{%  endif %}
+{% endfor %}
+
+  dns-resolver:
+    config:
+      server:
+        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
+      search: []
+    options:
+      - key: server
+        values:
+          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}
+{% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
+      - key: server
+        values:
+          - {{ nameserver }}
+{% endfor %}
+
+  routes:
+    config: []
+
+# Hardcoding the last IP bit since we don't have support for endpoint_annotations in the networking_mapper output
+  rabbitmq:
+    endpoint_annotations:
+      metallb.universe.tf/address-pool: internalapi
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(85) }}
+  rabbitmq-cell1:
+    endpoint_annotations:
+      metallb.universe.tf/address-pool: internalapi
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(86) }}
+
+  lbServiceType: LoadBalancer
+  storageClass: local-storage

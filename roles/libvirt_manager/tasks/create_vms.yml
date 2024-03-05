@@ -96,9 +96,26 @@
 - name: "Attach listed networks to the VMs {{ vm_type }}"  # noqa: no-handler
   when:
     - _create_overlays is changed
+    - >-
+      not cifmw_libvirt_manager_spineleaf_setup or
+      'controller' in vm_type
   vars:
     vm_item: "{{ vm_type }}-{{ vm_id }}"
     networks: "{{ vm_data.value.nets }}"
+  ansible.builtin.include_tasks: net_to_vms.yml
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"
+
+- name: "Attach spines/leafs networks to the VMs {{ vm_type }}"
+  when:
+    - _create_overlays is changed
+    - cifmw_libvirt_manager_spineleaf_setup
+    - "'controller' not in vm_type"
+  vars:
+    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    networks: "{{ vm_data.value.spineleafnets[vm_id] }}"
   ansible.builtin.include_tasks: net_to_vms.yml
   loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:

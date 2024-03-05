@@ -33,6 +33,8 @@ Used for checking if:
 * `cifmw_libvirt_manager_fixed_networks`: (List) Network names you don't want to prefix with `cifmw-`. It will be concatenated with cifmw_libvirt_manager_fixed_networks_defaults. Defaults to`[]`.
 * `cifmw_libvirt_manager_reproducer_key_type`: (String) Type of ssh key that will be injected into the controller VMs. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
 * `cifmw_libvirt_manager_reproducer_key_size`: (Integer) Size of the ecdsa ssh keys that will be injected into the controller VMs. Defaults to `cifmw_ssh_keysize` which default to 521.
+* `cifmw_libvirt_manager_spineleaf_setup`: (Boolean) Whether the VMs deployed are connected to a spine/leaf virtual infrastructure or not. When set to `true`, the interfaces of the instances from a certain type of VM are not connected to the same networks, but they can be defined per VM using the `spineleafnets` list (except for the `controller`). Defaults to `false`.
+* `cifmw_libvirt_manager_network_interface_types`: (Dict) By default, interfaces attached to VMs are created with `--type bridge`, but with this parameter, those interfaces can be configured with any other types. Defaults to empty dictionary.
 * `cifmw_libvirt_manager_configuration_patch(.)*`: (Dict) Structure describing the patch to combine on top of `cifmw_libvirt_manager_configuration`.
 
 ### Structure for `cifmw_libvirt_manager_configuration`

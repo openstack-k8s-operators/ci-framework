@@ -73,10 +73,12 @@
         (_net_name not in _net_bridge_map.keys()) |
         ternary(_net_name, _net_bridge_map[_net_name])
       }}
+    _type: "{{ cifmw_libvirt_manager_network_interface_types[network.name] | default('bridge') }}"
     _attached_bridges: >-
       {{
         _extracted_xml.matches | default([]) |
-        selectattr('source.bridge', 'equalto', _local_bridge_name) | default([])
+        selectattr('source.' + _type, 'defined') |
+        selectattr('source.' + _type, 'equalto', _local_bridge_name)
       }}
   when:
     - _attached_bridges | length == 0
@@ -85,7 +87,7 @@
       virsh -c qemu:///system
       attach-interface "{{ vm_name }}"
       --source "{{ _local_bridge_name }}"
-      --type bridge
+      --type "{{ _type }}"
       --mac "{{ _lm_mac_address }}"
       --model virtio
       --config
