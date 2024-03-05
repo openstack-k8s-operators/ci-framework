@@ -9,7 +9,6 @@ import (
     "net/http"
     "os"
     "regexp"
-    "strings"
     "time"
 
     "github.com/sirupsen/logrus"
@@ -21,8 +20,14 @@ type Build struct {
     URL    string `json:"log_url"`
 }
 
-func writeHTLMReport(success []string, failed []string, hash string, output string) {
+type ParsedBuiltContainerLogLine struct {
+	repository string
+	tag        string
+	digest     string
+}
+type ParsedBuiltContainerLogLines []*ParsedBuiltContainerLogLine
 
+func writeHTLMReport(success []string, failed []string, hash string, output string) {
     var reportTemplate = template.Must(template.New("report").Parse(`
     <!DOCTYPE html>
     <html>
@@ -245,23 +250,15 @@ func getCurrentTripleoRepo(api string) string {
     return ""
 }
 
-func parseLog(data string) [][2]string {
-    // r, _ := regexp.Compile(`(?m)item=docker push.*\/([\w-]+):([\w]+_[\w]+)`)
-    r, _ := regexp.Compile(`(?m)primary \|\s(\w+)\: digest\:.*\n.*\n.*Tag w\/ arch suffix and push image: .*\/([\w-]+)`)
-    var result [][2]string
-
-    for _, matches := range r.FindAllStringSubmatch(data, -1) {
-        if strings.Contains(matches[1], "x86_64") {
-            result = append(result, [2]string{matches[2], matches[1][:len(matches[1])-7]})
-        }
-        // result = append(result, [2]string{matches[2], matches[1]})
-    }
-    if len(result) == 0 {
-        r, _ := regexp.Compile(`(?m)\/([\w-]+)\s+([\w_]+)`)
-
-        for _, matches := range r.FindAllStringSubmatch(data, -1) {
-            result = append(result, [2]string{matches[1], matches[2]})
-        }
-    }
-    return result
+func parseLog(data string) ParsedBuiltContainerLogLines {
+	var parsedLogLines ParsedBuiltContainerLogLines
+	r, _ := regexp.Compile(`(?m)\/([\w-]+)\s+([\w_]+)\s+([\w]+)`)
+	for _, matches := range r.FindAllStringSubmatch(data, -1) {
+		parsedLogLines = append(parsedLogLines, &ParsedBuiltContainerLogLine{
+			repository: matches[1],
+			tag:        matches[2],
+			digest:     matches[3],
+		})
+	}
+	return parsedLogLines
 }

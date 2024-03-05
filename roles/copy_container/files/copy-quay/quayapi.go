@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -52,8 +53,8 @@ func createNewRepository(namespace, containerName string) (string, error) {
 	return string(data), nil
 }
 
-func tagExist(namespace, repositoryName, tag string) bool {
-	url := fmt.Sprintf("https://quay.io/api/v1/repository/%s/%s/tag/%s/images", namespace, repositoryName, tag)
+func tagExists(namespace, repositoryName, tag string) bool {
+	url := fmt.Sprintf("https://quay.io/api/v1/repository/%s/%s/tag/?specificTag=%s", namespace, repositoryName, tag)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return false
@@ -80,6 +81,15 @@ func tagExist(namespace, repositoryName, tag string) bool {
 		return true
 	}
 	return true
+}
+
+func imageWithDigestExists(namespace, repositoryName, tag, imageDigest string) bool {
+	if digest, err := getImageManifest(namespace, repositoryName, tag); err != nil {
+		if strings.HasPrefix(digest, fmt.Sprintf("sha256:%s", imageDigest)) {
+			return true
+		}
+	}
+	return false
 }
 
 func getImageManifest(namespace, repositoryName string, specificTag string) (string, error) {
