@@ -4,6 +4,7 @@
     - zuul is defined
     - zuul.items is defined
     - zuul.projects is defined
+    - not cifmw_reproducer_skip_fetch_repositories | default(false)
   delegate_to: controller-0
   delegate_facts: true
   block:
@@ -73,6 +74,8 @@
 - name: Push random code into the proper location
   vars:
     repo_base_dir: '/home/zuul/src'
+  when:
+    - not cifmw_reproducer_skip_fetch_repositories | default(false)
   block:
     - name: Create target directories beforehand
       delegate_to: controller-0
@@ -122,6 +125,26 @@
       loop_control:
         loop_var: repository
         label: "{{ repository.src | basename }}"
+
+- name: Push code in from the ansible controller to the controller-0
+  when:
+    - cifmw_reproducer_skip_fetch_repositories | default(false)
+  vars:
+    _source_path: "{{ cifmw_reproducer_repositories_path | regex_replace('/$', '') }}"
+  block:
+    - name: Ensure repositories path exists in the controller-0
+      delegate_to: controller-0
+      ansible.builtin.file:
+        path: "/home/zuul/{{ _source_path }}"
+        state: directory
+
+    - name: Copy code from ansible controller to controller-0
+      delegate_to: localhost
+      ansible.builtin.command:  # noqa: command-instead-of-module
+        cmd: >-
+          rsync -ar
+          {{ ansible_user_dir }}/{{ _source_path }}/
+          zuul@controller-0:/home/zuul/{{ _source_path }}
 
 # installing the cifmw collection will pull it's dependencies alongside it
 - name: Install collections on controller-0
