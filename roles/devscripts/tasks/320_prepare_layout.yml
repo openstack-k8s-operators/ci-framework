@@ -24,14 +24,17 @@
 
 - name: Align the OCP type information.
   when:
-    - not _ctrl_vm_xml.failed | default(true)
+    - _ctrl_vm_xml.matched == cifmw_devscripts_config.num_masters
   vars:
     _data:
       vms:
         ocp:
           amount: "{{ cifmw_devscripts_config.num_masters | int }}"
           image_local_dir: "{{ cifmw_devscripts_config.working_dir }}/pool"
-          xml_paths: "{{ _ctrl_vm_xml.files | map(attribute='path') | list }}"
+          xml_paths: >-
+            {{
+              _ctrl_vm_xml.files | map(attribute='path') | list | sort
+            }}
           disk_file_name: "{{ cifmw_devscripts_config.cluster_name }}_master"
           disksize: "{{ cifmw_devscripts_config.master_disk | int + 20 }}"
   ansible.builtin.set_fact:
@@ -55,7 +58,7 @@
 
     - name: Align the worker data.
       when:
-        - _wrk_vm_xml.failed | default(true)
+        - _wrk_vm_xml.matched == cifmw_devscripts_config.num_workers
       vars:
         _wrk_data:
           vms:
@@ -73,7 +76,7 @@
                 }}
               xml_paths: >-
                 {{
-                  _wrk_vm_xml.files | map(attribute='path') | list
+                  _wrk_vm_xml.files | map(attribute='path') | list | sort
                 }}
       ansible.builtin.set_fact:
         cifmw_libvirt_manager_configuration_gen: >-
