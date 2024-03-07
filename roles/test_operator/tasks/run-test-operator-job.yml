@@ -25,25 +25,16 @@
     definition: "{{ test_operator_config }}"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Wait for the job to be Ready - {{ run_test_fw }}
+- name: Wait for the last job to be Completed - {{ run_test_fw }}
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
     context: "{{ cifmw_openshift_context | default(omit) }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
     kind: Job
-    name: "{{ test_operator_job_name }}"
-    wait: true
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Wait for the job to be Completed - {{ run_test_fw }}
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Job
-    name: "{{ test_operator_job_name }}"
+    label_selectors:
+      - "workflowStep={{ [(test_operator_workflow | length) - 1, 0] | max }}"
+      - "instanceName={{ test_operator_job_name }}"
   retries: "{{ (cifmw_test_operator_timeout / 10) | round | int }}"
   delay: 10
   until: >
