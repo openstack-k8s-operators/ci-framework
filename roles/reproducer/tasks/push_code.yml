@@ -74,15 +74,35 @@
 - name: Push random code into the proper location
   vars:
     repo_base_dir: '/home/zuul/src'
-  when:
-    - not cifmw_reproducer_skip_fetch_repositories | default(false)
+    _cifmw_reproducer_all_repositories: "{{ cifmw_reproducer_repositories | default([]) }}"
   block:
+    - name: Expand cifmw_reproducer_repositories to pull code from ansible controller to controller-0
+      when:
+        - cifmw_reproducer_skip_fetch_repositories | default(false)
+        - zuul is defined
+        - zuul.items is defined
+        - zuul.projects is defined
+        # check that the project is not alredy in the user defined
+        # cifmw_reproducer_repositories value
+        - repo.value.name not in _user_sources
+      vars:
+        _user_sources: "{{ cifmw_reproducer_repositories | default([]) | map(attribute='src') }}"
+        _repo_entry:
+          src: "{{ ansible_user_dir }}/{{ repo.value.src_dir | regex_replace('/$', '') }}/"
+          dest: "/home/zuul/{{ repo.value.src_dir }}"
+      ansible.builtin.set_fact:
+        _cifmw_reproducer_all_repositories: "{{ _cifmw_reproducer_all_repositories  + [_repo_entry] }}"
+      loop: "{{ zuul['projects'] | dict2items }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.key }}"
+
     - name: Create target directories beforehand
       delegate_to: controller-0
       vars:
         _destinations: >-
           {{
-            cifmw_reproducer_repositories |
+            _cifmw_reproducer_all_repositories |
             map(attribute="dest") |
             map('dirname') |
             unique |
@@ -99,7 +119,7 @@
         - item.src is abs or item.src is not match('.*:.*')
       ansible.builtin.command:  # noqa: command-instead-of-module
         cmd: "rsync -ar {{ item.src }} zuul@controller-0:{{ item.dest }}"
-      loop: "{{ cifmw_reproducer_repositories }}"
+      loop: "{{ _cifmw_reproducer_all_repositories }}"
       loop_control:
         label: "{{ item.src | basename }}"
 
@@ -115,7 +135,7 @@
         version: "{{ item.version | default('HEAD') }}"
         refspec: "{{ item.refspec | default(omit) }}"
         force: true
-      loop: "{{ cifmw_reproducer_repositories }}"
+      loop: "{{ _cifmw_reproducer_all_repositories }}"
       loop_control:
         label: "{{ item.src | basename }}"
 
@@ -125,26 +145,6 @@
       loop_control:
         loop_var: repository
         label: "{{ repository.src | basename }}"
-
-- name: Push code in from the ansible controller to the controller-0
-  when:
-    - cifmw_reproducer_skip_fetch_repositories | default(false)
-  vars:
-    _source_path: "{{ cifmw_reproducer_repositories_path | regex_replace('/$', '') }}"
-  block:
-    - name: Ensure repositories path exists in the controller-0
-      delegate_to: controller-0
-      ansible.builtin.file:
-        path: "/home/zuul/{{ _source_path }}"
-        state: directory
-
-    - name: Copy code from ansible controller to controller-0
-      delegate_to: localhost
-      ansible.builtin.command:  # noqa: command-instead-of-module
-        cmd: >-
-          rsync -ar
-          {{ ansible_user_dir }}/{{ _source_path }}/
-          zuul@controller-0:/home/zuul/{{ _source_path }}
 
 # installing the cifmw collection will pull it's dependencies alongside it
 - name: Install collections on controller-0
