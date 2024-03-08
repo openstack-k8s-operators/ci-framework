@@ -1,0 +1,29 @@
+---
+- name: Kustomize ControlPlane for HCI deploy
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane"
+        state: directory
+
+    - name: Create kustomization for HCI pre deploy step
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/95-hci-pre-kustomization.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+            patch: |-
+              - op: replace
+                path: /spec/glance/template/glanceAPIs/default/replicas
+                value: 0
+
+              - op: replace
+                path: /spec/glance/template/glanceAPIs/default/type
+                value: split
