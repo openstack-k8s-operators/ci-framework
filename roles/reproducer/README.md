@@ -16,8 +16,6 @@ None
 * `cifmw_reproducer_hp_rhos_release`: (Bool) Allows to consume rhos-release on the hypervisor. Defaults to `false`.
 * `cifmw_reproducer_dnf_tweaks`: (List) Options you want to inject in dnf.conf, both on controller-0 and hypervisor. Defaults to `[]`.
 * `cifmw_reproducer_skip_fetch_repositories`: (Bool) Skip fetching repositories from zuul var and simply copy the code from the ansible controller. Defaults to `false`.
-* `cifmw_reproducer_repositories_path`: (String) Path where the repositories are found in the ansible controller, relative to $HOME. Only has any effect if
-`cifmw_reproducer_skip_fetch_repositories` is set to `true`. Defaults to `src`.
 
 ### run_job and run_content_provider booleans and risks.
 
