@@ -79,6 +79,27 @@
     user: "{{ ansible_user_id }}"
     key: "{{ pub_ssh_key['content'] | b64decode }}"
 
+- name: Prepare the static IP address for controller.
+  when:
+    - _layout.vms.controller.ip_address is defined
+  vars:
+    _ip_address: >-
+      {{
+        _layout.vms.controller.ip_address.address
+      }}
+    _ip_gw: "{{ _layout.vms.controller.ip_address.gw }}"
+    _ip_dns: "{{ _layout.vms.controller.ip_address.dns }}"
+  ansible.builtin.template:
+    src: templates/static_ip.j2
+    dest: >-
+      {{
+        (cifmw_libvirt_manager_ip_script_basedir, 'static-ip-controller.sh') |
+        ansible.builtin.path_join
+      }}
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: "0755"
+
 - name: Prepare disk image with SSH and growing volume  # noqa: risky-shell-pipe
   when:
     - item.value.disk_file_name != 'blank'
@@ -86,6 +107,13 @@
   vars:
     _admin_user: "{{ item.value.admin_user | default('root') }}"
     _root_part: "{{ item.value.root_part_id | default('1') }}"
+    _static_ip_script: >-
+      {{
+        (
+          cifmw_libvirt_manager_ip_script_basedir,
+          'static-ip-' + item.key + '.sh'
+        ) | ansible.builtin.path_join
+      }}
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail;
@@ -93,6 +121,9 @@
       --selinux-relabel
       --firstboot-command "growpart /dev/sda {{ _root_part }}"
       --firstboot-command "xfs_growfs /"
+      {% if item.value.ip_address is defined %}
+      --firstboot {{ _static_ip_script }}
+      {% endif %}
       --root-password "password:{{ item.value.password | default('fooBar') }}"
       --ssh-inject {{ _admin_user }}:file:{{ ansible_user_dir }}/.ssh/authorized_keys
       | tee -a {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log

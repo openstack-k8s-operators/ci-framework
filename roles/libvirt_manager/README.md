@@ -90,6 +90,10 @@ cifmw_libvirt_manager_configuration:
       disksize: 50
       memory: 4
       cpus: 2
+      ip_address:
+        address: "192.168.111.9/24"
+        gw: "192.168.111.1"
+        dns: "192.168.111.1"
       nets:
         - public
         - osp_trunk
