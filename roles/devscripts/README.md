@@ -36,6 +36,8 @@ networks.
   the OpenShift nodes having role as `worker`. Defaults to `false`.
 * `cifmw_devscripts_enable_multipath_on_ocp_nodes` (bool) Enable multipath
   services on the OpenShift nodes. Defaults to `false`.
+* `cifmw_devscripts_create_logical_volume` (bool) Create a logical volume with
+  the name cinder-volumes on all OCP nodes. Defaults to `false`.
 * `cifmw_devscripts_host_bm_net_ip_addr` (str) The IP address of the host to be
   assigned. Must be from the specified external network.
 * `cifmw_devscripts_use_static_ip_addr` (bool) Use static IP addresses for the
