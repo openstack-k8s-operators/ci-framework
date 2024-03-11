@@ -153,11 +153,22 @@
     name: "{{ test_pod_name }}"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Fail if the pod did not succeed - {{ run_test_fw }}
-  when: not cifmw_test_operator_dry_run | bool
+- name: Fail fast if the pod did not succeed - {{ run_test_fw }}
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - cifmw_test_operator_fail_fast | bool
   ansible.builtin.assert:
     that:
       - test_pod.resources[0].status.phase == "Succeeded"
+
+- name: Save result - {{ run_test_fw }}
+  when: not cifmw_test_operator_dry_run | bool
+  ansible.builtin.set_fact:
+    test_operator_results: >-
+      {{
+          test_operator_results | default({}) |
+          combine({run_test_fw: test_pod.resources[0].status.phase})
+      }}
 
 - name: Delete tempest and/or tobiko pods
   when:
