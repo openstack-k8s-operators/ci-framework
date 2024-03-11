@@ -1,0 +1,17 @@
+---
+- name: Check for /etc/ci/mirror_info.sh
+  ansible.builtin.stat:
+    path: "/etc/ci/mirror_info.sh"
+  register: mirror_path
+
+- name: Use proxy mirrors
+  become: "{{ not cifmw_repo_setup_output.startswith(ansible_user_dir) }}"
+  when:
+    - mirror_path.stat.exists
+  ansible.builtin.shell: |
+    set -o pipefail
+    source /etc/ci/mirror_info.sh
+    sed -i -e "s|https://trunk.rdoproject.org|$NODEPOOL_RDO_PROXY|g" *.repo
+    sed -i -e "s|http://mirror.stream.centos.org|$NODEPOOL_CENTOS_MIRROR|g" *.repo
+  args:
+    chdir: "{{ cifmw_repo_setup_output }}"
