@@ -196,6 +196,48 @@ If you provide neither, or both, it will fail.
     worker_vcpu: 10
   ```
 
+* Sample custom variable file for customizing the deployment with add-on configurations.
+
+  ```YAML
+  cifmw_use_libvirt: true
+  cifmw_libvirt_manager_configuration:
+    networks:
+      osp_trunk: |
+        <network>
+          <name>osp_trunk</name>
+          <forward mode='nat'/>
+          <bridge name='osp_trunk' stp='on' delay='0'/>
+          <ip family='ipv4' address='192.168.122.1' prefix='24'> </ip>
+        </network>
+    vms:
+      ocp:
+        amount: 3
+        admin_user: core
+        image_local_dir: "/home/dev-scripts/pool"
+        disk_file_name: "ocp_master"
+        disksize: "105"
+        xml_paths:
+          - /home/dev-scripts/ocp_master_0.xml
+          - /home/dev-scripts/ocp_master_1.xml
+          - /home/dev-scripts/ocp_master_2.xml
+        nets:
+          - osp_trunk
+
+  cifmw_manage_secrets_citoken_content: REDACTED
+  cifmw_manage_secrets_pullsecret_content: |
+    REDACTED
+  cifmw_use_devscripts: true
+  cifmw_devscripts_enable_ocp_nodes_host_routing: true
+  cifmw_devscripts_enable_iscsi_on_ocp_nodes: true
+  cifmw_devscripts_enable_multipath_on_ocp_nodes: true
+  cifmw_devscripts_create_logical_volume: true
+  cifmw_devscripts_config_overrides:
+    openshift_version: "4.16.0"
+    vm_extradisks: "true"
+    vm_extradisks_list: "vdb vdc vdd"
+    vm_extradisks_size: "10G"
+  ```
+
 ## References
 
 * [dev-scripts](https://github.com/openshift-metal3/dev-scripts)
