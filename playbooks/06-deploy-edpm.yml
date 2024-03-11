@@ -1,4 +1,7 @@
+---
 - name: Run pre_deploy hooks
+  when:
+    - cifmw_architecture_scenario is not defined
   vars:
     step: pre_deploy
   ansible.builtin.import_playbook: ./hooks.yml
@@ -7,6 +10,12 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
     - name: Load parameters files
       ansible.builtin.include_vars:
         dir: "{{ cifmw_basedir }}/artifacts/parameters"
@@ -20,6 +29,8 @@
         name: edpm_prepare
 
 - name: Run post_ctlplane_deploy hooks
+  when:
+    - cifmw_architecture_scenario is undefined
   vars:
     step: post_ctlplane_deploy
   ansible.builtin.import_playbook: ./hooks.yml
@@ -28,6 +39,12 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
     - name: Load parameters files
       ansible.builtin.include_vars:
         dir: "{{ cifmw_basedir }}/artifacts/parameters"
@@ -43,6 +60,12 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
     - name: Load parameters files
       ansible.builtin.include_vars:
         dir: "{{ cifmw_basedir }}/artifacts/parameters"
@@ -73,22 +96,36 @@
 - name: Clear ceph target hosts facts to force refreshing in HCI deployments
   hosts: "{{ cifmw_ceph_target | default('computes')  }}"
   tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
     - name: Clear ceph target hosts facts
       when: cifmw_edpm_deploy_hci | default('false') | bool
       ansible.builtin.meta: clear_facts
 
 - name: Deploy Ceph on target nodes
+  when:
+    - cifmw_edpm_deploy_hci | default('false') | bool
+    - cifmw_architecture_scenario is undefined
   vars:
     ceph_spec_fqdn: true
     storage_network_range: 172.18.0.0/24
     storage_mgmt_network_range: 172.20.0.0/24
   ansible.builtin.import_playbook: ceph.yml
-  when: cifmw_edpm_deploy_hci | default('false') | bool
 
 - name: Continue HCI deploy
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
     - name: Create Ceph secrets and retrieve FSID info
       when: cifmw_edpm_deploy_hci | default('false') | bool
       block:
@@ -104,6 +141,8 @@
             cifmw_edpm_deploy_prepare_run: false
 
 - name: Run post_deploy hooks
+  when:
+    - cifmw_architecture_scenario is not defined
   vars:
     step: post_deploy
   ansible.builtin.import_playbook: ./hooks.yml

@@ -1,5 +1,7 @@
 ---
 - name: Run pre_deploy hooks
+  when:
+    - cifmw_architecture_scenario is defined
   vars:
     step: pre_deploy
   ansible.builtin.import_playbook: ./hooks.yml
@@ -7,6 +9,12 @@
 - name: Deploy VA
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if not architecture deploy
+      when:
+        - cifmw_architecture_scenario is not defined
+      ansible.builtin.meta: end_play
+
     - name: Load Networking Environment Definition
       ansible.builtin.include_role:
         name: networking_mapper
@@ -117,6 +125,8 @@
         nova-manage cell_v2 discover_hosts --verbose
 
 - name: Run post_deploy hooks
+  when:
+    - cifmw_architecture_scenario is defined
   vars:
     step: post_deploy
   ansible.builtin.import_playbook: ./hooks.yml
