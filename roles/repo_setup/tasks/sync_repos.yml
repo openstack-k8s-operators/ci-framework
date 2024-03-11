@@ -1,0 +1,28 @@
+---
+- name: Copy generated repos to /etc/yum.repos.d directory
+  when: not cifmw_repo_setup_output.startswith(ansible_user_dir)
+  block:
+    - name: Find existing repos from /etc/yum.repos.d directory
+      ansible.builtin.find:
+        paths: "/etc/yum.repos.d/"
+        patterns: "*.repo"
+        recurse: false
+      register: _yum_repos
+
+    - name: Remove existing repos from /etc/yum.repos.d directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      with_items: "{{ _yum_repos.files|map(attribute='path') }}"
+
+    - name: Cleanup existing metadata
+      become: true
+      ansible.builtin.command: "dnf clean metadata"
+
+    - name: Copy generated repos to /etc/yum.repos.d directory
+      become: true
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ cifmw_repo_setup_output }}/"
+        dest: "/etc/yum.repos.d"
