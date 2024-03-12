@@ -14,33 +14,25 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Install epel-release repo
-  become: true
-  tags:
-    - bootstrap
-    - packages
-  ansible.builtin.package:
-    state: present
-    name: epel-release
-  when: ansible_distribution | lower == 'centos'
-
 - name: Install mock
-  become: true
   tags:
     - bootstrap
     - packages
-  ansible.builtin.package:
-    state: present
-    name: mock
+  block:
+    - name: Install Mock from DLRN repos
+      become: true
+      ansible.builtin.package:
+        name: mock
+        state: present
 
-- name: Remove epel-repos
-  become: true
-  tags:
-    - bootstrap
-    - packages
-  ansible.builtin.shell: |
-    sudo rm -rf /etc/yum.repos.d/epel*;
-    sudo rpm -e epel-release || true;
+  rescue:
+    - name: Install mock from epel repos
+      vars:
+        cifmw_ci_setup_epel_pkgs:
+          - mock
+      ansible.builtin.import_role:
+        name: ci_setup
+        tasks_from: epel.yml
 
 - name: Ensure DLRN package dependencies
   become: true
