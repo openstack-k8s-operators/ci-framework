@@ -101,10 +101,11 @@ import pathlib
 import re
 import uuid
 
-
+from ansible import constants as C
 from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
 from ansible.module_utils import basic
+from ansible.utils.display import Display
 
 from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
     ansible_encoding,
@@ -186,16 +187,25 @@ class ActionModule(ActionBase):
             file_task.args.pop(arg_name, None)
 
         fnum = len(glob.glob(f"{output_dir}/ci_script_*"))
-        t_name = re.sub(r"([^\x00-\x7F]|\s)+", "_", self._task.name).lower()
+
+        # Ensure the task name can be used as a file name and
+        # truncate the length of the name to 20 chars at max
+        # while trying to preserve entire words
+        t_name = (
+            re.sub(r"[^A-Za-z0-9_]+", "_", self._task.name)
+            .lower()[:30]
+            .rsplit("_", 1)[0]
+        )
         chdir_path = task_args.get("chdir", None)
+        log_path = output_dir.parent.joinpath(
+            "logs", f"ci_script_{fnum:03}_{t_name}.log"
+        ).as_posix()
         script_template_data = {
             "extra_args": self.__build_exports(
                 task_args.get(self.__EXTRA_ARGS_ARG, None)
             ),
             "content": task_args[self.__SCRIPT_ARG],
-            "logpath": output_dir.parent.joinpath(
-                "logs", f"ci_script_{fnum:03}_{t_name}.log"
-            ).as_posix(),
+            "logpath": log_path,
             "opts": self.__build_options(task_vars),
             "pushcmd": f"pushd {chdir_path}" if chdir_path else "",
             "popcmd": "popd" if chdir_path else "",
@@ -220,6 +230,9 @@ class ActionModule(ActionBase):
 
         # Are we running dry-run?
         if not basic.boolean(task_args.get(self.__DRY_RUN_ARG, False)):
+            Display().display(
+                f"Follow script's output here: {log_path}", color=C.COLOR_OK
+            )
             return self._shared_loader_obj.action_loader.get(
                 "ansible.builtin.script",
                 task=file_task,
