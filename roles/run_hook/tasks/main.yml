@@ -29,11 +29,20 @@
         selectattr('key', 'match', _matcher)
       }}
     _single_hooks: >-
-      {% for _hook in _filtered_hooks -%}
-      - name: {{ _hook.key | regex_replace(_matcher, '\1') |
-                 replace('_', ' ') | capitalize }}
-      {{ _hook.value | to_nice_yaml | indent(width=2, first=true) }}
-      {% endfor -%}
+      {{
+          _filtered_hooks |
+          map(attribute="value") |
+          zip(
+            _filtered_hooks |
+            map(attribute="key") |
+            map("regex_replace", _matcher, "\1") |
+            map("replace", "_", " ") |
+            map("capitalize") |
+            map("community.general.dict_kv", "name")
+          ) |
+          map("combine") |
+          list
+      }}
   block:
     - name: Assert parameters are valid
       ansible.builtin.assert:
@@ -54,7 +63,7 @@
         _hooks: >-
           {{
             (
-              (_single_hooks | from_yaml | default([], true)) +
+              (_single_hooks | default([])) +
               (hooks | default([], true)) +
               _list_hooks
             ) | sort(attribute='name')
@@ -63,3 +72,4 @@
       loop: "{{ _hooks }}"
       loop_control:
         loop_var: 'hook'
+
