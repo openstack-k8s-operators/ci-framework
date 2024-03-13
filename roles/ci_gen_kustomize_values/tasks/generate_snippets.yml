@@ -73,17 +73,21 @@
 
 - name: Generate CI snippet
   when:
-    - _tmpl_check_path is exists
+    - _tmpl_check_path | length > 0
   vars:
     _tmpl_name: >-
       {{ cifmw_ci_gen_kustomize_values_src_file | basename }}.j2
     _tmpl_path: >-
       {{
-        (cifmw_architecture_scenario, values_datatype, _tmpl_name) | path_join
+        (role_path, 'templates', cifmw_architecture_scenario, values_datatype, _tmpl_name) | path_join
+      }}
+    _common_tmpl_path: >-
+      {{
+        (role_path, 'templates', 'common', values_datatype, _tmpl_name) | path_join
       }}
     _tmpl_check_path: >-
       {{
-        ((role_path, 'templates', _tmpl_path) | path_join)
+        [_tmpl_path, _common_tmpl_path] | select('exists')
       }}
   ansible.builtin.template:
     dest: >-
@@ -91,7 +95,7 @@
         (snippet_datadir,
          '02_ci_data.yaml') | path_join
       }}
-    src: "{{ _tmpl_path }}"
+    src: "{{ _tmpl_check_path | first }}"
     mode: "0644"
 
 - name: Push user provided dataset
