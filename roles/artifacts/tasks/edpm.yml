@@ -42,11 +42,21 @@
             - cifmw_edpm_deploy_extra_vars is defined
           ansible.builtin.set_fact:
             ssh_key_file: "{{ cifmw_edpm_deploy_extra_vars.SSH_KEY_FILE }}"
-            ssh_user: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
+            # ssh_user should be the same as the user used to deploy the edpm nodes
+            # in adoption jobs the edpm node is called standalone and in greenfield jobs it is called compute-0, compute-1, etc
+            # the default user is zuul, but it can be overridden by the user in the zuul inventory so we need to check both
+            # via hostvars and default user if not found
+            ssh_user: >-
+              {{
+                hostvars | dict2items |
+                selectattr('key', 'match', '^compute.*$|^standalone.*$') |
+                map(attribute='value.ansible_user') | first | default('zuul')
+              }}
+
             edpm_vms: >-
               {{
                 crc_ci_bootstrap_networks_out | dict2items |
-                selectattr('key', 'match', '^compute.*$') |
+                selectattr('key', 'match', '^compute.*$|^standalone.*$') |
                 map(attribute='value.default.ip') | default([])
               }}
 
