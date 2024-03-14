@@ -15,6 +15,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_default_jobs`: (List) List of jobs in the exclude list to search for tests to be excluded. Default value: `[ 'default' ]`
 * `cifmw_test_operator_dry_run`: (Boolean) Whether test-operator should run or not. Default value: `false`
 * `cifmw_test_operator_fail_fast`: (Boolean) Whether the test results are evaluated when each test framework execution finishes or when all test frameworks are done. Default value: `false`
+* `cifmw_test_operator_kubeconfig_secret`: (String) Name of the Openshift Secret required to use Openshift Client from the test pod. Default value: `test-operator-kubeconfig-secret`
 
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
@@ -38,6 +39,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_tempest_image }}:{{ cifmw_test_operator_tempest_image_tag }}"
+    kubeconfigSecretName: "{{ cifmw_test_operator_kubeconfig_secret }}"
     tempestRun:
       includeList: |
         {{ cifmw_test_operator_include_list | default('') }}
@@ -59,7 +61,6 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_tobiko_pytest_addopts`: (String) `PYTEST_ADDOPTS` env variable with input pytest args. Example: `-m <markers> --maxfail <max-failed-tests> --skipregex <regex>`. Defaults to `null`. In case of `null` value, `PYTEST_ADDOPTS` is not set (tobiko tests are executed without any extra pytest options).
 * `cifmw_test_operator_tobiko_prevent_create`: (Boolean) Sets the value of the env variable `TOBIKO_PREVENT_CREATE` that specifies whether tobiko scenario tests create new resources or expect that those resource had been created before. Default to `null`. In case of `null` value, `TOBIKO_PREVENT_CREATE` is not set (tobiko tests create new resources).
 * `cifmw_test_operator_tobiko_num_processes`: (Integer) Sets the value of the env variable `TOX_NUM_PROCESSES` that is used to run pytest with `--numprocesses $TOX_NUM_PROCESSES`. Defaults to `null`. In case of `null` value, `TOX_NUM_PROCESSES` is not set (tobiko internally uses the value `auto`, see pytest documentation about the `--numprocesses` option).
-* `cifmw_test_operator_tobiko_kubeconfig_secret`: (String) Name of the Openshift Secret required to use Openshift Client from the Tobiko pod. Default value: `tobiko-secret`
 * `cifmw_test_operator_tobiko_override_conf`: (Dict) Overrides the default configuration from `cifmw_test_operator_tobiko_default_conf` that is used to generate the tobiko.conf file. Default value: empty dictionary
 * `cifmw_test_operator_tobiko_ssh_keytype`: (String) Type of ssh key that tobiko will use to connect to the VM instances it creates. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
 * `cifmw_test_operator_tobiko_ssh_keysize`: (Integer) Size of ssh key that tobiko will use to connect to the VM instances it creates. Defaults to `cifmw_ssh_keysize` which defaults to 521.
@@ -72,7 +73,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     name: tobiko-tests
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
-    kubeconfigSecretName: "{{ cifmw_test_operator_tobiko_kubeconfig_secret }}"
+    kubeconfigSecretName: "{{ cifmw_test_operator_kubeconfig_secret }}"
     containerImage: "{{ cifmw_test_operator_tobiko_image }}:{{ cifmw_test_operator_tobiko_image_tag }}"
     testenv: "{{ cifmw_test_operator_tobiko_testenv }}"
     version: "{{ cifmw_test_operator_tobiko_version }}"
