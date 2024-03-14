@@ -26,6 +26,10 @@ This role requires the following parameters to be configured.
 * `cifmw_openshift_adm_op` (str) The operation to be performed on the cluster.
 * `cifmw_openshift_adm_dry_run` (bool) If enabled, no modifications are
   performed on the cluster.
+* `cifmw_openshift_adm_login_retry_count` (int) The maximum number of attempts
+  to be made for a OpenShift login success. Default is `30`.
+* `cifmw_openshift_adm_api_retry_count` (int) The maximum number of attempts to
+  be made for confirming API response. Default is `30`.
 
 ## Reference
 
