@@ -36,14 +36,84 @@
     name: ci_network
     tasks_from: apply-dns.yml
 
-- name: Ensure virtual networks are created.
+- name: Create and apply virtual network configuration.
+  become: true
   when:
     - cifmw_devscripts_config.manage_br_bridge is defined
     - cifmw_devscripts_config.manage_br_bridge == 'n'
   vars:
-    cifmw_libvirt_manager_net_prefix_add: false
-    _layout:
-      networks: "{{ cifmw_libvirt_manager_configuration.networks }}"
-  ansible.builtin.include_role:
-    name: libvirt_manager
-    tasks_from: create_networks.yml
+    _nets: >-
+      {{
+        cifmw_libvirt_manager_configuration.networks |
+        dict2items |
+        map(attribute='key') |
+        list
+      }}
+  block:
+    - name: Ensure br_netfilter module is loaded.
+      community.general.modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Ensure IP forwarding is enabled.
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: 1
+        state: present
+
+    - name: Ensure the required parameters are loaded.
+      ansible.posix.sysctl:
+        name: "net.bridge.bridge-nf-call-{{ item }}"
+        value: 0
+        state: present
+      loop:
+        - arptables
+        - iptables
+        - ip6tables
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Ensure firewall service is enabled and started.
+      ansible.builtin.service:
+        name: firewalld
+        enabled: true
+        state: started
+
+    - name: Create the virtual networks.
+      vars:
+        cifmw_libvirt_manager_net_prefix_add: false
+        _layout:
+          networks: "{{ cifmw_libvirt_manager_configuration.networks }}"
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: create_networks.yml
+
+    - name: Ensure masquerading for external network
+      become: true
+      vars:
+        ext_interface: >-
+          {{
+            ansible_default_ipv4.interface
+            if cifmw_devscripts_config.ip_stack == 'v4'
+            else
+            ansible_default_ipv6.interface
+          }}
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: "POSTROUTING"
+        out_interface: "{{ ext_interface }}"
+        state: present
+        table: "nat"
+        jump: "MASQUERADE"
+
+    - name: Ensure forwarding of traffic to all networks.
+      become: true
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: "FORWARD"
+        in_interface: "{{ item }}"
+        jump: "ACCEPT"
+        state: present
+      loop: "{{ _nets }}"
+      loop_control:
+        label: "{{ item }}"
