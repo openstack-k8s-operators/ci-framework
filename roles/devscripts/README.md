@@ -42,6 +42,9 @@ networks.
   assigned. Must be from the specified external network.
 * `cifmw_devscripts_use_static_ip_addr` (bool) Use static IP addresses for the
   OCP nodes. Defaults to `false`
+* `cifmw_devscripts_external_net` (dict) Key/value pair containing information
+  about the network infrastructure.
+  Refer [section](#supported-keys-in-cifmw_devscripts_external_net).
 
 ### Secrets management
 
@@ -118,6 +121,13 @@ If you provide neither, or both, it will fail.
 | extra_worker_memory_mb | |  The amount of memory to be set for the extra nodes. |
 | extra_worker_disk | | The disk size to be set for each extra nodes. |
 | extra_worker_vcpu | | The number of vCPUs to be configured for each extra nodes. |
+
+### Support keys in cifmw_devscripts_external_net
+
+| Key | Description |
+| --- | ----------- |
+| gw | IP address of the external network gateway. |
+| dns | IP address of the external DNS service. |
 
 ## Examples
 
