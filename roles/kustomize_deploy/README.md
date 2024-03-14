@@ -103,7 +103,7 @@ This allows to discard specific stages by passing the following parameter
 to `ansible-playbook`:
 ```Bash
 $ ansible-playbook deploy-edpm.yml \
-  -e @scenarios/reproducers/validated-architecture-1.yml \
+  -e @scenarios/reproducers/va-hci.yml \
   -e @scenarios/reproducers/networking-definition.yml \
   --skip-tags deploy_architecture_stage_0
 ```
