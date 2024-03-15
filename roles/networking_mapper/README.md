@@ -10,6 +10,15 @@ networking details of a given environment.
 * `cifmw_networking_mapper_network_name`: The network name to filter `cifmw_networking_mapper_ifaces_info` interfaces.
 * `cifmw_networking_mapper_assert_env_load`: Ensures that calling the Networking Environment Definition ends with a valid one loaded. Defaults to `true`.
 
+
+## Networking Definition patching
+This role allows to use a base Networking Definition, given by `cifmw_networking_definition` and patch it
+with other values, ie. patch it for another environment, by declaring variables prefixed that matches the
+`^cifmw_networking_mapper_definition_patch.*` regex. Each of those variables, after sorting them by name,
+will be combined on top of the original `cifmw_networking_definition` and that will be the Networking
+Definition the networking mapper will use to generate the Networking Environment Definition.
+The content of the `cifmw_networking_definition` will reflect those patches.
+
 ## Important definitions
 - Networking Definition: The input to the CI-framework that defines all the networking-needed data.
 - Networking Environment Definition: The output of the mapper that the CI-framework consumes to configure
