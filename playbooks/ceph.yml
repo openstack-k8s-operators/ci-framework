@@ -154,6 +154,18 @@
       cifmw_ceph_spec_public_network: "{{ storage_network_range | default(ssh_network_range) }}"
       cifmw_ceph_spec_private_network: "{{ storage_mgmt_network_range | default('') }}"
 
+- name: Fetch network facts of all computes
+  tags: cephadm
+  hosts: "{{ groups[cifmw_ceph_target | default('computes')] }}"
+  gather_facts: false
+  tasks:
+    - name: Fetch network facts of all computes
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - network
+
 - name: Bootstrap Ceph and apply spec
   tags: cephadm
   hosts: "{{ (groups[cifmw_ceph_target | default('computes')] | default([]))[:1] }}"
@@ -216,14 +228,6 @@
     - name: Get Storage network range
       ansible.builtin.set_fact:
         cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
-
-    - name: Fetch network facts of the first monitor
-      ansible.builtin.setup:
-        gather_subset:
-          - "!all"
-          - "!min"
-          - network
-      delegate_to: "{{ _target_hosts | first }}"
 
     - name: Set IP address of first monitor
       ansible.builtin.set_fact:
