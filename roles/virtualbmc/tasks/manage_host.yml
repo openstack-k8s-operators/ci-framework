@@ -1,0 +1,72 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert we have required data
+  ansible.builtin.assert:
+    that:
+      - cifmw_virtualbmc_action is not none
+      - cifmw_virtualbmc_action in ['add', 'delete']
+      - cifmw_virtualbmc_machine is not none
+
+- name: List existing hosts
+  ansible.builtin.import_tasks: list_hosts.yml
+
+- name: Manage host in VBMC if needed
+  vars:
+    _known_hosts: >-
+      {{
+        cifmw_virtualbmc_known_hosts |
+        selectattr('Domain name', 'equalto', cifmw_virtualbmc_machine) |
+        length
+      }}
+  when:
+    - (cifmw_virtualbmc_action == 'add' and (_known_hosts | int) == 0) or
+      (cifmw_virtualbmc_action == 'delete' and (_known_hosts | int) == 1)
+  block:
+    - name: Stop host in VBMC
+      when:
+        - cifmw_virtualbmc_action == 'delete'
+      ansible.builtin.command:
+        cmd: >-
+          podman exec {{ cifmw_virtualbmc_container_name }}
+          vbmc stop {{ cifmw_virtualbmc_machine }}
+
+    - name: Add new host to VBMC
+      vars:
+        _port: >-
+          {{
+            cifmw_virtualbmc_ipmi_base_port + _known_hosts
+          }}
+      ansible.builtin.command:
+        cmd: >-
+          podman exec {{ cifmw_virtualbmc_container_name }} vbmc
+          {{ cifmw_virtualbmc_action }}
+          {% if cifmw_virtualbmc_action == 'add' -%}
+          --username "{{ cifmw_virtualbmc_ipmi_user }}"
+          --password "{{ cifmw_virtualbmc_ipmi_password }}"
+          --libvirt-uri "{{ cifmw_virtualbmc_ipmi_uri }}"
+          --port "{{ cifmw_virtualbmc_ipmi_port }}"
+          --address "{{ cifmw_virtualbmc_ipmi_address }}"
+          {% endif -%}
+          {{ cifmw_virtualbmc_machine }}
+
+    - name: Start new host in VBMC
+      when:
+        - cifmw_virtualbmc_action == 'add'
+      ansible.builtin.command:
+        cmd: >-
+          podman exec {{ cifmw_virtualbmc_container_name }}
+          vbmc start {{ cifmw_virtualbmc_machine }}

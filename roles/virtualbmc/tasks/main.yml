@@ -1,0 +1,52 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure needed directories exist
+  ansible.builtin.file:
+    path: "{{ item.key }}"
+    state: directory
+    mode: "{{ item.mode | default(omit) }}"
+  loop:
+    - key: "{{ cifmw_virtualbmc_sshkey_path | dirname }}"
+      mode: "0700"
+
+- name: Create ssh key for VBMC
+  register: _vbmc_key
+  community.crypto.openssh_keypair:
+    path: "{{ cifmw_virtualbmc_sshkey_path }}"
+    type: "{{ cifmw_virtualbmc_sshkey_type }}"
+    size: "{{ cifmw_virtualbmc_sshkey_size }}"
+    regenerate: full_idempotence
+
+- name: Pull vbmc container image
+  containers.podman.podman_image:
+    name: "{{ cifmw_virtualbmc_image }}"
+    state: present
+
+- name: Allow VBMC temporary key
+  ansible.posix.authorized_key:
+    user: "{{ ansible_user_id }}"
+    key: "{{ _vbmc_key.public_key }}"
+    state: present
+
+- name: Create and start vbmc container
+  containers.podman.podman_container:
+    image: "{{ cifmw_virtualbmc_image }}"
+    name: "{{ cifmw_virtualbmc_container_name }}"
+    network: host
+    state: started
+    volumes:
+      - "{{ cifmw_virtualbmc_sshkey_path }}:{{ cifmw_virtualbmc_ipmi_key_path }}:ro,Z"
