@@ -1,0 +1,59 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Prepare
+  hosts: all
+  vars:
+    cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+    test_deps_extra_packages:
+      - ipmitool
+  roles:
+    - role: test_deps
+    - role: libvirt_manager
+    - role: discover_latest_image
+  tasks:
+    - name: Deploy a single VM
+      vars:
+        cifmw_libvirt_manager_configuration:
+          vms:
+            compute:
+              amount: 1
+              image_url: "{{ cifmw_discovered_image_url }}"
+              sha256_image_name: "{{ cifmw_discovered_hash }}"
+              image_local_dir: "{{ cifmw_basedir }}/images/"
+              disk_file_name: "centos-stream-9.qcow2"
+              disksize: 15
+              memory: 4
+              cpus: 2
+              nets:
+                - public
+          networks:
+            public: |-
+              <network>
+                <name>public</name>
+                <forward mode='nat'/>
+                <bridge name='public' stp='on' delay='0'/>
+                <mac address='52:54:00:6a:f2:dc'/>
+                <ip family='ipv4' address='192.168.110.1' prefix='24'>
+                  <dhcp>
+                    <range start='192.168.110.10' end='192.168.110.100'/>
+                  </dhcp>
+                </ip>
+              </network>
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: deploy_layout.yml
