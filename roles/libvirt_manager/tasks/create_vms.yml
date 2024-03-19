@@ -162,6 +162,35 @@
       cifmw_libvirt_manager_pub_net ({{ cifmw_libvirt_manager_pub_net }}).
       Please double-check your scenario!
 
+- name: Create VBMC entity
+  when:
+    - _vbmc_available is defined
+    - _vbmc_available | bool
+  vars:
+    cifmw_virtualbmc_machine: "cifmw-{{ vm_type }}-{{ index }}"
+    cifmw_virtualbmc_ipmi_port: >-
+      {{
+        cifmw_virtualbmc_ipmi_base_port + family_id + index
+      }}
+    cifmw_virtualbmc_action: "add"
+    _ipmi_host: >-
+      {%- if cifmw_libvirt_manager_configuration.vms.crc.target is defined -%}
+      {{ cifmw_libvirt_manager_configuration.vms.crc.target }}
+      {%- elif cifmw_libvirt_manager_configuration.vms.ocp.target is defined -%}
+      {{ cifmw_libvirt_manager_configuration.vms.ocp.target }}
+      {%- else -%}
+      {{ inventory_hostname }}
+      {%- endif -%}
+    cifmw_virtualbmc_ipmi_address: >-
+      {{ hostvars[_ipmi_host].ansible_default_ipv4.address }}
+  ansible.builtin.include_role:
+    name: virtualbmc
+    tasks_from: manage_host
+  loop: "{{ _vm_ports.results }}"
+  loop_control:
+    index_var: index
+    label: "{{ vm_type }}-{{ index }}"
+
 - name: "Start and grab IP if image is not blank for {{ vm_type }}"
   when:
     - vm_data.value.disk_file_name != 'blank'
