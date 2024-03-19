@@ -1,0 +1,402 @@
+#!/bin/bash
+#
+# Script that spawns an instance
+# Has 3 operational modes:
+#   - workload: spawn VM with floating ip (default) or external ip in case of
+#               SRIOV
+#   - sanity:   spawn VM with floating/external ip assert it's ssh'able,
+#               delete VM and associated resources
+#   - cleanup:  clean up VM and other elements created previously
+#
+# TODO: Remove debug
+set -x
+if [[ -n ${1} ]]; then
+    MODE="${1}"
+else
+    MODE="workload"
+fi
+
+function prepare_env {
+
+    export IMAGE_URL='{{ workload_image_url|default("http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img") }}'
+    export IMAGE_NAME="upgrade_workload_${SUFFIX}"
+    export IMAGE_FILE="$(mktemp -d )/upgrade_workload_image.qcow2"
+    export INSTANCE_NAME="instance_${SUFFIX}"
+    export INSTANCE_USER='{{ workload_user|default("cirros") }}'
+    export KEYPAIR_NAME="userkey_${SUFFIX}"
+    export FLAVOR_NAME="v1-{{ workload_memory|default('512') }}M-{{ workload_disk|default('10') }}G-${SUFFIX}"
+    export SECGROUP_NAME="allow-icmp-ssh-${SUFFIX}"
+    export TENANT_NET_NAME="internal_net_${SUFFIX}"
+    export EXTERNAL_NET_NAME='{{ external_network_name|default("public") }}'
+    export SRIOV_PORT="sriov_port_${SUFFIX}"
+    export INSTANCE_FILE="${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}/vm_info.sh"
+    export WORKLOAD_FILE="${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}/workload_suffix"
+    export SSH_KEY_FILE="${HOME}/.ssh/${KEYPAIR_NAME}"
+    mkdir -p "${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}"
+}
+
+function sanity_check {
+    local timeout_seconds=180
+    local elapsed_seconds=0
+
+    echo "Waiting for compute services to be up"
+
+    while ! ( openstack compute service list --service nova-compute -f value -c State && openstack network agent list -f value -c Alive ); do
+        if [ $elapsed_seconds -ge $timeout_seconds ]; then
+            echo "FAILURE: clients commands not working."
+            openstack compute service list --service nova-compute
+            openstack network agent list
+            exit 1
+        fi
+        sleep 5
+        elapsed_seconds=$(( elapsed_seconds + 5 ))
+    done
+
+    elapsed_seconds=0
+
+    while openstack compute service list --service nova-compute -f value -c State | grep -q 'down' || openstack network agent list -f value -c Alive | grep -q 'false'; do
+        if [ $elapsed_seconds -ge $timeout_seconds ]; then
+            echo "FAILURE: Some nova-compute or network agent services are down"
+            openstack compute service list --service nova-compute
+            openstack network agent list
+            exit 1
+        fi
+        sleep 5
+        elapsed_seconds=$(( elapsed_seconds + 5 ))
+    done
+    echo "All compute and networking services are up and running"
+}
+
+function sanity_teardown {
+    # remove auxiliary resources
+
+    local timeout_seconds=180
+    local elapsed_seconds=0
+
+    {% if workload_sriov|default(false) | bool -%}
+    openstack port delete "${SRIOV_PORT}"
+    {% else -%}
+    echo "Remove ${INSTANCE_FIP} from ${INSTANCE_NAME}"
+    openstack server remove floating ip "${INSTANCE_NAME}" "${INSTANCE_FIP}"
+    grep "${INSTANCE_FIP}" "${INSTANCE_FILE}"  && rm "${INSTANCE_FILE}"
+
+    echo "Delete floating ip ${INSTANCE_FIP}"
+    openstack floating ip delete "${INSTANCE_FIP}"
+    {%- endif %}
+
+    echo "Remove VM ${INSTANCE_NAME}"
+    openstack server delete "${INSTANCE_NAME}"
+    while true; do
+        openstack server list -f value -c Name | grep -q "${INSTANCE_NAME}"
+        if [[ ${?} -eq 1 ]]; then
+            echo "Instance ${INSTANCE_NAME} successfully removed"
+            break
+        fi
+        sleep 5
+        elapsed_seconds=$(( elapsed_seconds + 5 ))
+        if [ $elapsed_seconds -ge $timeout_seconds ]; then
+            echo "FAILURE: Failed to remove instance ${INSTANCE_NAME}"
+            exit 1
+        fi
+    done
+
+    {% if cifmw_update_create_volume | default(True) | bool -%}
+    echo "Remove cinder volume ${CINDER_VOL_ID}"
+    openstack volume delete "${CINDER_VOL_ID}"
+
+    while true; do
+        openstack volume list -f value -c ID | grep -q "${CINDER_VOL_ID}"
+        if [[ ${?} -eq 1 ]]; then
+            echo "The volume ${CINDER_VOL_ID} successfully removed"
+            break
+        fi
+
+        sleep 5
+        elapsed_seconds=$(( elapsed_seconds + 5 ))
+
+        if [ $elapsed_seconds -ge $timeout_seconds ]; then
+            echo "FAILURE: Failed to remove the volume ${CINDER_VOL_ID}"
+            exit 1
+        fi
+    done
+    {%- endif %}
+
+    echo "Clear default gateway from ${TENANT_NET_NAME}_router"
+    openstack router unset --external-gateway "${TENANT_NET_NAME}"_router
+
+    echo "Remove subnet ${TENANT_NET_NAME}_subnet from router ${TENANT_NET_NAME}_router"
+    openstack router remove subnet "${TENANT_NET_NAME}"_router "${TENANT_NET_NAME}"_subnet
+
+    echo "Remove router ${TENANT_NET_NAME}_router"
+    openstack router delete "${TENANT_NET_NAME}_router"
+
+    echo "Remove subnet ${TENANT_NET_NAME}_subnet"
+    openstack subnet delete "${TENANT_NET_NAME}_subnet"
+
+    echo "Remove network ${TENANT_NET_NAME}"
+    openstack network delete "${TENANT_NET_NAME}"
+
+    echo "Remove security group ${SECGROUP_NAME}"
+    openstack security group delete "${SECGROUP_NAME}"
+
+    echo "Remove keypair ${KEYPAIR_NAME}"
+    openstack keypair delete "${KEYPAIR_NAME}"
+
+    echo "Remove image ${IMAGE_NAME}"
+    openstack image delete "${IMAGE_NAME}"
+
+    echo "Remove flavor ${FLAVOR_NAME}"
+    openstack flavor delete "${FLAVOR_NAME}"
+
+    echo "Remove file ${IMAGE_FILE}"
+    rm -Rf "$(dirname ${IMAGE_FILE})"
+
+}
+
+function workload_launch {
+    # create workload
+    ## create image
+
+
+    if ! openstack image list | grep "${IMAGE_NAME}"; then
+        echo "Downloading image ${IMAGE_URL}"
+
+
+        if ! curl -4fsSL --retry 5 -o "${IMAGE_FILE}" "${IMAGE_URL}"; then
+            echo "Failed to download ${IMAGE_URL}"
+            exit 1
+        fi
+
+        echo "Uploading ${IMAGE_NAME} to Glance"
+        openstack image create \
+            --file "${IMAGE_FILE}" \
+            --disk-format qcow2 \
+            --container-format bare \
+            "${IMAGE_NAME}"
+    fi
+
+    ## create user key
+
+    if ! openstack keypair list | grep "${KEYPAIR_NAME}"; then
+        echo "Creating keypair ${KEYPAIR_NAME}"
+        ssh-keygen -t ecdsa -C "${KEYPAIR_NAME}" -f "${SSH_KEY_FILE}" -N ''
+        cat "${SSH_KEY_FILE}"
+        openstack keypair create --public-key "${SSH_KEY_FILE}.pub" "${KEYPAIR_NAME}"
+    fi
+
+    ## create flavor
+
+    if ! openstack flavor list | grep "${FLAVOR_NAME}"; then
+        echo "Creating flavor ${FLAVOR_NAME}"
+        openstack flavor create --vcpus {{ workload_vcpu|default(1) }} \
+            --ram {{ workload_memory|default(512) }} \
+            --disk {{ workload_disk|default(10) }} \
+            --swap {{ workload_swap|default(1) }} \
+            $FLAVOR_NAME
+    fi
+
+    ## create public network
+    openstack network show "${EXTERNAL_NET_NAME}" || \
+        openstack network create "${EXTERNAL_NET_NAME}" \
+        --external --provider-network-type flat \
+        --provider-physical-network datacentre
+
+    openstack subnet show pub_sub || \
+        openstack subnet create pub_sub \
+        --subnet-range 192.168.122.0/24 \
+        --allocation-pool start=192.168.122.200,end=192.168.122.210 \
+        --gateway 192.168.122.1 --no-dhcp --network "${EXTERNAL_NET_NAME}"
+
+    ## create tenant network
+
+    if ! openstack network list | grep "${TENANT_NET_NAME}"; then
+        NAMESERVER=$(grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' /etc/resolv.conf  | head -1)
+        echo "Creating router ${TENANT_NET_NAME}_router"
+        openstack router create "${TENANT_NET_NAME}_router"
+
+        echo "Creating network ${TENANT_NET_NAME}"
+        openstack network create "${TENANT_NET_NAME}"
+
+        echo "Creating subnet ${TENANT_NET_NAME}_subnet"
+        openstack subnet create \
+            --subnet-range 192.168.0.0/24 \
+            --allocation-pool start=192.168.0.10,end=192.168.0.100 \
+            --gateway 192.168.0.254 \
+            --dns-nameserver "${NAMESERVER}" \
+            --network "${TENANT_NET_NAME}" \
+            "${TENANT_NET_NAME}_subnet"
+
+        echo "Add subnet ${TENANT_NET_NAME}_subnet to router ${TENANT_NET_NAME}_router"
+        openstack router add subnet "${TENANT_NET_NAME}_router" "${TENANT_NET_NAME}_subnet"
+
+        echo "Set external-gateway for ${TENANT_NET_NAME}_router"
+        openstack router set --external-gateway "${EXTERNAL_NET_NAME}" "${TENANT_NET_NAME}_router"
+    fi
+
+    ## create security group
+    if ! openstack security group list | grep "${SECGROUP_NAME}"; then
+        echo "Creating security group ${SECGROUP_NAME}"
+        openstack security group create "${SECGROUP_NAME}"
+
+        echo "Creating rules for ports 22,80,443 in security group ${SECGROUP_NAME}"
+        openstack security group rule create --proto icmp "${SECGROUP_NAME}"
+        openstack security group rule create --proto tcp --dst-port 22 "${SECGROUP_NAME}"
+        openstack security group rule create --proto tcp --dst-port 80 "${SECGROUP_NAME}"
+        openstack security group rule create --proto tcp --dst-port 443 "${SECGROUP_NAME}"
+    fi
+
+    ## create sriov port
+    {% if workload_sriov|default(false) | bool -%}
+    openstack port create --vnic-type direct --network "${EXTERNAL_NET_NAME}" \
+        --binding-profile trusted=true "${SRIOV_PORT}"
+    {%- endif %}
+
+
+
+    ## create instance
+    TENANT_NET_ID=$( openstack network show -f value -c id "${TENANT_NET_NAME}" )
+
+    echo "Creating overcloud instance ${INSTANCE_NAME}"
+    {% if workload_sriov|default(false) | bool -%}
+    openstack server create  \
+        --image "${IMAGE_NAME}" \
+        --flavor "${FLAVOR_NAME}" \
+        --key-name "${KEYPAIR_NAME}" \
+        --port "${SRIOV_PORT}" \
+        "${INSTANCE_NAME}"
+    {% else -%}
+    openstack server create  \
+        --image "${IMAGE_NAME}" \
+        --flavor "${FLAVOR_NAME}" \
+        --security-group "${SECGROUP_NAME}" \
+        --key-name  "${KEYPAIR_NAME}" \
+        --nic net-id="${TENANT_NET_ID}" \
+        "${INSTANCE_NAME}"
+    {%- endif %}
+
+    timeout_seconds=120
+    elapsed_seconds=0
+    while true; do
+        INSTANCE_STATUS=$(openstack server show -f value -c status "${INSTANCE_NAME}")
+        case "${INSTANCE_STATUS}" in
+            "ACTIVE")
+                echo "${INSTANCE_NAME} reached 'ACTIVE' status"
+                break
+                ;;
+            "ERROR")
+                echo "${INSTANCE_NAME} failed"
+                exit 1
+        esac
+        sleep 3
+        elapsed_seconds=$(expr "${elapsed_seconds}" + 3)
+        if [ $elapsed_seconds -ge $timeout_seconds ]; then
+            echo "FAILURE: Instance failed to boot within ${elapsed_seconds} seconds"
+            openstack server show "${INSTANCE_NAME}" -f json 2>&1
+            exit 1
+        fi
+    done
+
+    ## assign floating ip or external ip
+    {% if workload_sriov|default(false) | bool -%}
+    EXTERNAL_IP=$(openstack port show "${SRIOV_PORT}" -f yaml -c fixed_ips | awk '/ip_address/{print $3;exit}')
+    VM_IP=${EXTERNAL_IP}
+    {% else -%}
+    INSTANCE_FIP=$(openstack floating ip create -f value -c floating_ip_address "${EXTERNAL_NET_NAME}")
+
+    echo "Assign FIP[${INSTANCE_FIP}] to server ${INSTANCE_NAME}"
+
+    if ! openstack server add floating ip "${INSTANCE_NAME}" "${INSTANCE_FIP}"; then
+        echo "Network related error detected while attaching FIP to VM. Exiting with non-zero code"
+        if [[ "${MODE}" == "sanity" ]]; then
+            sanity_teardown
+        fi
+        exit 1
+    fi
+    VM_IP=${INSTANCE_FIP}
+    {%- endif %}
+
+    {% if cifmw_update_create_volume | default(true) | bool -%}
+    ## create and attach a volume
+    ## The cinder resource must be created and available to be attach
+    CINDER_VOL_ID=$(openstack volume create --size 1 "vol_${SUFFIX}" -f value -c id)
+    while true; do
+        VOL_STATUS=$(openstack volume show "${CINDER_VOL_ID}" -f value -c status)
+        if [[ ${VOL_STATUS} == "available" ]]; then
+            echo "The volume ${CINDER_VOL_ID} successfully created and available"
+            break
+        fi
+
+        sleep 5
+        elapsed_seconds=$(( elapsed_seconds + 5 ))
+
+        if [ $elapsed_seconds -ge $timeout_seconds ]; then
+            echo "FAILURE: Failed to create the volume ${CINDER_VOL_ID}"
+            exit 1
+        fi
+    done
+
+    echo "Attach volume vol_${SUFFIX} to instance ${INSTANCE_NAME}"
+
+    if ! openstack server add volume "${INSTANCE_NAME}" "${CINDER_VOL_ID}"; then
+        echo "Storage related error detected while attaching VOLUME to VM. Exiting with non-zero code"
+        if [[ "${MODE}" == "sanity" ]]; then
+            sanity_teardown
+        fi
+        exit 1
+    fi
+    {%- endif %}
+
+    ## SSH to VM through it's floating ip or external ip
+    timeout_seconds=180
+    elapsed_seconds=0
+    while true; do
+        # assert instance is reachable via ssh
+        echo "  [$(date)] Trying to ssh to ${VM_IP}"
+
+        if ssh -q -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${INSTANCE_USER}@${VM_IP}" 'whoami'; then
+            echo "Instance ${INSTANCE_NAME} is reachable via ${VM_IP}"
+            echo "Write VM_IP ${VM_IP} to file"
+            echo "export VM_IP=${VM_IP}" > "${INSTANCE_FILE}"
+            break
+        fi
+        sleep 3
+        elapsed_seconds=$(expr "${elapsed_seconds}" + 3)
+        if [ "${elapsed_seconds}" -ge "${timeout_seconds}" ]; then
+            echo "FAILURE: Instance failed to boot."
+            if [[ "${MODE}" == "sanity" ]]; then
+                sanity_teardown
+            fi
+            exit 1
+        fi
+    done
+}
+
+if [[ "${MODE}" == "workload" ]]; then
+    SUFFIX=$(openssl rand -hex 5)
+    prepare_env
+    sanity_check
+    workload_launch
+    echo "export SUFFIX=${SUFFIX}" > "${WORKLOAD_FILE}"
+    {% if cifmw_update_create_volume | default(true) | bool -%}
+    echo "export CINDER_VOL_ID=${CINDER_VOL_ID}" >> "${WORKLOAD_FILE}"
+    {% endif -%}
+    echo "export INSTANCE_FIP=${INSTANCE_FIP}" >> "${WORKLOAD_FILE}"
+fi
+
+if [[ "${MODE}" == "cleanup" ]]; then
+    # obtain SUFFIX value generated during workload_launch
+    source "${WORKLOAD_FILE}"
+    prepare_env
+    sanity_check
+    # cleanup workload
+    sanity_teardown
+fi
+
+if [[ "${MODE}" == "sanity" ]]; then
+    SUFFIX=$(openssl rand -hex 5)
+    prepare_env
+    sanity_check
+    workload_launch
+    sanity_teardown
+fi
