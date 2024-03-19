@@ -1,0 +1,41 @@
+- name: Ensure update log directory exists.
+  ansible.builtin.file:
+    path: "{{ cifmw_update_artifacts_basedir }}"
+    state: directory
+
+- name: Create workload launch script
+  ansible.builtin.template:
+    src: "workload_launch.sh.j2"
+    dest: "{{ cifmw_update_workload_launch_script }}"
+    mode: 0775
+
+- name: Create start l3 agent connectivity check scripts
+  ansible.builtin.template:
+    src: "l3_agent_start_ping.sh.j2"
+    dest: "{{ cifmw_update_ping_start_script }}"
+    mode: 0775
+
+- name: Create stop l3 agent connectivity check scripts
+  ansible.builtin.template:
+    src: "l3_agent_stop_ping.sh.j2"
+    dest: "{{ cifmw_update_ping_stop_script }}"
+    mode: 0775
+
+- name: Create an instance on the overcloud
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat {{ cifmw_update_workload_launch_script }} | \
+       oc rsh -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} openstackclient bash 2>&1 \
+       {{ cifmw_update_timestamper_cmd }} | tee {{ cifmw_update_artifacts_basedir }}/workload_launch.log 
+
+- name: Get logs from update instance creation
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: >
+    oc cp -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+    openstack/openstackclient:{{ cifmw_update_artifacts_basedir_suffix }}
+    {{ cifmw_update_artifacts_basedir }}
