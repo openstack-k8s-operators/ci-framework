@@ -91,6 +91,9 @@ need to be changed for a typical EDPM deployment.
   a fully qualified domain name (e.g. server1.bar.com). When false, the
   Ceph spec should use a short hostname (e.g. server1).
 
+* `cifmw_cephadm_ns`: Name of the OpenStack controlplane namespace
+   used in configuring swift objects.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
