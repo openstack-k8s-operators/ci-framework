@@ -14,6 +14,22 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Create the support files for test
+  ansible.builtin.include_tasks: create_test_files.yml
+  when: cifmw_update_ping_test | bool
+
+- name: Trigger the ping test
+  when:
+    - cifmw_update_ping_test | bool
+    - not cifmw_update_run_dryrun | bool
+
+  block:
+    - name: Create Test instance before update
+      ansible.builtin.include_tasks: create_instance.yml
+
+    - name: Start ping test
+      ansible.builtin.include_tasks: l3_agent_connectivity_check_start.yml
+
 - name: Set openstack_update_run Makefile environment variables
   tags:
     - always
@@ -28,6 +44,7 @@
       OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
       {% endif -%}
 
+
 - name: Run make openstack_update_run
   vars:
     make_openstack_update_run_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path }) }}"
@@ -36,3 +53,9 @@
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_openstack_update_run'
+
+- name: Stop the ping test
+  ansible.builtin.include_tasks: l3_agent_connectivity_check_stop.yml
+  when:
+    - cifmw_update_ping_test | bool
+    - not cifmw_update_run_dryrun | bool
