@@ -32,55 +32,62 @@
       ansible.builtin.stat:
         path: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
 
-    - name: Create nova migration keypair if does not exists
-      when:
-        - not _nova_key_file.stat.exists
-      community.crypto.openssh_keypair:
-        comment: "nova migration"
-        path: "{{ _nova_key_file.stat.path }}"
-        type: "{{ cifmw_ssh_keytype | default('ecdsa') }}"
-        size: "{{ cifmw_ssh_keysize | default(521) }}"
-
-    - name: Generate needed facts out of local files
+    - name: Ensure nova migration keypair details are propagated
       vars:
-        _ifaces_vars: >-
+        _ssh_file: >-
           {{
-            hostvars['controller-0'].ansible_interfaces |
-            map('regex_replace', '^(.*)$', 'ansible_\1')
+            _nova_key_file.stat.path |
+            default(
+              (cifmw_basedir, 'artifacts', 'nova_migration_key') |
+              ansible.builtin.path_join
+            )
           }}
-        _controller_host: "{{ hostvars['controller-0'].ansible_host }}"
-        _ipv4_network_data: >-
-          {{
-            hostvars['controller-0'] | dict2items |
-            selectattr('key', 'in', _ifaces_vars) |
-            selectattr('value.ipv4.address', 'defined') |
-            selectattr('value.ipv4.address', 'equalto', _controller_host) |
-            map(attribute='value.ipv4') | first | default({})
-          }}
-        _sshkey: >-
-          {{
-            _nova_key_file.stat.path
-          }}
-      ansible.builtin.set_fact:
-        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
-          {{ lookup('file', '~/.ssh/authorized_keys', rstrip=False) }}
-        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
-          {{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}
-        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
-          {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
-        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
-          {{ lookup('file', _sshkey ~ '.pub', rstrip=False)}}
-        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
-          {{ lookup('file', _sshkey, rstrip=False) }}
-        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
-          {{
-            [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
-            (
-              [
-                 _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
-              ]
-            ) if (_ipv4_network_data | length > 0) else []
-          }}
+      block:
+        - name: Create nova migration keypair if does not exists
+          when:
+            - not _nova_key_file.stat.exists | default(false)
+          community.crypto.openssh_keypair:
+            comment: "nova migration"
+            path: "{{ _ssh_file }}"
+            type: "{{ cifmw_ssh_keytype | default('ecdsa') }}"
+            size: "{{ cifmw_ssh_keysize | default(521) }}"
+
+        - name: Generate needed facts out of local files
+          vars:
+            _ifaces_vars: >-
+              {{
+                hostvars['controller-0'].ansible_interfaces |
+                map('regex_replace', '^(.*)$', 'ansible_\1')
+              }}
+            _controller_host: "{{ hostvars['controller-0'].ansible_host }}"
+            _ipv4_network_data: >-
+              {{
+                hostvars['controller-0'] | dict2items |
+                selectattr('key', 'in', _ifaces_vars) |
+                selectattr('value.ipv4.address', 'defined') |
+                selectattr('value.ipv4.address', 'equalto', _controller_host) |
+                map(attribute='value.ipv4') | first | default({})
+              }}
+          ansible.builtin.set_fact:
+            cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+              {{ lookup('file', '~/.ssh/authorized_keys', rstrip=False) }}
+            cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+              {{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}
+            cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+              {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
+            cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+              {{ lookup('file', _ssh_file ~ '.pub', rstrip=False)}}
+            cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+              {{ lookup('file', _ssh_file, rstrip=False) }}
+            cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+              {{
+                [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
+                (
+                  [
+                    _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
+                  ]
+                ) if (_ipv4_network_data | length > 0) else []
+              }}
 
     - name: Load architecture automation file
       register: _automation
