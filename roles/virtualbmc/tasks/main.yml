@@ -23,30 +23,39 @@
     - key: "{{ cifmw_virtualbmc_sshkey_path | dirname }}"
       mode: "0700"
 
-- name: Create ssh key for VBMC
-  register: _vbmc_key
-  community.crypto.openssh_keypair:
-    path: "{{ cifmw_virtualbmc_sshkey_path }}"
-    type: "{{ cifmw_virtualbmc_sshkey_type }}"
-    size: "{{ cifmw_virtualbmc_sshkey_size }}"
-    regenerate: full_idempotence
-
-- name: Pull vbmc container image
-  containers.podman.podman_image:
-    name: "{{ cifmw_virtualbmc_image }}"
-    state: present
-
-- name: Allow VBMC temporary key
-  ansible.posix.authorized_key:
-    user: "{{ ansible_user_id }}"
-    key: "{{ _vbmc_key.public_key }}"
-    state: present
-
-- name: Create and start vbmc container
-  containers.podman.podman_container:
-    image: "{{ cifmw_virtualbmc_image }}"
+- name: Check if container already exists
+  register: _vbmc_container_info
+  containers.podman.podman_container_info:
     name: "{{ cifmw_virtualbmc_container_name }}"
-    network: host
-    state: started
-    volumes:
-      - "{{ cifmw_virtualbmc_sshkey_path }}:{{ cifmw_virtualbmc_ipmi_key_path }}:ro,Z"
+
+- name: Run tasks only if container does not exist
+  when:
+    - _vbmc_container_info.containers | length == 0
+  block:
+    - name: Create ssh key for VBMC
+      register: _vbmc_key
+      community.crypto.openssh_keypair:
+        path: "{{ cifmw_virtualbmc_sshkey_path }}"
+        type: "{{ cifmw_virtualbmc_sshkey_type }}"
+        size: "{{ cifmw_virtualbmc_sshkey_size }}"
+        regenerate: full_idempotence
+
+    - name: Pull vbmc container image
+      containers.podman.podman_image:
+        name: "{{ cifmw_virtualbmc_image }}"
+        state: present
+
+    - name: Allow VBMC temporary key
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user_id }}"
+        key: "{{ _vbmc_key.public_key }}"
+        state: present
+
+    - name: Create and start vbmc container
+      containers.podman.podman_container:
+        image: "{{ cifmw_virtualbmc_image }}"
+        name: "{{ cifmw_virtualbmc_container_name }}"
+        network: host
+        state: started
+        volumes:
+          - "{{ cifmw_virtualbmc_sshkey_path }}:{{ cifmw_virtualbmc_ipmi_key_path }}:ro,Z"

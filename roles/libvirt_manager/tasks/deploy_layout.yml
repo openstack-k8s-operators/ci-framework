@@ -1,4 +1,29 @@
 ---
+# Deploy VBMC only on the hypervisor running OpenShift services,
+# being OCP cluster or single CRC.
+- name: Deploy VirtualBMC service container
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  when:
+    - (cifmw_libvirt_manager_configuration.vms.crc.target is defined and
+       cifmw_libvirt_manager_configuration.vms.crc.target == inventory_hostname) or
+      (cifmw_libvirt_manager_configuration.vms.crc is defined and
+       cifmw_libvirt_manager_configuration.vms.crc.target is undefined) or
+      (cifmw_libvirt_manager_configuration.vms.ocp.target is defined and
+       cifmw_libvirt_manager_configuration.vms.ocp.target == inventory_hostname) or
+      (cifmw_libvirt_manager_configuration.vms.ocp is defined and
+       cifmw_libvirt_manager_configuration.vms.ocp.target is undefined)
+  block:
+    - name: Deploy virtualbmc
+      ansible.builtin.include_role:
+        name: virtualbmc
+
+    - name: Let the project know we have vbmc available
+      ansible.builtin.set_fact:
+        _vbmc_available: true
+        _vbmc_host: "{{ inventory_hostname }}"
+
 - name: Create needed workload directory
   ansible.builtin.file:
     path: "{{ cifmw_libvirt_manager_basedir }}/{{ item }}"
@@ -166,6 +191,7 @@
   loop_control:
     label: "{{ vm_data.key }}"
     loop_var: vm_data
+    index_var: family_id
 
 - name: Create "all" group inventory file
   ansible.builtin.template:
@@ -193,6 +219,33 @@
   ansible.builtin.copy:
     dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/interfaces-info.yml"
     content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
+
+- name: Refresh and dump vbmc hosts
+  when:
+    - _vbmc_host is defined
+    - _vbmc_host == inventory_hostname
+  block:
+    - name: Ensure fresh vbmc listing
+      ansible.builtin.include_role:
+        name: virtualbmc
+        tasks_from: list_hosts.yml
+
+    - name: Dump vbmc known hosts
+      vars:
+        _auth:
+          username: "{{ cifmw_virtualbmc_ipmi_user | default('admin') }}"
+          password: "{{ cifmw_virtualbmc_ipmi_password | default('password') }}"
+        _mapped: >-
+          {{
+            cifmw_virtualbmc_known_hosts |
+            map('combine', _auth)
+          }}
+        content:
+          cifmw_virtualbmc_known_hosts: "{{ _mapped }}"
+      ansible.builtin.copy:
+        dest: >-
+          {{ cifmw_libvirt_manager_basedir }}/artifacts/virtualbmc-nodes.yml
+        content: "{{ content | to_nice_yaml }}"
 
 - name: Ensure we get proper access to CRC
   when:
