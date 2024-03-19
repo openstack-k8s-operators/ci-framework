@@ -10,6 +10,7 @@ import (
 type tagOptions struct {
     global *globalOptions
     tag string
+    tag_sha bool
     hash string
     htmlOutput string
 }
@@ -28,6 +29,7 @@ func tagCmd(global *globalOptions) *cobra.Command {
     cmd.Flags().StringVar(&optsTag.tag, "tag", "current-podified", "Image tag name")
     cmd.Flags().StringVar(&optsTag.hash, "force-hash", "", "Force an specific hash, overwriting delorean api")
     cmd.Flags().StringVar(&optsTag.htmlOutput, "html", "", "HTML output report file")
+    cmd.Flags().BoolVar(&optsTag.tag_sha, "tag-sha", true, "Should also tag sha. Default to true")
     return cmd
 }
 
@@ -55,6 +57,9 @@ func (opts *tagOptions) run(cmd *cobra.Command, args []string) error {
                 logrus.Errorln("Unable to get image manifest: ", err)
             } else {
                 tagImage(opts.global.toNamespace, image, opts.tag, sha)
+                if opts.tag_sha {
+                    tagImage(opts.global.toNamespace, image, sha[7:], sha)
+                }
             }
         }
     } else {
@@ -74,6 +79,9 @@ func (opts *tagOptions) run(cmd *cobra.Command, args []string) error {
                     failed_tag = append(failed_tag, parsedLine.repository)
                 } else {
                     success_tag = append(success_tag, parsedLine.repository)
+                    if opts.tag_sha {
+                        tagImage(opts.global.toNamespace, parsedLine.repository, sha[7:], sha)
+                    }
                 }
             }
         }
