@@ -1,0 +1,114 @@
+---
+- name: Ensure needed parameter is properly set
+  ansible.builtin.assert:
+    that:
+      - cifmw_architecture_scenario is defined
+      - cifmw_architecture_scenario is not none
+    msg: >-
+      cifmw_architecture_scenario must be provided.
+
+- name: Ensure source original values file exists
+  ansible.builtin.assert:
+    that:
+      - cifmw_ci_gen_kustomize_values_src_file is ansible.builtin.exists
+    msg: >-
+      {{ cifmw_ci_gen_kustomize_values_src_file }} doesn't exist.
+
+- name: Load original values file
+  register: _original
+  ansible.builtin.slurp:
+    src: "{{ cifmw_ci_gen_kustomize_values_src_file }}"
+
+- name: Expose the datatype for future usage
+  vars:
+    _datatype: >-
+      {{
+        cifmw_ci_gen_kustomize_values_name | default(
+        (_original.content |
+        b64decode |
+        from_yaml).metadata.name, true)
+      }}
+    _dest_dir: >-
+      {{
+        (cifmw_ci_gen_kustomize_values_snippets_basedir,
+         cifmw_ci_gen_kustomize_values_snippets_dir_prefix ~ _datatype) |
+         path_join
+      }}
+  ansible.builtin.set_fact:
+    values_datatype: "{{ _datatype }}"
+    snippet_datadir: "{{ _dest_dir }}"
+    cacheable: false
+
+- name: Ensure we get the needed data depending on the values type
+  when:
+    - ((role_path, 'tasks', _tasks) | path_join) is file
+  vars:
+    _tasks: "{{ values_datatype | replace('-', '_') }}.yml"
+  ansible.builtin.include_tasks: "{{ _tasks }}"
+
+- name: Ensure output directory exists
+  ansible.builtin.file:
+    path: "{{ snippet_datadir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy original values.yaml
+  ansible.builtin.copy:
+    force: false  # Do not override in case of second run
+    content: >-
+      {{
+        _original.content |
+        b64decode |
+        from_yaml |
+        ansible.utils.remove_keys(target=['^nodes(_[0-9]+)?$'],
+                                  matching_parameter='regex') |
+        to_nice_yaml
+      }}
+    dest: >-
+      {{
+        (snippet_datadir,
+         '01_original.yaml') | path_join
+      }}
+    mode: "0644"
+
+- name: Generate CI snippet
+  when:
+    - _tmpl_check_path | length > 0
+  vars:
+    _tmpl_name: >-
+      {{ cifmw_ci_gen_kustomize_values_src_file | basename }}.j2
+    _tmpl_path: >-
+      {{
+        (role_path, 'templates', cifmw_architecture_scenario, values_datatype, _tmpl_name) | path_join
+      }}
+    _common_tmpl_path: >-
+      {{
+        (role_path, 'templates', 'common', values_datatype, _tmpl_name) | path_join
+      }}
+    _tmpl_check_path: >-
+      {{
+        [_tmpl_path, _common_tmpl_path] | select('exists')
+      }}
+  ansible.builtin.template:
+    dest: >-
+      {{
+        (snippet_datadir,
+         '02_ci_data.yaml') | path_join
+      }}
+    src: "{{ _tmpl_check_path | first }}"
+    mode: "0644"
+
+- name: Push user provided dataset
+  ansible.builtin.copy:
+    dest: >-
+      {{
+        (snippet_datadir,
+         '03_user_data.yaml') | path_join
+      }}
+    content: >-
+      {{
+        cifmw_ci_gen_kustomize_values_userdata |
+        default({}) |
+        to_nice_yaml
+      }}
+    mode: "0644"

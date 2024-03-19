@@ -18,29 +18,107 @@
 - name: Converge
   hosts: all
   vars:
-    _target_file: >-
+    cifmw_ci_gen_kustomize_values_basedir: >-
+      {{ ansible_user_dir }}/ci-framework-data
+    architecture_repo: >-
       {{
-        (ansible_user_dir, 'ci-framework-data/artifacts',
-         'ci_gen_kustomize_values/values.yaml') | path_join
+        (ansible_user_dir,
+         'src/github.com/openstack-k8s-operators/architecture') | path_join
       }}
-  roles:
-    - role: "ci_gen_kustomize_values"
+    artifacts: "{{ cifmw_ci_gen_kustomize_values_basedir }}/artifacts"
+    to_kustomize:
+      - name: 'dataplane'
+        path: 'examples/va/nfv/sriov/edpm'
+      - name: 'ctlplane'
+        path: 'examples/va/nfv/sriov'
   tasks:
-    - name: Check if file exists
-      register: _file_state
-      ansible.builtin.stat:
-        path: "{{ _target_file }}"
+    - name: Ensure architecture repository is building
+      ansible.builtin.shell:
+        chdir: "{{ architecture_repo }}/{{ item.path }}"
+        cmd: >-
+          {{ ansible_user_dir }}/bin/kustomize build >
+          {{ artifacts }}/vanilla-{{ item.name }}.yaml
+      loop: "{{ to_kustomize }}"
 
-    - name: Get file content
-      register: _file_content
-      ansible.builtin.slurp:
-        path: "{{ _target_file }}"
+    - name: Create nova migration keypair
+      register: _nova_key
+      community.crypto.openssh_keypair:
+        comment: "nova migration"
+        path: >-
+          {{ (artifacts,
+             'nova_migration_key') | path_join
+          }}
+        type: "ecdsa"
 
-    - name: Assert tests
+    - name: Generate needed facts out of local files
       vars:
-        _parsed: "{{ _file_content.content | b64decode | from_yaml }}"
+        priv_key: "{{ lookup('file', '~/.ssh/id_cifw') }}"
+        pub_key: "{{ lookup('file', '~/.ssh/id_cifw.pub') }}"
+        authorized_keys: "{{ lookup('file', '~/.ssh/authorized_keys') }}"
+        net_env: >-
+          {{
+            lookup('file',
+                   '/etc/ci/env/networking-environment-definition.yml')
+          }}
+        _nova_priv_key: "{{ lookup('file', _nova_key.filename) }}"
+      ansible.builtin.set_fact:
+        cifmw_networking_env_definition: "{{ net_env | from_yaml }}"
+        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+          {{ authorized_keys }}
+        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+          {{ priv_key }}
+        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+          {{ pub_key }}
+        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+          {{ _nova_key.public_key }}
+        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+          {{ _nova_priv_key }}
+        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+          {{
+            [(net_env | from_yaml)['networks']['ctlplane']['network_v4']]
+          }}
+
+    - name: Generate network-values
+      vars:
+        cifmw_architecture_scenario: "hci/control-plane/nncp"
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+
+    - name: Get generated files status
+      register: stat_values
+      ansible.builtin.stat:
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+        path: >-
+          {{
+            (artifacts, 'ci_gen_kustomize_values',
+             item, 'values.yaml') |
+             path_join }}
+      loop:
+        - network-values
+
+    - name: Assert generated values.yaml exists
       ansible.builtin.assert:
         that:
-          - _file_state.stat.exists | bool
-          - _parsed.metadata is defined
-          - _parsed.data.ctlplane is defined
+          - item.stat.exists
+      loop: "{{ stat_values.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Copy generated values to correct location
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ artifacts }}/ci_gen_kustomize_values/{{ item.key }}/values.yaml"
+        dest: "{{ architecture_repo }}/{{ item.value }}"
+      loop:
+        - key: 'network-values'
+          value: 'examples/va/hci/control-plane/nncp/values.yaml'
+
+    - name: Ensure kustomize is able to build
+      ansible.builtin.shell:
+        chdir: "{{ architecture_repo }}/{{ item.path }}"
+        cmd: >-
+          {{ ansible_user_dir }}/bin/kustomize build >
+          {{ artifacts }}/{{ item.name }}.yaml
+      loop: "{{ to_kustomize }}"

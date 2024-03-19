@@ -65,6 +65,26 @@ __TMPL_DUMP_VARS_TARGET = """
 """
 
 
+class GetEnvException(Exception):
+    pass
+
+
+def __get_make_error(error: str) -> str:
+    """
+    Filters a Makefile target call output to include
+    errors that are from make and not from the rest
+    of the ran processes.
+    """
+    if not error:
+        return error
+    make_errors = [
+        err_line
+        for err_line in error.split("\n")
+        if err_line.lower().lstrip().startswith("makefile")
+    ]
+    return "\n".join(make_errors) if make_errors else error
+
+
 def __get_makefile_raw_variables(makefile_path):
     with open(makefile_path, "r") as f:
         return set(
@@ -110,13 +130,15 @@ def __get_makefile_variables(makefile_path):
         temp_makefile_f.flush()
 
         # Call the injected target
-        subprocess.run(
-            ["make", __TMP_TARGET_NAME],
-            check=True,
-            cwd=temp_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            subprocess.check_output(
+                ["make", __TMP_TARGET_NAME],
+                encoding="utf-8",
+                cwd=temp_dir,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as err:
+            raise GetEnvException(__get_make_error(err.stderr or err.stdout)) from err
 
         # Read and parse the resulting dump file
         with open(vars_out_path, "r", encoding=__FILES_ENCODING) as vars_content:
@@ -132,7 +154,7 @@ def __get_makefile_variables(makefile_path):
 def __get_makefiles_vars(root_path):
     base_path = pathlib.Path(root_path)
     if not base_path.is_dir():
-        return None
+        raise GetEnvException(f"Error! Makefiles base path {root_path} not found")
     makefiles_vars = {}
     for path in base_path.rglob("Makefile"):
         makefiles_vars.update(__get_makefile_variables(path))
@@ -149,14 +171,13 @@ def main():
     result = {"changed": False, "error": ""}
 
     makefiles_root = module.params.get("base_path")
-    makefiles_vars = __get_makefiles_vars(makefiles_root)
-    if not makefiles_vars:
-        result["msg"] = f"Error! Makefiles base path {makefiles_root} not found"
-        module.fail_json(**result)
-        return
+    try:
+        result["makefiles_values"] = __get_makefiles_vars(makefiles_root)
+        module.exit_json(**result)
 
-    result["makefiles_values"] = makefiles_vars
-    module.exit_json(**result)
+    except GetEnvException as err:
+        result["msg"] = str(err)
+        module.fail_json(**result)
 
 
 if __name__ == "__main__":

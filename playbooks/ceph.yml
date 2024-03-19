@@ -49,9 +49,9 @@
       when:
         - not public_key_stat.stat.exists
 
-- name: Distribute SSH keypair to EDPM nodes
+- name: Distribute SSH keypair to target nodes
   tags: admin
-  hosts: edpm
+  hosts: "{{ cifmw_ceph_target | default('computes')  }}"
   gather_facts: false
   become: true
   vars:
@@ -78,9 +78,9 @@
       cifmw_admin_distribute_private_key: true
       no_log: true
 
-- name: Create Block Device on EDPM Nodes
+- name: Create Block Device on target nodes
   tags: block
-  hosts: edpm
+  hosts: "{{ cifmw_ceph_target | default('computes')  }}"
   gather_facts: true
   become: true
   vars:
@@ -88,7 +88,7 @@
   roles:
     - role: cifmw_block_device
 
-- name: Build Ceph spec and conf from gathered IPs of EDPM inventory group
+- name: Build Ceph spec and conf from gathered IPs of the target inventory group
   tags: spec
   hosts: localhost
   gather_facts: true
@@ -122,18 +122,56 @@
       delegate_to: "{{ item }}"
       when:
         - hostvars[item][ceph_hostname_var] is defined
-      loop: "{{ groups['edpm'] }}"
+      loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
+    - name: Load network ranges from Networking Environment Definition if not provided
+      when: >-
+        storage_network_range is not defined or
+        storage_mgmt_network_range is not defined
+      block:
+        - name: Load Networking Environment Definition
+          vars:
+            cifmw_networking_mapper_assert_env_load: false
+          ansible.builtin.import_role:
+            name: networking_mapper
+            tasks_from: load_env_definition.yml
+
+        - name: Set network ranges vars
+          when: "cifmw_networking_env_definition is defined"
+          ansible.builtin.set_fact:
+            storage_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storage.network_v4
+              }}
+            storage_mgmt_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storagemgmt.network_v4
+              }}
+
   roles:
     - role: cifmw_ceph_spec
       cifmw_ceph_spec_host_to_ip: "{{ host_to_ip }}"
       cifmw_ceph_spec_public_network: "{{ storage_network_range | default(ssh_network_range) }}"
       cifmw_ceph_spec_private_network: "{{ storage_mgmt_network_range | default('') }}"
 
+- name: Fetch network facts of all computes
+  tags: cephadm
+  hosts: "{{ groups[cifmw_ceph_target | default('computes')] }}"
+  gather_facts: false
+  tasks:
+    - name: Fetch network facts of all computes
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - network
+
 - name: Bootstrap Ceph and apply spec
   tags: cephadm
-  hosts: edpm[0]
+  hosts: "{{ (groups[cifmw_ceph_target | default('computes')] | default([]))[:1] }}"
   gather_facts: false
   vars:
+    _target_hosts: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
     ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
     cifmw_cephadm_spec_ansible_host: /tmp/ceph_spec.yml
     cifmw_cephadm_bootstrap_conf: /tmp/initial_ceph.conf
@@ -195,12 +233,12 @@
       ansible.builtin.set_fact:
         cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
       vars:
-        this_host: "{{ groups['edpm'][0] }}"
+        this_host: "{{ _target_hosts | first }}"
 
     - name: Get already assigned IP addresses
       ansible.builtin.set_fact:
         ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
-      loop: "{{ groups['edpm'] }}"
+      loop: "{{ _target_hosts }}"
 
     # cifmw_cephadm_vip is the VIP reserved in the Storage network
     - name: Set VIP var as empty string
@@ -240,6 +278,7 @@
         tasks_from: pools
 
     - name: Deploy RGW
+      when: cifmw_ceph_daemons_layout.rgw_enabled | default(true) | bool
       ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: rgw
@@ -248,6 +287,7 @@
         cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}/24"
 
     - name: Configure Monitoring Stack
+      when: cifmw_ceph_daemons_layout.dashboard_enabled  | default(false) | bool
       ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: monitoring
@@ -256,8 +296,8 @@
         cifmw_cephadm_dashboard_crt: "{{ cifmw_cephadm_certificate }}"
         cifmw_cephadm_dashboard_key: "{{ cifmw_cephadm_key }}"
 
-
     - name: Create cephfs volume
+      when: cifmw_ceph_daemons_layout.cephfs_enabled  | default(true) | bool
       ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: cephfs

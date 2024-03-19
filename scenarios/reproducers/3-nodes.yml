@@ -11,33 +11,17 @@ cifmw_rhol_crc_config:
   disk-size: 100
   memory: 24000
 
-# Since we don't have zuul data, we have to provide some
-# networking information to the libvirt_manager so that it will be able to
-# generate the needed content for later usage
-_networks:
-  public:
-    range: "192.168.100.0/24"
-  osp_trunk:
-    range: "192.168.122.0/24"
-    mtu: 1500
-  internal-api:
-    range: "172.17.0.0/24"
-    vlan: 20
-  storage:
-    range: "172.18.0.0/24"
-    vlan: 21
-  tenant:
-    range: "172.19.0.0/24"
-    vlan: 22
-  storage-mgmt:
-    range: "172.20.0.0/24"
-    vlan: 23
-
 cifmw_use_libvirt: true
+cifmw_libvirt_manager_compute_amount: 1
 cifmw_libvirt_manager_configuration:
   vms:
     compute:
-      amount: 1
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 1] | max }}"
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
       image_url: "{{ cifmw_discovered_image_url }}"
       sha256_image_name: "{{ cifmw_discovered_hash }}"
       image_local_dir: "{{ cifmw_basedir }}/images/"
@@ -50,6 +34,11 @@ cifmw_libvirt_manager_configuration:
         - osp_trunk
     controller:
       image_url: "{{ cifmw_discovered_image_url }}"
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
       sha256_image_name: "{{ cifmw_discovered_hash }}"
       image_local_dir: "{{ cifmw_basedir }}/images/"
       disk_file_name: "centos-stream-9.qcow2"
@@ -88,6 +77,9 @@ cifmw_libvirt_manager_configuration:
         <forward mode='nat'/>
         <bridge name='osp_trunk' stp='on' delay='0'/>
         <mac address='52:54:00:fd:be:d0'/>
-        <ip family='ipv4' address='192.168.122.1' prefix='24'>
+        <ip family='ipv4'
+        address='{{ cifmw_networking_definition.networks.ctlplane.gateway }}'
+        prefix='{{ cifmw_networking_definition.networks.ctlplane.network |
+                   ansible.utils.ipaddr('prefix') }}'>
         </ip>
       </network>

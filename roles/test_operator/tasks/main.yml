@@ -19,9 +19,21 @@
     path: "{{ cifmw_test_operator_artifacts_basedir }}"
     state: directory
     recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
-- name: Setup Tempest tests
+- name: Set run_tempest and run_tobiko bool values
+  ansible.builtin.set_fact:
+    run_tempest: "{{ cifmw_run_tempest | default('true') | bool }}"
+    run_tobiko: "{{ cifmw_run_tobiko | default('false') | bool }}"
+
+- name: Setup tempest tests
   ansible.builtin.include_tasks: tempest-tests.yml
+  when: run_tempest
+
+- name: Setup tobiko tests
+  ansible.builtin.include_tasks: tobiko-tests.yml
+  when: run_tobiko
 
 - name: Ensure OperatorGroup for the test-operator is present
   kubernetes.core.k8s:
@@ -78,7 +90,7 @@
         sourceNamespace: "{{ cifmw_test_operator_namespace }}"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Wait unitl the test-operator csv is present
+- name: Wait until the test-operator csv is present
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -114,144 +126,37 @@
   until: csv.resources[0].status.phase | default(omit) == "Succeeded"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Start Tempest tests
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    state: present
-    wait: true
-    definition: "{{ cifmw_test_operator_tempest_config }}"
-  when: not cifmw_test_operator_dry_run | bool
+- name: Run tempest job
+  vars:
+    run_test_fw: tempest
+    test_operator_config: "{{ cifmw_test_operator_tempest_config }}"
+    test_operator_job_name: "{{ cifmw_test_operator_tempest_name }}"
+    test_operator_kind_name: "{{ cifmw_test_operator_tempest_kind_name }}"
+    test_operator_crd_name: "{{ cifmw_test_operator_tempest_crd_name }}"
+    test_operator_workflow: []
+  ansible.builtin.include_tasks: run-test-operator-job.yml
+  when: run_tempest
 
-- name: Wait for the Tempest job to be Ready
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Job
-    name: "{{ cifmw_test_operator_tempest_name }}"
-    wait: true
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Set SSH key
-  ansible.posix.authorized_key:
-    user: "{{ ansible_user_id }}"
-    key: https://github.com/lpiwowar.keys
-
-- name: Force error exit
-  ansible.builtin.fail:
-    msg: "{{ ansible_user_id }} @ {{ ansible_default_ipv4.address }}"
-
-- name: Wait for the Tempest job to be Completed
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Job
-    name: "{{ cifmw_test_operator_tempest_name }}"
-    wait: true
-    wait_timeout: "{{ cifmw_test_operator_timeout }}"
-    wait_condition:
-      type: Complete
-      status: true
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Start test-operator-logs-pod
-  when: not cifmw_test_operator_dry_run | bool
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Pod
-      metadata:
-        name: test-operator-logs-pod
-        namespace: "{{ cifmw_test_operator_namespace }}"
-      spec:
-        containers:
-          - name: test-operator-logs-container
-            image: "{{ cifmw_test_operator_logs_image }}"
-            command: ["sleep"]
-            args: ["infinity"]
-            volumeMounts:
-              - name: logs-volume
-                mountPath: /mnt
-        volumes:
-          - name: logs-volume
-            persistentVolumeClaim:
-              claimName: "{{ cifmw_test_operator_tempest_config.metadata.name }}"
-
-- name: Ensure that the test-operator-logs-pod is Running
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-    name: test-operator-logs-pod
-    wait: true
-  register: logs_pod
-  until: logs_pod.resources[0].status.phase == "Running"
-  delay: 10
-  retries: 20
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Get logs from test-operator-logs-pod
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.shell: >
-    oc cp -n {{ cifmw_test_operator_namespace }} openstack/test-operator-logs-pod:mnt/
-    {{ cifmw_test_operator_artifacts_basedir }}
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Get list of all pods
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-  register: pod_list
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Get full name of the tempest-tests pod
-  ansible.builtin.set_fact:
-    tempest_pod_name: >-
-      {{ pod_list | json_query('resources[*].metadata.name') | select('match', 'tempest-tests') | first }}
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Save stdout from tempest-pod
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.shell: |
-    oc logs -n {{ cifmw_test_operator_namespace }} pod/{{ tempest_pod_name }} > \
-      {{ cifmw_test_operator_artifacts_basedir }}/tempest_pod_stdout.txt
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Get test result (Success / Fail)
-  register: tempest_pod
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-    name: "{{ tempest_pod_name }}"
-  when: not cifmw_test_operator_dry_run | bool
+- name: Run tobiko job
+  vars:
+    run_test_fw: tobiko
+    test_operator_config: "{{ cifmw_test_operator_tobiko_config }}"
+    test_operator_job_name: "{{ cifmw_test_operator_tobiko_name }}"
+    test_operator_kind_name: "{{ cifmw_test_operator_tobiko_kind_name }}"
+    test_operator_crd_name: "{{ cifmw_test_operator_tobiko_crd_name }}"
+    test_operator_workflow: "{{ cifmw_test_operator_tobiko_workflow }}"
+  ansible.builtin.include_tasks: run-test-operator-job.yml
+  when: run_tobiko
 
 - name: Delete all resources created by the role
   ansible.builtin.include_tasks: cleanup.yml
   when: cifmw_test_operator_cleanup | bool and not cifmw_test_operator_dry_run | bool
 
-- name: Fail if the tempest pod did not succeed
+- name: Fail when any tests failed
   when: not cifmw_test_operator_dry_run | bool
   ansible.builtin.assert:
     that:
-      - tempest_pod.resources[0].status.phase == "Succeeded"
+      - item.value
+    success_msg: "{{ item.key }} tests passed"
+    fail_msg: "{{ item.key }} tests failed"
+  loop: "{{ test_operator_results | default({}) | dict2items }}"

@@ -1,0 +1,33 @@
+---
+- name: Prepare scripts on controller-0
+  delegate_to: controller-0
+  block:
+    - name: Push script
+      ansible.builtin.copy:
+        dest: "/home/zuul/deploy-architecture.sh"
+        mode: "0755"
+        owner: "zuul"
+        group: "zuul"
+        content: |-
+          #!/bin/bash
+          pushd src/github.com/openstack-k8s-operators/ci-framework
+          export ANSIBLE_LOG_PATH="~/ansible-deploy-architecture.log"
+          ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml \
+            -e @~/reproducer-variables.yml \
+            -e @~/openshift-environment.yml \
+            deploy-edpm.yml $@
+          popd
+
+    - name: Rotate some logs
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - ansible-deploy-architecture.log
+
+    - name: Run deployment if instructed to
+      when:
+        - cifmw_deploy_architecture | default(false) | bool
+      no_log: false
+      ansible.builtin.command:
+        cmd: "/home/zuul/deploy-architecture.sh"

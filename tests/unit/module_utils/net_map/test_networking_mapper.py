@@ -51,6 +51,29 @@ def test_networking_mapper_basic_networks_map_ok(
 
 
 @pytest.mark.parametrize(
+    "test_input_config_file,test_golden_file",
+    [
+        (
+            "network-definition-valid-router-template.yml",
+            "network-definition-valid-router-template-out.json",
+        ),
+    ],
+)
+def test_networking_mapper_basic_routers_map_ok(
+    test_input_config_file, test_golden_file
+):
+    mapper = networking_mapper.NetworkingDefinitionMapper(
+        net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
+    )
+    mapped_content = mapper.map_routers(
+        net_map_stub_data.get_test_file_yaml_content(test_input_config_file)
+    )
+    assert mapped_content == net_map_stub_data.get_test_file_json_content(
+        test_golden_file
+    )
+
+
+@pytest.mark.parametrize(
     "test_input_config_file,test_golden_file,reduced_hosts",
     [
         pytest.param(
@@ -134,6 +157,10 @@ def test_networking_mapper_full_partial_map_ok(
         (
             "networking-definition-valid-all-tools.yml",
             "networking-definition-valid-all-tools-full-map-out.json",
+        ),
+        (
+            "network-definition-valid-all-tools-no-group-templates.yml",
+            "network-definition-valid-all-tools-no-group-templates-out.json",
         ),
     ],
 )

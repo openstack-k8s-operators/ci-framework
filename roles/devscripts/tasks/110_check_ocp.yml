@@ -1,0 +1,69 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Assign default values to OpenShift cluster check variables.
+  ansible.builtin.set_fact:
+    cifmw_devscripts_ocp_exists: false
+    cifmw_devscripts_ocp_online: false
+    cifmw_openshift_adm_cert_expire_date_file: >-
+      {{
+        (
+          cifmw_devscripts_config.working_dir, '.ocp_cert_not_after'
+        ) | ansible.builtin.path_join
+      }}
+
+- name: Check for pre-existences of OpenShift cluster.
+  ansible.builtin.find:
+    file_type: "file"
+    path: "{{ cifmw_devscripts_config.working_dir }}"
+    patterns: "{{ cifmw_devscripts_config.cluster_name }}_*.xml"
+  register: overlay_results
+
+- name: Verify the node definition match with expected count.
+  when: >-
+    (
+      cifmw_devscripts_config.num_masters | int +
+      cifmw_devscripts_config.num_workers | int
+    ) == overlay_results.matched
+  ansible.builtin.set_fact:
+    cifmw_devscripts_ocp_exists: true
+
+- name: Gather dev-scripts deployed cluster auth information.
+  ansible.builtin.stat:
+    path: >-
+      {{
+        [
+          cifmw_devscripts_repo_dir,
+          'ocp',
+          cifmw_devscripts_config['cluster_name'],
+          'auth',
+          'kubeadmin-password'
+        ] | ansible.builtin.path_join
+      }}
+  register: _kubeconfig_result
+
+- name: Verify the deployed cluster.
+  when:
+    - _kubeconfig_result.stat is defined
+    - _kubeconfig_result.stat.exists
+  ansible.builtin.include_tasks: 111_verify_cluster.yml
+
+- name: Verify the golden image.
+  when:
+    - cifmw_devscripts_ocp_exists
+    - not cifmw_devscripts_ocp_online
+  ansible.builtin.include_tasks: 112_verify_golden_image.yml

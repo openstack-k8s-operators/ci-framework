@@ -38,3 +38,19 @@ class HostNetworkRangeCollisionValidationError(NetworkMappingValidationError):
 
     def __str__(self):
         return str(vars(self))
+
+
+class NetworkMappingTrunkParentValidationError(NetworkMappingValidationError):
+    def __init__(
+        self,
+        message,
+        field=None,
+        invalid_value=None,
+        parent_name=None,
+        parent_type=None,
+    ) -> None:
+        super().__init__(message)
+        self.field = field
+        self.invalid_value = invalid_value
+        self.parent_name = parent_name
+        self.parent_type = parent_type

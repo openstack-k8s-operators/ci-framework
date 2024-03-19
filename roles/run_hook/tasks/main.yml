@@ -14,8 +14,66 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Loop on the passed hooks and call correct action
-  ansible.builtin.include_tasks: "{{ hook.type }}.yml"
-  loop: "{{ hooks }}"
-  loop_control:
-    loop_var: 'hook'
+- name: "Combine hooks and run them for {{ step }}"
+  vars:
+    _list_hooks: >-
+      {{
+        hostvars[inventory_hostname][step] |
+        default([])
+      }}
+    _matcher: "^{{ step }}_(.*)$"
+    _filtered_hooks: >-
+      {{
+        hostvars[inventory_hostname] |
+        dict2items |
+        selectattr('key', 'match', _matcher)
+      }}
+    _single_hooks: >-
+      {% set hooks_list = [] -%}
+      {% for hook_element in (_filtered_hooks | default([])) -%}
+      {%   set hook_definitions = [hook_element] if hook_element is mapping else hook_element -%}
+      {%   for hook_definition in hook_definitions -%}
+      {%     set name = hook_definition.key | regex_replace(_matcher, '\\1') | replace('_', ' ') | capitalize -%}
+      {%     set _ = hooks_list.append(hook_definition.value | combine({'name': name})) -%}
+      {%   endfor -%}
+      {% endfor -%}
+      {{ hooks_list }}
+  block:
+    - name: Assert parameters are valid
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _list_hooks is not string
+          - _list_hooks is not mapping
+          - _list_hooks is iterable
+          - (hooks | default([])) is not string
+          - (hooks | default([])) is not mapping
+          - (hooks | default([])) is iterable
+
+    - name: Assert single hooks are all mappings
+      vars:
+        _not_mapping_hooks: >-
+          {{
+            _single_hooks | reject('mapping') | list
+          }}
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _not_mapping_hooks | length == 0
+        msg: >-
+          All single hooks must be a list of mappings or a mapping.
+
+    - name: "Loop on hooks for {{ step }}"
+      vars:
+        _hooks: >-
+          {{
+            (
+              _single_hooks +
+              (hooks | default([], true)) +
+              _list_hooks
+            ) | sort(attribute='name')
+          }}
+      ansible.builtin.include_tasks: "{{ hook.type }}.yml"
+      loop: "{{ _hooks }}"
+      loop_control:
+        loop_var: 'hook'

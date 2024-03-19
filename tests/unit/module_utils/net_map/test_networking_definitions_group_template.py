@@ -283,3 +283,107 @@ def test_group_template_definition_parse_invalid_net_fail():
         )
     assert exc_info.value.invalid_value == "does-not-exist-net"
     assert "non-existing network " in str(exc_info.value)
+
+
+def test_group_template_definition_parse_trunk_parent_ok():
+    # Test valid trunk parent
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    group_template_definition_raw = {
+        "networks": {
+            net_a.name: {"trunk_parent": net_b.name},
+            net_b.name: {"is_trunk_parent": True},
+        },
+    }
+
+    group_template_def = networking_definition.GroupTemplateDefinition(
+        "instances-group-1",
+        group_template_definition_raw,
+        networks_definitions,
+    )
+    assert hash(group_template_def)
+    assert group_template_def.group_name == "instances-group-1"
+    assert isinstance(group_template_def.networks, dict)
+    assert len(group_template_def.networks) == len(
+        group_template_definition_raw["networks"]
+    )
+    # Ensure nets were parsed
+    assert net_a.name in group_template_def.networks
+    assert net_b.name in group_template_def.networks
+    assert group_template_def.networks[net_a.name].trunk_parent == net_b.name
+    assert group_template_def.networks[net_b.name].is_trunk_parent is True
+
+
+def test_group_template_definition_parse_trunk_parent_fail():
+    # Test invalid trunk parent
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    group_template_definition_raw = {
+        "networks": {
+            net_a.name: {"is_trunk_parent": True},
+            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+        },
+    }
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.GroupTemplateDefinition(
+            "instances-group-1",
+            group_template_definition_raw,
+            networks_definitions,
+        )
+    assert exc_info.value.invalid_value == "does-not-exist-parent"
+    assert "does not exist in " in str(exc_info.value)
+
+
+def test_group_template_definition_parse_no_trunk_parent_fail():
+    # Test invalid no is_trunk_parent
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    group_template_definition_raw = {
+        "networks": {
+            net_a.name: {},
+            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+        },
+    }
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.GroupTemplateDefinition(
+            "instances-group-1",
+            group_template_definition_raw,
+            networks_definitions,
+        )
+    assert exc_info.value.invalid_value == "does-not-exist-parent"
+    assert "does not exist in " in str(exc_info.value)
+
+
+def test_group_template_definition_parse_trunk_parent_no_trunks_ok():
+    # Test valid - no trunks
+    networks_definitions = net_map_stub_data.build_valid_network_definition_set()
+    net_a = list(networks_definitions.values())[0]
+    net_b = list(networks_definitions.values())[1]
+    group_template_definition_raw = {
+        "networks": {
+            net_a.name: {},
+            net_b.name: {},
+        },
+    }
+
+    group_template_def = networking_definition.GroupTemplateDefinition(
+        "instances-group-1",
+        group_template_definition_raw,
+        networks_definitions,
+    )
+    assert hash(group_template_def)
+    assert group_template_def.group_name == "instances-group-1"
+    assert isinstance(group_template_def.networks, dict)
+    assert len(group_template_def.networks) == len(
+        group_template_definition_raw["networks"]
+    )
+    # Ensure nets were parsed
+    assert net_a.name in group_template_def.networks
+    assert net_b.name in group_template_def.networks
+    assert group_template_def.networks[net_a.name].trunk_parent is None
+    assert group_template_def.networks[net_b.name].is_trunk_parent is None

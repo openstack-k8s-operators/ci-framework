@@ -11,10 +11,53 @@
         ifname: "{{ _iface }}"
         type: ethernet
         ip4: "{{ _ip4 }}/{{ _prefix }}"
-        gw4: "{{ _gw4 }}"
+        never_default4: true
         state: present
 
     - name: Ensure we can ping controller-0 from ctlplane
       ansible.builtin.command:
         cmd: |
           ping -c2 {{ _controller_ip4 }}
+
+    - name: Tweak dnf configuration
+      become: true
+      community.general.ini_file:
+        no_extra_spaces: true
+        option: "{{ config.option }}"
+        path: "/etc/dnf/dnf.conf"
+        section: "{{ config.section | default('main') }}"
+        state: "{{ config.state | default(omit) }}"
+        value: "{{ config.value | default(omit) }}"
+      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
+      loop_control:
+        label: "{{ config.option }}"
+        loop_var: 'config'
+
+    - name: Install custom CA if needed
+      ansible.builtin.import_role:
+        name: install_ca
+
+    - name: RHEL related tasks on computes
+      become: true
+      when:
+        - cifmw_repo_setup_rhos_release_rpm is defined
+      block:
+        - name: Get rhos-release and CA
+          ansible.builtin.import_tasks: rhos_release.yml
+
+        - name: Configure rhos-release
+          ansible.builtin.command:
+            cmd: "rhos-release {{ cifmw_repo_setup_rhos_release_args }}"
+
+    - name: Create repositories on computes
+      become: true
+      ansible.builtin.yum_repository:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default(omit) }}"
+        baseurl: "{{ item.baseurl }}"
+        gpgcheck: "{{ item.gpgcheck | default(omit) }}"
+        enabled: "{{ item.enabled | default(omit) }}"
+        priority: "{{ item.priority | default(omit) }}"
+      loop: "{{ cifmw_reproducer_compute_repos }}"
+      loop_control:
+        label: "{{ item.name }}"

@@ -63,7 +63,7 @@
         output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
         script: |-
           ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
-            -i {{ ssh_key_file }} {{ ssh_user }}@{{ host_ip }} <<EOF
+            -i {{ ssh_key_file }} {{ ssh_user }}@{{ host_ip }} <<'EOF'
           set -x
           sudo dnf install -y rsync
           mkdir -p /tmp/{{ host_ip }}
@@ -81,6 +81,8 @@
           sudo ip ro ls >> /tmp/{{ host_ip }}/network.txt
           sudo rpm -qa > /tmp/{{ host_ip }}/rpm_qa.txt
           sudo podman images > /tmp/{{ host_ip }}/podman_images.txt
+          mkdir -p /tmp/{{ host_ip }}/service_logs
+          systemctl list-units | awk '/virt|edpm/ {print $1}' | grep -v sys | xargs -I {} sudo bash -c 'journalctl -u {} > /tmp/{{ host_ip }}/service_logs/{}.log'
           sudo ausearch -i | grep denied > /tmp/{{ host_ip }}/selinux-denials.log || true
           sudo journalctl -p warning -t kernel -o short -g DROPPING --no-pager &> /tmp/{{ host_ip }}/firewall-drops.txt || true
           EOF

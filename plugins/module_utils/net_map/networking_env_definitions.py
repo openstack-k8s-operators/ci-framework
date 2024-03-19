@@ -80,6 +80,8 @@ class MappedInstanceNetwork:
     mtu: typing.Optional[int] = None
     parent_interface: typing.Optional[str] = None
     vlan_id: typing.Optional[int] = None
+    is_trunk_parent: typing.Optional[bool] = None
+    trunk_parent: typing.Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -187,6 +189,20 @@ class MappedNetwork:
 
 
 @dataclasses.dataclass(frozen=True)
+class MappedRouter:
+    """Defines all the settings for a router
+    Attributes:
+        router_name: The name of the router
+        networks: Networks attached to the router
+        external_network: The external gateway network
+    """
+
+    router_name: str
+    networks: typing.List[str]
+    external_network: typing.Optional[str] = None
+
+
+@dataclasses.dataclass(frozen=True)
 class NetworkingEnvironmentDefinition:
     """Mapped Networking Environment Definition
 
@@ -195,8 +211,10 @@ class NetworkingEnvironmentDefinition:
     Attributes:
         networks: The existing networks in the environment.
         instances: Networking related information for each instance.
+        routers: Routers in the environment
 
     """
 
     networks: typing.Dict[str, MappedNetwork]
     instances: typing.Dict[str, typing.Dict[str, MappedInstance]]
+    routers: typing.Dict[str, MappedRouter]

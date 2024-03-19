@@ -21,7 +21,7 @@
         ifname: "{{ _crc.interface_name }}"
         type: ethernet
         ip4: "{{ _crc.ip_v4 }}/24"
-        gw4: "{{ _ctlplane.gw_v4 }}"
+        never_default4: true
         state: present
 
     - name: Ensure crc-0 does not get "public" DNS
@@ -32,10 +32,24 @@
         dns4_ignore_auto: true
         state: present
 
+    - name: Check which dnsmasq config we must edit
+      register: _dnsmasq
+      ansible.builtin.stat:
+        path: '/srv/dnsmasq.conf'
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
     - name: Configure dns forwarders
       become: true
+      vars:
+        _config_file: >-
+          {{
+            _dnsmasq.stat.exists |
+            ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
+          }}
       ansible.builtin.blockinfile:
-        path: "/var/srv/dnsmasq.conf"
+        path: "{{ _config_file }}"
         block: |-
           {% if cifmw_reproducer_dns_servers %}
           {% for dns_server in cifmw_reproducer_dns_servers %}
@@ -48,13 +62,26 @@
     - name: Configure local DNS for CRC pod
       become: true
       vars:
+        _config_file: >-
+          {{
+            _dnsmasq.stat.exists |
+            ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
+          }}
         _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
         _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
-      register: last_modification
-      ansible.builtin.replace:
-        path: "/var/srv/dnsmasq.conf"
-        regexp: "192.168.130.11"
-        replace: "{{ _crc.ip_v4 }}"
+      block:
+        - name: Configure local DNS for CRC pod
+          register: last_modification
+          ansible.builtin.replace:
+            path: "{{ _config_file }}"
+            regexp: "192.168.130.11"
+            replace: "{{ _crc.ip_v4 }}"
+
+        - name: Ensure localhost address if configured as listen-address for dnsmasq
+          ansible.builtin.replace:
+            path: "{{ _config_file }}"
+            regexp: "listen-address={{ _crc.ip_v4 }}"
+            replace: "listen-address={{ _crc.ip_v4 }},127.0.0.1"
 
     - name: Reboot CRC node  # noqa: no-handler
       become: true

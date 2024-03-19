@@ -1,0 +1,132 @@
+---
+- name: Run pre_deploy hooks
+  when:
+    - cifmw_architecture_scenario is defined
+  vars:
+    step: pre_deploy
+  ansible.builtin.import_playbook: ./hooks.yml
+
+- name: Deploy VA
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if not architecture deploy
+      when:
+        - cifmw_architecture_scenario is not defined
+      ansible.builtin.meta: end_play
+
+    - name: Load Networking Environment Definition
+      ansible.builtin.include_role:
+        name: networking_mapper
+        tasks_from: load_env_definition.yml
+
+    - name: Fetch controller-0 network facts
+      when: "'ansible_interfaces' not in hostvars['controller-0']"
+      ansible.builtin.setup:
+        gather_subset: network
+      delegate_to: controller-0
+      delegate_facts: true
+
+    - name: Create nova migration keypair
+      register: _nova_key
+      community.crypto.openssh_keypair:
+        comment: "nova migration"
+        path: >-
+          {{ (cifmw_basedir,
+             'artifacts/nova_migration_key') | path_join
+          }}
+        type: "ecdsa"
+
+    - name: Generate needed facts out of local files
+      vars:
+        _ifaces_vars: >-
+          {{
+            hostvars['controller-0'].ansible_interfaces |
+            map('regex_replace', '^(.*)$', 'ansible_\1')
+          }}
+        _controller_host: "{{ hostvars['controller-0'].ansible_host }}"
+        _ipv4_network_data: >-
+          {{
+            hostvars['controller-0'] | dict2items |
+            selectattr('key', 'in', _ifaces_vars) |
+            selectattr('value.ipv4.address', 'defined') |
+            selectattr('value.ipv4.address', 'equalto', _controller_host) |
+            map(attribute='value.ipv4') | first | default({})
+          }}
+      ansible.builtin.set_fact:
+        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+          {{ lookup('file', '~/.ssh/authorized_keys', rstrip=False) }}
+        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+          {{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}
+        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+          {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
+        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+          {{ lookup('file', _nova_key.filename ~ '.pub', rstrip=False)}}
+        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+          {{ lookup('file', _nova_key.filename, rstrip=False) }}
+        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+          {{
+            [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
+            (
+              [
+                 _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
+              ]
+            ) if (_ipv4_network_data | length > 0) else []
+          }}
+
+    - name: Load architecture automation file
+      register: _automation
+      ansible.builtin.slurp:
+        path: "{{ cifmw_architecture_automation_file }}"
+
+    - name: Prepare automation data
+      vars:
+        _parsed: "{{ _automation.content | b64decode | from_yaml }}"
+      ansible.builtin.set_fact:
+        cifmw_deploy_architecture_steps: >-
+          {{ _parsed['vas'][cifmw_architecture_scenario] }}
+
+    - name: Check requirements
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: check_requirements.yml
+
+    - name: Deploy OSP operators
+      ansible.builtin.import_role:
+        name: kustomize_deploy
+        tasks_from: install_operators.yml
+
+    - name: Configure Storage Class
+      ansible.builtin.include_role:
+        name: ci_local_storage
+
+    - name: Execute deployment steps
+      ansible.builtin.include_role:
+        name: kustomize_deploy
+        tasks_from: execute_step.yml
+      loop: "{{ cifmw_deploy_architecture_steps.stages }}"
+      loop_control:
+        label: "{{ stage.path }}"
+        loop_var: stage
+        index_var: stage_id
+
+    - name: Extract and install OpenStackControlplane CA
+      ansible.builtin.include_role:
+        role: install_openstack_ca
+
+    - name: Run nova host discover process
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        nova-cell0-conductor-0
+        nova-manage cell_v2 discover_hosts --verbose
+
+- name: Run post_deploy hooks
+  when:
+    - cifmw_architecture_scenario is defined
+  vars:
+    step: post_deploy
+  ansible.builtin.import_playbook: ./hooks.yml

@@ -154,103 +154,17 @@
 - name: Kustomize and deploy OpenStackControlPlane
   tags:
     - control-plane
+  when: not cifmw_edpm_prepare_dry_run
+  ansible.builtin.include_tasks: kustomize_and_deploy.yml
+
+- name: Extract and install OpenStackControlplane CA
+  tags:
+    - control-plane
+  when: not cifmw_edpm_prepare_dry_run
   vars:
-    cifmw_edpm_prepare_openstack_crs_path: >-
-      {{
-        [
-          cifmw_edpm_prepare_manifests_dir,
-          cifmw_install_yamls_defaults['NAMESPACE'],
-          'openstack',
-          'cr'
-        ] | ansible.builtin.path_join
-      }}
-
-  when:
-    - not cifmw_edpm_prepare_dry_run | bool
-  block:
-    - name: Perform kustomizations to the OpenStackControlPlane CR
-      when: not cifmw_edpm_prepare_dry_run
-      ci_kustomize:
-        target_path: "{{ cifmw_edpm_prepare_openstack_crs_path }}"
-        sort_ascending: false
-        kustomizations_paths: >-
-          {{
-            [
-              (
-                [
-                  cifmw_edpm_prepare_manifests_dir,
-                  'kustomizations',
-                  'controlplane'
-                ] | ansible.builtin.path_join
-              )
-            ]
-          }}
-      register: cifmw_edpm_prepare_crs_kustomize_result
-
-    - name: Log the CR that is about to be applied
-      when: not cifmw_edpm_prepare_dry_run
-      ansible.builtin.debug:
-        var: cifmw_edpm_prepare_crs_kustomize_result
-
-    - name: Apply the OpenStackControlPlane CR
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      when: not cifmw_edpm_prepare_dry_run
-      cifmw.general.ci_script:
-        output_dir: "{{ cifmw_edpm_prepare_basedir }}/artifacts"
-        script: "oc apply -f {{ cifmw_edpm_prepare_crs_kustomize_result.output_path }}"
-
-    - name: Wait for OpenStack controlplane to be deployed
-      when: not cifmw_edpm_prepare_dry_run
-      vars:
-        cr_name: >-
-          {{
-            (
-              cifmw_edpm_prepare_crs_kustomize_result.result |
-              selectattr('kind', 'defined') |
-              selectattr('metadata.name', 'defined') |
-              selectattr('kind', 'equalto', 'OpenStackControlPlane') |
-              first
-            ).metadata.name
-          }}
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc wait OpenStackControlPlane {{ cr_name }}
-          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          --for=condition=ready
-          --timeout={{ cifmw_edpm_prepare_timeout }}m
-
-    - name: Get CA bundle data
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: 'oc get secret combined-ca-bundle -n openstack -o "jsonpath={.data.tls-ca-bundle\.pem}" --ignore-not-found'
-      register: ca_bundle_data
-
-    - name: Get CA bundle
-      when: ca_bundle_data.stdout | length > 0
-      ansible.builtin.set_fact:
-        ca_bundle: >-
-          {{ ca_bundle_data.stdout | ansible.builtin.b64decode }}
-
-    - name: Creating tls-ca-bundle.pem
-      when: (ca_bundle is defined) and (ca_bundle | length > 0)
-      ansible.builtin.copy:
-        dest: "{{ cifmw_edpm_prepare_basedir }}/tls-ca-bundle.pem"
-        content: "{{ ca_bundle }}"
-      register: ca_bundle_file
-
-    - name: Inject OpenStackControlplane CA bundle  # noqa: no-handler
-      when: ca_bundle_file is changed
-      vars:
-        cifmw_install_ca_bundle_src: "{{ cifmw_edpm_prepare_basedir }}/tls-ca-bundle.pem"
-      ansible.builtin.include_role:
-        role: install_ca
+    cifmw_install_openstack_ca_dest_path: "{{ cifmw_edpm_prepare_basedir }}"
+  ansible.builtin.include_role:
+    role: install_openstack_ca
 
 - name: Wait for keystone to be ready
   tags:

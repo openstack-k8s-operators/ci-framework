@@ -1,8 +1,6 @@
 # edpm_deploy_baremetal
 
-This Ansible role deploys compute nodes with BMAAS, installs the OpenStack operator and services,
-and provision the compute nodes for further deployment by toggling the deploy:true flag in the openstackdataplane CR,
-and waits for the necessary components to be available.
+This Ansible role deploys compute nodes with BMAAS, installs the OpenStack operator services then waits for the necessary components to be available.
 
 ## Privilege escalation
 

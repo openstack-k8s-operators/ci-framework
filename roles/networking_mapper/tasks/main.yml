@@ -42,12 +42,32 @@
         file: "{{ cifmw_networking_mapper_ifaces_info_path }}"
         name: cifmw_networking_mapper_ifaces_info
 
-- name: Prepare the list of relevant instances
+- name: Set the input Networking Definition and patch it if needed
+  vars:
+    _net_def_patches: >-
+      {{
+        hostvars[inventory_hostname] |
+        dict2items |
+        selectattr("key", "match", "^cifmw_networking_mapper_definition_patch.*") |
+        sort(attribute='key') |
+        map(attribute='value') |
+        list
+      }}
+  ansible.builtin.set_fact:
+    _cifmw_networking_mapper_definition: >-
+      {{
+        _cifmw_networking_mapper_definition |
+        default({}) |
+        combine(item, recursive=True)
+      }}
+  loop: "{{ [cifmw_networking_definition] + _net_def_patches }}"
+
+- name: Ensure that networking and hostname facts are in place
   vars:
     _net_def_instances_filtered: >-
       {{
         (
-          cifmw_networking_definition.instances | default({})
+          _cifmw_networking_mapper_definition.instances | default({})
         ).keys() |
         select("in", hostvars.keys() | list) |
         list
@@ -55,7 +75,7 @@
     _net_def_groups_filtered: >-
       {{
         (
-          cifmw_networking_definition['group-templates'] | default({})
+          _cifmw_networking_mapper_definition['group-templates'] | default({})
         ).keys() |
         select("in", groups.keys() | list) |
         list
@@ -67,13 +87,10 @@
       {% endfor -%}
       {% set _instances = _instances | unique -%}
       {{ _instances }}
-  ansible.builtin.set_fact:
     _networking_mapper_instance_names: >-
       {{
         _net_def_groups_instances + _net_def_instances_filtered
       }}
-
-- name: Ensure that networking and hostname facts are in place
   ansible.builtin.setup:
     gather_subset:
       - network
@@ -84,7 +101,7 @@
 
 - name: Call the networking mapper
   cifmw.general.ci_net_map:
-    networking_definition: "{{ cifmw_networking_definition }}"
+    networking_definition: "{{ _cifmw_networking_mapper_definition }}"
     interfaces_info: >-
       {{
         cifmw_networking_mapper_ifaces_info |
@@ -104,12 +121,8 @@
 - name: Set networking mapper facts
   ansible.builtin.set_fact:
     # Set is as a fact in case it was not
-    cifmw_networking_definition: "{{ cifmw_networking_definition }}"
+    cifmw_networking_definition: "{{ _cifmw_networking_mapper_definition }}"
     cifmw_networking_env_definition: >-
-      {{
-        _networking_mapper_out.networking_env_definition
-      }}
-    cifmw_networking_mapper_output: >-
       {{
         _networking_mapper_out.networking_env_definition
       }}
@@ -126,7 +139,7 @@
     - name: Write the Networking Definition to file
       ansible.builtin.copy:
         dest: "{{ cifmw_networking_mapper_networking_def_path }}"
-        content: "{{ cifmw_networking_definition | to_nice_yaml }}"
+        content: "{{ _cifmw_networking_mapper_definition | to_nice_yaml }}"
         mode: '0644'
 
     - name: Write the Networking Environment Definition to file

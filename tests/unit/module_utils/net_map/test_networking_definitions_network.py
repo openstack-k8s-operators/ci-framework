@@ -733,3 +733,64 @@ def test_network_definition_parse_invalid_network_ip_version_fail():
     assert exc_info.value.field == "network"
     assert "network" in str(exc_info.value)
     assert "network-v6" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("invalid_test_input", [1, bool, 3.33, [], {}, ()])
+def test_network_definition_parse_invalid_router_external_network_fail(
+    invalid_test_input,
+):
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.RouterDefinition(
+            "testing-router",
+            {
+                "external_network": invalid_test_input,
+                "networks": [],
+            },
+        )
+    assert exc_info.value.invalid_value == invalid_test_input
+    assert exc_info.value.field == "external_network"
+    assert exc_info.value.parent_type == "router"
+    assert exc_info.value.parent_name == "testing-router"
+    assert "must be of type str" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("invalid_test_input", [1, bool, 3.33, "foo", {}, ()])
+def test_network_definition_parse_invalid_router_networks_fail(invalid_test_input):
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.RouterDefinition(
+            "testing-router",
+            {
+                "networks": invalid_test_input,
+            },
+        )
+    assert exc_info.value.invalid_value == invalid_test_input
+    assert exc_info.value.field == "networks"
+    assert exc_info.value.parent_type == "router"
+    assert exc_info.value.parent_name == "testing-router"
+    assert "must be of type list" in str(exc_info.value)
+
+
+def test_network_definition_parse_invalid_router_missing_mandatory_fail():
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.RouterDefinition(
+            "testing-router",
+            {"external_network": "provider-net"},
+        )
+    assert exc_info.value.invalid_value is None
+    assert exc_info.value.field == "networks"
+    assert exc_info.value.parent_type == "router"
+    assert exc_info.value.parent_name == "testing-router"
+    assert "field is mandatory" in str(exc_info.value)
+
+
+def test_network_definition_parse_valid_router_ok():
+    router_def = networking_definition.RouterDefinition(
+        "testing-router",
+        {
+            "external_network": "provider-net",
+            "networks": ["test-net1", "test-net2"],
+        },
+    )
+    assert router_def.name == "testing-router"
+    assert router_def.external_network == "provider-net"
+    assert router_def.networks == ["test-net1", "test-net2"]

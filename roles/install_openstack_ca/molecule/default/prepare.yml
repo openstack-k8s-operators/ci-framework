@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Prepare
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir  }}/.crc/machines/crc/kubeconfig"
+  pre_tasks:
+    - name: Ensure CRC is started
+      async: 1800
+      poll: 0
+      register: _crc_start
+      ansible.builtin.command:
+        cmd: crc start
+  roles:
+    - role: test_deps
+    - role: ci_setup
+    - role: install_yamls
+    - role: ci_local_storage
+  tasks:
+    - name: Check for CRC status
+      ansible.builtin.async_status:
+        jid: "{{ _crc_start.ansible_job_id  }}"
+      register: _crc_status
+      until: _crc_status.finished
+      retries: 100
+      delay: 10
+
+    - name: Install install_yamls dependencies
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: "make_download_tools"
+
+    - name: Install openstack operator
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: "make_openstack_wait"
+      vars:
+        make_openstack_wait_params:
+          BMO_SETUP: false
+          NETWORK_ISOLATION: false
+          TIMEOUT: "600s"
+
+    - name: Deploy openstack controlplane
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: "make_openstack_deploy"
+      vars:
+        make_openstack_wait_params:
+          BMO_SETUP: false
+          NETWORK_ISOLATION: false
+          OPENSTACK_CTLPLANE: "config/samples/core_v1beta1_openstackcontrolplane.yaml"

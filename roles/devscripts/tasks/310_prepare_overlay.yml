@@ -1,0 +1,93 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Gather all of the OpenShift nodes.
+  community.libvirt.virt:
+    command: "list_vms"
+    uri: "qemu:///system"
+  register: _current_vms
+
+- name: Initiate graceful shutdown of the cluster.
+  vars:
+    cifmw_openshift_adm_op: "shutdown"
+    cifmw_openshift_adm_cert_expire_date_file: >-
+      {{
+        (
+          cifmw_devscripts_config.working_dir, '.ocp_cert_not_after'
+        ) | ansible.builtin.path_join
+      }}
+  ansible.builtin.import_role:
+    name: openshift_adm
+
+- name: Stop all the OpenShift nodes.
+  failed_when: false
+  vars:
+    matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
+  community.libvirt.virt:
+    command: "destroy"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+- name: Get XMLs of all nodes part of OpenShift platform
+  vars:
+    matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
+  community.libvirt.virt:
+    command: "get_xml"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+  register: _ocp_xmls
+
+- name: Undefine all nodes part of OpenShift platform
+  vars:
+    matcher: "{{ cifmw_devscripts_config.cluster_name }}_(master|worker).*"
+  community.libvirt.virt:
+    command: "undefine"
+    flags:
+      - "keep_nvram"
+      - "snapshots_metadata"
+    name: "{{ item }}"
+    uri: "qemu:///system"
+  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+- name: Dump XMLs in a file for all nodes part of OpenShift platform
+  ansible.builtin.copy:
+    dest: "{{ cifmw_devscripts_config.working_dir }}/{{ ocp_node.item }}.xml"
+    content: "{{ ocp_node.get_xml }}"
+  loop: "{{ _ocp_xmls.results }}"
+  loop_control:
+    loop_var: "ocp_node"
+    label: "{{ ocp_node.item }}"
+
+- name: Set matching VM name in XMLs
+  vars:
+    ocp_id: "{{ ocp_node.item | split('_') | last }}"
+  community.general.xml:
+    path: "{{ cifmw_devscripts_config.working_dir }}/{{ ocp_node.item }}.xml"
+    xpath: "/domain/name"
+    value: "cifmw-ocp-{{ ocp_id }}"
+  loop: "{{ _ocp_xmls.results }}"
+  loop_control:
+    loop_var: "ocp_node"
+    label: "{{ ocp_node.item }}"
+
+- name: Disable online cluster flag
+  when:
+    - cifmw_devscripts_ocp_online | bool
+  ansible.builtin.set_fact:
+    cifmw_devscripts_ocp_online: false

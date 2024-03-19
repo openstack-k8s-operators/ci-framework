@@ -1,11 +1,5 @@
 # Zuul job
 
-~~~{warning}
-This feature is currently broken. The ci-framework is slightly ahead of
-actual job definitions and we need to change them to provide the needed
-bits again.
-~~~
-
 ~~~{tip}
 It is strongly advised to run this reproducer against a dedicated hypervisor
 with enough resources. The current configuration will require close to 40G
@@ -117,6 +111,7 @@ the job:
     reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml [-e @custom/repo-overrides.yml]
 ```
 #### What does it do?!
@@ -138,6 +133,10 @@ that file in the `custom` directory described earlier with your own resources.
 
 Note that the reproducer will update the amount of computes. You therefore don't need
 to change it.
+
+#### @scenarios/reproducers/networking-definition.yml
+That file describe the networking so that [networking_mapper](../roles/networking_mapper.md)
+can expose the needed configuration.
 
 #### Generated files
 There will be a fair amount of generated files, as you may expect. As usual, most of them
@@ -214,12 +213,14 @@ Note: you **must** have an already deployed layout before running only this tag.
 [laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml
 
 # Iterate with the second iteration of your PR that failed on Zuul
 [laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml \
     --tags bootstrap_repositories
 ```
@@ -237,12 +238,14 @@ Note: you **must** have an already deployed layout before skipping this tag.
 [laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml
 
 # Iterate with the second iteration of your PR that failed on Zuul
 [laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml \
     --skip-tags bootstrap_layout
 ```
@@ -267,12 +270,14 @@ recommend *against* skipping it due to the lack of data regeneration.
 [laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml
 
 # Iterate with the second iteration of your PR that failed on Zuul
 [laptop]$ ansible-playbook -i custom/inventory.yml reproducer.yml \
     -e cifmw_target_host=hypervisor-1 \
     -e @scenarios/reproducers/3-nodes.yml \
+    -e @scenarios/reproducers/networking-definition.yml \
     -e @custom/my-job.yml \
     --skip-tags bootstrap_layout,bootstrap
 ```

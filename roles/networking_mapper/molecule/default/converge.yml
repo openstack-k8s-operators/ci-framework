@@ -56,8 +56,13 @@
             b64decode |
             from_yaml
           }}
+        _expected_content: >-
+          {{
+            _testing_net_def |
+            combine(cifmw_networking_mapper_definition_patch_01, recursive=True)
+          }}
       ansible.builtin.assert:
-        that: _content == _testing_net_def
+        that: _content == _expected_content
 
     - name: Slurp Zuul inventory
       ansible.builtin.slurp:
@@ -176,38 +181,14 @@
               )
             "
 
-    - name: Generate values for future deploy
-      ansible.builtin.import_role:
-        name: networking_mapper
-        tasks_from: network_config_values.yml
-
-    - name: Load generated file
-      register: _gen_snippet
-      ansible.builtin.slurp:
-        path: >-
-          {{
-            (ansible_user_dir, 'ci-framework-data',
-            'artifacts', 'ci_k8s_snippets',
-            'networking_mapper.yaml') | path_join
-          }}
-
-    - name: Load ctlplane expected output
-      ansible.builtin.include_vars:
-        file: ctlplane_output.yml
-        name: _ctlplane_output
-
-    - name: Load internal-api expected output
-      ansible.builtin.include_vars:
-        file: internalapi_output.yml
-        name: _internalapi_output
-
-    - name: Ensure content is consistent
+    - name: Assert that the internalapi patch has been applied
       vars:
-        _content: "{{ _gen_snippet.content | b64decode | from_yaml }}"
+        _content: >-
+          {{
+            _net_env_def_slurp.content |
+            b64decode |
+            from_yaml
+          }}
       ansible.builtin.assert:
         that:
-          - _content.data.node_0 is defined
-          - _content.data.ctlplane is defined
-          - _content.data['internalapi'] is defined
-          - _content.data.ctlplane == _ctlplane_output.ctlplane
-          - _content.data['internalapi'] == _internalapi_output['internalapi']
+          - "_content.networks['internalapi'].vlan_id == 100"

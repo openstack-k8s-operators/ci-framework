@@ -2,24 +2,7 @@
 - job:
     name: podified-multinode-edpm-deployment-crc-3comp
     parent: podified-multinode-edpm-deployment-crc
-    nodeset:
-      nodes:
-        - name: controller
-          label: cloud-centos-9-stream-tripleo-vexxhost-medium
-        - name: compute-0
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: compute-1
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: compute-2
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: crc
-          label: coreos-crc-extracted-2-19-0-xxl
-      groups:
-        - name: computes
-          nodes:
-            - compute-0
-            - compute-1
-            - compute-2
+    nodeset: centos-9-medium-3x-centos-9-crc-extracted-2-30-0-xxl
     vars:
       crc_ci_bootstrap_cloud_name: "{{ nodepool.cloud | replace('-nodepool-tripleo','') }}"
       crc_ci_bootstrap_networking:
@@ -95,29 +78,7 @@
 - job:
     name: podified-multinode-hci-deployment-crc-3comp
     parent: podified-multinode-edpm-deployment-crc
-    nodeset:
-      nodes:
-        - name: controller
-          label: cloud-centos-9-stream-tripleo-vexxhost-medium
-        - name: compute-0
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: compute-1
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: compute-2
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: crc
-          label: coreos-crc-extracted-2-19-0-xxl
-      groups:
-        - name: computes
-          nodes:
-            - compute-0
-            - compute-1
-            - compute-2
-        - name: edpm
-          nodes:
-            - compute-0
-            - compute-1
-            - compute-2
+    nodeset: centos-9-medium-3x-centos-9-crc-extracted-2-30-0-xxl
     vars:
       cifmw_edpm_deploy_hci: true
       crc_ci_bootstrap_cloud_name: "{{ nodepool.cloud | replace('-nodepool-tripleo','') }}"
@@ -215,36 +176,16 @@
       - ci/playbooks/edpm/run.yml
 
 - job:
-    name: podified-multinode-edpm-ironic-nobuild-tagged-crc
+    name: podified-multinode-edpm-update-crc
     parent: cifmw-podified-multinode-edpm-base-crc
-    nodeset:
-      nodes:
-        - name: controller
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: compute-0
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: crc
-          label: coreos-crc-extracted-2-19-0-3xl
-      groups:
-        - name: computes
-          nodes:
-            - compute-0
     vars:
       cifmw_extras:
-        - '@scenarios/centos-9/ci.yml'
         - '@scenarios/centos-9/multinode-ci.yml'
-        - '@scenarios/centos-9/ironic.yml'
+      cifmw_run_update: true
+      cifmw_run_tests: true
     run:
-      - ci/playbooks/e2e-run.yml
-    irrelevant-files:
-      - ^roles/.*_build
-      - ^roles/build.*
-      - ^roles/local_env_vm
-      - ^ci/templates
-      - ^docs
-      - ^.*/*.md
-      - ^OWNERS
-      - ^.github
+      - ci/playbooks/edpm/run.yml
+      - ci/playbooks/edpm/update.yml
 
 - job:
     name: podified-multinode-hci-deployment-crc
@@ -261,18 +202,7 @@
 - job:
     name: podified-multinode-edpm-e2e-nobuild-tagged-crc
     parent: cifmw-podified-multinode-edpm-base-crc
-    nodeset:
-      nodes:
-        - name: controller
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: compute-0
-          label: cloud-centos-9-stream-tripleo-vexxhost
-        - name: crc
-          label: coreos-crc-extracted-2-19-0-3xl
-      groups:
-        - name: computes
-          nodes:
-            - compute-0
+    nodeset: centos-9-medium-centos-9-crc-extracted-2.30-3xl
     vars:
       cifmw_extras:
         - '@scenarios/centos-9/ci.yml'
@@ -353,6 +283,68 @@
     name: podified-multinode-edpm-deployment-crc-bootstrap-staging
     parent: cifmw-podified-multinode-edpm-ci-bootstrap-staging
     extra-vars: *edpm_bootstrap_extra_vars
-    vars: *edpm_bootstrap_vars
+    vars:
+      cifmw_networking_definition:
+        networks:
+          default:
+            network: "192.168.122.0/24"
+            gateway: "192.168.122.1"
+            mtu: 1500
+          internal-api:
+            network: "172.17.0.0/24"
+            gateway: "172.17.0.1"
+            vlan: 20
+          storage:
+            network: "172.18.0.0/24"
+            gateway: "172.18.0.1"
+            vlan: 21
+          tenant:
+            network: "172.19.0.0/24"
+            gateway: "172.19.0.1"
+            vlan: 22
+        routers:
+          ci-router:
+            external_network: public
+            networks:
+              - default
+        group-templates:
+          computes:
+            network-template:
+              range:
+                start: 100
+                length: 21
+            networks:
+              default:
+                is_trunk_parent: true
+              internal-api:
+                trunk_parent: default
+                skip-nm-configuration: true
+              tenant:
+                trunk_parent: default
+                skip-nm-configuration: true
+              storage:
+                trunk_parent: default
+                skip-nm-configuration: true
+        instances:
+          controller:
+            networks:
+              default:
+                ip: "192.168.122.11"
+          crc:
+            networks:
+              default:
+                ip: "192.168.122.10"
+                is_trunk_parent: true
+              internal-api:
+                ip: "172.17.0.5"
+                trunk_parent: default
+              storage:
+                ip: "172.18.0.5"
+                trunk_parent: default
+              tenant:
+                ip: "172.19.0.5"
+                trunk_parent: default
+      cifmw_extras:
+        - '@scenarios/centos-9/multinode-ci.yml'
     run:
       - ci/playbooks/edpm/run.yml

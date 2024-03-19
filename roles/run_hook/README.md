@@ -9,10 +9,31 @@ play has a great chance of failure.
 
 ## Parameters
 * `hooks`: A list of hooks
+* `step`: (String) Prefix for the hooks you want to run. Mandatory.
+
+## Hook sorting
+
+The "name" is taken as a key to sort the various hooks in a selected step.
+
+In case of "single hook in its own parameter", the `name` is computed from the parameter
+name:
+
+* `pre_infra_01_my_hook` will end as `01 my hook`
+* `post_infra_my_hook` will end as `My hook`
 
 ## Hooks expected format
 ### Playbook
-In such a case, the following data can be provided to the hook:
+
+#### Single hook in its own parameter
+* `config_file`: (String) Ansible configuration file. Defaults to `ansible_config_file`.
+* `connection`: (String) Set the connection type for ansible. Defaults to `omit`.
+* `creates`: (String) Refer to the `ansible.builtin.command` "creates" parameter. Defaults to `omit`.
+* `inventory`: (String) Refer to the `--inventory` option for `ansible-playbook`. Defaults to `inventory_file`.
+* `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `hooks/playbooks`. It can be an absolute path.
+* `type`: (String) Type of the hook. In this case, set it to `playbook`.
+* `extra_vars`: (Dict) Structure listing the extra variables you want to pass down
+
+#### Multiple hooks in a list
 * `config_file`: (String) Ansible configuration file. Defaults to `ansible_config_file`.
 * `connection`: (String) Set the connection type for ansible. Defaults to `omit`.
 * `creates`: (String) Refer to the `ansible.builtin.command` "creates" parameter. Defaults to `omit`.
@@ -52,14 +73,30 @@ pre_deploy:
       type: playbook
       extra_vars:
         UUID: <some generated UUID>
+
+pre_infra_my_nice_hook:
+    source: noop.yml
+    type: playbook
 ```
 
 
 ### CRD
-In such a case, the following data can be provided to the hook:
+
+#### Single hook in its own parameter
 * `type`: (String) Type of the hook. In this case, set it to `crd`.
 * `source`: (String) Source of the CRD. If it's a filename, the CRD is expected in `hooks/crds`. It can be an absolute path.
 * `host`: (String) Cluster API endpoint. Defaults to `https://api.crc.testing:6443`.
+* `username`: (String) Username for authentication against the cluster. Defaults to `kubeadmin`.
+* `password`: (String) Password for authentication against the cluster. Defaults to `12345678`.
+* `state`: (String) State of the service. Can be `present` or `absent`. Defaults to `present`.
+* `validate_certs`: (Boolean) Whether to validate or not the cluster certificates.
+* `wait_condition`: (Dict) Wait condition for the service.
+
+#### Multiple hooks in a list
+* `type`: (String) Type of the hook. In this case, set it to `crd`.
+* `source`: (String) Source of the CRD. If it's a filename, the CRD is expected in `hooks/crds`. It can be an absolute path.
+* `host`: (String) Cluster API endpoint. Defaults to `https://api.crc.testing:6443`.
+* `name`: (String) Describe the hook.
 * `username`: (String) Username for authentication against the cluster. Defaults to `kubeadmin`.
 * `password`: (String) Password for authentication against the cluster. Defaults to `12345678`.
 * `state`: (String) State of the service. Can be `present` or `absent`. Defaults to `present`.

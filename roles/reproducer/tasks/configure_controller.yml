@@ -19,6 +19,7 @@
       ) or
       cifmw_libvirt_manager_configuration.vms.controller.target is undefined
   delegate_to: controller-0
+  delegate_facts: false
   block:
     - name: Ensure directories exist
       ansible.builtin.file:
@@ -50,7 +51,6 @@
       ansible.builtin.copy:
         dest: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
         content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
-        force: false
 
     - name: Inject other Hypervisor SSH keys
       when:
@@ -158,7 +158,7 @@
         dest: "/home/zuul/.kube/config"
         content: >-
           {{
-            (cifmw_use_devscripts | default(false) | bool) |
+            (cifmw_libvirt_manager_configuration.vms.ocp is defined) |
             ternary(_devscripts_kubeconfig.content, _crc_kubeconfig.content) |
             b64decode
           }}
@@ -207,49 +207,25 @@
         label: "{{ config.option }}"
         loop_var: 'config'
 
-    - name: Inject CRC related content if needed
-      when:
-        - _layout.vms.crc is defined
-      block:
-        - name: Inject CRC ssh key
-          ansible.builtin.copy:
-            dest: "/home/zuul/.ssh/crc_key"
-            content: "{{ crc_priv_key['content'] | b64decode }}"
-            mode: "0400"
-            owner: zuul
-            group: zuul
-
-        - name: Inject crc related host entry
-          become: true
-          ansible.builtin.lineinfile:
-            path: /etc/hosts
-            line: >-
-              {{ cifmw_reproducer_crc_ip4 }} api.crc.testing
-              canary-openshift-ingress-canary.apps-crc.testing
-              console-openshift-console.apps-crc.testing
-              default-route-openshift-image-registry.apps-crc.testing
-              downloads-openshift-console.apps-crc.testing
-              oauth-openshift.apps-crc.testing
+    - name: Install custom CA if needed
+      ansible.builtin.import_role:
+        name: install_ca
 
     - name: RHEL repository setup for ansible-controller
       become: true
       when:
         - cifmw_repo_setup_rhos_release_rpm is defined
       block:
-        - name: Get rhos-release
-          ansible.builtin.package:
-            name: "{{ cifmw_repo_setup_rhos_release_rpm }}"
-            state: present
-            disable_gpg_check: true
+        - name: Get rhos-release and CA
+          ansible.builtin.import_tasks: rhos_release.yml
 
-        - name: Enable RHEL repos
-          ansible.builtin.command:
-            cmd: "rhos-release rhel"
-
-        - name: Install internal CA
-          ansible.builtin.package:
-            name: "{{ cifmw_reproducer_internal_ca }}"
-            disable_gpg_check: true
+        - name: Create bundle for CRC
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail;
+              cat /etc/pki/ca-trust/source/anchors/* >
+              /etc/pki/ca-trust/source/anchors/rh.crt
+            creates: "/etc/pki/ca-trust/source/anchors/rh.crt"
 
     - name: Install some tools
       become: true
@@ -282,6 +258,7 @@
             rejectattr('key', 'equalto', 'cifmw_target_host') |
             rejectattr('key', 'equalto', 'cifmw_basedir') |
             rejectattr('key', 'equalto', 'cifmw_path') |
+            rejectattr('key', 'equalto', 'cifmw_extras') |
             rejectattr('key', 'match', '^cifmw_use.*') |
             rejectattr('key', 'match', '^cifmw_reproducer.*') |
             rejectattr('key', 'match', '^cifmw_rhol.*') |
@@ -292,6 +269,41 @@
       ansible.builtin.copy:
         dest: "/home/zuul/reproducer-variables.yml"
         content: "{{ _filtered_vars | to_nice_yaml }}"
+
+    - name: Inject local environment parameters
+      ansible.builtin.copy:
+        dest: "/home/zuul/openshift-environment.yml"
+        content: |-
+          {% raw %}
+          ---
+          cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+          cifmw_openshift_login_password_file: >-
+            {{ ansible_user_dir }}/.kube/kubeadmin-password
+          cifmw_openshift_login_kubeconfig: >-
+            {{ ansible_user_dir }}/.kube/config
+          cifmw_openshift_user: "kubeadmin"
+          cifmw_openshift_skip_tls_verify: true
+          cifmw_installyamls_repos: >-
+            {{
+              (ansible_user_dir,
+               'src/github.com/openstack-k8s-operators',
+               'install_yamls') | path_join
+            }}
+          cifmw_architecture_automation_file: >-
+            {{
+              (ansible_user_dir,
+               'src/github.com/openstack-k8s-operators',
+               'architecture/automation/vars/default.yaml') |
+               path_join
+            }}
+          pre_infra:
+            - name: Download needed tools
+              inventory: 'localhost,'
+              connection: local
+              type: playbook
+              source: >-
+                {{ cifmw_installyamls_repos }}/devsetup/download_tools.yaml
+          {% endraw %}
 
     - name: Get interfaces-info content
       register: _nic_info
@@ -323,24 +335,6 @@
       ansible.builtin.import_role:
         name: networking_mapper
 
-    - name: Generate configMap snippet
-      vars:
-        cifmw_networking_mapper_config_generator_output: >-
-          /home/zuul/ci-framework-data/artifacts/ci_k8s_snippets
-      ansible.builtin.import_role:
-        name: networking_mapper
-        tasks_from: network_config_values.yml
-
-    - name: Generate values.yaml for EDPM deploy
-      vars:
-        cifmw_ci_gen_kustomize_values_basedir: "/home/zuul/ci-framework-data"
-      ansible.builtin.import_role:
-        name: ci_gen_kustomize_values
-
-    - name: Debug
-      ansible.builtin.debug:
-        msg: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
-
     - name: Configure ctlplane interface on controller-0
       become: true
       vars:
@@ -354,5 +348,31 @@
         ifname: "{{ _controller_data.interface_name }}"
         type: ethernet
         ip4: "{{ _controller_data.ip_v4 }}/{{ _prefix }}"
-        gw4: "{{ _ctlplane_net.gw_v4 }}"
+        never_default4: true
         state: present
+
+    - name: Inject CRC related content if needed
+      when:
+        - _layout.vms.crc is defined
+      block:
+        - name: Inject CRC ssh key
+          ansible.builtin.copy:
+            dest: "/home/zuul/.ssh/crc_key"
+            content: "{{ crc_priv_key['content'] | b64decode }}"
+            mode: "0400"
+            owner: zuul
+            group: zuul
+
+        - name: Inject crc related host entry
+          become: true
+          vars:
+            _crc_data: "{{ cifmw_networking_env_definition.instances['crc-0'].networks.ctlplane}}"
+          ansible.builtin.lineinfile:
+            path: /etc/hosts
+            line: >-
+              {{ _crc_data.ip_v4 }} api.crc.testing
+              canary-openshift-ingress-canary.apps-crc.testing
+              console-openshift-console.apps-crc.testing
+              default-route-openshift-image-registry.apps-crc.testing
+              downloads-openshift-console.apps-crc.testing
+              oauth-openshift.apps-crc.testing

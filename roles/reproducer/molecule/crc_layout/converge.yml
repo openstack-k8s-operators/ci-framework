@@ -30,6 +30,9 @@
         range: "192.168.140.0/24"
         mtu: 1500
     cifmw_use_libvirt: true
+    cifmw_reproducer_repositories:
+      - src: "{{ lookup('env', 'HOME') }}/src/github.com/openstack-k8s-operators/ci-framework"
+        dest: "/home/zuul/src/github.com/openstack-k8s-operators/"
     cifmw_libvirt_manager_configuration:
       vms:
         compute:
@@ -159,6 +162,22 @@
           ansible.builtin.command:
             cmd: "ping -c1 -w1 {{ _ip }}"
 
+    - name: Gather logs from nested controller-0
+      vars:
+        _log_dest: "{{ ansible_user_dir }}/ci-framework-data/logs/controller-0"
+      block:
+        - name: Create log directory
+          ansible.builtin.file:
+            path: "{{ _log_dest }}"
+            state: directory
+            mode: "0755"
+
+        - name: Sync logs from controller-0
+          ansible.builtin.shell:  # noqa: command-instead-of-module
+            cmd: |-
+              rsync -r zuul@controller-0:"*.log" {{ _log_dest }};
+              rsync -r zuul@controller-0:ci-framework-data/logs {{ _log_dest }};
+
     - name: Assert all of the tests
       vars:
         _inventory_content: >-
@@ -184,6 +203,18 @@
           - _inventory_content == _expected_files
           - _crc_ping.rc == 0
           - _cmp0_ping.rc == 0
+
+    - name: Gather data from controller-0
+      failed_when: false
+      ansible.builtin.shell:
+        cmd: >-
+          mkdir -p /home/zuul/ci-framework-data/controller-0;
+          rsync -a controller-0:/home/zuul/ci-framework-data/artifacts
+            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
+          rsync -a controller-0:/home/zuul/ci-framework-data/logs
+            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
+          rsync -a controller-0:/home/zuul/ci-framework-data/parameters
+            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
 
 #  TODO: Add some more files from the reproducer itself, especially
 #  network related content and add related checks here.

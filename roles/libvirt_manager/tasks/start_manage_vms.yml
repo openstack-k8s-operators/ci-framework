@@ -1,4 +1,14 @@
 ---
+- name: Refresh oooq_pool before starting VMs
+  when:
+    - item.value.status == 'running'
+  community.libvirt.virt_pool:
+    command: refresh
+    name: "{{ item.key }}"
+  loop: "{{ ansible_libvirt_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 # Start and manage VMs, such as injecting SSH configurations,
 # inject the VMs in the live inventory for later reference, and so on.
 # In case we create a "blank" VM, without any OS, it shouldn't be known by
@@ -67,7 +77,7 @@
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
     identity_file: >-
       {{
-        cifmw_reproducer_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type == 'ocp' else
+        cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type == 'ocp' else
         ansible_user_dir ~ '/.crc/machines/crc/id_ecdsa' if vm_type == 'crc' else
         ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
       }}
@@ -134,6 +144,10 @@
       set -o pipefail;
       cat ~/.ssh/authorized_keys |
       ssh {{ _user }}@{{ vm_ip.nic.host }} "cat >> ~/.ssh/authorized_keys"
+  retries: 5
+  delay: 10
+  register: _ssh_access
+  until: _ssh_access.rc == 0
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: "vm_ip"

@@ -25,9 +25,9 @@
   ansible.builtin.assert:
     that:
       - (cifmw_libvirt_manager_configuration.vms.crc is defined) or
-        (cifmw_use_devscripts | default(false) | bool)
+        (cifmw_libvirt_manager_configuration.vms.ocp is defined)
       - not ((cifmw_libvirt_manager_configuration.vms.crc is defined) and
-             (cifmw_use_devscripts | default(false) | bool))
+             (cifmw_libvirt_manager_configuration.vms.ocp is defined))
     quiet: true
     msg: >-
       You cannot get both OpenShift cluster types.
@@ -37,7 +37,7 @@
   tags:
     - always
   ansible.builtin.file:
-    path: "{{ cifmw_reproducer_basedir }}"
+    path: "{{ cifmw_reproducer_basedir }}/{{ item }}"
     state: directory
   loop:
     - artifacts
@@ -46,12 +46,14 @@
 - name: Load CI job environment
   when:
     - cifmw_job_uri is defined
-  ansible.builtin.import_tasks: ci_data.yml
+  ansible.builtin.include_tasks: ci_data.yml
 
 - name: Bootstrap libvirt if needed
+  tags:
+    - bootstrap_libvirt
   when:
     - cifmw_use_libvirt | default(false) | bool
-  ansible.builtin.import_role:
+  ansible.builtin.include_role:
     name: libvirt_manager
 
 - name: Deploy CRC if needed
@@ -66,7 +68,7 @@
     - bootstrap
     - bootstrap_layout
     - crc_layout
-  ansible.builtin.import_tasks: crc_layout.yml
+  ansible.builtin.include_tasks: crc_layout.yml
 
 - name: Consume dev-scripts for OCP cluster
   when:
@@ -79,7 +81,7 @@
   tags:
     - bootstrap
     - boostrap_layout
-  ansible.builtin.import_tasks: devscripts_layout.yml
+  ansible.builtin.include_tasks: devscripts_layout.yml
 
 - name: Consume libvirt_manager
   when:
@@ -87,7 +89,7 @@
   tags:
     - bootstrap
     - bootstrap_layout
-  ansible.builtin.import_tasks: libvirt_layout.yml
+  ansible.builtin.include_tasks: libvirt_layout.yml
 
 - name: Run only on hypervisor with controller-0
   when:
@@ -101,7 +103,7 @@
       tags:
         - bootstrap_repositories
         - bootstrap
-      ansible.builtin.import_tasks: push_code.yml
+      ansible.builtin.include_tasks: push_code.yml
 
     - name: Rotate some logs
       tags:
@@ -114,14 +116,39 @@
       delegate_to: controller-0
       environment:
         ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+      no_log: true
       ansible.builtin.command:
         chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
         cmd: >-
-          ansible-playbook
+          ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
           -e @~/reproducer-variables.yml
+          -e @scenarios/reproducers/networking-definition.yml
           playbooks/01-bootstrap.yml
 
     - name: Emulate CI job
       when:
         - cifmw_job_uri is defined
-      ansible.builtin.import_tasks: ci_job.yml
+      ansible.builtin.include_tasks: ci_job.yml
+
+    - name: Prepare VA deployment
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.include_tasks: configure_architecture.yml
+
+    - name: Prepare ci-like EDPM deploy
+      delegate_to: controller-0
+      ansible.builtin.copy:
+        dest: "/home/zuul/deploy-edpm.sh"
+        mode: "0755"
+        owner: "zuul"
+        group: "zuul"
+        content: |-
+          #!/bin/bash
+          pushd src/github.com/openstack-k8s-operators/ci-framework
+          export ANSIBLE_LOG_PATH="~/ansible-deploy-edpm.log"
+          ansible-playbook deploy-edpm.yml \
+            -e @scenarios/centos-9/base.yml \
+            -e @scenarios/centos-9/edpm_ci.yml \
+            -e cifmw_openshift_password="{{ cifmw_openshift_password }}" \
+            $@
+          popd

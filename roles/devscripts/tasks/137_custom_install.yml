@@ -1,0 +1,108 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Enable IP forwarding in the Network Operator.
+  when:
+    - cifmw_devscripts_config['network_type'] == 'OVNKubernetes'
+    - ("cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=')") or
+      (cifmw_devscripts_enable_ocp_nodes_host_routing | bool)
+  vars:
+    ip_forward: "{{ cifmw_devscripts_config.openshift_version is ansible.builtin.version('4.14.0', '>=') }}"
+    host_routing: "{{ cifmw_devscripts_enable_ocp_nodes_host_routing | bool }}"
+  ansible.builtin.template:
+    src: "templates/ovn_config.j2"
+    dest: >-
+      {{
+        [
+          cifmw_devscripts_config['assets_extra_folder'],
+          'ovn_k8s_config.yaml'
+        ] | ansible.builtin.path_join
+      }}
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"
+
+- name: Set the custom ocp role based on cluster configuration.
+  ansible.builtin.set_fact:
+    ocp_role: >-
+      {{
+        (cifmw_devscripts_config.num_workers > 0) | ternary('worker', 'master')
+      }}
+
+- name: Enable iSCSI services on the OpenShift Nodes.
+  when: cifmw_devscripts_enable_iscsi_on_ocp_nodes | bool
+  ansible.builtin.template:
+    src: templates/iscsi.j2
+    dest: >-
+      {{
+        [
+          cifmw_devscripts_config['assets_extra_folder'],
+          'enable_iscsi.yaml'
+        ] | ansible.builtin.path_join
+      }}
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"
+
+- name: Enable multipath services on the OpenShift nodes.
+  when: cifmw_devscripts_enable_multipath_on_ocp_nodes | bool
+  vars:
+    _mpath_conf: >-
+      {{
+        lookup('ansible.builtin.file', 'files/multipath.conf') |
+        ansible.builtin.b64encode
+      }}
+  ansible.builtin.template:
+    src: templates/multipath.j2
+    dest: >-
+      {{
+        (
+          cifmw_devscripts_config['assets_extra_folder'],
+          'enable_mpath.yaml'
+        ) | ansible.builtin.path_join
+      }}
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"
+
+- name: Add cinder-volumes lv customization
+  when:
+    - cifmw_devscripts_create_logical_volume | bool
+    - cifmw_devscripts_config.vm_extradisks | default(false) | bool
+    - cifmw_devscripts_config.vm_extradisks_list is defined
+  vars:
+    _script_file: >-
+      {{
+        lookup('ansible.builtin.file', 'files/lv-cinder-volumes.sh') |
+        ansible.builtin.b64encode
+      }}
+    _disk_names: >-
+      {{
+        cifmw_devscripts_config.vm_extradisks_list | split
+      }}
+  ansible.builtin.template:
+    src: templates/lv.j2
+    dest: >-
+      {{
+        (
+          cifmw_devscripts_config['assets_extra_folder'],
+          'create_logical_volume.yaml'
+        ) | ansible.builtin.path_join
+      }}
+    owner: "{{ cifmw_devscripts_user }}"
+    group: "{{ cifmw_devscripts_user }}"
+    mode: "0644"

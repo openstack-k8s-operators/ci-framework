@@ -4,6 +4,7 @@
     - zuul is defined
     - zuul.items is defined
     - zuul.projects is defined
+    - not cifmw_reproducer_skip_fetch_repositories | default(false)
   delegate_to: controller-0
   delegate_facts: true
   block:
@@ -17,6 +18,7 @@
     - name: Ensure we are not in the job_id branch
       when:
         - repos_dir_stats is defined
+        - not (item.1.skipped | default(false))
         - item.1.stat.exists
       ansible.builtin.git:
         dest: "{{ item.0.project.src_dir }}"
@@ -26,26 +28,42 @@
       loop: "{{ zuul['items'] | zip(repos_dir_stats.results) | list }}"
 
     - name: Fetch zuul.items repositories
-      vars:
-        _skip_refspec: "{{ job_id is not defined or repo.change is not defined }}"
-      ansible.builtin.git:
-        dest: "{{ repo.project.src_dir }}"
-        repo: "https://{{ repo.project.canonical_hostname }}/{{ repo.project.canonical_hostname | reproducer_gerrit_infix }}{{ repo.project.name }}"
-        refspec: "{{ omit if _skip_refspec else repo | reproducer_refspec ~ ':' ~ job_id }}"
-        version: "{{ job_id | default(omit) }}"
-        force: true
-      loop: "{{ zuul['items'] }}"
-      loop_control:
-        loop_var: repo
-        label: "{{ repo.project.name }}"
+      block:
+        - name: Fetch zuul.items repositories
+          vars:
+            _skip_refspec: "{{ job_id is not defined or repo.change is not defined }}"
+          ansible.builtin.git:
+            dest: "{{ repo.project.src_dir }}"
+            repo: "https://{{ repo.project.canonical_hostname }}/{{ repo.project.canonical_hostname | reproducer_gerrit_infix }}{{ repo.project.name }}"
+            refspec: "{{ omit if _skip_refspec else repo | reproducer_refspec ~ ':' ~ job_id }}"
+            version: "{{ omit if _skip_refspec else job_id }}"
+            force: true
+          loop: "{{ zuul['items'] }}"
+          loop_control:
+            loop_var: repo
+            label: "{{ repo.project.name }}"
+      rescue:
+        - name: Rebase on top of existing change if we tried to pull on the same repo twice
+          vars:
+            refspec: "{{ item['invocation']['module_args']['refspec'] }}"
+            dest_dir: "{{ item['invocation']['module_args']['dest'] }}"
+          when:
+            - item.failed
+            - '"Failed to download remote objects and refs:" in item.msg'
+            - '"fatal: refusing to fetch into branch" in item.msg'
+            - '"checked out at" in item.msg'
+          ansible.builtin.command: # noqa: command-instead-of-module
+            chdir: "{{ dest_dir }}"
+            cmd: "git -c 'user.name=zuul' -c 'user.email=zuul@controller-0.com' pull --rebase origin {{ refspec | regex_replace(':.*', '') }}"
+          loop: "{{ ansible_failed_result['results'] }}"
+
 
     - name: Fetch zuul.projects repositories for dependencies
       when:
-        - repo.key is match('^github.com')
         - "repo.key not in (zuul['items'] | map(attribute='project.canonical_name'))"
       ansible.builtin.git:
         dest: "{{ repo.value.src_dir }}"
-        repo: "https://{{ repo.key }}"
+        repo: "https://{{ repo.value.canonical_hostname }}/{{ repo.value.canonical_hostname | reproducer_gerrit_infix }}{{ repo.value.name }}"
         version: "{{ repo.value.commit }}"
         force: true
       loop: "{{ zuul['projects'] | dict2items }}"
@@ -56,14 +74,52 @@
 - name: Push random code into the proper location
   vars:
     repo_base_dir: '/home/zuul/src'
+    _cifmw_reproducer_all_repositories: "{{ cifmw_reproducer_repositories | default([]) }}"
   block:
+    - name: Expand cifmw_reproducer_repositories to pull code from ansible controller to controller-0
+      when:
+        - cifmw_reproducer_skip_fetch_repositories | default(false)
+        - zuul is defined
+        - zuul.items is defined
+        - zuul.projects is defined
+        # check that the project is not alredy in the user defined
+        # cifmw_reproducer_repositories value
+        - repo.value.name not in _user_sources
+      vars:
+        _user_sources: "{{ cifmw_reproducer_repositories | default([]) | map(attribute='src') }}"
+        _repo_entry:
+          src: "{{ ansible_user_dir }}/{{ repo.value.src_dir | regex_replace('/$', '') }}/"
+          dest: "/home/zuul/{{ repo.value.src_dir }}"
+      ansible.builtin.set_fact:
+        _cifmw_reproducer_all_repositories: "{{ _cifmw_reproducer_all_repositories  + [_repo_entry] }}"
+      loop: "{{ zuul['projects'] | dict2items }}"
+      loop_control:
+        loop_var: repo
+        label: "{{ repo.key }}"
+
+    - name: Create target directories beforehand
+      delegate_to: controller-0
+      vars:
+        _destinations: >-
+          {{
+            _cifmw_reproducer_all_repositories |
+            map(attribute="dest") |
+            map('dirname') |
+            unique |
+            list
+          }}
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+      loop: "{{ _destinations }}"
+
     - name: Sync local repositories to ansible controller
       delegate_to: localhost
       when:
         - item.src is abs or item.src is not match('.*:.*')
       ansible.builtin.command:  # noqa: command-instead-of-module
         cmd: "rsync -ar {{ item.src }} zuul@controller-0:{{ item.dest }}"
-      loop: "{{ cifmw_reproducer_repositories }}"
+      loop: "{{ _cifmw_reproducer_all_repositories }}"
       loop_control:
         label: "{{ item.src | basename }}"
 
@@ -79,7 +135,7 @@
         version: "{{ item.version | default('HEAD') }}"
         refspec: "{{ item.refspec | default(omit) }}"
         force: true
-      loop: "{{ cifmw_reproducer_repositories }}"
+      loop: "{{ _cifmw_reproducer_all_repositories }}"
       loop_control:
         label: "{{ item.src | basename }}"
 
@@ -95,4 +151,4 @@
   delegate_to: controller-0
   ansible.builtin.command:
     chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
-    cmd: ansible-galaxy collection install -U .
+    cmd: ansible-galaxy collection install --upgrade --force .

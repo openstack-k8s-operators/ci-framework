@@ -31,6 +31,8 @@ Used for checking if:
 * `cifmw_libvirt_manager_pub_net`: (String) Network name playing the "public" interface. Defaults to `public`.
 * `cifmw_libvirt_manager_vm_net_ip_set`: (Dict) Allow to extend the existing mapping for host family to IP mapping. Defaults to `{}`.
 * `cifmw_libvirt_manager_fixed_networks`: (List) Network names you don't want to prefix with `cifmw-`. It will be concatenated with cifmw_libvirt_manager_fixed_networks_defaults. Defaults to`[]`.
+* `cifmw_libvirt_manager_reproducer_key_type`: (String) Type of ssh key that will be injected into the controller VMs. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
+* `cifmw_libvirt_manager_reproducer_key_size`: (Integer) Size of the ecdsa ssh keys that will be injected into the controller VMs. Defaults to `cifmw_ssh_keysize` which default to 521.
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 
@@ -88,6 +90,10 @@ cifmw_libvirt_manager_configuration:
       disksize: 50
       memory: 4
       cpus: 2
+      ip_address:
+        address: "192.168.111.9/24"
+        gw: "192.168.111.1"
+        dns: "192.168.111.1"
       nets:
         - public
         - osp_trunk
@@ -128,13 +134,7 @@ The parameters listed here are therefore merely proxies to the ones set in the r
 and have the same name, less the role prefix. Default values are the same as the
 reproducer role.
 
-* `cifmw_libvirt_manager_private_nic`: `{{ cifmw_reproducer_private_nic | default('eth1') }}`
-* `cifmw_libvirt_manager_ctl_ip4`: `{{ cifmw_reproducer_ctl_ip4 | default('192.168.122.11') }}`
-* `cifmw_libvirt_manager_ctl_gw4`: `{{ cifmw_reproducer_ctl_gw4 | default('192.168.122.1') }}`
-* `cifmw_libvirt_manager_crc_ip4`: `{{ cifmw_reproducer_crc_ip4 | default('192.168.122.10') }}`
-* `cifmw_libvirt_manager_crc_gw4`: `{{ cifmw_reproducer_crc_gw4 | default('192.168.122.1') }}`
 * `cifmw_libvirt_manager_dns_servers`: `{{ cifmw_reproducer_dns_servers | default(['1.1.1.1', '8.8.8.8']) }}`
-* `cifmw_libvirt_manager_crc_private_nic`: `{{ cifmw_reproducer_crc_private_nic | default('enp2s0') }}`
 
 ## Calling attach_network.yml from another role
 

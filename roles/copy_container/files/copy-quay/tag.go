@@ -60,20 +60,20 @@ func (opts *tagOptions) run(cmd *cobra.Command, args []string) error {
     } else {
         image := getLatestGoodBuildURL(opts.global.job, opts.global)
         data := fetchLogs(image)
-        res := parseLog(data)
+        parsedLogLines := parseLog(data)
 
         logrus.Infof("image: %s namespace: %s promoted_hash: %s", image, opts.global.toNamespace, promoted_hash)
         failed_tag := make([]string, 0)
         success_tag := make([]string, 0)
-        for _, res := range res {
-            sha, err := getImageManifest(opts.global.toNamespace, res[0], promoted_hash)
+        for _, parsedLine := range parsedLogLines {
+            sha, err := getImageManifest(opts.global.toNamespace, parsedLine.repository, promoted_hash)
             if err != nil {
                 logrus.Errorln("Unable to get image manifest: ", err)
             } else {
-                if err := tagImage(opts.global.toNamespace, res[0], opts.tag, sha); err != nil {
-                    failed_tag = append(failed_tag, res[0])
+                if err := tagImage(opts.global.toNamespace, parsedLine.repository, opts.tag, sha); err != nil {
+                    failed_tag = append(failed_tag, parsedLine.repository)
                 } else {
-                    success_tag = append(success_tag, res[0])
+                    success_tag = append(success_tag, parsedLine.repository)
                 }
             }
         }

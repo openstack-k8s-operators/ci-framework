@@ -116,3 +116,53 @@
       delay: 30
       register: cifmw_openshift_setup_podman_login_stdout
       until: cifmw_openshift_setup_podman_login_stdout.rc == 0
+
+- name: Add custom CA bundle to OCP registry
+  when: cifmw_openshift_setup_ca_registry_to_add is defined
+  block:
+    - name: Ensure we have custom CA installed on host
+      ansible.builtin.include_role:
+        role: install_ca
+
+    - name: Update ca bundle
+      become: true
+      ansible.builtin.command:
+        cmd: update-ca-trust extract
+
+    - name: Slurp CAs file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_openshift_setup_ca_bundle_path }}"
+      register: _ca_content
+
+    - name: Create config map with registry CAs
+      vars:
+        _config_map_data:
+          - key: "{{ cifmw_openshift_setup_ca_registry_to_add  }}"
+            value: "{{ _ca_content.content | b64decode  }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            namespace: openshift-config
+            name: registry-cas
+          data:
+            "{{ _config_map_data | items2dict  }}"
+
+    - name: Install Red Hat CA for pulling images from internal registry
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        merge_type: "merge"
+        definition:
+          apiVersion: config.openshift.io/v1
+          kind: Image
+          metadata:
+            name: cluster
+          spec:
+            additionalTrustedCA:
+              name: "registry-cas"

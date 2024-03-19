@@ -1,14 +1,25 @@
 ---
 - name: "Set playbook path for {{ hook.name }}"
-  ansible.builtin.set_fact:
-    cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
-    hook_name: "{{ hook.name | regex_replace('([^\x00-\x7F]|\\s|`)+', '_') | lower }}"
-    playbook_path: >-
+  vars:
+    _hook_name: >-
+      {{ hook.name |
+         regex_replace('([^a-zA-Z0-9\-\._])+', '_') |
+         lower |
+         truncate(20, false, '') }}
+    _play: >-
       {%- if hook.source is not ansible.builtin.abs -%}
       {{ role_path }}/../../hooks/playbooks/{{ hook.source }}
       {%- else -%}
       {{ hook.source }}
       {%- endif -%}
+    _bdir: >-
+      {{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}
+  ansible.builtin.set_fact:
+    cifmw_basedir: "{{ _bdir }}"
+    hook_name: "{{ _hook_name }}"
+    playbook_path: "{{ _play | realpath }}"
+    log_path: >-
+      {{ _bdir }}/logs/{{ step }}_{{ _hook_name }}.log
     extra_vars: >-
       {%- if hook.extra_vars is defined and hook.extra_vars|length > 0 -%}
       {% for key,value in hook.extra_vars.items() -%}
@@ -19,25 +30,6 @@
       {%- endif %}
       {%- endfor %}
       {%- endif %}
-
-- name: Get parameters files
-  ansible.builtin.find:
-    paths: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/parameters"
-    file_type: file
-    patterns: '*.yml'
-  register: cifmw_run_hook_parameters_files
-
-- name: "Add parameters artifacts as extra variables"  # noqa jinja[spacing]
-  ansible.builtin.set_fact:
-    extra_vars: >-
-      {{ extra_vars }}
-      {% for file in cifmw_run_hook_parameters_files.files %}
-      -e "@{{ file.path }}"
-      {%- endfor %}
-
-- name: Debug extra_vars
-  ansible.builtin.debug:
-    var: extra_vars
 
 - name: Ensure file exists
   block:
@@ -51,51 +43,72 @@
       ansible.builtin.fail:
         msg: "Playbook {{ playbook_path }} doesn't seem to exist."
 
+- name: Get parameters files
+  ansible.builtin.find:
+    paths: >-
+      {{
+        (cifmw_basedir, 'artifacts/parameters') | path_join
+      }}
+    file_type: file
+    patterns: '*.yml'
+  register: cifmw_run_hook_parameters_files
+
+- name: "Add parameters artifacts as extra variables"
+  ansible.builtin.set_fact:
+    extra_vars: >-
+      {{ extra_vars }}
+      {% for file in cifmw_run_hook_parameters_files.files %}
+      -e "@{{ file.path }}"
+      {%- endfor %}
+
+- name: Ensure log directory exists
+  ansible.builtin.file:
+    path: "{{ log_path | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Ensure artifacts directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_basedir }}/artifacts"
+    state: directory
+    mode: "0755"
+
+- name: Point to the generated log file
+  ansible.builtin.debug:
+    msg: "You can follow hook run here: {{ log_path }}"
+
 # We cannot call ansible.builtin.import_playbook from within a play,
 # even less from a task. So the way to run a playbook from within a playbook
 # is to call a command. Though we may lose some of the data passed to the
 # "main" play.
-- name: Ensure we get the logs even in case of failure
+- name: "Run {{ hook.name }}"
+  no_log: true
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_basedir }}/artifacts"
+    extra_args:
+      ANSIBLE_CONFIG: "{{ hook.config_file | default(ansible_config_file) }}"
+      ANSIBLE_LOG_PATH: "{{ log_path }}"
+    creates: "{{ hook.creates | default(omit) }}"
+    script: >-
+      ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
+      {% if hook.connection is defined -%}
+      -c {{ hook.connection }}
+      {% endif -%}
+      {{ extra_vars }}
+      -e "cifmw_basedir={{ cifmw_basedir }}"
+      -e "step={{ step }}"
+      -e "hook_name={{ hook_name }}"
+      -e "playbook_dir={{ playbook_path | dirname }}"
+      {{ playbook_path }}
+
+- name: Load generated content if any
   block:
-    - name: "Run play {{ playbook_path }}"
-      register: play_output
-      environment:
-        ANSIBLE_CONFIG: "{{ hook.config_file | default(ansible_config_file) }}"
-      ansible.builtin.shell:  # noqa: command-instead-of-shell
-        cmd: >-
-          ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
-          {% if hook.connection is defined -%}
-          -c {{ hook.connection }}
-          {% endif -%}
-          {{ extra_vars }}
-          -e "cifmw_basedir={{ cifmw_basedir }}"
-          -e "step={{ step }}"
-          -e "hook_name={{ hook_name }}"
-          -e "playbook_dir={{ playbook_path | dirname }}"
-          {{ playbook_path }}
-        creates: "{{ hook.creates | default(omit) }}"
-
-    - name: Load generated content if any
-      block:
-        - name: Check if we have a file
-          register: hook_callback
-          ansible.builtin.stat:
-            path: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
-        - name: Load generated content in main playbook
-          when:
-            hook_callback.stat.exists
-          ansible.builtin.include_vars:
-            file: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
-
-  always:
-    - name: Output hook command
-      ansible.builtin.debug:
-        var: play_output.cmd
-
-    - name: Output play stderr
-      ansible.builtin.debug:
-        var: play_output.stderr_lines
-
-    - name: Output play stdout
-      ansible.builtin.debug:
-        var: play_output.stdout_lines
+    - name: Check if we have a file
+      register: hook_callback
+      ansible.builtin.stat:
+        path: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+    - name: Load generated content in main playbook
+      when:
+        hook_callback.stat.exists
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"

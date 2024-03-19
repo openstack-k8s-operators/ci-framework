@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert we have needed parameters
+  ansible.builtin.assert:
+    that:
+      - cifmw_openshift_login_load_kubeconfig is defined
+      - cifmw_openshift_login_load_kubeconfig is not none
+      - cifmw_openshift_login_load_kubeadmin is defined
+      - cifmw_openshift_login_load_kubeadmin is not none
+
+- name: Ensure files exists
+  block:
+    - name: Stat kubeconfig
+      register: _stat_config
+      ansible.builtin.stat:
+        path: "{{ cifmw_openshift_login_load_kubeconfig }}"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Stat kubeadmin
+      register: _stat_admin
+      ansible.builtin.stat:
+        path: "{{ cifmw_openshift_login_load_kubeadmin }}"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Assert files exist
+      ansible.builtin.assert:
+        that:
+          - _stat_config.stat.exists
+          - _stat_admin.stat.exists
+
+- name: Gather the password of the deployed cluster.
+  register: kubeadmin_password
+  ansible.builtin.slurp:
+    src: "{{ cifmw_openshift_login_load_kubeadmin }}"
+
+- name: Gather the deployed OCP configuration.
+  register: _kubeconfig
+  ansible.builtin.slurp:
+    path: "{{ cifmw_openshift_login_load_kubeconfig }}"
+
+- name: Set the OpenShift platform access information.
+  vars:
+    kubeconf: "{{ _kubeconfig['content'] | b64decode | from_yaml }}"
+  ansible.builtin.set_fact:
+    cifmw_openshift_api: "{{ kubeconf.clusters[0].cluster.server }}"
+    cifmw_openshift_user: "kubeadmin"
+    cifmw_openshift_password: "{{ kubeadmin_password.content | b64decode }}"
+    cifmw_openshift_kubeconfig: "{{ cifmw_openshift_login_load_kubeconfig }}"
+    cacheable: true

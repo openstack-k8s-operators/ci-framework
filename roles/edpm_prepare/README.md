@@ -16,3 +16,6 @@ This role doesn't need privilege escalation.
 * `cifmw_edpm_prepare_timeout`: (Integer) Time, in minutes to wait for the deployment to be ready. Defaults to `30`.
 * `cifmw_edpm_prepare_verify_tls`: (Boolean) In case of TLS enabled for OpenStack endpoint, validates against the CA. Defaults to `true`.
 * `cifmw_edpm_prepare_skip_patch_ansible_runner`: (Boolean) Intentionally skips setting ansible runner image to `latest` from quay.io. Defaults to `False`.
+* `cifmw_edpm_prepare_kustomizations`: (List) Kustomizations to apply on top of the controlplane CRs. Defaults to `[]`.
+* `cifmw_edpm_prepare_wait_controplane_status_change_sec`: (Integer) Time, in seconds, to wait before checking
+openstack control plane deployment status. Useful when using the role to only update the control plane resource, scenario where it may be in a `ready` status. Defaults to `30`.

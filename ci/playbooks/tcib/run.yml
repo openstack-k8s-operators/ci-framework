@@ -33,11 +33,38 @@
           {%- endif %}
           -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
 
+    - name: Slurp dlrn md5 hash
+      become: true
+      vars:
+        _repo_path: >-
+          {%- if cifmw_repo_setup_output is defined %}
+          {{ cifmw_repo_setup_output }}
+          {%- else %}
+          {{ ansible_user_dir }}/ci-framework-data/artifacts/repositories
+          {%- endif %}
+      block:
+        - name: Check DLRN md5 exists or not
+          ansible.builtin.stat:
+            path: "{{ _repo_path }}/delorean.repo.md5"
+          register: _check_dlrn_md5
+
+        - name: Slurp dlrn md5 hash
+          ansible.builtin.slurp:
+            path: "{{ _repo_path }}/delorean.repo.md5"
+          register: _md5_data
+          when: _check_dlrn_md5.stat.exists
+
+        - name: Store md5 content
+          ansible.builtin.set_fact:
+            _dlrn_md5: "{{ _md5_data['content'] | b64decode }}"
+          when: _check_dlrn_md5.stat.exists
+
     - name: Return Zuul Data
       ansible.builtin.debug:
         msg: >-
           Running Content provider registry on
-          {{ node_ip | default('nowhere') }}
+          {{ node_ip | default('nowhere') }} with dlrn md5 hash
+          {{ _dlrn_md5 | default('') }}
 
     - name: Set up content registry IP address
       zuul_return:
@@ -45,3 +72,4 @@
           zuul:
             pause: true
           content_provider_registry_ip: "{{ node_ip | default('nowhere') }}"
+          content_provider_dlrn_md5_hash: "{{ _dlrn_md5 | default('') }}"

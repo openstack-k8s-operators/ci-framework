@@ -15,110 +15,72 @@
 # under the License.
 
 
-- name: Gather the configurations to be passed to dev-scripts.
-  ansible.builtin.set_fact:
-    cifmw_devscripts_config: >-
-      {{
-        cifmw_devscripts_config_defaults |
-        combine(cifmw_devscripts_config_overrides, recursive=true)
-      }}
-    cacheable: true
+- name: Clean libvirt resources
+  tags:
+    - always
+  ansible.builtin.import_role:
+    name: libvirt_manager
+    tasks_from: clean_layout
 
-- name: Gather the dev-scripts repo directory information.
-  ansible.builtin.stat:
-    path: "{{ cifmw_devscripts_repo_dir }}"
-  register: devscript_repodir
-
-- name: Gather the metal3-dev-env repo directory information.
-  ansible.builtin.stat:
-    path: "{{ cifmw_devscripts_config_defaults.working_dir }}/metal3-dev-env"
-  register: metal3_dev_env_repodir
-
-- name: Remove the deployed OpenShift platform.
-  when:
-    - not cifmw_devscripts_dry_run | bool
-    - devscript_repodir.stat.exists
-    - metal3_dev_env_repodir.stat.exists
-  community.general.make:
-    chdir: "{{ cifmw_devscripts_repo_dir }}"
-    target: clean
-
-- name: Remove the SSH key generated for accessing the platform
-  ansible.builtin.file:
-    path: "{{ cifmw_devscripts_artifacts_dir }}/{{ item }}"
-    state: absent
-  loop:
-    - "cifmw_ocp_access_key"
-    - "cifmw_ocp_access_key.pub"
-
-- name: Cleanup the devscripts repo directory.
-  become: true
-  ansible.builtin.file:
-    path: "{{ cifmw_devscripts_repo_dir }}"
-    state: absent
-    force: true
-
-- name: Cleanup the devscripts working directory.
-  become: true
-  ansible.builtin.file:
-    path: "{{ cifmw_devscripts_config.working_dir }}"
-    state: absent
-    force: true
-
-- name: Cleanup DNS resolution artifacts.
-  when: cifmw_network_local_dns is defined
-  ansible.builtin.include_role:
-    name: ci_network
-    tasks_from: cleanup-dns.yml
-
-- name: Ensure forwarding and post routing rules are cleaned.
-  when:
-    - cifmw_devscripts_osp_compute_nodes is defined
-    - cifmw_devscripts_osp_compute_nodes | length > 0
+- name: Scrub the existence of dev-scripts deployed OCP cluster.
+  tags:
+    - never
+    - deepscrub
+  when: >-
+    (cifmw_devscripts_ocp_exists is undefined) or
+    (cifmw_devscripts_force_cleanup | default(false) | bool)
   block:
-    - name: Ensuring post routing rules are cleaned.
-      become: true
-      vars:
-        ext_interface: >-
+    - name: Gather the configurations to be passed to dev-scripts.
+      ansible.builtin.set_fact:
+        cifmw_devscripts_config: >-
           {{
-            ansible_default_ipv4.interface
-            if cifmw_devscripts_config.ip_stack == 'v4'
-            else
-            ansible_default_ipv6.interface
+            cifmw_devscripts_config_defaults |
+            combine(cifmw_devscripts_config_overrides, recursive=true)
           }}
-      ansible.builtin.iptables:
-        action: "insert"
-        chain: "POSTROUTING"
-        out_interface: "{{ ext_interface }}"
-        state: absent
-        table: "nat"
-        jump: "MASQUERADE"
 
-    - name: Ensuring forwarding rules are cleaned.
+    - name: Gather the dev-scripts repo directory information.
+      ansible.builtin.stat:
+        path: "{{ cifmw_devscripts_repo_dir }}"
+      register: devscript_repodir
+
+    - name: Gather the metal3-dev-env repo directory information.
+      ansible.builtin.stat:
+        path: "{{ cifmw_devscripts_config_defaults.working_dir }}/metal3-dev-env"
+      register: metal3_dev_env_repodir
+
+    - name: Remove the deployed OpenShift platform.
+      when:
+        - not cifmw_devscripts_dry_run | bool
+        - devscript_repodir.stat.exists
+        - metal3_dev_env_repodir.stat.exists
+      community.general.make:
+        chdir: "{{ cifmw_devscripts_repo_dir }}"
+        target: clean
+
+    - name: Remove the SSH key generated for accessing the platform
+      ansible.builtin.file:
+        path: "{{ cifmw_devscripts_artifacts_dir }}/{{ item }}"
+        state: absent
+      loop:
+        - "cifmw_ocp_access_key"
+        - "cifmw_ocp_access_key.pub"
+
+    - name: Cleanup the devscripts repo directory.
       become: true
-      ansible.builtin.iptables:
-        action: "insert"
-        chain: "FORWARD"
-        in_interface: "{{ item.name }}"
-        jump: "ACCEPT"
+      ansible.builtin.file:
+        path: "{{ cifmw_devscripts_repo_dir }}"
         state: absent
-      loop: "{{ cifmw_devscripts_extra_networks }}"
+        force: true
 
-- name: Clear firewall settings for all extra networks
-  become: true
-  when: cifmw_devscripts_extra_networks is defined
-  ansible.posix.firewalld:
-    zone: libvirt
-    interface: "{{ item.name }}"
-    state: "disabled"
-    permanent: true
-    immediate: true
-  loop: "{{ cifmw_devscripts_extra_networks }}"
+    - name: Cleanup the devscripts working directory.
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_devscripts_config.working_dir }}"
+        state: absent
+        force: true
 
-- name: Remove all the virtual networks created by this role.
-  when: cifmw_devscripts_extra_networks is defined
-  community.libvirt.virt_net:
-    name: "{{ item }}"
-    state: absent
-    uri: "qemu:///system"
-  loop: "{{ cifmw_devscripts_extra_networks }}"
+    - name: Cleanup DNS resolution artifacts.
+      when: cifmw_network_local_dns is defined
+      ansible.builtin.include_role:
+        name: ci_network
+        tasks_from: cleanup-dns.yml

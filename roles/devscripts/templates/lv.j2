@@ -1,0 +1,44 @@
+---
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  name: 92-create-logical-volume
+  labels:
+    machineconfiguration.openshift.io/role: {{ ocp_role }}
+    service: cinder
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    storage:
+      disks:
+{% for _disk in _disk_names %}
+        - device: "/dev/{{ _disk }}"
+          wipeTable: true
+{% endfor %}
+      files:
+        - path: /usr/local/bin/lv-cinder-volumes.sh
+          overwrite: false
+          mode: 493
+          user:
+            name: root
+          group:
+            name: root
+          contents:
+            source: data:text/plain;charset=utf-8;base64,{{ _script_file }}
+    systemd:
+      units:
+        - name: lv-cinder-volumes.service
+          enabled: true
+          contents: |
+            [Unit]
+            Description=Create logical volume with name cinder-volumes.
+            After=var.mount systemd-udev-settle.service
+
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/local/bin/lv-cinder-volumes.sh
+            RemainAfterExit=yes
+
+            [Install]
+            WantedBy=multi-user.target

@@ -80,3 +80,23 @@
   loop: "{{ networks }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: Gather the status of firewall service.
+  become: true
+  ansible.builtin.service:
+    name: firewalld
+  register: _fw_info
+
+- name: Ensure network is in libvirt zone
+  become: true
+  when:
+    - _fw_info.status.SubState | default('') == "running"
+  ansible.posix.firewalld:
+    zone: libvirt
+    interface: "{{ item.name }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ networks }}"
+  loop_control:
+    label: "{{ item.name }}"
