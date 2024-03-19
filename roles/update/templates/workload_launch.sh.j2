@@ -17,31 +17,17 @@ fi
 
 function prepare_env {
 
-    export OVERCLOUD_RC='{{ overcloud_rc }}'
-    export IMAGE_URL='{{ workload_image_url }}'
+    export IMAGE_URL='{{ workload_image_url|default("http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img") }}'
     export IMAGE_NAME="upgrade_workload_${SUFFIX}"
     export IMAGE_FILE="$(mktemp -d )/upgrade_workload_image.qcow2"
     export INSTANCE_NAME="instance_${SUFFIX}"
-    export INSTANCE_USER='{{ workload_user }}'
+    export INSTANCE_USER='{{ workload_user|default("cirros") }}'
     export KEYPAIR_NAME="userkey_${SUFFIX}"
-    export FLAVOR_NAME="v1-{{ workload_memory }}M-{{ workload_disk }}G-${SUFFIX}"
+    export FLAVOR_NAME="v1-{{ workload_memory|default('512') }}M-{{ workload_disk|default('10') }}G-${SUFFIX}"
     export SECGROUP_NAME="allow-icmp-ssh-${SUFFIX}"
     export TENANT_NET_NAME="internal_net_${SUFFIX}"
-    export EXTERNAL_NET_NAME='{{ external_network_name }}'
+    export EXTERNAL_NET_NAME='{{ external_network_name|default("public") }}'
     export SRIOV_PORT="sriov_port_${SUFFIX}"
-
-    source ${OVERCLOUD_RC}
-    {% if ffu_overcloud_upgrade | bool -%}
-    # Pin the API's to Queens max versions
-    export OS_COMPUTE_API_VERSION=2.60
-    export OS_SHARE_API_VERSION=2.42
-    export OS_VOLUME_API_VERSION=3
-    {% elif overcloud_upgrade | bool -%}
-    # Pin the API's to Train max versions
-    export OS_COMPUTE_API_VERSION=2.72
-    export OS_SHARE_API_VERSION=2.49
-    export OS_VOLUME_API_VERSION=3
-    {%- endif %}
 
 }
 
@@ -181,14 +167,26 @@ function workload_launch {
     openstack flavor list | grep ${FLAVOR_NAME}
     if [ $? -ne 0 ]; then
         echo "Creating flavor ${FLAVOR_NAME}"
-        openstack flavor create --vcpus {{ workload_vcpu }} \
-            --ram {{ workload_memory }} \
-            --disk {{ workload_disk }} \
-            --swap {{ workload_swap }} \
+        openstack flavor create --vcpus {{ workload_vcpu|default(1) }} \
+            --ram {{ workload_memory|default(512) }} \
+            --disk {{ workload_disk|default(10) }} \
+            --swap {{ workload_swap|default(1) }} \
             $FLAVOR_NAME
     fi
 
-    ## create networking
+    ## create public network
+    openstack network show ${EXTERNAL_NET_NAME} || \
+        openstack network create ${EXTERNAL_NET_NAME} \
+        --external --provider-network-type flat \
+        --provider-physical-network datacentre
+
+    openstack subnet show pub_sub || \
+        openstack subnet create pub_sub \
+        --subnet-range 192.168.122.0/24 \
+        --allocation-pool start=192.168.122.200,end=192.168.122.210 \
+        --gateway 192.168.122.1 --no-dhcp --network ${EXTERNAL_NET_NAME}
+
+    ## create tenant network
     openstack network list | grep ${TENANT_NET_NAME}
     if [ $? -ne 0 ]; then
         NAMESERVER=$(grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' /etc/resolv.conf  | head -1)
