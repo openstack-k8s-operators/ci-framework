@@ -56,3 +56,52 @@
     - name: Set variable
       ansible.builtin.set_fact:
         cifmw_test_operator_tempest_exclude_list: "{{ list_skipped.skipped_tests | join('\n') }}"
+
+- name: Ensure a secret for the cifmw private key file exists
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - cifmw_test_operator_tempest_ssh_key_secret_name is not defined
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ cifmw_test_operator_controller_priv_key_secret_name }}"
+        namespace: "{{ cifmw_test_operator_namespace }}"
+      data:
+        ssh-privatekey: "{{ lookup('file', '~/.ssh/id_cifw') | b64encode }}"
+
+- name: Add SSHKeySecretName section to tobiko CR
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - cifmw_test_operator_tempest_ssh_key_secret_name is not defined
+  ansible.builtin.set_fact:
+    cifmw_test_operator_tempest_config: >-
+      {{
+          cifmw_test_operator_tempest_config |
+          combine({'spec': {'SSHKeySecretName':
+                    cifmw_test_operator_controller_priv_key_secret_name
+                  }}, recursive=true)
+      }}
+
+- name: Add controller IP to the overrides section in Tempest CR
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - controller_ip != ""
+  vars:
+    controller_ip: >-
+      {{ cifmw_test_operator_controller_ip | default(ansible_default_ipv4.address) | default('') }}
+  ansible.builtin.set_fact:
+    cifmw_test_operator_tempest_config: >-
+      {{
+          cifmw_test_operator_tempest_config |
+          combine({'spec': {'tempestconfRun': {'overrides':
+                    'whitebox_neutron_plugin_options.proxy_host_address ' + controller_ip
+                  }}}, recursive=true)
+      }}
