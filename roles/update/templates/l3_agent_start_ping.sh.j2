@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# Script which start an ICMP connectivity check on the first in use
+# floating IP during upgrade
+
+if [ -f {{ working_dir }}/vm_ip.sh ]; then
+    source {{ working_dir }}/vm_ip.sh
+else
+    {% if workload_sriov | bool %}
+    echo export VM_IP=$(openstack server list -f json | jq -r -c '.[0]["Networks"]' | cut -d"=" -f2) > {{ working_dir }}/vm_ip.sh
+    {% else %}
+    echo export VM_IP=$(openstack floating ip list -f json | jq -r -c '.[] | select(.Port) | .["Floating IP Address"]' | head -1) > {{ working_dir }}/vm_ip.sh
+    {% endif %}
+    source {{ working_dir }}/vm_ip.sh
+fi
+
+# NOTE: the &>> is necessary as if we don't redirect both
+# stdout and stderr we will make any script using this one to
+# hang until ping finishes. Meaning if some script crashes
+# and should fail in CI it will get stuck if we don't redirect
+# both outputs.
+# bash
+#    \ bash <script>
+#    \ &| awk blah
+# If script runs l3 start test and than runs something that fails
+# we will make the awk wait until this ping exits as it will hold
+# the output pipes. So again &>> instead of >> is necessary.
+
+ping -D ${VM_IP} &>> ~/ping_results_$(date +%Y%m%d%H%M%S).log &
