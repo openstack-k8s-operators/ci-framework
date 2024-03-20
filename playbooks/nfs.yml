@@ -1,0 +1,107 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Deploy an NFS server
+  become: true
+  hosts: "{{ groups[cifmw_nfs_target | default('computes')][0] | default([]) }}"
+  pre_tasks:
+    - name: End play early if no NFS is needed
+      when:
+        - not cifmw_edpm_deploy_nfs | default('false') | bool
+      ansible.builtin.meta: end_play
+  tasks:
+    - name: Install nfs-utils package
+      ansible.builtin.package:
+        name: "nfs-utils"
+
+    - name: Configure nfs to use v4 only
+      community.general.ini_file:
+        path: /etc/nfs.conf
+        section: nfsd
+        option: vers3
+        value: n
+        backup: true
+
+    - name: Disable NFSv3-related services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        masked: true
+      loop:
+        - rpc-statd.service
+        - rpcbind.service
+        - rpcbind.socket
+
+    - name: Ensure shared folder exist
+      ansible.builtin.file:
+        path: "/data/{{ item }}"
+        state: directory
+        mode: '755'
+      loop: "{{ cifmw_nfs_shares }}"
+
+    - name: Set nfs network vars
+      vars:
+        _nfs_network_name: "{{ cifmw_nfs_network | default('storage') }}"
+        _nfs_host: "{{ groups[cifmw_nfs_target | default('computes')][0] | default('') }}"
+      ansible.builtin.set_fact:
+        _nfs_network_range: >-
+          {{
+            crc_ci_bootstrap_networking.networks[_nfs_network_name].range
+          }}
+        _nfs_ip: >-
+          {{
+            crc_ci_bootstrap_networking.instances[_nfs_host].networks[_nfs_network_name].ip
+          }}
+
+    - name: Add nfs ports to firewall
+      ansible.builtin.iptables:
+        action: "insert"
+        chain: "INPUT"
+        destination_ports:
+          - "32765:32768"
+          - "2049"
+          - "111"
+        jump: "ACCEPT"
+        source: "{{ _nfs_network_range }}"
+        protocol: "{{ item }}"
+      loop:
+        - tcp
+        - udp
+
+    - name: Configure the ip the nfs server should listen on
+      community.general.ini_file:
+        path: /etc/nfs.conf
+        section: nfsd
+        option: host
+        value: "{{ _nfs_ip }}"
+        backup: true
+
+    - name: Enable and restart nfs-server service
+      ansible.builtin.service:
+        name: nfs-server
+        state: restarted
+        enabled: true
+
+    - name: Add shares to /etc/exports
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        line: "/data/{{ item }} {{ _nfs_network_range }}(rw,sync,no_root_squash)"
+      loop: "{{ cifmw_nfs_shares }}"
+      register: _export_shares
+
+    - name: Export the shares # noqa: no-handler
+      when:
+        - _export_shares.changed
+      ansible.builtin.command: exportfs -a
