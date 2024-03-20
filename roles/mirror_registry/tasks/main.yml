@@ -1,0 +1,50 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set random auth cred for duration of QE run
+  ansible.builtin.set_fact:
+    # For QE purposes, this only needs to exist for the duration of a single execution.
+    # Randomly generating a string saves us from pulling the randomly generated init password
+    # from the stdout of mirror-registry install.
+    _cifmw_mirror_registry_init_password: "{{ lookup('community.general.random_string', length=12, special=false) }}"
+
+- name: Make directory for mirror-registry to use
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_mirror_registry_install_dir }}/registry"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    state: directory
+
+- name: Download mirror-registry tools
+  ansible.builtin.unarchive:
+    remote_src: true
+    src: "https://github.com/quay/mirror-registry/releases/download/{{ cifmw_mirror_registry_release_version }}/mirror-registry-offline.tar.gz"
+    dest: "{{ cifmw_mirror_registry_install_dir }}"
+
+- name: Add hosts entry in /etc/hosts for mirror-registry
+  become: true
+  ansible.builtin.lineinfile:
+    dest: /etc/hosts
+    line: "127.0.0.1 {{ cifmw_mirror_registry_fqdn }}"
+    state: present
+
+- name: Install mirror-registry
+  become: true
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_mirror_registry_basedir }}/artifacts"
+    script: |
+      {{ cifmw_mirror_registry_install_dir }}/mirror-registry install -v --quayHostname {{ cifmw_mirror_registry_fqdn }} --quayRoot {{ cifmw_mirror_registry_install_dir }}/registry --initPassword {{ _cifmw_mirror_registry_init_password }}
