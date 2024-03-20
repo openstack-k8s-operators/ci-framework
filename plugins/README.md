@@ -216,3 +216,42 @@ Module that approves pending certificate requests in OpenShift platform.
       approve_csr:
         k8s_config: "{{ k8s_config }}"
 ```
+
+# modules/bridge_vlan
+
+Configures the gathered VLAN ids for all TAP devices attached to the provided
+network(s).
+
+## options - bridge_vlan
+
+```YAML
+* networks
+  * description: List of the networks to be processed.
+    required: true
+    type: list
+    elements: str
+```
+
+### example - bridge_vlan
+
+```YAML
+---
+- name: Configure the TAP attached to trunk ports
+  hosts: hypervisor
+  gather_facts: false
+  vars:
+    networks:
+      osp_trunk: |
+        <network>
+          <name>osp_trunk</name>
+          <forward mode='nat' />
+          <bridge name='osp_trunk' />
+        </network>
+
+  tasks:
+    - name: Apply VLANs to all associated TAP devices.
+      become: true
+      cifmw.general.bridge_vlan:
+        networks: "{{ networks.keys() | list }}"
+      register: _bridge_results
+```
