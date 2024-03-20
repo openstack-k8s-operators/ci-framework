@@ -15,6 +15,13 @@
 # under the License.
 #
 
+- name: Set variable containing the test-operator CR
+  ansible.builtin.set_fact:
+    test_operator_cr: "{{ test_operator_config }}"
+
+- name: Prepare test configuration - {{ run_test_fw }}
+  ansible.builtin.include_tasks: "{{ test_operator_config_playbook }}"
+
 - name: Start tests - {{ run_test_fw }}
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -22,7 +29,7 @@
     context: "{{ cifmw_openshift_context | default(omit)}}"
     state: present
     wait: true
-    definition: "{{ test_operator_config }}"
+    definition: "{{ test_operator_cr }}"
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Wait for the last job to be Completed - {{ run_test_fw }}
@@ -77,7 +84,7 @@
         volumes:
           - name: logs-volume
             persistentVolumeClaim:
-              claimName: "{{ test_operator_config.metadata.name }}"
+              claimName: "{{ test_operator_cr.metadata.name }}"
 
 - name: Ensure that the test-operator-logs-pod is Running
   kubernetes.core.k8s_info:
