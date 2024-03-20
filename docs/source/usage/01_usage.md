@@ -38,12 +38,16 @@ are shared among multiple roles:
 - `cifmw_architecture_repo`: (String) Path of the architecture repository on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
 - `cifmw_architecture_scenario`: (String) The selected VA scenario to deploy.
-- `cifmw_ceph_target`: (String) the Ansible inventory group where ceph is deployed. Defaults to `computes`.
+- `cifmw_ceph_target`: (String) The Ansible inventory group where ceph is deployed. Defaults to `computes`.
 - `cifmw_run_tests`: (Bool) Specifies whether tests should be executed.
   Defaults to false.
 - `cifmw_run_test_role`: (String) Specifies which ci-framework role will be used to run tests. Allowed options are `test_operator` and `tempest`. Defaults to `tempest`.
-- `cifmw_run_tempest`: (bool) specifies whether tempest tests should be run.  Notice tempest tests can be executed with either `test_operator` or `tempest` roles. Defaults to true.
-- `cifmw_run_tobiko`: (bool) specifies whether tobiko tests should be run. Notice tobiko tests can only be executed with the `test_operator` role. Defaults to false.
+- `cifmw_run_tempest`: (Bool) Specifies whether tempest tests should be run.  Notice tempest tests can be executed with either `test_operator` or `tempest` roles. Defaults to true.
+- `cifmw_run_tobiko`: (Bool) Specifies whether tobiko tests should be run. Notice tobiko tests can only be executed with the `test_operator` role. Defaults to false.
+- `cifmw_edpm_deploy_nfs`: (Bool) Specifies whether an nfs server should be deployed.
+- `cifmw_nfs_target`: (String) The Ansible inventory group where the nfs server is deployed. Defaults to `computes`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
+- `cifmw_nfs_network`: (String) The network the deployed nfs server will be accessible from. Defaults to `storage`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
+- `cifmw_nfs_shares`: (List) List of the shares that will be setup in the nfs server.  Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 
 ```{admonition} Words of caution
 :class: danger
