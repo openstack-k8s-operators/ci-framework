@@ -27,14 +27,24 @@
       delegate_to: controller-0
       delegate_facts: true
 
-    - name: Create nova migration keypair
+    - name: Look for nova migration keypair file
+      register: _nova_key_file
+      ansible.builtin.stat:
+        path: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
+
+    - name: Set _nova_key var when nova migration keypair exists
+      when: _nova_key_file.stat.exists
+      ansible.builtin.set_fact:
+        _nova_key:
+          filename: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
+
+    - name: Create nova migration keypair if does not exists
+      when:
+        - not _nova_key_file.stat.exists
       register: _nova_key
       community.crypto.openssh_keypair:
         comment: "nova migration"
-        path: >-
-          {{ (cifmw_basedir,
-             'artifacts/nova_migration_key') | path_join
-          }}
+        path: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
         type: "ecdsa"
 
     - name: Generate needed facts out of local files
