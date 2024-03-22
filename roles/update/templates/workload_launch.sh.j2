@@ -38,7 +38,7 @@ function sanity_check {
 
     echo "Waiting for compute services to be up"
 
-    while openstack compute service list --service nova-compute -f json | jq '.[].State' | grep -q 'down' || openstack network agent list -f json | jq '.[].Alive' | grep -q 'false'; do
+    while openstack compute service list --service nova-compute -f value -c State | grep -q 'down' || openstack network agent list -f value -c Alive | grep -q 'false'; do
         if [ $elapsed_seconds -ge $timeout_seconds ]; then
             echo "FAILURE: Some nova-compute or network agent services are down"
             openstack compute service list --service nova-compute
@@ -235,7 +235,7 @@ function workload_launch {
 
 
     ## create instance
-    TENANT_NET_ID=$( openstack network show -f json ${TENANT_NET_NAME} |  jq -r -c '.id' )
+    TENANT_NET_ID=$( openstack network show -f value -c id "${TENANT_NET_NAME}" )
 
     echo "Creating overcloud instance ${INSTANCE_NAME}"
     {% if workload_sriov|default(false) | bool -%}
@@ -258,7 +258,7 @@ function workload_launch {
     timeout_seconds=120
     elapsed_seconds=0
     while true; do
-        INSTANCE_STATUS=$(openstack server show ${INSTANCE_NAME} -f json | jq -r '.status')
+        INSTANCE_STATUS=$(openstack server show -f value -c status "${INSTANCE_NAME}")
         case "${INSTANCE_STATUS}" in
             "ACTIVE")
                 echo "${INSTANCE_NAME} reached 'ACTIVE' status"
@@ -279,10 +279,10 @@ function workload_launch {
 
     ## assign floating ip or external ip
     {% if workload_sriov|default(false) | bool -%}
-    EXTERNAL_IP=$(openstack port show ${SRIOV_PORT} -f json -c fixed_ips | jq -r -c '.fixed_ips[0]["ip_address"]')
+    EXTERNAL_IP=$(openstack port show "${SRIOV_PORT}" -f yaml -c fixed_ips | awk '/ip_address/{print $3;exit}')
     VM_IP=${EXTERNAL_IP}
     {% else -%}
-    INSTANCE_FIP=$(openstack floating ip create ${EXTERNAL_NET_NAME} -f json | jq -r -c '.floating_ip_address' )
+    INSTANCE_FIP=$(openstack floating ip create -f value -c floating_ip_address "${EXTERNAL_NET_NAME}")
 
     echo "Assign FIP[${INSTANCE_FIP}] to server ${INSTANCE_NAME}"
     openstack server add floating ip ${INSTANCE_NAME} ${INSTANCE_FIP}
@@ -298,7 +298,7 @@ function workload_launch {
 
     ## create and attach a volume
     ## The cinder resource must be created and available to be attach
-    CINDER_VOL_ID=$(openstack volume create --size 1 vol_${SUFFIX} -f json | jq -r .id)
+    CINDER_VOL_ID=$(openstack volume create --size 1 "vol_${SUFFIX}" -f value -c id)
     while true; do
         VOL_STATUS=$(openstack volume show ${CINDER_VOL_ID} -f value -c status)
         if [[ ${VOL_STATUS} == "available" ]]; then
