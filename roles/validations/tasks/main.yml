@@ -1,0 +1,47 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# We can execute all defined validations when cifmw_validation_run_all is defined.
+# Else, we will skip this and run only the explicitly defined validations from
+# cifmw_validations_list
+- name: Run all validations if required
+  when: cifmw_validations_run_all | bool
+  block:
+    - name: Find all validations
+      register: found_validations
+      ansible.builtin.find:
+        paths: "{{ cifmw_validations_default_path }}"
+        patterns: '*.yml'
+        recurse: true
+
+    - name: Run all found validations
+      ansible.builtin.include_tasks:
+        file: "{{ item.path }}"
+      loop: "{{ found_validations.files }}"
+
+- name: Run selected validations
+  when: not cifmw_validations_run_all | bool
+  block:
+    - name: Assert all listed validations exist
+      ansible.builtin.stat:
+        path: "{{ cifmw_validations_default_path }}{{ item }}"
+      loop: "{{ cifmw_validations_list }}"
+      register: validation_exists
+      failed_when: not validation_exists.stat.exists
+
+    - name: Run validations
+      ansible.builtin.include_tasks: "{{ item }}"
+      loop: "{{ cifmw_validations_list }}"
