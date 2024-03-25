@@ -18,6 +18,7 @@ are shared among multiple roles:
 - `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`.
 - `cifmw_use_libvirt`: (Bool) toggle libvirt support.
 - `cifmw_use_crc`: (Bool) toggle rhol/crc usage.
+- `cifmw_use_uefi`: (Bool) toggle UEFI support in libvirt_manager provided VMs.
 - `cifmw_use_devscripts`: (Bool) toggle devscripts usage.
 - `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided. If provided will be the kubeconfig to use and update after login.
 - `cifmw_openshift_api`: (String) Path to the kubeconfig file. If provided will be the API to authenticate against.
