@@ -84,22 +84,32 @@
   loop_control:
     label: "{{ item.key }}"
 
-- name: Create temporary ssh keypair
-  community.crypto.openssh_keypair:
-    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
-    type: "{{ cifmw_libvirt_manager_reproducer_key_type }}"
-    size: "{{ cifmw_libvirt_manager_reproducer_key_size }}"
-    regenerate: full_idempotence
+- name: Manage SSH key
+  vars:
+    _sshkey: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
+  block:
+    - name: Get ssh key state
+      register: _keystat
+      ansible.builtin.stat:
+        path: "{{ _sshkey }}"
 
-- name: Slurp public key for later use
-  register: pub_ssh_key
-  ansible.builtin.slurp:
-    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
+    - name: Create temporary ssh keypair
+      when:
+        - not _keystat.stat.exists
+      community.crypto.openssh_keypair:
+        path: "{{ _sshkey }}"
+        type: "{{ cifmw_libvirt_manager_reproducer_key_type }}"
+        size: "{{ cifmw_libvirt_manager_reproducer_key_size }}"
 
-- name: Slurp private key for later use
-  register: priv_ssh_key
-  ansible.builtin.slurp:
-    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
+    - name: Slurp public key for later use
+      register: pub_ssh_key
+      ansible.builtin.slurp:
+        path: "{{ _sshkey }}.pub"
+
+    - name: Slurp private key for later use
+      register: priv_ssh_key
+      ansible.builtin.slurp:
+        path: "{{ _sshkey }}"
 
 - name: Inject cifmw_reproducer_key.pub in hypervisor authorized_keys
   ansible.posix.authorized_key:
@@ -222,6 +232,52 @@
     dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/interfaces-info.yml"
     content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
 
+- name: Extract VM UUIDs from libvirt
+  block:
+    - name: Get all XMLs
+      register: _all_xmls
+      community.libvirt.virt:
+        command: get_xml
+        name: "{{ item }}"
+      loop: "{{ _vms.list_vms }}"
+
+    - name: Extract UUIDs from all XMLs
+      register: _extracted_uuids
+      community.general.xml:
+        xmlstring: "{{ vm.get_xml }}"
+        xpath: "/domain/uuid"
+        content: text
+      loop: "{{ _all_xmls.results }}"
+      loop_control:
+        label: "{{ vm.item }}"
+        loop_var: vm
+
+    - name: Build UUIDs fact
+      vars:
+        vm_uuid: "{{ xml.matches | first }}"
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_uuids: >-
+          {{
+            cifmw_libvirt_manager_uuids | default({}) |
+            combine({xml.vm.item: vm_uuid.uuid})
+          }}
+      loop: "{{ _extracted_uuids.results }}"
+      loop_control:
+        label: "{{ xml.vm.item }}"
+        loop_var: xml
+
+    - name: Dump UUIDs
+      when:
+        - cifmw_libvirt_manager_uuids is defined
+        - cifmw_libvirt_manager_uuids | length > 0
+      vars:
+        _content:
+          libvirt_uuid: "{{ cifmw_libvirt_manager_uuids }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/libvirt-uuids.yml"
+        content: "{{ _content | to_nice_yaml }}"
+        mode: "0644"
+
 - name: Refresh and dump vbmc hosts
   when:
     - _vbmc_host is defined
@@ -232,21 +288,34 @@
         name: virtualbmc
         tasks_from: list_hosts.yml
 
-    - name: Dump vbmc known hosts
+    - name: Update vbmc related fact
       vars:
         _auth:
           username: "{{ cifmw_virtualbmc_ipmi_user | default('admin') }}"
           password: "{{ cifmw_virtualbmc_ipmi_password | default('password') }}"
-        _mapped: >-
+        _map_auth: >-
           {{
             cifmw_virtualbmc_known_hosts |
             map('combine', _auth)
           }}
+        _map_uuid: >-
+          {% set ns = namespace(output=[]) -%}
+          {% for host in _map_auth -%}
+          {%   set _uuid = {'uuid': cifmw_libvirt_manager_uuids[host['Domain name']]} -%}
+          {%   set _host = host | combine(_uuid) -%}
+          {%   set _ = ns.output.append(_host) -%}
+          {% endfor -%}
+          {{ ns.output }}
+      ansible.builtin.set_fact:
+        cifmw_virtualbmc_known_hosts: "{{ _map_uuid }}"
+
+    - name: Dump vbmc known hosts
+      vars:
         content:
-          cifmw_virtualbmc_known_hosts: "{{ _mapped }}"
+          cifmw_virtualbmc_known_hosts: "{{ cifmw_virtualbmc_known_hosts }}"
       ansible.builtin.copy:
         dest: >-
-          {{ cifmw_libvirt_manager_basedir }}/artifacts/virtualbmc-nodes.yml
+          {{ cifmw_libvirt_manager_basedir }}/artifacts/virtual-nodes.yml
         content: "{{ content | to_nice_yaml }}"
 
 - name: Ensure we get proper access to CRC

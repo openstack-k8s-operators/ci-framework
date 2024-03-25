@@ -14,7 +14,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Converge
+- name: One hypervisor
   hosts: instance
   gather_facts: true
   vars:
@@ -243,7 +243,7 @@
               - expected_count == found_count
           loop: "{{ volume_count.results }}"
 
-- name: Cleanup
+- name: Cleanup one hypervisor
   hosts: instance
   tasks:
     - name: Clean layout
@@ -251,23 +251,34 @@
         name: libvirt_manager
         tasks_from: clean_layout.yml
 
+    - name: Reload clean inventory
+      ansible.builtin.meta: refresh_inventory
+
+    - name: Expose current hosts
+      ansible.builtin.debug:
+        msg: "{{ hostvars.keys() }}"
+
 - name: Inject fake hosts in inventory
   hosts: instance
   tasks:
-    - name: Inject compute-0 in inventory
+    - name: Inject hypervisor-0 in inventory
       ansible.builtin.add_host:
-        name: compute-0
+        name: hypervisor-0
+        groups:
+          - hypervisors
         ansible_host: localhost
         ansible_connection: local
 
-    - name: Inject compute-1 in inventory
+    - name: Inject hypervisor-1 in inventory
       ansible.builtin.add_host:
-        name: compute-1
+        name: hypervisor-1
+        groups:
+          - hypervisors
         ansible_host: localhost
         ansible_connection: local
 
-- name: Converge
-  hosts: all
+- name: Multiple hypervisors
+  hosts: hypervisors
   vars:
     ansible_user_dir: "{{ lookup('env', 'HOME') }}"
     cifmw_basedir: "/opt/basedir"
@@ -287,7 +298,7 @@
     cifmw_libvirt_manager_configuration:
       vms:
         computecp0:
-          target: compute-0
+          target: hypervisor-0
           amount: 1
           disk_file_name: "blank"
           disksize: 20
@@ -297,7 +308,7 @@
             - public
             - osp_trunk
         computecp1:
-          target: compute-1
+          target: hypervisor-1
           amount: 1
           disk_file_name: "blank"
           disksize: 20
