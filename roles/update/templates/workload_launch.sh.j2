@@ -31,6 +31,7 @@ function prepare_env {
     export INSTANCE_FILE="{{ cifmw_update_artifacts_basedir }}/vm_info.sh"
     export WORKLOAD_FILE="{{ cifmw_update_artifacts_basedir }}/workload_suffix"
 
+    export SSH_KEY_FILE="${HOME}/.ssh/${KEYPAIR_NAME}"
 }
 
 function sanity_check {
@@ -162,7 +163,9 @@ function workload_launch {
 
     if ! openstack keypair list | grep "${KEYPAIR_NAME}"; then
         echo "Creating keypair ${KEYPAIR_NAME}"
-        openstack keypair create --public-key ~/.ssh/id_rsa.pub "${KEYPAIR_NAME}"
+        ssh-keygen -t ecdsa -C "${KEYPAIR_NAME}" -f "${SSH_KEY_FILE}" -N ''
+        cat "${SSH_KEY_FILE}"
+        openstack keypair create --public-key "${SSH_KEY_FILE}.pub" "${KEYPAIR_NAME}"
     fi
 
     ## create flavor
@@ -332,7 +335,7 @@ function workload_launch {
         # assert instance is reachable via ssh
         echo "  [$(date)] Trying to ssh to ${VM_IP}"
 
-        if ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        if ssh -q -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${INSTANCE_USER}@${VM_IP}" 'whoami'; then
             echo "Instance ${INSTANCE_NAME} is reachable via ${VM_IP}"
             echo "Write VM_IP ${VM_IP} to file"
