@@ -11,7 +11,8 @@ None
 ## Parameters
 * `cifmw_virtualbmc_image`: (String) VirtualBMC container image. Defaults to `quay.io/metal3-io/vbmc:latest`.
 * `cifmw_virtualbmc_container_name`: (String) VirtualBMC container name. Defaults to `cifmw-vbmc`.
-* `+cifmw_virtualbmc_listen_address`: (String) VirtualBMC listen address. Defaults to `127.0.0.1`.
+* `cifmw_virtualbmc_listen_address`: (String) VirtualBMC listen address. Defaults to `127.0.0.1`.
+* `cifmw_virtualbmc_daemon_port`: (Integer) VirtualBMC daemon listen port. Default to `50891`.
 * `cifmw_virtualbmc_machine`: (String) Virtual machine to manage in VirtualBMC. Mandatory. Defaults to `null`.
 * `cifmw_virtualbmc_action`: (String) VirtualBMC action. Must be either `add` or `delete`. Mandatory. Defaults to `null`.
 * `cifmw_virtualbmc_sshkey_path`: (String) SSH keypair path for VirtualBMC. Defaults to `{{ ansible_user_dir }}/.ssh/vbmc-key`.
