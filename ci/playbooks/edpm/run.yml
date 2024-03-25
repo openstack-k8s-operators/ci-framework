@@ -15,6 +15,25 @@
         path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
       register: edpm_file
 
+    - name: Display vars used in EDPM deployment playbook
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-inventory
+          -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          -e @scenarios/centos-9/base.yml
+          -e @scenarios/centos-9/edpm_ci.yml
+          {%- if edpm_file.stat.exists %}
+          -e @{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml
+          {%- endif %}
+          {%- if cifmw_extras is defined %}
+          {%-   for extra_var in cifmw_extras %}
+          -e "{{   extra_var }}"
+          {%-   endfor %}
+          {%- endif %}
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+          --list
+
     - name: Run Podified EDPM deployment
       ansible.builtin.command:
         chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
