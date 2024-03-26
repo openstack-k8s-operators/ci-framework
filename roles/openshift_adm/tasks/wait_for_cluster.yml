@@ -29,24 +29,15 @@
   retries: "{{ cifmw_openshift_adm_api_retry_count }}"
   delay: 5
 
-- name: Wait until OCP login succeeds.
-  kubernetes.core.k8s_auth:
-    host: "{{ cifmw_openshift_api }}"
-    password: "{{ cifmw_openshift_password }}"
-    state: present
-    username: "{{ cifmw_openshift_user }}"
-    validate_certs: false
-  register: _oc_login_result
-  until: _oc_login_result.k8s_auth is defined
-  retries: "{{ cifmw_openshift_adm_login_retry_count }}"
-  delay: 5
-
 - name: Gather the list of nodes
   kubernetes.core.k8s_info:
     kind: Node
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     validate_certs: false
   register: _nodes
+  until: _nodes.resources is defined
+  retries: "{{ cifmw_openshift_adm_node_retry_count }}"
+  delay: 10
 
 - name: Ensure the nodes are in ready state.
   when:
@@ -58,6 +49,12 @@
     validate_certs: false
   loop: "{{ _nodes.resources | map(attribute='metadata.name') | list }}"
 
+- name: Check for pending certificate approval.
+  when:
+    - _openshift_adm_check_cert_approve | default(false) | bool
+  approve_csr:
+    k8s_config: "{{ cifmw_openshift_kubeconfig }}"
+
 - name: Wait unit the OpenShift cluster is stable.
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
@@ -65,3 +62,15 @@
   ansible.builtin.command:
     cmd: >-
       oc adm wait-for-stable-cluster --minimum-stable-period=5s --timeout=15m
+
+- name: Wait until OCP login succeeds.
+  kubernetes.core.k8s_auth:
+    host: "{{ cifmw_openshift_api }}"
+    password: "{{ cifmw_openshift_password }}"
+    state: present
+    username: "{{ cifmw_openshift_user }}"
+    validate_certs: false
+  register: _oc_login_result
+  until: _oc_login_result.k8s_auth is defined
+  retries: "{{ cifmw_openshift_adm_login_retry_count }}"
+  delay: 5

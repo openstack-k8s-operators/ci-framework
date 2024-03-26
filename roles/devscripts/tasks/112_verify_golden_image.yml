@@ -20,34 +20,58 @@
     path: "{{ cifmw_openshift_adm_cert_expire_date_file }}"
   register: _cert_file_stat
 
-- name: Read the certificate expiration date recorded.
+- name: Execute all tasks pertaining to standing up the cluster.
   when:
     - _cert_file_stat.stat.exists | default(false)
-  ansible.builtin.slurp:
-    src: "{{ cifmw_openshift_adm_cert_expire_date_file }}"
-  register: _cert_file
-
-- name: Ensure the golden image has valid certificate.
-  vars:
-    _expire_date: "{{ _cert_file.content | b64decode }}"
-    _diff_hours: >-
-      {{
-        (
-          (_expire_date | trim | ansible.builtin.to_datetime) -
-          (
-            now(utc=true, fmt="%Y-%m-%d %H:%M:%S") |
-            ansible.builtin.to_datetime
-          )
-        ).total_seconds() / 3600 | int
-      }}
-  when:
-    - _cert_file_stat.stat.exists | default(false)
-    - _diff_hours | int < 2
   block:
-    - name: Reset golden image exists flag
-      ansible.builtin.set_fact:
-        cifmw_devscripts_ocp_exists: false
-        cifmw_devscripts_force_cleanup: true
+    - name: Read the certificate expiration date recorded.
+      ansible.builtin.slurp:
+        src: "{{ cifmw_openshift_adm_cert_expire_date_file }}"
+      register: _cert_file
 
-    - name: Cleanup the golden image if the certificate has expired.
-      ansible.builtin.include_tasks: cleanup.yml
+    - name: Find if cert expire date file is older than a day.
+      ansible.builtin.find:
+        age: 1d
+        hidden: true
+        path: >-
+          {{
+            cifmw_openshift_adm_cert_expire_date_file | ansible.builtin.dirname
+          }}
+        pattern: >-
+          {{
+            cifmw_openshift_adm_cert_expire_date_file |
+            ansible.builtin.basename
+          }}
+      register: _cert_file_age
+
+    - name: Set cert check if older than 1 day
+      when:
+        - _cert_file_age is defined
+        - _cert_file_age.files | default([]) | length > 0
+      ansible.builtin.set_fact:
+        _openshift_adm_check_cert_approve: true
+
+    - name: Cleanup when there is an expired certificate.
+      vars:
+        _expire_date: "{{ _cert_file.content | b64decode }}"
+        _diff_hours: >-
+          {{
+            (
+              (_expire_date | trim | ansible.builtin.to_datetime) -
+              (
+                now(utc=true, fmt="%Y-%m-%d %H:%M:%S") |
+                ansible.builtin.to_datetime
+              )
+            ).total_seconds() / 3600 | int
+          }}
+      when:
+        - _diff_hours | int < 2
+      block:
+        - name: Reset golden image exists flag
+          ansible.builtin.set_fact:
+            cifmw_devscripts_ocp_exists: false
+            cifmw_devscripts_force_cleanup: true
+            _openshift_adm_check_cert_approve: false
+
+        - name: Cleanup the golden image if the certificate has expired.
+          ansible.builtin.include_tasks: cleanup.yml
