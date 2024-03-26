@@ -26,9 +26,39 @@
     cifmw_cls_storage_capacity: 100Mi
     cifmw_cls_local_storage_name: /mnt/openstack
   tasks:
+    - name: Add the crc host dynamically
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
     - name: Run ci_local_storage role
       ansible.builtin.include_role:
         name: ci_local_storage
+
+    - name: Ensure directories are created
+      block:
+        - name: Not create directories on crc
+          delegate_to: crc
+          become: true
+          register: _check_files
+          ansible.builtin.file:
+            path: >-
+              {{
+                [
+                  cifmw_cls_local_storage_name,
+                  'pv'+ ("%02d" | format(item | int))
+                ] | path_join
+              }}
+            state: directory
+            mode: "0755"
+          loop: "{{ range(1, cifmw_cls_pv_count+1) }}"
+
+        - name: Fail if we have a change  # noqa: no-handler
+          when:
+            - _check_files is changed
+          ansible.builtin.fail:
+            msg: "{{ _check_files.results | to_nice_yaml }}"
 
     - name: Get all pvs
       kubernetes.core.k8s_info:
@@ -50,7 +80,7 @@
 
     - name: Gather computed PV names
       ansible.builtin.set_fact:
-        _generated_names: "{{ _generated_names | default([]) + [ cifmw_cls_storage_class ~ '%02d' | format(item) ~ '-' ~ _cls_nodes[0] ] }}"
+        _generated_names: "{{ _generated_names | default([]) + [ cifmw_cls_storage_class ~ '%02d' | format(item) ~ '-' ~ cifmw_ci_local_storage_k8s_hostnames[0] ] }}"
       loop: "{{ range(1, cifmw_cls_pv_count + 1) | list }}"
 
     - name: Assert that the pvs names are correct

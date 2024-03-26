@@ -33,6 +33,9 @@
     dest: "{{ cifmw_cls_manifests_dir }}/storage-class.yaml"
     content: "{{ cifmw_cls_storage_manifest | to_nice_yaml }}"
 
+- name: Get k8s nodes
+  ansible.builtin.import_tasks: fetch_names.yml
+
 - name: Apply the storage class manifests
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
@@ -41,28 +44,11 @@
     state: present
     src: "{{ cifmw_cls_manifests_dir }}/storage-class.yaml"
 
-- name: Get the worker nodes
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    kind: Node
-    label_selectors:
-      - node-role.kubernetes.io/worker
-  register: _node_info
-
-- name: Get all the worker nodes
-  ansible.builtin.set_fact:
-    _cls_nodes: >-
-      {{ _node_info.resources |
-          selectattr("metadata.name", "defined") |
-          map(attribute="metadata.name")
-      }}
-
 - name: Create directories on worker node
-  vars:
-    _msg: "Creating"
-  ansible.builtin.import_tasks: worker_node_dirs.yml
+  ansible.builtin.include_tasks: worker_node_dirs.yml
+  loop: "{{ cifmw_ci_local_storage_k8s_hosts }}"
+  loop_control:
+    loop_var: host
 
 - name: Generate pv related storage manifest file
   ansible.builtin.template:
