@@ -51,6 +51,7 @@
 - name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
   when:
     - inventory_hostname != 'localhost'
+    - _need_start | bool
   delegate_to: localhost
   vars:
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
@@ -58,10 +59,10 @@
   ansible.builtin.blockinfile:
     create: true
     path: "{{ lookup('env', 'HOME') }}/.ssh/config"
-    marker: "## {mark} {{ vm_ip.nic.host }}"
+    marker: "## {mark} {{ vm_ip.nic.host }} {{ inventory_hostname }}"
     mode: "0600"
     block: |-
-      Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
+      Host {{ vm_ip.nic.host }} {{ vm_ip.nic.host }}.{{ inventory_hostname }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ proxy_hostname }}
         Hostname {{ extracted_ip }}
         User {{ 'core' if vm_ip.nic.host is match('^(crc|ocp).*') else 'zuul' }}
@@ -73,6 +74,8 @@
     label: "{{ vm_ip.nic.host }}"
 
 - name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"  # noqa: name[template]
+  when:
+    - _need_start | bool
   vars:
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
     identity_file: >-
@@ -87,7 +90,7 @@
     marker: "## {mark} {{ vm_ip.nic.host }}"
     mode: "0600"
     block: |-
-      Host {{ vm_ip.nic.host }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
+      Host {{ vm_ip.nic.host }} {{ vm_ip.nic.host }}.{{ inventory_hostname }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
         Hostname {{ extracted_ip }}
         User {{ 'core' if vm_ip.nic.host is match('^(crc|ocp)') else 'zuul' }}
         IdentityFile {{ identity_file }}
@@ -121,6 +124,8 @@
     src: inventory.yml.j2
 
 - name: "Wait for SSH on VMs type {{ vm_type }}"
+  when:
+    - _need_start | bool
   vars:
     extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.wait_for:
@@ -133,6 +138,8 @@
     label: "{{ extracted_ip }}"
 
 - name: "Configure ssh access on type {{ vm_type }}"
+  when:
+    - _need_start | bool
   vars:
     _user: >-
       {{
@@ -156,6 +163,7 @@
 - name: "Configure VMs type {{ vm_type }}"
   when:
     - vm_type is not match('^(crc|ocp).*$')
+    - _need_start | bool
   delegate_to: "{{ vm_ip.nic.host }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.shell:
@@ -178,6 +186,7 @@
 - name: "Inject private key on hosts {{ vm_type }}"
   when:
     - vm_type is match('^controller.*$')
+    - _need_start | bool
   delegate_to: "{{ vm_ip.nic.host }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
@@ -194,6 +203,7 @@
 - name: "Inject public key on hosts {{ vm_type }}"
   when:
     - vm_type is match('^controller.*$')
+    - _need_start | bool
   delegate_to: "{{ vm_ip.nic.host }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
