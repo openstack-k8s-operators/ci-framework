@@ -1,0 +1,25 @@
+---
+- name: Kustomize ControlPlane for swift service
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane"
+        state: directory
+
+    - name: Create kustomization to disable swift
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/98-swift-kustomization.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+            patch: |-
+              - op: add
+                path: /spec/swift/enabled
+                value: {{ cifmw_services_swift_enabled | default('false') }}
