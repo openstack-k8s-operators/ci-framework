@@ -22,6 +22,7 @@
     - name: "Create VM overlay for {{ vm_type }}"
       vars:
         _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+      register: _create_overlays
       ansible.builtin.command:
         cmd: >-
           qemu-img create
@@ -92,7 +93,9 @@
         index_var: vm_id
         label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: "Attach listed networks to the VMs {{ vm_type }}"
+- name: "Attach listed networks to the VMs {{ vm_type }}"  # noqa: no-handler
+  when:
+    - _create_overlays is changed
   vars:
     vm_item: "{{ vm_type }}-{{ vm_id }}"
     networks: "{{ vm_data.value.nets }}"
@@ -194,4 +197,6 @@
 - name: "Start and grab IP if image is not blank for {{ vm_type }}"
   when:
     - vm_data.value.disk_file_name != 'blank'
+  vars:
+    _need_start: "{{ _create_overlays is changed }}"
   ansible.builtin.include_tasks: start_manage_vms.yml
