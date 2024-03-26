@@ -15,6 +15,40 @@
         path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
       register: edpm_file
 
+    - name: Add crc node in local inventory
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+        ansible_host: api.crc.testing
+
+    - name: Ensure we know ssh hosts
+      ansible.builtin.shell:
+        cmd: "ssh-keyscan {{ hostvars[item].ansible_host }} >> ~/.ssh/known_hosts"
+      loop: "{{ hostvars.keys() | reject('equalto', 'localhost') }}"
+
+    - name: Inject CRC in zuul_inventory
+      block:
+        - name: Load zuul_inventory
+          register: _inventory
+          ansible.builtin.slurp:
+            path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+
+        - name: Inject CRC in zuul_inventory.yml
+          vars:
+            _crc:
+              all:
+                hosts:
+                  crc: "{{ dict(hostvars.crc) }}"
+            _updated: >-
+              {{
+                _inventory.content | b64decode | from_yaml | combine(_crc, recursive=true)
+              }}
+          ansible.builtin.copy:
+            dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+            content: "{{ _updated | to_nice_yaml }}"
+            mode: "0644"
+
     - name: Perform Podified and EDPM deployment on compute nodes with virtual baremetal
       ansible.builtin.command:
         chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
