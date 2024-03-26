@@ -1,0 +1,54 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create Sushy Emulator resource directory
+  ansible.builtin.file:
+    path: "{{ cifmw_sushy_emulator_resource_directory }}"
+    state: directory
+
+- name: Install required packages
+  become: true
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - httpd-tools
+    - libvirt-client
+
+- name: Collect details for Sushy Emulator config
+  ansible.builtin.import_tasks: collect_details.yml
+
+- name: Render resource files for Sushy Emulator
+  ansible.builtin.import_tasks: render_resources.yml
+
+- name: Deploy Sushy Emulator to OCP
+  ansible.builtin.import_tasks: apply_resources.yml
+  when: cifmw_sushy_emulator_install_type == 'ocp'
+
+- name: Deploy Sushy Emulator into Podman container
+  ansible.builtin.import_tasks: create_container.yml
+  when: cifmw_sushy_emulator_install_type == 'podman'
+
+# todo(Lewis): Once vms deployed by libvirt_manager are working we should
+# add one more basic fuctional test like checking power status
+- name: Test sushy Emulator and connection to hypervisor libvirt socket
+  ansible.builtin.uri:
+    url: "{{ sushy_url}}/redfish/v1/Managers"
+    return_content: true
+    user: admin
+    password: password
+  retries: 5
+  delay: 5
