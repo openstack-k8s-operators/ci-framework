@@ -43,9 +43,12 @@
         - cifmw_repo_setup_rhos_release_rpm is defined
       block:
         - name: Get rhos-release
-          ansible.builtin.import_tasks: rhos_release.yml
+          ansible.builtin.include_tasks: rhos_release.yml
 
         - name: Configure rhos-release
+          register: _async_rhos_release
+          async: 120  # 2 minutes should be enough?
+          poll: 0
           ansible.builtin.command:
             cmd: "rhos-release {{ cifmw_repo_setup_rhos_release_args }}"
 
@@ -61,3 +64,24 @@
       loop: "{{ cifmw_reproducer_compute_repos }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Ensure rhos-release is configured
+      become: true
+      when:
+        - _async_rhos_release.ansible_job_id is defined
+      block:
+        - name: Ensure async flag still exists
+          register: _async_flag
+          ansible.builtin.stat:
+            path: >-
+              /root/.ansible_async/{{ _async_rhos_release.ansible_job_id }}
+
+        - name: Ensure rhos-release task is over
+          when:
+            - _async_flag.stat.exists
+          ansible.builtin.async_status:
+            jid: "{{ _async_rhos_release.ansible_job_id }}"
+          register: _async_result
+          until: _async_result.finished
+          retries: 20
+          delay: 5
