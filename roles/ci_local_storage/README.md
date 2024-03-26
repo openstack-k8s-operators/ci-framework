@@ -16,7 +16,7 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_cls_storage_provisioner`: (String) Name of the storage provisioner. Defaults to `cifmw`.
 * `cifmw_cls_create_ee_storage`: (Bool) Param to create ee_storage. Defaults to `false`.
 * `cifmw_cls_namespace`: (String) The namespace where OCP resources will be installed. Defaults to `openstack`.
-* `cifmw_cls_action`: (String) Command to creating/deleting directories on worker node. Defaults to `mkdir`.
+* `cifmw_cls_action`: (String) Action to perform, can be `create` or `clean`. Defaults to `create`.
 * `cifmw_cls_storage_manifest`:  (Dict) The storage manifest resource to be used to initiate storage class.
 
 ## Examples

@@ -24,7 +24,7 @@
       - provisioned-by={{ cifmw_cls_storage_provisioner }}
   register: _pv_info
 
-- name: Get all pvs
+- name: Export PVs as facts
   ansible.builtin.set_fact:
     cifmw_cls_pvs: >-
       {{ _pv_info.resources |
@@ -44,29 +44,16 @@
     name: "{{ item }}"
   loop: "{{ cifmw_cls_pvs }}"
 
-- name: Get the worker nodes
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    kind: Node
-    label_selectors:
-      - node-role.kubernetes.io/worker
-  register: _node_info
+- name: Get k8s nodes
+  ansible.builtin.import_tasks: fetch_names.yml
 
-- name: Get all the worker nodes
-  ansible.builtin.set_fact:
-    cifmw_cls_nodes: >-
-      {{ _node_info.resources |
-          selectattr("metadata.name", "defined") |
-          map(attribute="metadata.name")
-      }}
-
-- name: Delete directories on worker nodes
+- name: Delete directories on worker node
   vars:
-    cifmw_cls_action: "rm -rf"
-    _msg: "Deleting"
-  ansible.builtin.import_tasks: worker_node_dirs.yml
+    cifmw_cls_action: "clean"
+  ansible.builtin.include_tasks: worker_node_dirs.yml
+  loop: "{{ cifmw_ci_local_storage_k8s_hosts }}"
+  loop_control:
+    loop_var: host
 
 - name: Remove the cifmw_cls_namespace namespace
   kubernetes.core.k8s:

@@ -1,0 +1,42 @@
+---
+# Common tasks to get and filter k8s nodes
+- name: Get k8s nodes
+  when: cifmw_openshift_kubeconfig is defined
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    kind: Node
+  register: cifmw_ci_local_storage_k8s_nodes_out
+
+- name: Fetch hostnames for all hosts
+  register: _hostnames
+  ansible.builtin.command:
+    cmd: hostname
+  delegate_to: "{{ item }}"
+  loop: "{{ hostvars.keys() | list }}"
+
+- name: Set the hosts k8s ansible hosts
+  vars:
+    k8s_nodes_hostnames: >-
+      {{
+          cifmw_ci_local_storage_k8s_nodes_out.resources |
+          default([]) |
+          selectattr("metadata.name", "defined") |
+          map(attribute="metadata.name")
+      }}
+    _host_map: >-
+      {{
+        _hostnames.results |
+        items2dict(key_name='stdout', value_name='item') |
+        dict2items
+      }}
+  ansible.builtin.set_fact:
+    cifmw_ci_local_storage_k8s_hosts: >-
+      {{
+          _host_map |
+          selectattr("key", "in", k8s_nodes_hostnames) |
+          map(attribute="value") |
+          list
+      }}
+    cifmw_ci_local_storage_k8s_hostnames: "{{ k8s_nodes_hostnames }}"
