@@ -183,3 +183,36 @@ allowing an easy `make_TARGET_status is not failed` condition:
     name: 'install_yamls_makes'
     tasks_from: 'make_crc_storage'
 ```
+
+# modules/approve_csr
+
+Module that approves pending certificate requests in OpenShift platform.
+
+## options - approve_csr
+
+```YAML
+* k8s_config
+  * description: Absolute path to the kube configuration file.
+    required: false
+    type: str
+* quiet_period
+  * description: Maximum amount of time to be observed for no events.
+    required: false
+    type: str
+    default: 3m
+```
+
+## example - approve_csr
+
+```YAML
+- name: Approve pending certificate requests in OpenShift
+  hosts: hypervisor
+  gather_facts: false
+  vars:
+    k8s_config: "/home/zuul/.kube/config"
+
+  tasks:
+    - name: Wait and approve all
+      approve_csr:
+        k8s_config: "{{ k8s_config }}"
+```
