@@ -18,6 +18,7 @@
 - name: Converge
   hosts: all
   vars:
+    cifmw_architecture_scenario: hci
     cifmw_ci_gen_kustomize_values_basedir: >-
       {{ ansible_user_dir }}/ci-framework-data
     architecture_repo: >-
@@ -27,10 +28,10 @@
       }}
     artifacts: "{{ cifmw_ci_gen_kustomize_values_basedir }}/artifacts"
     to_kustomize:
-      - name: 'dataplane'
-        path: 'examples/va/nfv/sriov/edpm'
       - name: 'ctlplane'
-        path: 'examples/va/nfv/sriov'
+        path: 'examples/va/hci/control-plane/nncp'
+      - name: 'dataplane'
+        path: 'examples/va/hci/edpm-pre-ceph'
   tasks:
     - name: Ensure architecture repository is building
       ansible.builtin.shell:
@@ -80,7 +81,23 @@
 
     - name: Generate network-values
       vars:
-        cifmw_architecture_scenario: "hci/control-plane/nncp"
+        cifmw_ci_gen_kustomize_values_name: "network-values"
+        cifmw_ci_gen_kustomize_values_src_file: >-
+          {{
+            [architecture_repo,
+             "examples/va/hci/control-plane/nncp/values.yaml"] | path_join
+          }}
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+
+    - name: Generate edpm-values
+      vars:
+        cifmw_ci_gen_kustomize_values_name: "edpm-values"
+        cifmw_ci_gen_kustomize_values_src_file: >-
+          {{
+            [architecture_repo,
+             "examples/va/hci/edpm-pre-ceph/values.yaml"] | path_join
+          }}
       ansible.builtin.include_role:
         name: ci_gen_kustomize_values
 
@@ -97,6 +114,7 @@
              path_join }}
       loop:
         - network-values
+        - edpm-values
 
     - name: Assert generated values.yaml exists
       ansible.builtin.assert:
@@ -104,7 +122,17 @@
           - item.stat.exists
       loop: "{{ stat_values.results }}"
       loop_control:
-        label: "{{ item.item }}"
+        label: "{{ item.stat.path }}"
+
+    - name: Ensure we do not case MAC anymore
+      vars:
+        _val_file: "{{ artifacts }}/ci_gen_kustomize_values/edpm-values/values.yaml"
+        _edpm_val: "{{ lookup('file', _val_file) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - _edpm_val.data.nodeset.ansible.ansibleVars.edpm_network_config_os_net_config_mappings['edpm-compute-0'].nic2 == '52:54:00:17:05:43'
+        msg: >-
+          Got {{ _edpm_val.data.nodeset.ansible.ansibleVars.edpm_network_config_os_net_config_mappings['edpm-compute-0'].nic2 }}
 
     - name: Copy generated values to correct location
       ansible.builtin.copy:
@@ -114,6 +142,8 @@
       loop:
         - key: 'network-values'
           value: 'examples/va/hci/control-plane/nncp/values.yaml'
+        - key: 'edpm-values'
+          value: 'examples/va/hci/edpm-pre-ceph/values.yaml'
 
     - name: Ensure kustomize is able to build
       ansible.builtin.shell:
