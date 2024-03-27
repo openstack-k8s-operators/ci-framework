@@ -1,0 +1,128 @@
+# This job tests the functionality of the dataplane-operator to update values for a given
+# openstackdataplanenodeset and have them applied to nodes within the cluster. Specifically,
+# we will update the value for hugepages, ensure it is applied to the node, and that the node
+# has been rebooted.
+#
+# This job was created to satisfy:
+# https://issues.redhat.com/browse/osprh-5324
+
+# Collect facts from the node in question. this will give us an initial state prior to our changes
+# that can be compared with the end state.
+- name: Collect initial state of edpm node
+  ansible.builtin.gather_facts:
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+  register: initial_node_state
+
+# Since jobs use different names for their OpenStackDataPlaneNodeSet's, we need to dynamically
+# determine the name of the currently deployed one
+- name: Determine name of deployed NodeSet
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc get osdpns --no-headers -o custom-columns=":metadata.name"
+  register: deployed_nodeset_name
+
+# collect initial confighash from the nodeset
+- name: Collecting initial confighash from the nodeset
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      set -o pipefail && oc get -n {{ cifmw_validations_namespace }} osdpns "{{ deployed_nodeset_name.stdout }}" -o yaml | yq .status.configHash
+  register: initial_config_hash
+
+- name: Update hugepages value
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout }}" --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_kernel_args": "default_hugepagesz=1gb hugepagesz=1g hugepages=64 iommu=pt intel_iommu=on tsx=off isolcpus=2-11,14-23"}}}}}'
+
+# The reboot-os service doesn't exist by default. So we need to create this service in
+# order to reboot the nodes.
+- name: Create reboot service
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      metadata:
+        name: reboot-os
+      spec:
+        playbook: osp.edpm.reboot
+      EOF
+
+# Create a new OpenStackDataPlaneDeployment to set the reboot variable. We also only need to execute
+# the jobs required to update Hugepages and reboot the nodes.
+- name: Create openstackdataplanedeployment to rollout changes
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-hugepages-update
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout }}"
+        ansibleExtraVars:
+          edpm_reboot_force_reboot: "true"
+        servicesOverride:
+          - bootstrap
+          - reboot-os
+      EOF
+
+# loop check the status of the openstackdataplanedeployment until it is either completed,
+# or reaches a defined timeout value.
+- name: Wait for deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment edpm-hugepages-update
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout | default(100) }}m
+
+# Collect final confighash from the nodeset
+- name: Collecting final confighash from the nodeset
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      set -o pipefail && oc get -n {{ cifmw_validations_namespace }} osdpns "{{ deployed_nodeset_name.stdout }}" -o yaml | yq .status.configHash
+  register: post_change_config_hash
+
+# gather facts again to compare against the initial state.
+- name: Collect post change state of edpm node
+  ansible.builtin.gather_facts:
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+  register: post_change_node_state
+
+# these assertions will determine whether this job has ultimately been successful or not.
+# here, we should list all of the assertions required to satisfy our feature requirements.
+- name: Assert state change reflects our requirements
+  ansible.builtin.assert:
+    that:
+      - initial_config_hash.stdout != post_change_config_hash.stdout
+      - initial_node_state.ansible_facts.ansible_cmdline != post_change_node_state.ansible_facts.ansible_cmdline
