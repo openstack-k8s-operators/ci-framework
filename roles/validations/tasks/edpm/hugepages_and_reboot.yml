@@ -1,0 +1,106 @@
+# this job tests the functionality of the dataplane-operator to update values for a given
+# openstackdataplanenodeset and have them applied to nodes within the cluster. specifically,
+# we will update the value for hugepages, ensure it is applied to the node, and that the node
+# has been rebooted.
+#
+# this job was created to satisfy:
+# https://issues.redhat.com/browse/osprh-5324
+
+# collect facts from the node in question. this will give us an initial state prior to our changes
+# that can be compared with the end state.
+- name: collect initial state of edpm node
+  ansible.builtin.gather_facts:
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+  register: initial_node_state
+
+# collect initial confighash from the nodeset
+- name: collecting initial confighash from the nodeset
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: >-
+      oc get -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} osdpns openstack-edpm -o yaml | yq .status.configHash
+  register: initial_config_hash
+
+- name: update hugepages value
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc patch -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} osdpns/openstack-edpm --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_kernel_args": "default_hugepagesz=1gb hugepagesz=1g hugepages=64 iommu=pt intel_iommu=on tsx=off isolcpus=2-11,14-23"}}}}}'
+
+- name: Create reboot service
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      metadata:
+        name: reboot-os
+      spec:
+        playbook: osp.edpm.reboot
+      EOF
+
+- name: create openstackdataplanedeployment to rollout changes
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-hugepages-update
+        namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      spec:
+        nodeSets:
+          - openstack-edpm
+        ansibleExtraVars:
+          edpm_reboot_force_reboot: "true" 
+        servicesOverride:
+          - configure-os
+          - reboot-os
+      EOF
+
+# loop check the status of the openstackdataplanedeployment until it is either completed,
+# or reaches a defined timeout value.
+- name: wait for deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait openstackdataplanedeployment edpm-hugepages-update
+      --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout | default(100) }}m
+
+# collect initial confighash from the nodeset
+- name: collecting initial confighash from the nodeset
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: >-
+      oc get -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} osdpns openstack-edpm -o yaml | yq .status.configHash
+  register: post_change_config_hash
+
+# gather facts again to compare against the initial state.
+- name: collect post change state of edpm node
+  ansible.builtin.gather_facts:
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+  register: post_change_node_state
+
+# these assertions will determine whether this job has ultimately been successful or not.
+# here, we should list all of the assertions required to satisfy our feature requirements.
+- name: assert state change reflects our requirements
+  ansible.builtin.assert:
+    that:
+     - initial_config_hash != post_change_config_hash
+     - initial_node_state.ansible_facts.ansible_cmdline != post_change_node_state.ansible_facts.ansible_cmdline
