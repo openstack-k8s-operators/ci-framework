@@ -1,0 +1,43 @@
+---
+- name: Add crc host for nested crc
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Catch CRC IP
+      register: crc_ip
+      ansible.builtin.command: "crc ip"
+
+    - name: Get k8s nodes
+      when: cifmw_openshift_kubeconfig is defined
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: Node
+      register: crc_host_name
+
+    - name: Get crc node hostname
+      ansible.builtin.set_fact:
+        _crc_host: '{{ 
+                      crc_host_name.resources |
+                      selectattr("metadata.name", "defined") | 
+                      map(attribute="metadata.name")
+                    }}'
+
+    - name: Print crc host
+      ansible.builtin.debug:
+        var: _crc_host
+
+    - name: Add crc hostname with it's IP to /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ crc_ip.stdout }} {{ _crc_host[0] }}"
+
+    - name: Add crc host
+      ansible.builtin.add_host:
+        name: "{{ _crc_host[0] }}"
+        ansible_host: "{{ crc_ip.stdout }}"
+        ansible_ssh_private_key_file: "~/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+ 
