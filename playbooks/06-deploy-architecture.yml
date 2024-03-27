@@ -32,20 +32,14 @@
       ansible.builtin.stat:
         path: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
 
-    - name: Set _nova_key var when nova migration keypair exists
-      when: _nova_key_file.stat.exists
-      ansible.builtin.set_fact:
-        _nova_key:
-          filename: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
-
     - name: Create nova migration keypair if does not exists
       when:
         - not _nova_key_file.stat.exists
-      register: _nova_key
       community.crypto.openssh_keypair:
         comment: "nova migration"
-        path: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
-        type: "ecdsa"
+        path: "{{ _nova_key_file.stat.path }}"
+        type: "{{ cifmw_ssh_keytype | default('ecdsa') }}"
+        size: "{{ cifmw_ssh_keysize | default(521) }}"
 
     - name: Generate needed facts out of local files
       vars:
@@ -63,6 +57,10 @@
             selectattr('value.ipv4.address', 'equalto', _controller_host) |
             map(attribute='value.ipv4') | first | default({})
           }}
+        _sshkey: >-
+          {{
+            _nova_key_file.stat.path
+          }}
       ansible.builtin.set_fact:
         cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
           {{ lookup('file', '~/.ssh/authorized_keys', rstrip=False) }}
@@ -71,9 +69,9 @@
         cifmw_ci_gen_kustomize_values_ssh_public_key: >-
           {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
         cifmw_ci_gen_kustomize_values_migration_pub_key: >-
-          {{ lookup('file', _nova_key.filename ~ '.pub', rstrip=False)}}
+          {{ lookup('file', _sshkey ~ '.pub', rstrip=False)}}
         cifmw_ci_gen_kustomize_values_migration_priv_key: >-
-          {{ lookup('file', _nova_key.filename, rstrip=False) }}
+          {{ lookup('file', _sshkey, rstrip=False) }}
         cifmw_ci_gen_kustomize_values_sshd_ranges: >-
           {{
             [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
