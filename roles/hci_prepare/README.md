@@ -11,6 +11,7 @@ None.
 * `cifmw_hci_prepare_skip_load_parameters`: Skip the initial `load_parameters` step, which load vars to gather network information. Defaults to `False`.
 * `cifmw_hci_prepare_ceph_secret_path`: "/tmp/k8s_ceph_secret.yml"
 * `cifmw_hci_prepare_enable_storage_mgmt`: (Boolean) Creates a kustomization file to include `storage-mgmt` network in DataPlane deployment. Defaults to `True`.
+* `cifmw_hci_prepare_enable_repo_setup_service`: (Boolean) Optionally adds `repo-setup` service to OpenStackDataPlaneNodeSet in both phase1 and phase2. Defaults to `True`.
 * `cifmw_hci_prepare_storage_mgmt_mtu`: (Int) Storage-Management network MTU. Defaults to `1500`.
 * `cifmw_hci_prepare_storage_mgmt_vlan`: (Int) Storage-Management network VLAn. Defaults to `23`.
 
