@@ -838,7 +838,7 @@ class NetworkingDefinitionMapper:
 
             if interfaces_info is not None and instance_name not in interfaces_info:
                 raise exceptions.NetworkMappingError(
-                    f"interfaces_info does not contain information for {instance_name}"
+                    f"interfaces_info does not contain information for {instance_name}\ninterfaces_info = {interfaces_info}\ninstance_groups = {instance_groups}"
                 )
             elif interfaces_info is not None and instance_name not in self.__host_vars:
                 raise exceptions.NetworkMappingError(
