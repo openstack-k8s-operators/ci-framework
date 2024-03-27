@@ -48,6 +48,7 @@ are shared among multiple roles:
 - `cifmw_nfs_target`: (String) The Ansible inventory group where the nfs server is deployed. Defaults to `computes`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_nfs_network`: (String) The network the deployed nfs server will be accessible from. Defaults to `storage`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_nfs_shares`: (List) List of the shares that will be setup in the nfs server.  Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
+- `cifmw_fips_enabled`: (Bool) Specifies whether FIPS should be enabled in the deployment. Note that not all deployment methods support this functionality. Defaults to `false`.
 
 ```{admonition} Words of caution
 :class: danger
