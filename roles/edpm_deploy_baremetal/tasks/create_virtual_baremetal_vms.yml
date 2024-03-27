@@ -1,0 +1,84 @@
+---
+- name: Ensure packages are present
+  ansible.builtin.package:
+    name: "{{ item }}"
+  loop:
+    - libvirt
+    - virt-install
+    - qemu-kvm
+
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ cifmw_edpm_deploy_baremetal_console_log_dir }}"
+    - "{{ cifmw_edpm_deploy_baremetal_libvirt_hooks_path }}"
+
+- name: Set selinux context type to "virt_log_t"
+  community.general.sefcontext:
+    target: "{{ cifmw_edpm_deploy_baremetal_console_log_dir }}(/.*)?"
+    setype: virt_log_t
+    state: present
+
+- name: Copy README into console log directory
+  ansible.builtin.copy:
+    src: console_log_readme
+    dest: "{{ (cifmw_edpm_deploy_baremetal_console_log_dir, '/README') | path_join }}"
+
+- name: Copy the qemu hook to the right directory
+  ansible.builtin.template:
+    src: logrotate_hook_py.j2
+    dest: "{{ (cifmw_edpm_deploy_baremetal_libvirt_hooks_path, '/10-logrotate.py') | path_join }}"
+    mode: u+x,g+x,o+x
+
+- name: Enable virtualization services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - virtqemud
+    - virtstoraged
+    - virtnetworkd
+
+- name: Whoami
+  become: false
+  ansible.builtin.command:
+    cmd: |
+      whoami
+      groups
+  register: _tmp_whoami
+
+- name: Whoami debug
+  become: false
+  ansible.builtin.debug:
+    msg: "{{ _tmp_whoami }}"
+
+- name: Create VMs XML
+  become: false
+  ansible.builtin.command:
+    cmd: >-
+      virt-install --connect qemu:///system
+      --name "{{ cifmw_edpm_deploy_baremetal_instance_node_name_prefix}}-{{ item }}"
+      --memory "{{ cifmw_edpm_deploy_baremetal_instance_memory }}"
+      --vcpus "{{ cifmw_edpm_deploy_baremetal_instance_vcpu }}"
+      --boot uefi,hd,bootmenu.enable=yes,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no
+      --os-variant "{{ cifmw_edpm_deploy_baremetal_instance_os_variant }}"
+      --disk size="{{ cifmw_edpm_deploy_baremetal_instance_disk_size }}"
+      --network network="{{ cifmw_edpm_deploy_baremetal_instance_network_name }}",model="{{ cifmw_edpm_deploy_baremetal_instance_net_model }}"
+      --graphics vnc
+      --virt-type "{{ cifmw_edpm_deploy_baremetal_instance_virt_type }}"
+      --serial file,path="{{ cifmw_edpm_deploy_baremetal_console_log_dir }}/{{ cifmw_edpm_deploy_baremetal_instance_node_name_prefix}}-{{ item }}_console.log"
+      --rng /dev/urandom,rate.period=100,rate.bytes=1024
+      --print-xml
+  register: vms_xml
+  loop: "{{ range(1, cifmw_edpm_deploy_baremetal_instance_node_count + 1) | list }}"
+
+- name: Define VMs
+  become: false
+  community.libvirt.virt:
+    command: define
+    xml: "{{ item.stdout }}"
+    uri: 'qemu:///system'
+  with_items: "{{vms_xml.results}}"
