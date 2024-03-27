@@ -44,10 +44,12 @@
     - name: Ensure we have needed bits for compute when needed
       when:
         - computes_len | int > 0
+      vars:
+        compute_name: "{{ groups['computes'] | first }}"
       ansible.builtin.assert:
         that:
-          - "'compute-0' in crc_ci_bootstrap_networks_out"
-          - "'default' in crc_ci_bootstrap_networks_out['compute-0']"
+          - "compute_name in crc_ci_bootstrap_networks_out"
+          - "'default' in crc_ci_bootstrap_networks_out[compute_name]"
 
     - name: Set facts for further usage within the framework
       ansible.builtin.set_fact:
@@ -101,12 +103,13 @@
         - name: Set specific fact for compute accesses
           vars:
             dns_servers: "{{ ((['192.168.122.10'] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
+            compute_name: "{{ groups['computes'] | first }}"
             edpm_install_yamls_vars:
               SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_cifw"
               DATAPLANE_COMPUTE_IP: >-
                 {{
-                  crc_ci_bootstrap_networks_out['compute-0'].default.ip4 |
-                  default(crc_ci_bootstrap_networks_out['compute-0'].default.ip) |
+                  crc_ci_bootstrap_networks_out[compute_name].default.ip4 |
+                  default(crc_ci_bootstrap_networks_out[compute_name].default.ip) |
                   ansible.utils.ipaddr('address')
                 }}
               DATAPLANE_SSHD_ALLOWED_RANGES: "['0.0.0.0/0']"
@@ -119,6 +122,7 @@
         - name: Create EDPM CR Kustomization
           vars:
             dns_servers: "{{ ((['192.168.122.10'] + ansible_facts['dns']['nameservers']) | unique)[0:2] }}"
+            compute_name: "{{ groups['computes'] | first }}"
           ansible.builtin.copy:
             dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane/99-kustomization.yaml"
             content: |-
@@ -137,9 +141,9 @@
               {% endfor %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/neutron_public_interface_name
-                    value: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('') }}"
+                    value: "{{ crc_ci_bootstrap_networks_out[compute_name].default.iface | default('') }}"
 
-              {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
+              {% for compute_node in groups['computes'] if compute_node != compute_name %}
                   - op: replace
                     path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
                     value: >-
@@ -164,7 +168,7 @@
                     value:
                       net_config_data_lookup:
                         edpm-compute:
-                          nic2: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('ens7') }}"
+                          nic2: "{{ crc_ci_bootstrap_networks_out[compute_name].default.iface | default('ens7') }}"
 
                   - op: add
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_debug
@@ -218,7 +222,7 @@
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleUser
-                    value: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
+                    value: "{{ hostvars[compute_name].ansible_user | default('zuul') }}"
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_dns_nameservers
