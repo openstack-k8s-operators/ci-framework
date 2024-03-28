@@ -82,22 +82,32 @@
   loop_control:
     label: "{{ item.key }}"
 
-- name: Create temporary ssh keypair
-  community.crypto.openssh_keypair:
-    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
-    type: "{{ cifmw_libvirt_manager_reproducer_key_type }}"
-    size: "{{ cifmw_libvirt_manager_reproducer_key_size }}"
-    regenerate: full_idempotence
+- name: Create temporary ssh keypair if needed
+  vars:
+    _ssh_key: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
+  block:
+    - name: Check for key availability
+      register: _key_exists
+      ansible.builtin.stat:
+        path: "{{ _ssh_key }}"
+    - name: Create key
+      when:
+        - not _key_exists.stat.exists
+      community.crypto.openssh_keypair:
+        path: "{{ _ssh_key }}"
+        type: "{{ cifmw_libvirt_manager_reproducer_key_type }}"
+        size: "{{ cifmw_libvirt_manager_reproducer_key_size }}"
+        regenerate: full_idempotence
 
-- name: Slurp public key for later use
-  register: pub_ssh_key
-  ansible.builtin.slurp:
-    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
+    - name: Slurp public key for later use
+      register: pub_ssh_key
+      ansible.builtin.slurp:
+        path: "{{ _ssh_key }}.pub"
 
-- name: Slurp private key for later use
-  register: priv_ssh_key
-  ansible.builtin.slurp:
-    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
+    - name: Slurp private key for later use
+      register: priv_ssh_key
+      ansible.builtin.slurp:
+        path: "{{ _ssh_key }}"
 
 - name: Inject cifmw_reproducer_key.pub in hypervisor authorized_keys
   ansible.posix.authorized_key:
@@ -159,7 +169,7 @@
 
 - name: Create fact holding network data for VMs
   ansible.builtin.set_fact:
-    cacheable: true
+    cacheable: false
     cifmw_reproducer_network_data: {}
 
 - name: List existing networks
