@@ -5,8 +5,10 @@ PROJECT_DIR="$(dirname $(readlink -f $0))/../"
 
 # Create a symlink for ansible_collections python package
 SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
-mkdir -p "${SITE_PACKAGES}/ansible_collections/cifmw"
-ln -nsfr ${PROJECT_DIR} ${SITE_PACKAGES}/ansible_collections/cifmw/general
+
+# Install the cifmw collection from source (removes the need for any symlink)
+# Also install galaxy dependencies, required by ansible-doc-extractor
+ansible-galaxy collection install -U .. -p "${SITE_PACKAGES}"
 
 # Create links for roles' README.md in
 # docs/source/roles
