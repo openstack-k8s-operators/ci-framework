@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sushy-emulator
+  namespace: {{ cifmw_sushy_emulator_namespace }}
+  labels:
+    name: sushy-emulator
+spec:
+  selector:
+    app.kubernetes.io/name: sushy-emulator
+  containers:
+  - name: sushy-emulator
+    image: {{ cifmw_sushy_emulator_image }}
+    command: ["/usr/local/bin/sushy-emulator", "--config", "/etc/sushy-emulator/config.conf"]
+    ports:
+    - containerPort: 8000
+    volumeMounts:
+    - name: ssh-secret
+      mountPath: /root/.ssh
+      readOnly: true
+    - name: sushy-emulator-config
+      mountPath: /etc/sushy-emulator/
+{% if cifmw_sushy_emulator_driver == 'openstack' %}
+    - name: os-client-config
+      mountPath: /etc/openstack/
+{% endif %}
+    readinessProbe:
+      httpGet:
+        path: redfish/v1
+        port: 8000
+        initialDelaySeconds: 5
+        periodSeconds: 5
+    livenessProbe:
+      httpGet:
+        path: redfish/v1
+        port: 8000
+        initialDelaySeconds: 10
+        failureThreshold: 30
+        periodSeconds: 10
+    startupProbe:
+      httpGet:
+        path: redfish/v1
+        port: 8000
+        failureThreshold: 30
+        initialDelaySeconds: 10
+  volumes:
+  - name: ssh-secret
+    secret:
+      secretName: sushy-emulator-secret
+      defaultMode: 0644 # u=rw,g=r,o=r
+      items:
+      - key: ssh-privatekey
+        path: id_rsa
+        mode: 0600 # u=rw,g=,o=
+      - key: ssh-publickey
+        path: id_rsa.pub
+        mode: 0644 # u=rw,g=r,o=r
+      - key: ssh-known-hosts
+        path: known_hosts
+        mode: 0644 # u=rw,g=r,o=r
+  - name: sushy-emulator-config
+    configMap:
+      name: sushy-emulator-config
+      defaultMode: 0644 # u=rw,g=r,o=r
+      items:
+      - key: config
+        path: config.conf
+      - key: htpasswd
+        path: .htpasswd
+        mode: 0600 # u=rw,g=r,o=r
+{% if cifmw_sushy_emulator_driver == 'openstack' %}
+  - name: os-client-config
+    secret:
+      secretName: os-client-config
+      defaultMode: 0644 # u=rw,g=r,o=r
+      items:
+      - key: openstack-clouds-yaml
+        path: clouds.yaml
+  restartPolicy: OnFailure
+{% endif %}
