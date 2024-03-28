@@ -16,6 +16,7 @@ are shared among multiple roles:
 - `cifmw_manifests`: Directory where k8s related manifests will be places. Defaults to
   `{{ cifmw_basedir }}/manifests`.
 - `cifmw_path`: customized PATH. Defaults to `~/.crc/bin:~/.crc/bin/oc:~/bin:${PATH}`.
+- `cifmw_root_partition_id`: (Integer) Root partition ID for virtual machines. Useful for UEFI images.
 - `cifmw_use_libvirt`: (Bool) toggle libvirt support.
 - `cifmw_use_crc`: (Bool) toggle rhol/crc usage.
 - `cifmw_use_uefi`: (Bool) toggle UEFI support in libvirt_manager provided VMs.
