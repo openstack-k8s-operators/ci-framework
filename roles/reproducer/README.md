@@ -45,7 +45,7 @@ cifmw_reproducer_repositories:
   - src: "{{ local_base_dir }}/ci-framework"
     dest: "{{ remote_base_dir }}/ci-framework"
   - src: "{{ local_base_dir }}/install_yamls"
-    dest: "{{ remote_base_dir }}/install_yamls"
+    dest: "{{ remote_base_dir }}/"
 ```
 Notes:
 * `ansible_user_dir` isn't really usable due to the use of `delegate_to` in order to sync those local repositories.
