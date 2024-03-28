@@ -78,15 +78,33 @@
   ansible.builtin.include_role:
     name: set_openstack_containers
 
-- name: Create virtual baremetal
-  when: cifmw_edpm_deploy_baremetal_create_vms | bool
-  vars:
-    make_edpm_baremetal_compute_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
-      combine(cifmw_edpm_deploy_baremetal_make_openstack_env)}}"
-    make_edpm_baremetal_compute_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
-  ansible.builtin.include_role:
-    name: 'install_yamls_makes'
-    tasks_from: 'make_edpm_baremetal_compute'
+- name: "Create libvirt group"
+  become: true
+  delegate_to: "{{ cifmw_edpm_deploy_baremetal_hypervisor_target }}"
+  ansible.builtin.group:
+    name: libvirt
+    state: present
+    system: true
+
+- name: "Create user {{ cifmw_edpm_deploy_baremetal_libvirt_user }}"
+  become: true
+  delegate_to: "{{ cifmw_edpm_deploy_baremetal_hypervisor_target }}"
+  ansible.builtin.user:
+    name: "{{ cifmw_edpm_deploy_baremetal_libvirt_user }}"
+    group: libvirt
+
+- name: Create virtual baremetal VMs
+  delegate_to: "{{ cifmw_edpm_deploy_baremetal_hypervisor_target }}"
+  remote_user: "{{ cifmw_edpm_deploy_baremetal_libvirt_user }}"
+  become: true
+  block:
+    - name: Create virtual baremetal VMs
+      ansible.builtin.import_tasks: create_virtual_baremetal_vms.yml
+
+- name: Deploy and configure sushy-emulator
+  ansible.builtin.import_role:
+    name: 'sushy_emulator'
+    tasks_from: 'main'
 
 - name: Deploy EDPM with baremetal
   vars:
