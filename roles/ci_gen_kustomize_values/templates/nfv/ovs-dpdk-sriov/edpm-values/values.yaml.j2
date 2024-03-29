@@ -1,0 +1,63 @@
+{% set instances_names = []                                                            %}
+{% set _original_nodeset = (original_content.data | default({})).nodeset | default({}) %}
+{% set _original_nodes = _original_nodeset.nodes | default({})                         %}
+{% set _vm_type = (_original_nodes.keys() | first).split('-')[1]                       %}
+{% for _inst in cifmw_networking_env_definition.instances.keys()                       %}
+{%   if _inst.startswith(_vm_type)                                                     %}
+{%     set _ = instances_names.append(_inst)                                           %}
+{%   endif                                                                             %}
+{% endfor                                                                              %}
+data:
+  preProvisioned: false
+  baremetalSetTemplate:
+{% for instance in instances_names                                                     %}
+    ctlplaneInterface: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.interface_name }}"
+    cloudUserName: cloud-admin
+{%   if cifmw_ci_gen_kustomize_values_provisioning_interface is defined                %}
+    provisioningInterface: {{ cifmw_ci_gen_kustomize_values_provisioning_interface }}
+{%   endif                                                                             %}
+    bmhLabelSelector:
+      app: openstack
+{% endfor                                                                              %}
+  ssh_keys:
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
+    public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      ansibleVars:
+        timesync_ntp_servers:
+          - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+        edpm_network_config_os_net_config_mappings:
+{% for instance in instances_names                                                     %}
+          edpm-{{ instance }}:
+            nic2: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.mac_addr }}"
+{% endfor                                                                              %}
+{% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
+        edpm_sshd_allowed_ranges:
+{%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
+          - "{{ range }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+    nodes:
+{% for instance in instances_names                                                     %}
+      edpm-{{ instance }}:
+        ansible:
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+        hostName: {{ instance }}
+        networks:
+{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
+          - name: {{ net }}
+            subnetName: subnet1
+{%        if net is match('ctlplane')                                                  %}
+            defaultRoute: true
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+{%        endif                                                                        %}
+{%      endfor                                                                         %}
+{% endfor                                                                              %}
