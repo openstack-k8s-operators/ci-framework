@@ -26,7 +26,7 @@
     status_code: 403
   register: ocp_api_result
   until: ocp_api_result.status == 403
-  retries: "{{ cifmw_openshift_adm_api_retry_count }}"
+  retries: "{{ cifmw_openshift_adm_retry_count }}"
   delay: 5
 
 - name: Gather the list of nodes
@@ -36,8 +36,8 @@
     validate_certs: false
   register: _nodes
   until: _nodes.resources is defined
-  retries: "{{ cifmw_openshift_adm_node_retry_count }}"
-  delay: 10
+  retries: "{{ cifmw_openshift_adm_retry_count }}"
+  delay: 2
 
 - name: Ensure the nodes are in ready state.
   when:
@@ -48,7 +48,9 @@
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     validate_certs: false
   loop: "{{ _nodes.resources | map(attribute='metadata.name') | list }}"
-  retries: "{{ cifmw_openshift_adm_node_retry_count }}"
+  register: _node_status
+  until: _node_status.result is defined
+  retries: "{{ cifmw_openshift_adm_retry_count }}"
   delay: 5
 
 - name: Check for pending certificate approval.
@@ -63,7 +65,7 @@
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc adm wait-for-stable-cluster --minimum-stable-period=5s --timeout=15m
+      oc adm wait-for-stable-cluster --minimum-stable-period=5s --timeout=30m
 
 - name: Wait until OCP login succeeds.
   kubernetes.core.k8s_auth:
@@ -74,5 +76,5 @@
     validate_certs: false
   register: _oc_login_result
   until: _oc_login_result.k8s_auth is defined
-  retries: "{{ cifmw_openshift_adm_login_retry_count }}"
-  delay: 5
+  retries: "{{ cifmw_openshift_adm_retry_count }}"
+  delay: 2
