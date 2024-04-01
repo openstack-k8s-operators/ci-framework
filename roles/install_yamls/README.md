@@ -57,3 +57,68 @@ The role can be imported and tasks can be executed like this
 
 Tasks are created in a form of: `make_{{ original make target }}`, corresponding to `make target` imported from [a Makefile](https://github.com/openstack-k8s-operators/install_yamls/blob/c8487df41bf9ddefa7989f9384e77ae9720ce9dd/Makefile#L418).
 When task is being executed, it runs corresponding code from the Makefile.
+
+## Override install_yamls "make" parameters and environments
+
+### module: generate_make_tasks
+
+1. For every makefile target we have a dedicated task file.
+
+```YAML
+    options:
+      install_yamls_path:
+      description:
+        - Absolute path to install_yamls repository.
+      required: True
+      type: str
+      output_directory:
+      description:
+        - Absolute path to the output directory. It must exists.
+      required: True
+      type: str
+```
+
+2. Follow below steps to find makefile target dedicated task files:
+
+```Bash
+  [laptop]$ cd ~/src/github.com/openstack-k8s-operators/ci-framework
+  [laptop]$ cd ci-framework-data/artifacts/roles/install_yamls_makes/tasks
+```
+
+### Override install_yaml make parameter
+
+User can build specific parameters using "make_TARGET_env"
+and "make_TARGET_dryrun".
+So, here the target could be the parameter for which user wish to override
+make parameter.
+
+Let's look at below example:-
+
+  ```YAML
+    - name: Debug make_ansibleee_cleanup_env
+      when: make_ansibleee_cleanup_env is defined
+      ansible.builtin.debug:
+      var: make_ansibleee_cleanup_env
+    - name: Debug make_ansibleee_cleanup_params
+      when: make_ansibleee_cleanup_params is defined
+      ansible.builtin.debug:
+        var: make_ansibleee_cleanup_params
+    - name: Run ansibleee_cleanup
+      retries: "{{ make_ansibleee_cleanup_retries | default(omit) }}"
+      delay: "{{ make_ansibleee_cleanup_delay | default(omit) }}"
+      until: "{{ make_ansibleee_cleanup_until | default(true) }}"
+      register: "make_ansibleee_cleanup_status"
+      ci_script:
+        output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
+        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/install_yamls"
+        script: "make ansibleee_cleanup"
+        dry_run: "{{ make_ansibleee_cleanup_dryrun|default(false)|bool }}"
+        extra_args: "{{ dict((make_ansibleee_cleanup_env|default({})), **(make_ansibleee_cleanup_params|default({}))) }}"
+  ```
+
+This is a generated task file for the "make ansibleee_cleanup". Here, a user
+is able to set ansible parameter
+that would then be translated into either task parameter (such as
+make_ansibleee_cleanup_until,
+make_ansibleee_cleanup_retries etc) or as a proper "make" parameter
+(via make_ansibleee_cleanup_env)
