@@ -45,6 +45,8 @@ networks.
 * `cifmw_devscripts_external_net` (dict) Key/value pair containing information
   about the network infrastructure.
   Refer [section](#supported-keys-in-cifmw_devscripts_external_net).
+* `cifmw_libvirt_manager_configuration_overrides` (dict) key/value pairs to be
+  used to override cifmw_libvirt_manager_configuration.
 
 ### Secrets management
 
