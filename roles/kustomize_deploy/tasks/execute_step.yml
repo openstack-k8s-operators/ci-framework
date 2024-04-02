@@ -5,8 +5,11 @@
       - stage is defined
       - stage_id is defined
       - stage['path'] is defined
-      - stage.validations is defined
-      - stage.validations | length > 0
+      ## TODO: remove "validations" once architecture repo is up-to-date
+      - (stage.validations is defined and
+         stage.validations | length > 0) or
+        (stage.wait_conditions is defined and
+         stage.wait_conditions | length > 0)
       - stage['values'] is defined
       - stage['values'] | length > 0
 
@@ -176,17 +179,18 @@
         state: present
         src: "{{ _cr }}"
 
-    - name: "Run validations for {{ stage.path }}"
+    - name: "Run Wait Conditions for {{ stage.path }}"
       when:
         - not cifmw_kustomize_deploy_generate_crs_only | bool
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.command:
-        cmd: "{{ validation }}"
-      loop: "{{ stage['validations'] }}"
+        cmd: "{{ wait_condition }}"
+      ## TODO: remove "validations" once architecture is up-to-date
+      loop: "{{ stage['wait_conditions'] | default(stage['validations']) }}"
       loop_control:
-        loop_var: validation
+        loop_var: wait_condition
 
     - name: Stop after applying CRs if requested
       when:
