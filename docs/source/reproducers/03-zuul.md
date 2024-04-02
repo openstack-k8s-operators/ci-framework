@@ -97,7 +97,7 @@ local_base_dir: "{{ local_home_dir }}/src/github.com/openstack-k8s-operators"
 remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
 cifmw_reproducer_repositories:
   - src: "{{ local_base_dir }}/nova-operator"
-    dest: "{{ remote_base_dir }}/nova-operator"
+    dest: "{{ remote_base_dir }}"
 ~~~
 
 Provided you have the right code branch set in your local repository, the reproducer
