@@ -51,3 +51,14 @@ It doesn't have any output.
 Ensure podified deployment is successful by checking the running pods/services.
 
 It doesn't have any output.
+
+## link2file.yml
+
+This play replaces the given soft links with their respective source files. It
+is required to avoid kustomize errors when using symbolic links. This play has
+no output.
+
+### Required variables - link2file
+
+* `cifmw_link2file_files` (str) A comma separated string of file names to be
+  replaced.
