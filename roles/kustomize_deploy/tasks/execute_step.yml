@@ -162,7 +162,14 @@
       ansible.builtin.fail:
         msg: "Failing on demand {{ cifmw_deploy_architecture_stopper }}"
 
+    # We have to use plain `oc apply -f` here due to the
+    # way kubernetes.core.k8s module works: we can't use
+    # - `state: present` and expect it to update the resource;
+    # - `state: present force: true` since it would replace the resource completly
+    # - `state: patched` if the resource doesn't exist
     - name: "Apply generated content for {{ stage.path }}"
+      register: oc_apply
+      changed_when: "'unchanged' not in oc_apply.stdout"
       when:
         - not cifmw_kustomize_deploy_generate_crs_only | bool
       vars:
@@ -172,12 +179,11 @@
              stage['path'], stage['build_output']
              ) | path_join
           }}
-      kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        state: present
-        src: "{{ _cr }}"
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: "oc apply -f {{ _cr }}"
 
     - name: "Run Wait Conditions for {{ stage.path }}"
       when:
