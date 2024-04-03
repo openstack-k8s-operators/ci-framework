@@ -42,6 +42,8 @@ are shared among multiple roles:
 - `cifmw_arch_automation_file`: (String) Name of the workflow automation file
   in the architecture repository. Defaults to `default.yaml`
 - `cifmw_architecture_scenario`: (String) The selected VA scenario to deploy.
+- `cifmw_architecture_wait_condition`: (Dict) Structure defining custom wait_conditions for the automation.
+- `cifmw_architecture_user_kustomize`: (Dict) Structure defining user provided kustomization for automation.
 - `cifmw_ceph_target`: (String) The Ansible inventory group where ceph is deployed. Defaults to `computes`.
 - `cifmw_run_tests`: (Bool) Specifies whether tests should be executed.
   Defaults to false.

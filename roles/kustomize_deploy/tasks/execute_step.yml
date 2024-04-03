@@ -185,18 +185,32 @@
       ansible.builtin.command:
         cmd: "oc apply -f {{ _cr }}"
 
-    - name: "Run Wait Conditions for {{ stage.path }}"
+    - name: "Build Wait Conditions for {{ stage.path }}"
       when:
         - not cifmw_kustomize_deploy_generate_crs_only | bool
+      vars:
+        _stage_name: "stage_{{ stage_id }}"
+        _custom_conditions: >-
+          {{
+            cifmw_architecture_wait_condition[_stage_name] |
+            default([])
+          }}
+        ## TODO: remove "validations" once architecture is up-to-date
+        _commands: >-
+          {{
+            (stage['wait_conditions'] |
+             default(stage['validations'])) + _custom_conditions
+           }}
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: "{{ wait_condition }}"
-      ## TODO: remove "validations" once architecture is up-to-date
-      loop: "{{ stage['wait_conditions'] | default(stage['validations']) }}"
-      loop_control:
-        loop_var: wait_condition
+      block:
+        - name: "Run Wait Conditions for {{ stage.path }}"
+          ansible.builtin.command:
+            cmd: "{{ wait_condition }}"
+          loop: "{{ _commands }}"
+          loop_control:
+            loop_var: wait_condition
 
     - name: Stop after applying CRs if requested
       when:
