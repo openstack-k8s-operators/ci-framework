@@ -93,8 +93,13 @@ def run_module():
 
 
 def _filter_skipped_tests(jobs, release, yaml_file):
+    print("Received jobs:", jobs)
+    print("Received release:", release)
+    print("Received YAML file:", yaml_file)
+
     if len(yaml_file) > 0:
         tests = yaml_file.get("known_failures", [])
+        print("Loaded tests from YAML file:", tests)
 
         if jobs:
             tests = [
@@ -103,6 +108,7 @@ def _filter_skipped_tests(jobs, release, yaml_file):
                 if (not test.get("jobs", []))
                 or ([job for job in jobs if job in test.get("jobs", [])])
             ]
+            print("Filtered tests based on jobs:", tests)
 
         if release:
             tests = [
@@ -110,9 +116,12 @@ def _filter_skipped_tests(jobs, release, yaml_file):
                 for test in tests
                 if [rel for rel in test.get("releases", []) if rel["name"] == release]
             ]
+            print("Filtered tests based on release:", tests)
 
         if len(tests) > 0:
-            return [test.get("test") for test in tests]
+            filtered_tests = [test.get("test") for test in tests]
+            print("Filtered tests:", filtered_tests)
+            return filtered_tests
     return []
 
 
