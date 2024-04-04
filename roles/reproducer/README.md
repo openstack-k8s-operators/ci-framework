@@ -7,6 +7,7 @@ None
 ## Parameters
 * `cifmw_reproducer_basedir`: (String) Base directory. Defaults to `cifmw_basedir`, which defaults to `~/ci-framework-data`.
 * `cifmw_reproducer_compute_repos`: (List[mapping]) List of yum repository that must be deployed on the compute nodes during their creation. Defaults to `[]`.
+* `cifmw_reproducer_play_extravars`: (List[string]) List of extra-vars you want to pass down to the EDPM deployment playbooks. Defaults to `[]`.
 * `cifmw_reproducer_kubecfg`: (String) Path to the CRC kubeconfig file. Defaults to the image_local_dir defined in the cifmw_libvirt_manager_configuration dict.
 * `cifmw_reproducer_repositories`: (List[mapping]) List of repositories you want to synchronize from your local machine to the ansible controller.
 * `cifmw_reproducer_run_job`: (Bool) Run actual CI job. Defaults to `true`.
