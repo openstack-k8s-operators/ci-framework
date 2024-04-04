@@ -99,43 +99,67 @@
         - "ansible-{{ job_id }}.log"
         - "ansible-content-provider-bootstrap.log"
 
-    - name: Run pre-ci-play
-      tags:
-        - bootstrap
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-pre-ci-{{ job_id }}.log"
-        ANSIBLE_HOST_KEY_CHECKING: "false"
-      no_log: true
-      ansible.builtin.command:
-        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/"
-        cmd: >-
-          ansible-playbook
-          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          pre-ci-play.yml
+    - name: Generate and run scripts
+      vars:
+        _home: "/home/zuul"
+        run_directory: "{{ _home }}/src/github.com/openstack-k8s-operators/ci-framework/"
+      block:
+        - name: Generate pre-ci-play script
+          vars:
+            exports:
+              ANSIBLE_LOG_PATH: "~/ansible-pre-ci-{{ job_id }}.log"
+              ANSIBLE_HOST_KEY_CHECKING: "false"
+            playbook: "pre-ci-play.yml"
+            default_extravars: []
+            extravars: []
+          ansible.builtin.template:
+            dest: "{{ _home }}/01-pre-ci-play.sh"
+            mode: "0755"
+            src: "script.sh.j2"
 
-    - name: Run content-provider
-      when:
-        - (operator_content_provider | default(false) | bool) or (openstack_content_provider | default(false) | bool)
-        - cifmw_reproducer_run_content_provider | bool
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-content-provider-{{ job_id }}.log"
-      no_log: true
-      ansible.builtin.command:
-        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook
-          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          {{ job_id }}_content-provider.yml
+        - name: Generate content-provided script
+          vars:
+            exports:
+              ANSIBLE_LOG_PATH: "~/ansible-content-provider-{{ job_id }}.log"
+            playbook: "{{ job_id }}_content-provider.yml"
+            default_extravars: []
+            extravars: []
+          ansible.builtin.template:
+            dest: "{{ _home }}/02-content-provider.sh"
+            mode: "0755"
+            src: "script.sh.j2"
 
-    - name: Run job
-      when:
-        - cifmw_reproducer_run_job | bool
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-ci-job-{{ job_id }}.log"
-      no_log: true
-      ansible.builtin.command:
-        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook
-          -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          {{ job_id }}_play.yml --flush-cache
+        - name: Generate ci-job script
+          vars:
+            exports:
+              ANSIBLE_LOG_PATH: "~/ansible-ci-job-{{ job_id }}.log"
+            playbook: "{{ job_id }}_play.yml"
+            default_extravars: []
+            extravars: []
+          ansible.builtin.template:
+            dest: "{{ _home }}/03-run-job.sh"
+            mode: "0755"
+            src: "script.sh.j2"
+
+        - name: Run pre-ci-play
+          tags:
+            - bootstrap
+          no_log: true
+          ansible.builtin.command:
+            cmd: "{{ _home }}/01-pre-ci-play.sh"
+
+        - name: Run content-provider
+          when:
+            - (operator_content_provider | default(false) | bool) or
+              (openstack_content_provider | default(false) | bool)
+            - cifmw_reproducer_run_content_provider | bool
+          no_log: true
+          ansible.builtin.command:
+            cmd: "{{ _home }}/02-content-provider.sh"
+
+        - name: Run job
+          when:
+            - cifmw_reproducer_run_job | bool
+          no_log: true
+          ansible.builtin.command:
+            cmd: "{{ _home }}/03-run-job.sh"
