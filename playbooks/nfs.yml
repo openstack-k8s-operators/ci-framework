@@ -58,13 +58,25 @@
         _nfs_network_name: "{{ cifmw_nfs_network | default('storage') }}"
         _nfs_host: "{{ groups[cifmw_nfs_target | default('computes')][0] | default('') }}"
       ansible.builtin.set_fact:
-        _nfs_network_range: >-
+        cifmw_nfs_network_range: >-
           {{
             crc_ci_bootstrap_networking.networks[_nfs_network_name].range
           }}
-        _nfs_ip: >-
+        cifmw_nfs_ip: >-
           {{
             crc_ci_bootstrap_networking.instances[_nfs_host].networks[_nfs_network_name].ip
+          }}
+
+    - name: Store nfs network vars
+      delegate_to: controller
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/parameters/nfs-params.yml"
+        content: >-
+          {{
+            {
+            'cifmw_nfs_ip': cifmw_nfs_ip,
+            'cifmw_nfs_network_range': cifmw_nfs_network_range
+            } | to_nice_yaml
           }}
 
     - name: Add nfs ports to firewall
@@ -76,7 +88,7 @@
           - "2049"
           - "111"
         jump: "ACCEPT"
-        source: "{{ _nfs_network_range }}"
+        source: "{{ cifmw_nfs_network_range }}"
         protocol: "{{ item }}"
       loop:
         - tcp
@@ -87,7 +99,7 @@
         path: /etc/nfs.conf
         section: nfsd
         option: host
-        value: "{{ _nfs_ip }}"
+        value: "{{ cifmw_nfs_ip }}"
         backup: true
 
     - name: Enable and restart nfs-server service
@@ -99,7 +111,7 @@
     - name: Add shares to /etc/exports
       ansible.builtin.lineinfile:
         path: /etc/exports
-        line: "/data/{{ item }} {{ _nfs_network_range }}(rw,sync,no_root_squash)"
+        line: "/data/{{ item }} {{ cifmw_nfs_network_range }}(rw,sync,no_root_squash)"
       loop: "{{ cifmw_nfs_shares }}"
       register: _export_shares
 
