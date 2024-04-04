@@ -13,7 +13,7 @@ cd ${DOCS_DIR}/source
 SITE_PACKAGES=$(python -c 'import site; print(site.getsitepackages()[0])')
 # install the cifmw collection from source without dependencies (removes the
 # need for any symlink)
-ansible-galaxy collection install -U -n ../.. -p "${SITE_PACKAGES}"
+ansible-galaxy collection install -U ../.. -p "${SITE_PACKAGES}"
 
 make clean
 make html
