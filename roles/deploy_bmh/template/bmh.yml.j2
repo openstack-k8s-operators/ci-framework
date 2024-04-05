@@ -1,42 +1,28 @@
-{%- for node in baremetal_nodes if node.split('-')[0] not in [ 'crc', 'controller', 'ocp' ]      %}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ node }}-bmc-secret
-  namespace: {{ cimfw_deploy_bmh_namespace }}
-type: Opaque
-stringData:
-  username: {{ baremetal_nodes[node]['username'] }}
-  password: {{ baremetal_nodes[node]['password'] }}
-
 ---
 apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 metadata:
-  name: {{ node }}
+  name: {{ node_name }}
   namespace: {{ cimfw_deploy_bmh_namespace }}
+{%- if cimfw_deploy_bmh_disable_inspection %}
+  annotations:
+    inspect.metal3.io: "disabled"
+{% endif %}
 labels:
   app: openstack
-  workload: {{ node.split('-')[0] }}
+  workload: {{ node_name.split('-')[0] }}
 spec:
   bmc:
-{# TODO
-   we'll have to build the URI address from scratch when
-   we have a proper redshift support in ci-framework
-#}
-    address: {{ baremetal_nodes[node]['connection'] }}
-    credentialsName: {{ node }}-bmc-secret
+    address: {{ node_data['connection'] }}
+    credentialsName: {{ node_name }}-bmc-secret
     disableCertificateVerification: {{ cimfw_deploy_bmh_disable_certificate_validation }}
-{% for nic in baremetal_nodes[node]['nics'] if nic['network'] == cimfw_deploy_bmh_boot_interface %}
+{% for nic in node_data['nics'] if nic['network'] == cimfw_deploy_bmh_boot_interface %}
   bootMACAddress: {{ nic.mac }}
-{% endfor                                                                                        %}
-  bootMode: {{ baremetal_nodes[node]['boot_mode'] }}
+{% endfor                                                                            %}
+  bootMode: {{ node_data['boot_mode'] }}
   online:
-{%- if baremetal_nodes[node]['status'] == "running"                                              %}
+{%- if node_data['status'] == "running"                                              %}
  true
-{% else                                                                                          %}
+{% else                                                                              %}
  false
-{% endif                                                                                         %}
-
-{% endfor                                                                                        %}
+{% endif                                                                             %}
