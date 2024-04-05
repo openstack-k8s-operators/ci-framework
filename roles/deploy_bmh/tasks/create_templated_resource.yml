@@ -1,0 +1,32 @@
+---
+- name: Generate and apply the templated CR
+  vars:
+    _manifest_file: >-
+      {{
+        [
+          cimfw_deploy_bmh_dest_dir,
+          template_name+ '-' + node_name + '.yml'
+        ] | path_join
+      }}
+  block:
+    - name: Create the templates CR files
+      ansible.builtin.copy:
+        content: >-
+          {{
+            lookup('template', 'template/' + template_name + '.yml.j2') | from_yaml |
+            combine(manifest_patch | default({}), recursive=true)|
+            to_nice_yaml
+          }}
+        dest: "{{ _manifest_file }}"
+        mode: "0644"
+
+    - name: Apply the generated CRs
+      when:
+        - cimfw_deploy_bmh_apply_cr
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        wait: true
+        src: "{{ _manifest_file }}"

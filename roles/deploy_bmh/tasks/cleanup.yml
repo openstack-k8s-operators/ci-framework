@@ -14,9 +14,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Get the BM manifests
+  ansible.builtin.find:
+    paths: "{{ cimfw_deploy_bmh_dest_dir }}"
+    patterns: "*.yml"
+  register: _bmh_manifests_find
+
 - name: Removing resources if deployed
   when:
-    - cimfw_deploy_bmh_dest_file is file
     - cimfw_deploy_bmh_apply_cr
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -24,9 +29,11 @@
     context: "{{ cifmw_openshift_context | default(omit) }}"
     state: absent
     wait: true
-    src: "{{ cimfw_deploy_bmh_dest_file }}"
+    src: "{{ item.path }}"
+  loop: "{{ _bmh_manifests_find.files | default([]) }}"
 
-- name: Delete CR file
+- name: Delete CR files
   ansible.builtin.file:
     path: "{{ cimfw_deploy_bmh_dest_file }}"
     state: absent
+  loop: "{{ _bmh_manifests_find.files | default([]) }}"

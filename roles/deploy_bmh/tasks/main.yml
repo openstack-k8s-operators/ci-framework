@@ -14,31 +14,60 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Generate BMH CR
-  when: cimfw_deploy_bmh_parameters_file is file
+- name: Load baremetal hosts information from file
+  when:
+    - cimfw_deploy_bmh_parameters_file is file
+    - baremetal_hosts is not defined
+  ansible.builtin.include_vars:
+    file: "{{ cimfw_deploy_bmh_parameters_file }}"
+
+- name: Set baremetal hosts facts
+  ansible.builtin.set_fact:
+    cifmw_deploy_bmh_bm_hosts: >-
+      {{
+        baremetal_hosts | default({}) | dict2items |
+        rejectattr('key', 'in', ['crc', 'controller', 'ocp']) |
+        items2dict
+      }}
+
+- name: Generate CRs
+  when:
+    - cifmw_deploy_bmh_bm_hosts | length > 0
   block:
-    - name: Generate variables from parameters file
-      ansible.builtin.include_vars:
-        file: "{{ cimfw_deploy_bmh_parameters_file }}"
     - name: Create destination directory
       ansible.builtin.file:
-        path: "{{ cimfw_deploy_bmh_dest_file | dirname }}"
+        path: "{{ cimfw_deploy_bmh_dest_dir }}"
         state: directory
         mode: "0755"
-    - name: Create the CR file
-      ansible.builtin.template:
-        src: template/bmh.yml.j2
-        dest: "{{ cimfw_deploy_bmh_dest_file }}"
-        mode: "0644"
 
-- name: Apply BMH CR
-  when:
-    - cimfw_deploy_bmh_dest_file is file
-    - cimfw_deploy_bmh_apply_cr
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    state: present
-    wait: true
-    src: "{{ cimfw_deploy_bmh_dest_file }}"
+    - name: Build and create Secret CRs
+      vars:
+        node_name: "{{ item.key }}"
+        node_data: "{{ item.value }}"
+        template_name: "bmh-secret"
+        manifest_patch: >-
+          {{
+            cifmw_deploy_bmh_patch_secret | default({}) |
+            combine(cifmw_deploy_bmh_node_patch_secret[node_name] | default({}), recursive=true)
+          }}
+      ansible.builtin.include_tasks:
+        file: "create_templated_resource.yml"
+      loop: "{{ cifmw_deploy_bmh_bm_hosts | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Build and create BMH CRs
+      vars:
+        node_name: "{{ item.key }}"
+        node_data: "{{ item.value }}"
+        template_name: "bmh"
+        manifest_patch: >-
+          {{
+            cifmw_deploy_bmh_patch | default({}) |
+            combine(cifmw_deploy_bmh_node_patch[node_name] | default({}), recursive=true)
+          }}
+      ansible.builtin.include_tasks:
+        file: "create_templated_resource.yml"
+      loop: "{{ cifmw_deploy_bmh_bm_hosts | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
