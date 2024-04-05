@@ -37,6 +37,8 @@
 - name: Run tasks only if container does not exist
   when:
     - _vbmc_container_info.containers | length == 0
+  vars:
+    dest_dir: "{{ cifmw_virtualbmc_sshkey_path | dirname }}"
   block:
     - name: Create ssh key for VBMC
       register: _vbmc_key
@@ -58,8 +60,6 @@
         state: present
 
     - name: Create vbmc server configuration file
-      vars:
-        dest_dir: "{{ cifmw_virtualbmc_sshkey_path | dirname }}"
       ansible.builtin.copy:
         dest: "{{ dest_dir }}/virtualbmc.conf"
         content: |
@@ -67,14 +67,28 @@
           server_port={{ cifmw_virtualbmc_daemon_port }}
         mode: "0644"
 
-    - name: Create and start vbmc container
-      vars:
-        dest_dir: "{{ cifmw_virtualbmc_sshkey_path | dirname }}"
-      containers.podman.podman_container:
-        image: "{{ cifmw_virtualbmc_image }}"
-        name: "{{ cifmw_virtualbmc_container_name }}"
-        network: host
-        state: started
-        volumes:
-          - "{{ cifmw_virtualbmc_sshkey_path }}:{{ cifmw_virtualbmc_ipmi_key_path }}:ro,Z"
-          - "{{ dest_dir }}/virtualbmc.conf:/etc/virtualbmc/virtualbmc.conf:ro,Z"
+    - name: Create undying vbmcd service script
+      ansible.builtin.copy:
+        dest: "{{ dest_dir }}/vbmcd.sh"
+        content: |-
+          #!/bin/sh
+          while true; do
+            /usr/local/bin/vbmcd --foreground;
+            echo "Dying... restarting vbmcd"
+            sleep 1;
+          done
+        mode: "0755"
+
+- name: Create and start vbmc container
+  vars:
+    dest_dir: "{{ cifmw_virtualbmc_sshkey_path | dirname }}"
+  containers.podman.podman_container:
+    image: "{{ cifmw_virtualbmc_image }}"
+    name: "{{ cifmw_virtualbmc_container_name }}"
+    network: host
+    state: started
+    command: "/vbmcd.sh"
+    volumes:
+      - "{{ cifmw_virtualbmc_sshkey_path }}:{{ cifmw_virtualbmc_ipmi_key_path }}:ro,Z"
+      - "{{ dest_dir }}/virtualbmc.conf:/etc/virtualbmc/virtualbmc.conf:ro,Z"
+      - "{{ dest_dir }}/vbmcd.sh:/vbmcd.sh:ro,Z"
