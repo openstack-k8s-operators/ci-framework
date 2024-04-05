@@ -14,11 +14,21 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Use ansible_fqdn when ceph_spec_fqdn parameter is true
+  when: cifmw_cephadm_ceph_spec_fqdn
+  ansible.builtin.set_fact:
+    ceph_hostname_var: 'ansible_fqdn'
+
+- name: Use ansible_hostname when ceph_spec_fqdn parameter is false
+  when: not cifmw_cephadm_ceph_spec_fqdn
+  ansible.builtin.set_fact:
+    ceph_hostname_var: 'ansible_hostname'
+
 - name: Build placement string
   block:
     - name: Collect the host and build the resulting host list
       ansible.builtin.set_fact:
-        _hosts: "{{ _hosts|default([]) + [ hostvars[item]['ansible_hostname'] ] }}"
+        _hosts: "{{ _hosts|default([]) + [ hostvars[item][ceph_hostname_var] ] }}"
       with_items: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
 
     - name: Collect the target hosts
@@ -29,10 +39,27 @@
 - name: Get ceph_cli
   ansible.builtin.include_tasks: ceph_cli.yml
 
+- name: Create a Ceph MDS spec
+  ansible.builtin.template:
+    src: templates/ceph_mds.yml.j2
+    dest: "{{ cifmw_ceph_mds_spec_path }}"
+    mode: '0644'
+    force: true
+
+- name: Get ceph_cli
+  ansible.builtin.include_tasks: ceph_cli.yml
+  vars:
+    mount_spec: true
+    cifmw_cephadm_spec: "{{ cifmw_ceph_mds_spec_path }}"
+
 - name: Apply cephfs volume
   ansible.builtin.command: |
     {{ cifmw_cephadm_ceph_cli }} fs volume create {{ cifmw_cephadm_cephfs_name }} '--placement={{ placement }}'
   changed_when: false
+  become: true
+
+- name: Apply the MDS spec
+  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch apply --in-file {{ cifmw_cephadm_container_spec }}"
   become: true
 
 # waiting for https://github.com/ceph/ceph/pull/53108
