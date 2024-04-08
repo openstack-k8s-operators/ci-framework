@@ -1,0 +1,52 @@
+---
+- name: Parse Zuul changes
+  with_items: "{{ zuul['items'] }}"
+  when:
+    - zuul is defined
+    - "'change_url' in item"
+    - '"-distgit" not in item.project'
+    - item.project.name not in cifmw_bop_change_list|default([]) | map(attribute='project') |list
+    - >-
+        cifmw_bop_release_mapping[cifmw_bop_openstack_release] in item.branch or
+        (cifmw_bop_openstack_release is not defined and item.branch == zuul.override_checkout | default(zuul.branch)) or
+        (cifmw_bop_osp_release is defined and cifmw_bop_osp_release in item.branch) or
+        item.project.name in cifmw_bop_branchless_projects
+  ansible.builtin.set_fact:
+    cacheable: true
+    cifmw_bop_change_list:
+      "{{ cifmw_bop_change_list|default([]) +
+          [{'host': item.change_url | regex_search('(^https?://.*?)/', '\\1') | first,
+            'project': item.project.name,
+            'branch': item.branch,
+            'change': item.change,
+            'refspec': '/'.join(['refs', 'changes',
+                                  item.change[-2:],
+                                  item.change,
+                                  item.patchset]) }] }}"
+
+
+- name: Print Zuul change list
+  ansible.builtin.debug:
+    var: cifmw_bop_change_list
+
+- name: Build DLRN packages from zuul changes
+  when:
+    - '"-distgit" not in _change.project'
+    - _change.project not in cifmw_bop_skipped_projects
+    - >-
+        cifmw_bop_release_mapping[cifmw_bop_openstack_release] in _change.branch or
+        (zuul.project.name | default("") == cifmw_bop_rdoinfo_repo_name) or
+        (cifmw_bop_osp_release is defined and cifmw_bop_osp_release in _change.branch) or
+        _change.project in cifmw_bop_branchless_projects
+  loop: "{{ cifmw_bop_change_list }}"
+  loop_control:
+    loop_var: "_change"
+  ansible.builtin.include_tasks: run_dlrn.yml
+
+- name: Build DLRN packages from Local change
+  when: cifmw_bop_openstack_project_path | length > 0
+  vars:
+    _change:
+      branch: "{{ cifmw_bop_openstack_release }}"
+      project: "{{ cifmw_bop_openstack_project_path | basename }}"
+  ansible.builtin.include_tasks: run_dlrn.yml
