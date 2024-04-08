@@ -38,6 +38,7 @@ EXAMPLES = r"""
   ansible.builtin.file:
     path: "{{ ansible_user_dir }}/make_installyamls/tasks"
     state: directory
+    mode: "0644"
 
 - name: Generate make tasks
   generate_make_tasks:
