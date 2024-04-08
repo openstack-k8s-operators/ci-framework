@@ -4,7 +4,7 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 ## Parameters
 
 * `cifmw_bop_dlrn_deps`: (List) A list of DLRN project system dependencies.
-* `cifmw_bop_build_repo_dir`: (String) The directory where the DLRN repo is built. Defaults to `~/`.
+* `cifmw_bop_build_repo_dir`: (String) The directory where the DLRN repo is built. Defaults to `{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}/logs`.
 * `cifmw_bop_dlrn_repo_url`: (String) The URL of the DLRN repository.
 * `cifmw_bop_dlrn_from_source`: (String) Install DLRN from git. Defaults to `False`.
 * `cifmw_bop_rdoinfo_repo_url`: (String) The URL of the rdoinfo repository that contains the project definitions for DLRN.
@@ -19,14 +19,58 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 * `cifmw_bop_gating_repo_dest`: (String) The path of directory to store gating repo file and repo metadata.
   Defaults to `cifmw_bop_build_repo_dir` var.
 * `cifmw_bop_dlrn_cleanup`: (Boolean) Clean up the DLRN artifacts. Defaults to `False`.
-
-### TODO
-- Allow building multiple openstack projects
-- Build RDO dist-git changes
-- Parse gerrit review and clone the respective project and build it
-- Build rpm from Zuul Depends On
+* `cifmw_bop_branchless_projects`: List of project does not have stable branches.
+* `cifmw_bop_skipped_projects`: List of projects on which DLRN build needs to be skipped.
+* `cifmw_bop_change_list`: Zuul Change list constructed while using Depends-On in CI to build rpm packages using DLRN.
+* `cifmw_bop_release_mapping`: A list of openstack release names and their respective branch names.
 
 ## Examples
+
+### Construct cifmw_bop_change_list list
+
+cifmw_bop_change_list var contains a list of dict containing branch, change number,
+host, project name and change refspec. It is used by build_openstack_packages to
+download the spec change of a project and build rpm out of that.
+
+cifmw_bop_change_list is constructed from a OpenDev Depends-On based on
+following conditions:
+- Depends-On project is not in cifmw_bop_skipped_projects list.
+- Depends-On project is not a RDO project.
+- Zuul override-checkout branch should be similar to project branch.
+  (It is useful in case of downstream).
+- Depends-On project branch is in cifmw_bop_release_mapping.
+
+We want to build DLRN rpm packages from following reviews:
+* https://review.opendev.org/c/openstack/neutron/+/913763 - This code
+  review is proposed against stable/2023.1 branch. If we open this url, we can
+  get the refspec from the downstream the patch section.
+
+```
+cifmw_bop_change_list:
+  - "branch": "stable/2023.1"
+    "change": "913763"
+    "host": "https://review.opendev.org"
+    "project": "openstack/neutron"
+    "refspec": "refs/changes/63/913763/3"
+```
+* Extend the above cifmw_bop_change_list change to include
+  https://github.com/openstack-k8s-operators/tcib/pull/162 also.
+```
+cifmw_bop_change_list:
+  - "branch": "stable/2023.1"
+    "change": "913763"
+    "host": "https://review.opendev.org"
+    "project": "openstack/neutron"
+    "refspec": "refs/changes/63/913763/3"
+
+  - "branch": "main",
+    "change": "162",
+    "host": "https://github.com"
+    "project": "openstack-k8s-operators/tcib"
+    "refspec": "refs/changes/62/162/60ad76dbeacb491c0bddca419c61d398e83fe1af"
+```
+
+### Run the role
 
 ```
 - hosts: localhost
