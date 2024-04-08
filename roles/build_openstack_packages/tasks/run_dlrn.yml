@@ -14,15 +14,25 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Set RDO release for master openstack release
-  when: cifmw_bop_openstack_release in ['master']
+- name: Set proper branch name
   ansible.builtin.set_fact:
-    cifmw_bop_rdo_release: "rpm-{{ cifmw_bop_openstack_release }}"
+    _project_branch: "{{ cifmw_bop_openstack_release }}"
+  when: _change.branch != cifmw_bop_openstack_release
+
+- name: Set proper branch name
+  ansible.builtin.set_fact:
+    _project_branch: "{{ _change.branch }}"
+  when: _change.branch == cifmw_bop_openstack_release
+
+- name: Set RDO release for master openstack release
+  when: _project_branch in ['master']
+  ansible.builtin.set_fact:
+    cifmw_bop_rdo_release: "rpm-{{ _project_branch }}"
 
 - name: Set RDO release for non-master openstack release
-  when: cifmw_bop_openstack_release not in ['master']
+  when: _project_branch not in ['master']
   ansible.builtin.set_fact:
-    cifmw_bop_rdo_release: "{{ cifmw_bop_openstack_release }}-rdo"
+    cifmw_bop_rdo_release: "{{ _project_branch }}-rdo"
 
 - name: Make sure /usr/share/rhn/RHN-ORG-TRUSTED-SSL-CERT exists (RHEL)
   ansible.builtin.shell:
@@ -35,6 +45,13 @@
   when: ansible_distribution in ['RedHat']
 
 - name: Override projects.ini settings
+  vars:
+    _source_branch: >-
+      {% if _change.project in cifmw_bop_branchless_projects -%}
+      'master'
+      {%- else -%}
+      {{ cifmw_bop_release_mapping[_project_branch] }}
+      {%- endif -%}
   ansible.builtin.lineinfile:
     dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/projects.ini'
     regexp: '{{ item.regexp }}'
@@ -42,9 +59,9 @@
   with_items:
     - {regexp: 'baseurl=.*', line: 'baseurl={{ cifmw_bop_dlrn_baseurl }}'}
     - {regexp: 'distro=.*', line: 'distro={{ cifmw_bop_rdo_release }}'}
-    - {regexp: 'source=.*', line: 'source={{ cifmw_bop_openstack_release }}'}
+    - {regexp: 'source=.*', line: 'source={{ _source_branch }}'}
 
-- name: Mapp project
+- name: Map project
   block:
     - name: Map project name to DLRN project name
       register: project_name_mapped
@@ -55,7 +72,7 @@
           set -xeo pipefail
           # {{ cifmw_bop_rdoinfo_repo_name }}/{{ cifmw_bop_rdoinfo_repo_name.split('info')[0] }}-full.yml will
           # return rdo-full.yml and for downstream is osp-full.yml.
-          rdopkg findpkg -s '{{ cifmw_bop_openstack_project_path | basename }}' \
+          rdopkg findpkg -s '{{ _change.project | basename }}' \
             -i {{ cifmw_bop_rdoinfo_repo_name }}/{{ cifmw_bop_rdoinfo_repo_name.split('info')[0] }}-full.yml | \
             awk '/^name/{print $2}; {print "findpkg: " $0 > "/dev/stderr"}'
       changed_when: false
@@ -76,25 +93,59 @@
 - name: Mapping succeeded
   when: project_name_mapped is success
   block:
-    - name: Append project name to package list
-      ansible.builtin.set_fact:
-        artg_rdo_packages: "{{ project_name_mapped.stdout }}"
-
     - name: Create data directory if doesn't exist yet
       ansible.builtin.file:
         path: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/"
         state: directory
 
-    - name: "Check for existing {{ project_name_mapped.stdout }}"
+    - name: "Check for existing {{ project_name_mapped.stdout }}" # noqa: name[template]
       ansible.builtin.stat:
         path: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}/.git'
       register: repo_status
 
-    - name: "Clone {{ project_name_mapped.stdout }}"  # noqa: latest[git]
+    - name: "Sync {{ project_name_mapped.stdout }} from local repo" # noqa: name[template]
+      when:
+        - cifmw_bop_openstack_project_path | length > 0
+        - not repo_status.stat.exists
       ansible.builtin.git:
         accept_hostkey: true
         repo: '{{ cifmw_bop_openstack_project_path }}'
         dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
+        version: '{{ _change.branch }}'
+
+    - name: "Clone {{ project_name_mapped.stdout }} from Github" # noqa: name[template]
+      when:
+        - cifmw_bop_openstack_project_path | length == 0
+        - not repo_status.stat.exists
+        - "'host' in _change"
+        - "'github.com' in _change.host"
+      ansible.builtin.git:
+        repo: '{{ _change.host }}/{{ _change.project }}'
+        dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
+        refspec: "+refs/pull/*:refs/remotes/origin/pr/*"
+        version: 'origin/pr/{{ _change.change }}/head'
+
+    - name: "Clone Openstack {{ project_name_mapped.stdout }}" # noqa: name[template]
+      when:
+        - cifmw_bop_openstack_project_path | length == 0
+        - not repo_status.stat.exists
+        - "'host' in _change"
+        - "'opendev' in _change.host"
+      ansible.builtin.git:
+        repo: '{{ _change.host }}/{{ _change.project }}'
+        dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
+        refspec: "{{ _change.refspec }}"
+        version: 'FETCH_HEAD'
+
+    - name: Find the last commit from the clonned repo
+      register: _commit
+      ansible.builtin.command:
+        cmd: git show-ref --head --hash head # noqa: command-instead-of-module
+        chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}"
+
+    - name: Print the last commit of the git repo
+      ansible.builtin.debug:
+        var: _commit.stdout
 
     - name: Ensure distgit repo is absent, DLRN takes care of cloning based on config
       ansible.builtin.file:
