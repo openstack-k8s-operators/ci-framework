@@ -33,6 +33,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_fixed_networks`: (List) Network names you don't want to prefix with `cifmw-`. It will be concatenated with cifmw_libvirt_manager_fixed_networks_defaults. Defaults to`[]`.
 * `cifmw_libvirt_manager_reproducer_key_type`: (String) Type of ssh key that will be injected into the controller VMs. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
 * `cifmw_libvirt_manager_reproducer_key_size`: (Integer) Size of the ecdsa ssh keys that will be injected into the controller VMs. Defaults to `cifmw_ssh_keysize` which default to 521.
+* `cifmw_libvirt_manager_configuration_patch(.)*`: (Dict) Structure describing the patch to combine on top of `cifmw_libvirt_manager_configuration`.
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 
@@ -149,6 +150,13 @@ In order to do so, you have to provide specific variables:
   * `name`: (String) Network or bridge name. Mandatory.
   * `cidr`: (String) Network CIDR. Mandatory.
 * `cifmw_libvirt_manager_net_prefix_add`: (Bool) Toggle this to `true` if the network name needs to get the `cifmw-` prefix (advanced usage). Optional. Defaults to `true`.
+
+## Layout patching
+This role allows to use a base layout, given by `cifmw_libvirt_manager_configuration` and patch it
+with other values, ie. patch it for another environment, by declaring variables prefixed that matches the
+`^cifmw_libvirt_manager_configuration_patch.*` regex. Each of those variables, after sorting them by name,
+will be combined on top of the original `cifmw_libvirt_manager_configuration` and that will be the final
+layout used by the role.
 
 ### Example of a task
 
