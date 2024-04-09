@@ -1,0 +1,40 @@
+---
+- name: Ensure we pass needed parameter
+  ansible.builtin.assert:
+    that:
+      - cifmw_use_libvirt is defined
+      - cifmw_use_libvirt | bool
+    msg: >-
+      Please ensure you pass "cifmw_use_libvirt: true" to the
+      deployment!
+    quiet: true
+
+- name: Verify ansible_host is defined in inventory
+  when: cifmw_target_host != 'localhost'
+  delegate_to: localhost
+  ansible.builtin.assert:
+    that: ansible_host != 'localhost'
+    msg: >-
+      Please ensure you define your ansible_host in your inventory file
+      https://ci-framework.readthedocs.io/en/latest/quickstart/03_deploy_infra.html#inventory-file
+    quiet: true
+
+- name: Verify ansible_connection is set to "local" in provided inventory
+  delegate_to: localhost
+  ansible.builtin.assert:
+    that: ansible_connection == 'local'
+    msg: >-
+      Please ensure you define your ansible_connection to local for localhost in your inventory file
+      https://ci-framework.readthedocs.io/en/latest/quickstart/03_deploy_infra.html#inventory-file
+    quiet: true
+
+- name: Verify we are running on a supported hypervisor OS version
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution in cifmw_reproducer_supported_hypervisor_os
+      - ansible_distribution_version | float  >= cifmw_reproducer_supported_hypervisor_os[ansible_distribution].minimum_version
+    msg: >-
+      Please ensure host: {{ cifmw_target_host }} is running a supported OS.
+      {{ ansible_distribution_version }} is less than the minimum supported version of
+      {{ cifmw_reproducer_supported_hypervisor_os[ansible_distribution].minimum_version }}
+      https://ci-framework.readthedocs.io/en/latest/quickstart/02_prepare_env.html#tested-environment
