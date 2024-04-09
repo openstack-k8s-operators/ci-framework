@@ -1,0 +1,47 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: "Set custom resource definition path for {{ hook.name }}"
+  when:
+    - hook.source is defined
+  ansible.builtin.set_fact:
+    crd_path: >-
+      {%- if hook.source is not ansible.builtin.abs -%}
+      {{
+        (
+          ansible.builtin.role_path,
+          '../../hooks/crds',
+          hook.src
+        ) | ansible.builtin.path_join | ansible.builtin.realpath
+      }}
+      {%- else -%}
+      {{ hook.source | ansible.builtin.realpath}}
+      {%- endif -%}
+
+- name: "Manage the k8s object"
+  kubernetes.core.k8s:
+    definition: "{{ hook.definition | default(omit) }}"
+    kind: "{{ hook.kind | default(omit) }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    name: "{{ hook.resource_name | default(omit) }}"
+    src: "{{ crd_path | default(omit) }}"
+    state: "{{ hook.state | default(present) }}"
+    validate:
+      fail_on_error: true
+    wait: true
+    wait_condition: "{{ hook.wait_condition | default(omit) }}"
+    validate_certs: "{{ hook.validate_certs | default(false) }}"
