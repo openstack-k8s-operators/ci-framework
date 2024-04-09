@@ -6,7 +6,7 @@ The following operating systems were successfully tested:
 
 - Fedora Core 38, 39 (for laptop/desktop)
 - CentOS Stream 9 (for the hypervisor, laptop/desktop)
-- Red Hat Enterprise Linux 9.2 (for the hypervisor, laptop/desktop)
+- Red Hat Enterprise Linux 9.4 (for the hypervisor, laptop/desktop)
 
 ## On your laptop/desktop
 
@@ -27,7 +27,7 @@ On the hypervisor, please ensure you have:
 - a non-root user, with passwordless SSH access (use SSH keys)
 - `sudo` configuration allowing that non-root user to run any random command, with or without password
 - at least 400G of free space in /home
-- an up-to-date CentOS Stream 9 or RHEL-9.2 system
+- an up-to-date CentOS Stream 9 or RHEL-9.4 system
 
 Note: if you chose to require a password for `sudo`, please ensure to pass the `-K` option to any
 `ansible-playbook` command running against the hypervisor.

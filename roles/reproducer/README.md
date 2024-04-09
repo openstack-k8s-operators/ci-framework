@@ -5,6 +5,7 @@ Role to deploy close to CI layout on a hypervisor.
 None
 
 ## Parameters
+
 * `cifmw_reproducer_basedir`: (String) Base directory. Defaults to `cifmw_basedir`, which defaults to `~/ci-framework-data`.
 * `cifmw_reproducer_compute_repos`: (List[mapping]) List of yum repository that must be deployed on the compute nodes during their creation. Defaults to `[]`.
 * `cifmw_reproducer_play_extravars`: (List[string]) List of extra-vars you want to pass down to the EDPM deployment playbooks. Defaults to `[]`.
@@ -17,6 +18,7 @@ None
 * `cifmw_reproducer_hp_rhos_release`: (Bool) Allows to consume rhos-release on the hypervisor. Defaults to `false`.
 * `cifmw_reproducer_dnf_tweaks`: (List) Options you want to inject in dnf.conf, both on controller-0 and hypervisor. Defaults to `[]`.
 * `cifmw_reproducer_skip_fetch_repositories`: (Bool) Skip fetching repositories from zuul var and simply copy the code from the ansible controller. Defaults to `false`.
+* `cifmw_reproducer_supported_hypervisor_os`: (List) List of supported hypervisor operating systems and their minimum version.
 
 ### run_job and run_content_provider booleans and risks.
 
