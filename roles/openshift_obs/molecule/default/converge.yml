@@ -1,0 +1,63 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+
+  vars:
+    cifmw_path: >-
+      {{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{
+      ansible_user_dir }}/bin:{{ ansible_env.PATH }}
+    cifmw_openshift_kubeconfig: >-
+      {{
+        (ansible_user_dir, '.crc/machines/crc/kubeconfig') |
+        ansible.builtin.path_join
+      }}
+
+  tasks:
+    - name: Add crc hostname with it's IP to /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "192.168.130.11 crc"
+
+    - name: Add the crc host dynamically
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
+    - name: Deploy Cluster observability Operator
+      ansible.builtin.include_role:
+        name: openshift_obs
+
+    - name: Gather information about observability operator.
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Operator
+        namespace: openshift-operators
+        name: observability-operator.openshift-operators
+      register: _obs
+
+    - name: For debugging purpose, print the information
+      ansible.builtin.debug:
+        var: _obs
+
+    - name: Ensure the operator was deployed
+      ansible.builtin.assert:
+        that:
+          - _obs.resources | length > 0
