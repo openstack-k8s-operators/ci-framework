@@ -57,6 +57,7 @@ are shared among multiple roles:
 - `cifmw_nfs_shares`: (List) List of the shares that will be setup in the nfs server.  Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_fips_enabled`: (Bool) Specifies whether FIPS should be enabled in the deployment. Note that not all deployment methods support this functionality. Defaults to `false`.
 - `cifmw_baremetal_hosts`: (Dict) Baremetal nodes environment details. More details [here](../baremetal/01_baremetal_hosts_data.md)
+- `cifmw_deploy_obs` (Bool) Specifies whether to deploy Cluster Observability operator.
 
 ```{admonition} Words of caution
 :class: danger
