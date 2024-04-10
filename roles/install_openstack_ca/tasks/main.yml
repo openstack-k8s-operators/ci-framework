@@ -14,16 +14,20 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Get CA bundle data
+- name: Get CA bundle data with retries
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
-    cmd: 'oc get secret combined-ca-bundle -n openstack -o "jsonpath={.data.tls-ca-bundle\.pem}" --ignore-not-found'
+    cmd: 'oc get secret combined-ca-bundle -n openstack -o "jsonpath={.data.tls-ca-bundle\.pem}"'
+  retries: 10
+  delay: 3
+  until: ca_bundle_data.rc == 0
   register: ca_bundle_data
+  ignore_errors: true
 
 - name: Get CA bundle
-  when: ca_bundle_data.stdout | length > 0
+  when: ca_bundle_data.rc == 0
   ansible.builtin.set_fact:
     ca_bundle: >-
       {{ ca_bundle_data.stdout | ansible.builtin.b64decode }}
