@@ -1,10 +1,49 @@
 ---
+{% if is_molecule | default(false) %}
+- name: Prepare molecule environment
+  hosts: controller-0
+  gather_facts: true
+  tasks:
+    - name: Install required packages
+      become: true
+      ansible.builtin.package:
+        name:
+          - make
+          - podman
+          - python3
+          - python3-pip
+{% raw %}
+    - name: Check if venv exists
+      register: _venv
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/test-python"
+{% endraw %}
+    - name: Install venv
+      when:
+        - not _venv.stat.exists
+      vars:
+        src_dir: "{{ zuul.zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}"
+      community.general.make:
+{%- raw %}
+        chdir: "{{ ansible_user_dir }}/{{ src_dir }}"
+        target: setup_molecule
+
+    - name: Ensure zuul-output directory exists
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/zuul-output/logs"
+        state: directory
+        mode: "0755"
+{% endraw %}
+{% endif %}
+
 {% for play in zuul_plays %}
 - name: "Reproducer for {{ job_id }}: {{ play }}"
   vars:
     cifmw_extras:
+{% if not is_molecule | default(false) %}
       - '@~/{{ job_id }}-params/custom-params.yml'
       - '@~/{{ job_id }}-params/install-yamls-params.yml'
+{% endif %}
       - '@~/{{ job_id }}-params/reproducer_params.yml'
 {% if (operator_content_provider | bool) or (openstack_content_provider | bool) %}
       - '@~/{{ job_id }}-params/content-provider.yml'
@@ -15,5 +54,6 @@
       - cifmw_openshift_login_skip_tls_verify=true
       - cifmw_openshift_setup_skip_internal_registry_tls_verify=true
     cifmw_zuul_target_host: controller-0
+    cifmw_reproducer_molecule_env_file: ~/ci-framework-data/artifacts/parameters/zuul-params.yml
   ansible.builtin.import_playbook: {{ play }}
 {% endfor %}

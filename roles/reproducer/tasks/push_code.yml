@@ -1,19 +1,21 @@
 ---
 - name: Sync zuul content if available
   when:
-    - zuul is defined
-    - zuul.items is defined
-    - zuul.projects is defined
+    - zuul_vars.zuul is defined
+    - zuul_vars.zuul.items is defined
+    - zuul_vars.zuul.projects is defined
     - not cifmw_reproducer_skip_fetch_repositories | default(false)
   delegate_to: controller-0
   delegate_facts: true
+  vars:
+    _zuul: "{{ zuul_vars.zuul }}"
   block:
     - name: Check if repository directories already exist
       when: job_id is defined
       ansible.builtin.stat:
         path: "{{ item.project.src_dir }}"
       register: repos_dir_stats
-      with_items: "{{ zuul['items'] }}"
+      with_items: "{{ _zuul['items'] }}"
 
     - name: Ensure we are not in the job_id branch
       when:
@@ -25,7 +27,7 @@
         repo: "https://{{ item.0.project.canonical_name }}"
         version: "origin/main"
         force: true
-      loop: "{{ zuul['items'] | zip(repos_dir_stats.results) | list }}"
+      loop: "{{ _zuul['items'] | zip(repos_dir_stats.results) | list }}"
 
     - name: Fetch zuul.items repositories
       block:
@@ -38,7 +40,7 @@
             refspec: "{{ omit if _skip_refspec else repo | reproducer_refspec ~ ':' ~ job_id }}"
             version: "{{ omit if _skip_refspec else job_id }}"
             force: true
-          loop: "{{ zuul['items'] }}"
+          loop: "{{ _zuul['items'] }}"
           loop_control:
             loop_var: repo
             label: "{{ repo.project.name }}"
@@ -60,13 +62,13 @@
 
     - name: Fetch zuul.projects repositories for dependencies
       when:
-        - "repo.key not in (zuul['items'] | map(attribute='project.canonical_name'))"
+        - "repo.key not in (_zuul['items'] | map(attribute='project.canonical_name'))"
       ansible.builtin.git:
         dest: "{{ repo.value.src_dir }}"
         repo: "https://{{ repo.value.canonical_hostname }}/{{ repo.value.canonical_hostname | reproducer_gerrit_infix }}{{ repo.value.name }}"
         version: "{{ repo.value.commit }}"
         force: true
-      loop: "{{ zuul['projects'] | dict2items }}"
+      loop: "{{ _zuul['projects'] | dict2items }}"
       loop_control:
         loop_var: repo
         label: "{{ repo.key }}"
@@ -79,20 +81,21 @@
     - name: Expand cifmw_reproducer_repositories to pull code from ansible controller to controller-0
       when:
         - cifmw_reproducer_skip_fetch_repositories | default(false)
-        - zuul is defined
-        - zuul.items is defined
-        - zuul.projects is defined
+        - zuul_vars.zuul is defined
+        - zuul_vars.zuul.items is defined
+        - zuul_vars.zuul.projects is defined
         # check that the project is not alredy in the user defined
         # cifmw_reproducer_repositories value
         - repo.value.name not in _user_sources
       vars:
+        _zuul: "{{ zuul_vars.zuul }}"
         _user_sources: "{{ cifmw_reproducer_repositories | default([]) | map(attribute='src') }}"
         _repo_entry:
           src: "{{ ansible_user_dir }}/{{ repo.value.src_dir | regex_replace('/$', '') }}/"
           dest: "/home/zuul/{{ repo.value.src_dir }}"
       ansible.builtin.set_fact:
         _cifmw_reproducer_all_repositories: "{{ _cifmw_reproducer_all_repositories  + [_repo_entry] }}"
-      loop: "{{ zuul['projects'] | dict2items }}"
+      loop: "{{ _zuul['projects'] | dict2items }}"
       loop_control:
         loop_var: repo
         label: "{{ repo.key }}"

@@ -3,7 +3,7 @@
   when:
     - cifmw_job_uri is defined
   vars:
-    playbooks: "{{ zuul.playbook_context.playbooks }}"
+    playbooks: "{{ zuul_vars.zuul.playbook_context.playbooks }}"
     extracted: >-
       {{
         (playbooks |
@@ -21,6 +21,14 @@
       when:
         - cifmw_job_uri is defined
       block:
+        - name: Ensure directory exists
+          ansible.builtin.file:
+            path: "/home/zuul/{{ job_id }}-params"
+            mode: "0755"
+            state: directory
+            owner: zuul
+            group: zuul
+
         - name: Copy environment files to controller node
           tags:
             - bootstrap
@@ -53,6 +61,8 @@
             src: "content-provider.yml.j2"
 
         - name: Push extracted network data on controller-0
+          when:
+            - not is_molecule | default(false)
           tags:
             - bootstrap
           ansible.builtin.copy:
@@ -70,17 +80,11 @@
       tags:
         - bootstrap
       block:
-        - name: Get content of zuul-params.yml
-          register: zuul_params
-          ansible.builtin.slurp:
-            path: "/home/zuul/{{ job_id }}-params/zuul-params.yml"
-
         - name: Push extracted content
           vars:
             zuul_params_filtered: >-
               {{
-                (zuul_params['content'] | b64decode | from_yaml) |
-                dict2items |
+                zuul | dict2items |
                 rejectattr('key', 'equalto', 'cifmw_operator_build_output') |
                 rejectattr('key', 'equalto', 'content_provider_registry_ip') |
                 items2dict
@@ -94,10 +98,10 @@
         - always
       ansible.builtin.include_tasks: rotate_log.yml
       loop:
-        - "ansible.log"
-        - "ansible-pre-ci.log"
-        - "ansible-{{ job_id }}.log"
-        - "ansible-content-provider-bootstrap.log"
+        - "/home/zuul/ansible.log"
+        - "/home/zuul/ansible-pre-ci.log"
+        - "/home/zuul/ansible-{{ job_id }}.log"
+        - "/home/zuul/ansible-content-provider-bootstrap.log"
 
     - name: Generate and run scripts
       vars:
@@ -142,6 +146,8 @@
             src: "script.sh.j2"
 
         - name: Run pre-ci-play
+          when:
+            - not is_molecule | default(false)
           tags:
             - bootstrap
           no_log: true
