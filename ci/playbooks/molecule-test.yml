@@ -1,8 +1,14 @@
 ---
 - name: "Run ci/playbooks/molecule-test.yml"
-  hosts: controller
+  hosts: "{{ cifmw_zuul_target_host | default('controller') }}"
   gather_facts: true
   tasks:
+    - name: Load environment var if instructed to
+      when:
+        - cifmw_reproducer_molecule_env_file is defined
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_reproducer_molecule_env_file }}"
+
     - name: Run molecule
       environment:
         ANSIBLE_LOG_PATH: "{{ ansible_user_dir }}/zuul-output/logs/ansible-execution.log"
@@ -25,6 +31,9 @@
               trim(":")
             )
           }}
-      ansible.builtin.command:
+      ansible.builtin.shell:
         chdir: "{{ roles_dir }}"
-        cmd: "molecule -c {{ mol_config_dir }} test --all"
+        cmd: >-
+          set -o pipefail;
+          molecule -c {{ mol_config_dir }} test --all |
+          tee {{ ansible_user_dir }}/ci-framework-data/logs/molecule-execution.log
