@@ -128,7 +128,7 @@
       ansible.builtin.fail:
         msg: "Failing on demand {{ cifmw_deploy_architecture_stopper }}"
 
-    - name: "Build kustomized content for {{ stage.path }}"
+    - name: "Build and store kustomized content for {{ stage.path }}"
       vars:
         _output: >-
           {{
@@ -142,16 +142,29 @@
              stage['path']) |
              path_join | realpath
           }}
-      ansible.builtin.copy:
-        dest: "{{ _output }}"
-        mode: "0644"
-        content: >-
-          {{
-            lookup(
-              'kubernetes.core.kustomize',
-              dir=_chdir
-            )
-          }}
+      block:
+        - name: "Build kustomized content for {{ stage.path }}"
+          ansible.builtin.copy:
+            dest: "{{ _output }}"
+            mode: "0644"
+            content: >-
+              {{
+                lookup(
+                  'kubernetes.core.kustomize',
+                  dir=_chdir
+                )
+              }}
+
+        - name: "Store kustomized content in artifacts for {{ stage.path }}"
+          ansible.builtin.copy:
+            remote_src: true
+            src: "{{ _output }}"
+            dest: >-
+              {{
+                (cifmw_kustomize_deploy_kustomizations_dest_dir,
+                 stage['build_output'] | basename) | path_join
+              }}
+            mode: "0644"
 
     - name: Stop after building kustomization if requested
       when:
