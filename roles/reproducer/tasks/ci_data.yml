@@ -20,15 +20,14 @@
         path: "{{ _reproducer_basedir }}/parameters"
         state: directory
 
-    - name: Fetch needed artifacts
-      ansible.builtin.get_url:
-        dest: "{{ _reproducer_basedir }}/{{ item }}"
-        url: "{{ data_baseurl }}/{{ item }}"
-        force: true
-      loop:
-        - parameters/custom-params.yml
-        - parameters/install-yamls-params.yml
-        - parameters/zuul-params.yml
+    - name: Check if we're facing molecule job
+      register: _is_molecule
+      ansible.builtin.uri:
+        url: "{{ cifmw_job_uri }}/report.html"
+        method: HEAD
+        status_code:
+          - 200
+          - 404
 
     - name: Fetch zuul inventory
       ansible.builtin.get_url:
@@ -36,46 +35,20 @@
         url: "{{ cifmw_job_uri }}/zuul-info/inventory.yaml"
         force: true
 
-    - name: Load parameters in current runtime
-      ansible.builtin.include_vars:
-        dir: "{{ _reproducer_basedir }}/parameters"
+    - name: Facing non-molecule job
+      when:
+        - _is_molecule.status == 404
+      ansible.builtin.include_tasks: ci_deploy_data.yml
 
-    - name: Extract compute count
-      vars:
-        zuul_inventory: >-
-          {{
-            lookup('file', _reproducer_basedir ~ '/zuul_inventory.yml') |
-            from_yaml
-           }}
-        compute_count: >-
-          {{
-            zuul_inventory.all.hosts.keys() |
-            select('match', '^compute.*') | length
-           }}
-        zuul_params: >-
-          {{
-            lookup('file', _reproducer_basedir ~ '/parameters/zuul-params.yml') |
-            from_yaml
-          }}
-      ansible.builtin.set_fact:
-        cacheable: true
-        ci_job_networking: "{{ zuul_inventory.all.hosts.crc.crc_ci_bootstrap_networking }}"
-        operator_content_provider: >-
-          {{
-            zuul_params.content_provider_registry_ip is defined
-          }}
-        openstack_content_provider: >-
-          {{
-            zuul_params.content_provider_dlrn_md5_hash is defined
-          }}
-        updated_layout:
-          vms:
-            compute:
-              amount: "{{ compute_count | int }}"
+    - name: Facing molecule job
+      when:
+        - _is_molecule.status == 200
+      ansible.builtin.include_tasks: ci_molecule_data.yml
 
     - name: Update layout
       ansible.builtin.set_fact:
         cacheable: true
+        is_molecule: "{{ _is_molecule.status == 200 }}"
         cifmw_libvirt_manager_configuration_gen: >-
           {{
             cifmw_libvirt_manager_configuration |
