@@ -80,6 +80,13 @@ In case of emergency, or if we didn't come back to you in a reasonable time (exp
 
 .. toctree::
    :maxdepth: 1
+   :caption: Baremetal
+   :glob:
+
+   baremetal/*
+
+.. toctree::
+   :maxdepth: 1
    :caption: Development
    :glob:
 
