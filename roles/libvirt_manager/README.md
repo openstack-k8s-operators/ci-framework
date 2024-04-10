@@ -42,7 +42,7 @@ The following structure has to be passed via the configuration parameter:
 cifmw_libvirt_manager_configuration:
   vms:
     type_name:  # (string, such as "compute", "controller")
-      amount: (integer, optional. Optional, defaults to 1)
+      amount: (integer, optional. Optional, defaults to 1, allowed [0-9]+)
       image_url: (string, URI to the base image. Optional if disk_file_name is set to "blank")
       sha256_image_name: (string, image checksum. Optional if disk_file_name is set to "blank")
       image_local_dir: (string, image destination for download. Optional if disk_file_name is set to "blank")
@@ -55,6 +55,7 @@ cifmw_libvirt_manager_configuration:
       extra_disks_size: (string, optional. Storage capacity to be allocated. Example 1G, 512M)
       password: (string, optional, defaults to fooBar. Root password for console access)
       target: (Hypervisor hostname you want to deploy the family on. Optional)
+      uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
   networks:
     net_name: <XML definition of the network to create>
 ```
