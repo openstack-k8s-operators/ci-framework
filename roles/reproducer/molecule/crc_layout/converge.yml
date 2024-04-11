@@ -19,6 +19,11 @@
   hosts: all
   gather_facts: true
   vars:
+    cifmw_manage_secrets_reproducer_secrets:
+      - content: "my-default-location-place"
+        dest: "default.txt"
+      - src: "/tmp/ipmi-things"
+        dest: "/home/zuul/ipmi-things"
     cifmw_basedir: "/opt/basedir"
     cifmw_install_yamls_repo: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
@@ -161,6 +166,20 @@
               {{ _inv.ocps.hosts['crc-0'].ansible_host }}
           ansible.builtin.command:
             cmd: "ping -c1 -w1 {{ _ip }}"
+
+        - name: Check secret files
+          block:
+            - name: Check default location secret file
+              register: _default_secret
+              ansible.builtin.stat:
+                path: "{{ ansible_user_dir }}/ci-framework-data/secrets/default.txt"
+              failed_when: not _default_secret.stat.exists
+
+            - name: Check non-default location secret
+              register: _default_secret
+              ansible.builtin.stat:
+                path: "{{ ansible_user_dir }}/ipmi-things"
+              failed_when: not _default_secret.stat.exists
 
     - name: Gather logs from nested controller-0
       vars:

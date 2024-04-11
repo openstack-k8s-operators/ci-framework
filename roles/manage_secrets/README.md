@@ -8,6 +8,7 @@ None
 ### General parameters
 
 * `cifmw_manage_secrets_basedir`: (String) Base directory for the directory tree. Default to `cifmw_basedir` which defaults to `~/ci-framework-data`.
+* `cifmw_manage_secrets_owner`: (String) User name owning the directory and secrets. Defaults to `ansible_user_id`.
 
 ### Pull-secret parameters
 
@@ -39,6 +40,13 @@ None
 
 * `cifmw_manage_secrets_ospsecrets_manifests_dest`: (String) Destination directory for OSP secrets manifest
 * `cifmw_manage_secrets_ospsecrets_list`: (List) Secrets parameter definitions. See molecule test for example.
+
+### Reproducer secrets
+
+Those tasks are mostly for the reproducer use-case, where you may need to push secrets on the controller-0
+node.
+
+* `cifmw_manage_secrets_reproducer_secrets`: (List[map]) Secrets you want to push on controller-0
 
 ## File versus Content
 You can set either a file OR a content for the pull-secret and ci-token secrets. You can't set both.
@@ -92,4 +100,26 @@ and pass it down:
       ansible.builtin.include_role:
         name: manage_secrets
         tasks_from: kube.yml
+```
+
+### Using the reproducer tasks
+
+```YAML
+- name: Delegate tasks to controller-0
+  delegate_to: controller-0
+  vars:
+    cifmw_manage_secrets_reproducer_secrets:
+      - src: "{{ lookup('env', 'HOME') }}/ipmi-password.txt"
+        dest: "/home/zuul/ipmi-password.txt"
+      - content: "fooBar: StarWar"
+        dest: "/home/zuul/my-foo.yml"
+  block:
+    - name: Initialize secrets
+      ansible.builtin.import_role:
+        name: manage_secrets
+
+    - name: Push some secrets
+      ansible.builtin.import_role:
+        name: manage_secrets
+        tasks_from: reproducer.yml
 ```
