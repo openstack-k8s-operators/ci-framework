@@ -42,8 +42,7 @@ func (opts *copyOptions) run(cmd *cobra.Command, args []string) error {
             if(opts.global.pushHash != "") {
                 tagToPush = opts.global.pushHash
             }
-
-            if tagExists(opts.global.toNamespace, image, tagToPush) {
+            if tagExists(opts.global.quayApiBaseUrl, opts.global.toNamespace, image, tagToPush) {
                 return fmt.Errorf("Tag %s already exist on the destination namespace", tagToPush)
             }
 
@@ -59,7 +58,7 @@ func (opts *copyOptions) run(cmd *cobra.Command, args []string) error {
         data := fetchLogs(image)
         parsedLogLines := parseLog(data)
 
-        repositories, err := listRepositories(opts.global.toNamespace)
+        repositories, err := listRepositories(opts.global.quayApiBaseUrl, opts.global.toNamespace)
 
         failed_push := make([]string, 0)
         success_pushed := make([]string, 0)
@@ -81,14 +80,14 @@ func (opts *copyOptions) run(cmd *cobra.Command, args []string) error {
             }
             logrus.Info(fmt.Sprintf("Copying image %s/%s:%s", opts.global.toNamespace, parsedLine.repository, tagToPull))
             if !repoExists(parsedLine.repository, repositories) {
-                _, err := createNewRepository(opts.global.toNamespace, parsedLine.repository)
+                _, err := createNewRepository(opts.global.quayApiBaseUrl, opts.global.toNamespace, parsedLine.repository)
                 if err != nil {
                     logrus.Errorln("Failed to create repository: ", err)
                     continue
                 }
             }
 
-            if imageWithDigestExists(opts.global.toNamespace, parsedLine.repository, tagToPush, parsedLine.digest) {
+            if imageWithDigestExists(opts.global.quayApiBaseUrl, opts.global.toNamespace, parsedLine.repository, tagToPush, parsedLine.digest) {
                 logrus.Errorf("Image with digest %s already exists on the destination namespace\n", parsedLine.digest)
                 continue
             }

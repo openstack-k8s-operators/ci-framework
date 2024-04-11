@@ -20,6 +20,7 @@ type Config struct {
     ZuulAPI string `yaml:"zuul_api"`
     PullRegistry string `yaml:"pull_registry"`
     PushRegistry string `yaml:"push_registry"`
+    QuayApiBaseUrl string `yaml:"quay_api_base_url"`
     Entries []ConfigEntry `yaml:"entries"`
 }
 
