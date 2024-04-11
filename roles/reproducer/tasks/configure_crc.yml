@@ -7,12 +7,13 @@
 
 - name: Configure CRC services
   delegate_to: crc-0
+  vars:
+    _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
+    _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
   block:
     - name: Ensure crc-0 knows about its second NIC
       become: true
       vars:
-        _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
-        _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
         _ctlplane: "{{ _parsed.networks.ctlplane }}"
       community.general.nmcli:
         autoconnect: true
@@ -24,14 +25,6 @@
         never_default4: true
         state: present
 
-    - name: Ensure crc-0 does not get "public" DNS
-      become: true
-      community.general.nmcli:
-        autoconnect: true
-        conn_name: "Wired connection 1"
-        dns4_ignore_auto: true
-        state: present
-
     - name: Check which dnsmasq config we must edit
       register: _dnsmasq
       ansible.builtin.stat:
@@ -40,25 +33,6 @@
         get_checksum: false
         get_mime: false
 
-    - name: Configure dns forwarders
-      become: true
-      vars:
-        _config_file: >-
-          {{
-            _dnsmasq.stat.exists |
-            ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
-          }}
-      ansible.builtin.blockinfile:
-        path: "{{ _config_file }}"
-        block: |-
-          {% if cifmw_reproducer_dns_servers %}
-          {% for dns_server in cifmw_reproducer_dns_servers %}
-          server={{ dns_server }}
-          {% endfor %}
-          {% endif %}
-
-    # TODO: ensure we know CRC IP on osp_trunk interface
-    # Needs the networking_mapper output.
     - name: Configure local DNS for CRC pod
       become: true
       vars:
@@ -67,9 +41,18 @@
             _dnsmasq.stat.exists |
             ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
           }}
-        _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
-        _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
       block:
+        - name: Configure dns forwarders
+          become: true
+          ansible.builtin.blockinfile:
+            path: "{{ _config_file }}"
+            block: |-
+              {% if cifmw_reproducer_dns_servers %}
+              {% for dns_server in cifmw_reproducer_dns_servers %}
+              server={{ dns_server }}
+              {% endfor %}
+              {% endif %}
+
         - name: Configure local DNS for CRC pod
           register: last_modification
           ansible.builtin.replace:
@@ -77,14 +60,30 @@
             regexp: "192.168.130.11"
             replace: "{{ _crc.ip_v4 }}"
 
-        - name: Ensure localhost address if configured as listen-address for dnsmasq
+        - name: Ensure dnsmasq listens on correct interfaces
           ansible.builtin.replace:
             path: "{{ _config_file }}"
             regexp: "listen-address={{ _crc.ip_v4 }}"
             replace: "listen-address={{ _crc.ip_v4 }},127.0.0.1"
 
-    - name: Reboot CRC node  # noqa: no-handler
+    - name: Reboot CRC node
       become: true
-      when:
-        - last_modification is changed
       ansible.builtin.reboot:
+
+- name: Ensure hypervisor has the right CRC IP
+  become: true
+  vars:
+    _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
+    _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
+  ansible.builtin.blockinfile:
+    path: "/etc/hosts"
+    marker: "# {mark}"
+    marker_begin: "Added by CRC"
+    marker_end: "End of CRC section"
+    block: >-
+      {{ _crc.ip_v4 }} api.crc.testing
+      canary-openshift-ingress-canary.apps-crc.testing
+      console-openshift-console.apps-crc.testing
+      default-route-openshift-image-registry.apps-crc.testing
+      downloads-openshift-console.apps-crc.testing
+      oauth-openshift.apps-crc.testing
