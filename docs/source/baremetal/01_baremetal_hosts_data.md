@@ -19,10 +19,16 @@ The structure of that variable is the following:
 ```yaml
 cifmw_baremetal_hosts:
   compute-0:
-    # Mandatory: (string) The BMC password of the host
+    # Mandatory if credentials_file is missing:
+    #   (string) The BMC password of the host
     password: password
-    # Mandatory: (string) The BMC username of the host
+    # Mandatory if credentials_file is missing:
+    #   (string) The BMC username of the host
     username: user
+    # Mandatory if user/password are missing
+    #   (string) A path to a yaml file containing the
+    #     the username and password fields
+    credentials_file: /path/to/credentials.yaml
     # Mandatory: (string) The BMC connection URL
     #   The format should be: <proto>://host:port
     connection: idrac://host-bmc.example.local
