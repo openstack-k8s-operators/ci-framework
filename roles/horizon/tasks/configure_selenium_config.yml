@@ -1,0 +1,35 @@
+---
+- name: Get password for admin_user from openstack installation
+  ansible.builtin.command: oc get secret osp-secret -o jsonpath='{.data.AdminPassword}' | base64 -d
+  register: admin_password
+
+- name: Get dashboard URL from openstack installation
+  ansible.builtin.shell: |
+    oc get horizons horizon -o jsonpath='{.status.endpoint}'
+  register: dashboard_url
+
+- name: Get network name
+  kubernetes.core.k8s_exec:
+    namespace: openstack
+    pod: openstackclient
+    command: "openstack network list --external -f json | grep -Po '\"Name\": *\"\\K[^\"]*'"
+  register: network_name
+
+- name: Get Volume type name
+  kubernetes.core.k8s_exec:
+    namespace: openstack
+    pod: openstackclient
+    command: "openstack volume type list -c Name -f value "
+  register: volume_type
+
+- name: Get backend deployment name
+  kubernetes.core.k8s_exec:
+    namespace: openstack
+    pod: openstackclient
+    command: "openstack volume service list -c Host -f value | grep cinder-volume"
+  register: backend_name
+
+- name: Create conf file from template
+  ansible.builtin.template:
+    src: templates/local-horizon.conf.j2
+    dest: "{{ selenium_tests_temp.path }}/{{ cifmw_horizon_selenium_config }}"

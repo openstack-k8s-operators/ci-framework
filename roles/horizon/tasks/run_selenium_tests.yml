@@ -1,0 +1,40 @@
+- name: Update pip and create virtual environment
+  ansible.builtin.pip:
+    name:
+      - pip
+    state: present
+    chdir: "{{ selenium_tests_temp.path  }}"
+    virtualenv: .venv
+    virtualenv_command: python3 -m venv
+
+- name: Install python test dependencies in virtual environment
+  ansible.builtin.pip:
+    name:
+      - pytest
+      - pytest-django
+      - pytest-html
+      - Django==2.2.28
+      - horizon
+      - selenium==3.141.0
+      - testtools
+      - xvfbwrapper
+      - junit2html
+      - urllib3<2
+    chdir: "{{ selenium_tests_temp.path  }}"
+    virtualenv: .venv
+
+- name: Copy and execute env setup and test script
+  cifmw.general.ci_script:
+    output_dir: "{{ selenium_tests_temp.path  }}"
+    script: |-
+      . .venv/bin/activate
+      PATH=$PATH:/usr/local/bin/ INTEGRATION_TESTS=1 SELENIUM_HEADLESS=1 pytest openstack_dashboard/test/integration_tests --ds=openstack_dashboard.test.settings -v --junitxml="test_reports/ui_integration_test_results.xml" --html="test_reports/ui_integration_test_results.html" --self-contained-html
+    chdir: "{{ selenium_tests_temp.path  }}"
+  become: true
+  ignore_errors: true
+  register: cmd_res
+  failed_when: '"=========================== short test summary info ============================" not in cmd_res.stdout'
+
+- name: Display test results
+  ansible.builtin.debug:
+    msg: "{{ cmd_res }}"

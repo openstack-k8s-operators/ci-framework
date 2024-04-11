@@ -1,0 +1,242 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Run the Selenium Infrared plugin and fetch report files
+  block:
+    - name: Ensure that osp release and build versions are defined
+      ansible.builtin.assert:
+        that:
+          - cifmw_horizon_osp_build is defined
+          - cifmw_horizon_osp_release is defined
+        msg: >-
+          Please ensure you set the "cifmw_horizon_osp_build" and "cifmw_horizon_osp_release" variables.
+
+    - name: Install custom CA if needed
+      ansible.builtin.import_role:
+        name: install_ca
+
+    - name: Setup repositories via rhos-release if needed
+      when:
+        - ansible_facts['distribution'] == 'RedHat'
+        - cifmw_reproducer_hp_rhos_release | bool
+      vars:
+        cifmw_repo_setup_output: /etc/yum.repos.d
+        cifmw_repo_setup_rhos_release_args: "rhel"
+      ansible.builtin.import_role:
+        name: repo_setup
+        tasks_from: rhos_release.yml
+
+    - name: Install EPEL
+      become: true
+      vars:
+        rhel_uri: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+        pkg: "{{ (ansible_facts['distribution'] == 'RedHat') | ternary(rhel_uri, 'epel-release')}}"
+      ansible.builtin.dnf:
+        name: "{{ pkg }}"
+        disable_gpg_check: "{{ (pkg != 'epel-release') }}"
+
+    - name: Install rpmfusion repository
+      become: true
+      ansible.builtin.shell: |
+        sudo dnf -y localinstall --nogpgcheck https://download1.rpmfusion.org/free/el/rpmfusion-free-release-9.noarch.rpm
+        sudo dnf -y install --nogpgcheck https://download1.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-9.noarch.rpm
+
+    - name: Install required packages
+      become: true
+      ansible.builtin.dnf:
+        name: ['xorg-x11-server-Xvfb', 'firefox', 'git']
+        state: present
+        disable_gpg_check: true
+
+    - name: Create temp directory for geckodriver
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: "-geckodriver"
+      register: geckodriver_temp
+
+    - name: Download geckodriver
+      ansible.builtin.get_url:
+        url: "{{ geckodriver_base_url }}v{{ geckodriver_version }}/geckodriver-v{{ geckodriver_version }}-linux64.tar.gz"
+        dest: "{{ geckodriver_temp.path }}/geckodriver.tar.gz"
+      when: geckodriver_temp.path is defined
+
+    - name: Extract the geckodriver
+      become: true
+      ansible.builtin.unarchive:
+        src: "{{ geckodriver_temp.path }}/geckodriver.tar.gz"
+        dest: "/usr/local/bin"
+        remote_src: true
+
+    - name: Create temp directory for selenium tests
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: "-selenium-tests"
+      register: selenium_tests_temp
+
+    - name: Get selenium tests
+      ansible.builtin.include_tasks: get_selenium_from_git.yml
+      when: selenium_tests_temp.path is defined
+
+    - name: Configure Selenium config file
+      ansible.builtin.include_tasks: configure_selenium_config.yml
+      when: selenium_tests_temp.path is defined
+
+    - name: Create internal network
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack network create --share --internal internal"
+
+    - name: Create sub-internal subnet
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack subnet create --network internal --subnet-range 172.0.0.0/24 sub-internal"
+
+    - name: Create a router
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack router create --external-gateway public --enable router1"
+
+    - name: Connect the subnet to the router
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstack
+        command: "openstack router add subnet router1 sub-internal"
+
+    - name: Remove old project
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstack
+        command: "openstack project delete horizontest"
+
+    - name: Remove old user
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstack
+        command: "openstack user delete horizontest"
+
+    - name: Find all images
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack image list -c ID -f value | paste -s"
+      register: images
+
+    - name: Create list of images
+      ansible.builtin.set_fact:
+        image_list: "{{ images.stdout.split('\t') }}"
+
+    - name: Delete all images
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack image delete {{ item }}"
+      loop: "{{ image_list }}"
+
+    - name: Create a project
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack project create --description 'Horizon Selenium test project' --domain default --enable horizontest"
+
+    - name: Add horizontest user to project
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack user create --password secretadmin --domain default --project horizontest horizontest"
+
+    - name: Add horizontest user and horizontest project to member role
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack role add --user horizontest --project horizontest member"
+
+    - name: Create flavor
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack flavor create --ram 512 --vcpus 1 --disk 1 --public m1.tiny"
+
+    - name: Download cirros image
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "curl -o /home/cloud-admin/{{ cifmw_horizon_cirros_image_name }}.img {{ cifmw_horizon_cirros_image_url }}"
+
+    - name: Upload image
+      kubernetes.core.k8s_exec:
+        namespace: openstack
+        pod: openstackclient
+        command: "openstack image create --container-format bare --disk-format qcow2 --public --file /home/cloud-admin/{{ cifmw_horizon_cirros_image_name }}.img {{ cifmw_horizon_cirros_image_name }}"
+
+    - name: Run Horizon selenium tests
+      ansible.builtin.include_tasks: run_selenium_tests.yml
+      when: selenium_tests_temp.path is defined
+
+  always:
+    - name: Create a test folder
+      become: true
+      ansible.bultin.file:
+        path: "{{ cifmw_horizon_dir }}/test_results/"
+        state: directory
+
+    - name: Perform clean-up tasks
+      failed_when: false
+      block:
+        - name: Remove old project
+          kubernetes.core.k8s_exec:
+            namespace: openstack
+            pod: openstack
+            command: "openstack project delete horizontest"
+
+        - name: Remove old user
+          kubernetes.core.k8s_exec:
+            namespace: openstack
+            pod: openstack
+            command: "openstack user delete horizontest"
+
+        - name: Remove Router
+          kubernetes.core.k8s_exec:
+            namespace: openstack
+            pod: openstack
+            command: "openstack router delete router1"
+
+        - name: Remove internal network
+          kubernetes.core.k8s_exec:
+            namespace: openstack
+            pod: openstack
+            command: "openstack network delete internal"
+
+        - name: Uninstall EPEL and rpmfusion repositories
+          become: true
+          ansible.builtin.shell: |
+            sudo dnf remove -y 'epel-release-9*'
+
+    - name: Fetch JUnit XML results file
+      ansible.builtin.fetch:
+        src: "{{ selenium_tests_temp.path }}/test_reports/ui_integration_test_results.xml"
+        dest: "{{ cifmw_horizon_dir }}/test_results/ui_integration_test_results.xml"
+        flat: true
+        fail_on_missing: true
+
+    - name: Fetch HTML results file
+      ansible.builtin.fetch:
+        src: "{{ selenium_tests_temp.path }}/test_reports/ui_integration_test_results.html"
+        dest: "{{ cifmw_horizon_dir }}/test_results/ui_integration_test_results.html"
+        flat: true
+        fail_on_missing: false
