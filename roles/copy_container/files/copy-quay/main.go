@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "log"
+    "strings"
 
     "github.com/containers/image/v5/signature"
     "github.com/containers/image/v5/types"
@@ -13,20 +14,21 @@ import (
 )
 
 type globalOptions struct {
-    zuulAPI       string
-    pullRegistry  string
-    pushRegistry  string
-    fromNamespace string
-    toNamespace   string
-    hash          string
-    pushHash      string
-    forceTag      string
-    job           string
-    token         string
-    release       string
-    configFile    string
-    debug         bool
-    Entry         ConfigEntry
+    zuulAPI        string
+    pullRegistry   string
+    pushRegistry   string
+    quayApiBaseUrl string
+    fromNamespace  string
+    toNamespace    string
+    hash           string
+    pushHash       string
+    forceTag       string
+    job            string
+    token          string
+    release        string
+    configFile     string
+    debug          bool
+    Entry          ConfigEntry
 }
 
 var opts = &globalOptions{}
@@ -46,6 +48,7 @@ func createApp() (*cobra.Command, *globalOptions) {
     rootCommand.PersistentFlags().StringVar(&opts.zuulAPI, "zuul-api", "", "Zuul api endpoint")
     rootCommand.PersistentFlags().StringVar(&opts.pullRegistry, "pull-registry", "", "Registry to pull images from")
     rootCommand.PersistentFlags().StringVar(&opts.pushRegistry, "push-registry", "", "Registry to push images to")
+    rootCommand.PersistentFlags().StringVar(&opts.quayApiBaseUrl, "quay-api-base-url", "https://quay.io/api/v1", "Quay API URL")
     rootCommand.PersistentFlags().StringVar(&opts.fromNamespace, "from-namespace", "", "Namespace of pushed image")
     rootCommand.PersistentFlags().StringVar(&opts.toNamespace, "to-namespace", "", "Namespace of pushed image")
     rootCommand.PersistentFlags().StringVar(&opts.hash, "hash", "", "Hash to be pulled/pushed")
@@ -82,6 +85,10 @@ func (opts *globalOptions) before(cmd *cobra.Command) error {
     if opts.pushRegistry == "" {
         opts.pushRegistry = config.PushRegistry
     }
+    if opts.quayApiBaseUrl == "" {
+    	opts.quayApiBaseUrl = config.QuayApiBaseUrl
+    }
+    opts.quayApiBaseUrl = strings.TrimSuffix(opts.quayApiBaseUrl, "/")
 
     for _, entry := range config.Entries {
         if entry.Name == opts.release {

@@ -52,13 +52,13 @@ func (opts *tagOptions) run(cmd *cobra.Command, args []string) error {
     logrus.Infoln("Promoted hash: ", promoted_hash)
     if len(args) > 0 {
         for _, image := range args {
-            sha, err := getImageManifest(opts.global.toNamespace, image, promoted_hash)
+            sha, err := getImageManifest(opts.global.quayApiBaseUrl, opts.global.toNamespace, image, promoted_hash)
             if err != nil {
                 logrus.Errorln("Unable to get image manifest: ", err)
             } else {
-                tagImage(opts.global.toNamespace, image, opts.tag, sha)
+                tagImage(opts.global.quayApiBaseUrl, opts.global.toNamespace, image, opts.tag, sha)
                 if opts.tag_sha {
-                    tagImage(opts.global.toNamespace, image, sha[7:], sha)
+                    tagImage(opts.global.quayApiBaseUrl, opts.global.toNamespace, image, sha[7:], sha)
                 }
             }
         }
@@ -71,16 +71,16 @@ func (opts *tagOptions) run(cmd *cobra.Command, args []string) error {
         failed_tag := make([]string, 0)
         success_tag := make([]string, 0)
         for _, parsedLine := range parsedLogLines {
-            sha, err := getImageManifest(opts.global.toNamespace, parsedLine.repository, promoted_hash)
+            sha, err := getImageManifest(opts.global.quayApiBaseUrl, opts.global.toNamespace, parsedLine.repository, promoted_hash)
             if err != nil {
                 logrus.Errorln("Unable to get image manifest: ", err)
             } else {
-                if err := tagImage(opts.global.toNamespace, parsedLine.repository, opts.tag, sha); err != nil {
+                if err := tagImage(opts.global.quayApiBaseUrl, opts.global.toNamespace, parsedLine.repository, opts.tag, sha); err != nil {
                     failed_tag = append(failed_tag, parsedLine.repository)
                 } else {
                     success_tag = append(success_tag, parsedLine.repository)
                     if opts.tag_sha {
-                        tagImage(opts.global.toNamespace, parsedLine.repository, sha[7:], sha)
+                        tagImage(opts.global.quayApiBaseUrl, opts.global.toNamespace, parsedLine.repository, sha[7:], sha)
                     }
                 }
             }
