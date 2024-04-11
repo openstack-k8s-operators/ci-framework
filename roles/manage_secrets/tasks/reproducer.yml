@@ -1,0 +1,42 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert we get needed data
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_manage_secrets_reproducer_secrets is defined
+      - cifmw_manage_secrets_reproducer_secrets is iterable
+      - cifmw_manage_secrets_reproducer_secrets is not mapping
+    msg: >-
+      Provide cifmw_manage_secrets_reproducer_secrets as a list
+      of dict.
+
+- name: Push reproducer secrets
+  vars:
+    _secret_dest: >-
+      {%- if item.dest is abs -%}
+      {{ item.dest | trim}}
+      {%- else -%}
+      {{
+        (cifmw_manage_secrets_basedir, 'secrets',
+         item.dest) | path_join | trim
+      }}
+      {%- endif -%}
+    _secret_file: "{{ item.src | default('') }}"
+    _secret_content: "{{ item.content | default('') }}"
+  ansible.builtin.include_tasks: _push_secret.yml
+  loop: "{{ cifmw_manage_secrets_reproducer_secrets }}"
