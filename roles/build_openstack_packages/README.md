@@ -16,7 +16,8 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 * `cifmw_bop_openstack_release`: (String) The default release of OpenStack project. Defaults to `master`.
 * `cifmw_bop_osp_release`: (String) The downstream openstack release name.
 * `cifmw_bop_openstack_project_path`: (String) The full path of openstack cloned project to be built.
-* `cifmw_bop_gating_repo`: (String) The path of directory to store the generated rpms.
+* `cifmw_bop_gating_repo_dest`: (String) The path of directory to store gating repo file and repo metadata.
+  Defaults to `cifmw_bop_build_repo_dir` var.
 * `cifmw_bop_dlrn_cleanup`: (Boolean) Clean up the DLRN artifacts. Defaults to `False`.
 
 ### TODO
@@ -30,9 +31,6 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 ```
 - hosts: localhost
   vars:
-    cifmw_bop_dlrn_target: centos9-stream
-    cifmw_bop_initial_dlrn_config: centos9-local
-    cifmw_bop_dlrn_baseurl: https://trunk.rdoproject.org/centos9-master
     cifmw_bop_yum_repos_dir: /tmp/repos
   pre_tasks:
     - name: Clone neutron-tempest-plugin
