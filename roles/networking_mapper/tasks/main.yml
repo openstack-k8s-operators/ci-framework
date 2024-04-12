@@ -62,7 +62,7 @@
       }}
   loop: "{{ [cifmw_networking_definition] + _net_def_patches }}"
 
-- name: Ensure that networking and hostname facts are in place
+- name: Gather needed networking facts
   vars:
     _net_def_instances_filtered: >-
       {{
@@ -91,13 +91,34 @@
       {{
         _net_def_groups_instances + _net_def_instances_filtered
       }}
-  ansible.builtin.setup:
-    gather_subset:
-      - network
-      - platform
-  delegate_to: "{{ item }}"
-  delegate_facts: true
-  loop: "{{ _networking_mapper_instance_names }}"
+  block:
+    - name: Gather the facts
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+          - platform
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ _networking_mapper_instance_names }}"
+
+    - name: Save instaces refreshed facts for troubleshooting purposes
+      ansible.builtin.copy:
+        dest: >-
+          {{
+            [
+              cifmw_networking_mapper_basedir,
+              'artifacts',
+              'networking-mapper-instances-facts.yml'
+            ] | path_join
+          }}
+        content: >-
+          {{
+            dict(hostvars) |
+            dict2items |
+            selectattr('key', 'in', _networking_mapper_instance_names) |
+            items2dict |
+            to_nice_yaml
+          }}
 
 - name: Call the networking mapper
   cifmw.general.ci_net_map:
