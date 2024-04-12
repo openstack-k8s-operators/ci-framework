@@ -14,24 +14,31 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create a directory to hold the rpms
-  ansible.builtin.file:
-    path: '{{ cifmw_bop_gating_repo }}'
+- name: Create a temproary directory to hold the rpms
+  ansible.builtin.tempfile:
+    suffix: gating
     state: directory
+  register: _repodir
 
 - name: Copy the generated rpms
   ansible.builtin.shell:
     cmd: >
       set -o pipefail &&
-      rm -rf {{ cifmw_bop_gating_repo }}/*;
+      rm -rf {{ _repodir.path }}/*;
       [[ $(find {{ cifmw_bop_build_repo_dir }}/DLRN/data/repos -type f -name '*.rpm') ]] &&
-      find {{ cifmw_bop_build_repo_dir }}/DLRN/data/repos -type f -name '*.rpm' -print0 | xargs -0 cp -t {{ cifmw_bop_gating_repo }} ||
+      find {{ cifmw_bop_build_repo_dir }}/DLRN/data/repos -type f -name '*.rpm' -print0 | xargs -0 cp -t {{ _repodir.path }} ||
       echo "no DLRN builds";
 
 - name: Run createrepo on generated rpms
   ansible.builtin.command:
     cmd: createrepo .
-    chdir: '{{ cifmw_bop_gating_repo }}'
+    chdir: '{{ _repodir.path }}'
+
+- name: Copy the gating content to destination
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ _repodir.path }}/"
+    dest: "{{ cifmw_bop_gating_repo_dest }}"
 
 - name: Add gating.repo file to install the required built packages
   ansible.builtin.copy:
@@ -42,9 +49,4 @@
       enabled=1
       gpgcheck=0
       priority=1
-    dest: "{{ cifmw_bop_gating_repo }}/gating.repo"
-
-- name: Compress the repo
-  ansible.builtin.command:  # noqa: command-instead-of-module
-    cmd: "tar czf {{ cifmw_bop_gating_repo }}.tar.gz gating_repo"
-    chdir: "{{ cifmw_bop_gating_repo | ansible.builtin.dirname }}"
+    dest: "{{ cifmw_bop_gating_repo_dest }}/gating.repo"
