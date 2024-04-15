@@ -39,8 +39,10 @@ This configMap needs some more parameters in order to properly override the `arc
 * `cifmw_ci_gen_kustomize_values_ssh_public_key`: (String) SSH public key associated to `cifmw_ci_gen_kustomize_values_ssh_private_key`.
 * `cifmw_ci_gen_kustomize_values_migration_priv_key`: (String) SSH private key dedicated for the nova-migration services.
 * `cifmw_ci_gen_kustomize_values_migration_pub_key`: (String) SSH public key associated to `cifmw_ci_gen_kustomize_values_migration_priv_key`.
-
 Note that all of the SSH keys should be in `ecdsa` format to comply with FIPS directives.
+
+### Required parameters only when baremetal compute nodes are used.
+* `cifmw_ci_gen_kustomize_values_ctlplane_interface`: (String) Used to override default controlplane interface for OSP compute nodes.
 
 ## Examples
 
