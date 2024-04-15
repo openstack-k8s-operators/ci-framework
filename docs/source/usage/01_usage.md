@@ -58,6 +58,8 @@ are shared among multiple roles:
 - `cifmw_fips_enabled`: (Bool) Specifies whether FIPS should be enabled in the deployment. Note that not all deployment methods support this functionality. Defaults to `false`.
 - `cifmw_baremetal_hosts`: (Dict) Baremetal nodes environment details. More details [here](../baremetal/01_baremetal_hosts_data.md)
 - `cifmw_deploy_obs` (Bool) Specifies whether to deploy Cluster Observability operator.
+- `cifmw_openshift_api_ip_address` (String) contains the OpenShift API IP address. Note: it is computed internally and should not be user defined.
+- `cifmw_openshift_ingress_ip_address` (String) contains the OpenShift Ingress IP address. Note: it is computed internally and should not be user defined.
 
 ```{admonition} Words of caution
 :class: danger
