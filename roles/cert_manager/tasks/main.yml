@@ -69,17 +69,24 @@
       type: Ready
       status: "True"
 
-- name: Wait for the cert-manager operator csv to be Ready
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_cert_manager_operator_namespace }}"
-    kind: ClusterServiceVersion
-    wait_sleep: 10
-    wait_timeout: 360
-    field_selectors:
-      - status.phase=Succeeded
+- name: Wait for the cert-manager operator csv to be installed
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      -n "{{ cifmw_cert_manager_operator_namespace }}"
+      -o jsonpath='{.items[*].status.phase}'
+  changed_when: false
+  register: _certmanager_csv_out
+  retries: 12
+  delay: 10
+  until:
+    - _certmanager_csv_out is defined
+    - _certmanager_csv_out.failed is false
+    - _certmanager_csv_out.stdout_lines | length > 0
+    - "(_certmanager_csv_out.stdout_lines[0] | lower) == 'succeeded'"
 
 - name: Check for cert-manager namspeace existance
   kubernetes.core.k8s_info:
