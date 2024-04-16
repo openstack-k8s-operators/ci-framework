@@ -5,13 +5,46 @@
       - stage is defined
       - stage_id is defined
       - stage['path'] is defined
-      ## TODO: remove "validations" once architecture repo is up-to-date
-      - (stage.validations is defined and
-         stage.validations | length > 0) or
-        (stage.wait_conditions is defined and
+      - (stage.wait_conditions is defined and
          stage.wait_conditions | length > 0)
       - stage['values'] is defined
       - stage['values'] | length > 0
+
+- name: Assert all wait conditions are valid
+  vars:
+    _stage_name: "stage_{{ stage_id }}"
+    _custom_conditions: >-
+      {{
+        cifmw_architecture_wait_condition[_stage_name] |
+        default([])
+      }}
+    _pattern: '^(oc|kubectl).*wait.*$'
+  block:
+    - name: Check custom wait conditions
+      ansible.builtin.assert:
+        that: item is match(_pattern)
+        msg: "The following custom condition is invalid: {{ item }}"
+        quiet: true
+      ignore_errors: true  # noqa: ignore-errors
+      register: _custom_wait_cond_result
+      loop: "{{ _custom_conditions }}"
+
+    - name: Check builtin wait conditions
+      ansible.builtin.assert:
+        that: item is match(_pattern)
+        msg: "The following builtin condition is invalid: {{ item }}"
+        quiet: true
+      ignore_errors: true  # noqa: ignore-errors
+      register: _builtin_wait_cond_result
+      loop: "{{ stage.wait_conditions }}"
+
+    - name: Check wait_conditions validation result
+      when:
+        - _custom_wait_cond_result is failed or
+          _builtin_wait_cond_result is failed
+      ansible.builtin.fail:
+        msg: >-
+          Review and correct the faulty wait_conditions listed above.
 
 - name: Group tasks under the same tag
   vars:
@@ -208,11 +241,9 @@
             cifmw_architecture_wait_condition[_stage_name] |
             default([])
           }}
-        ## TODO: remove "validations" once architecture is up-to-date
         _commands: >-
           {{
-            (stage['wait_conditions'] |
-             default(stage['validations'])) + _custom_conditions
+            stage['wait_conditions'] + _custom_conditions
            }}
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"

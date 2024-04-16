@@ -61,3 +61,32 @@
         label: "{{ stage.path }}"
         loop_var: "stage"
         index_var: "stage_id"
+
+    - name: Check failure with faulty wait_condition injection
+      vars:
+        cifmw_architecture_wait_condition:
+          stage_0:
+            - sudo cat /etc/passwd
+            - oc rsh exec blah
+            - kubectl rsh exec bar
+      block:
+        - name: Run loop deployment again
+          ansible.builtin.include_role:
+            name: "kustomize_deploy"
+            tasks_from: execute_step.yml
+          loop: "{{ cifmw_deploy_architecture_steps.vas.hci.stages }}"
+          loop_control:
+            label: "{{ stage.path }}"
+            loop_var: "stage"
+            index_var: "stage_id"
+      rescue:
+        - name: Clear expected errors
+          ansible.builtin.meta: clear_host_errors
+
+        - name: Ensure a successful end
+          ansible.builtin.meta: end_play
+
+    - name: Wait conditions validation failed
+      ansible.builtin.fail:
+        msg: >-
+          Wait condition validation failed!
