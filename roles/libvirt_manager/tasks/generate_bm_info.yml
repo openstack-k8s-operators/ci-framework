@@ -1,0 +1,57 @@
+---
+# TODO(lewis) you can manipulate sushy output in this file, to get it
+# ready for the "Generate libvirt_manager_bm_info fact" task.
+
+- name: Convert VBMC list into a dict for better usage
+  when:
+    - cifmw_use_vbmc | default(true) | bool
+    - cifmw_virtualbmc_known_hosts is defined
+  vars:
+    keys: "{{ item.keys() | difference(['Domain name']) }}"
+    vals: "{{ keys | map('extract', item) | list }}"
+    value: "{{ dict(keys | map('lower') | zip(vals)) }}"
+    _host: "{{ item['Domain name'] | regex_replace('^cifmw-', '') }}"
+  ansible.builtin.set_fact:
+    _vbmc_info_dict: >-
+      {{
+        _vbmc_info_dict | default({}) |
+        combine({_host: value}, recursive=true)
+      }}
+    cacheable: false
+  loop: "{{ cifmw_virtualbmc_known_hosts }}"
+
+# This task exposes a new fact, then consumed by the
+# reproducer/configure_controller.yml tasks in order to expose
+# the content as a file for later usage.
+- name: Generate libvirt_manager_bm_info_data fact
+  vars:
+    _host: "{{ item.key | replace('cifmw-', '') }}"
+    _uefi: >-
+      {% set _type = _host | regex_replace('-[0-9]+$', '') -%}
+      {{ _layout.vms[_type].uefi | default(false) | bool }}
+    _data: |
+      "{{ _host }}":
+        boot_mode: "{{ _uefi | ternary('UEFI', 'legacy') }}"
+        uuid: "{{ item.value }}"
+      {% if cifmw_use_vbmc | default(true) | bool %}
+        address: "{{ _vbmc_info_dict[_host].address }}"
+        connection: "ipmi://{{ _vbmc_info_dict[_host].address }}:{{ _vbmc_info_dict[_host].port }}"
+        password: "{{ _vbmc_info_dict[_host].password }}"
+        port: {{ _vbmc_info_dict[_host].port | int }}
+        username: "{{ _vbmc_info_dict[_host].username }}"
+      {% else %}
+        connection: "build-sushy-address"
+      {% endif %}
+    _with_nics: >-
+      {{
+         _data | from_yaml |
+         combine({_host: {'nics': cifmw_libvirt_manager_mac_map[_host]}},
+                 recursive=true)
+      }}
+  ansible.builtin.set_fact:
+    libvirt_manager_bm_info_data: >-
+      {{
+        libvirt_manager_bm_info_data | default({}) |
+        combine((_with_nics | from_yaml), recursive=true)
+      }}
+  loop: "{{ cifmw_libvirt_manager_uuids | dict2items }}"

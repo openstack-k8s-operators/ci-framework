@@ -21,6 +21,7 @@ are shared among multiple roles:
 - `cifmw_use_crc`: (Bool) toggle rhol/crc usage.
 - `cifmw_use_uefi`: (Bool) toggle UEFI support in libvirt_manager provided VMs.
 - `cifmw_use_devscripts`: (Bool) toggle devscripts usage.
+- `cifmw_use_vbmc`: (Bool) toggle virtualBMC usage. Defaults to `true`.
 - `cifmw_openshift_kubeconfig`: (String) Path to the kubeconfig file if externally provided. If provided will be the kubeconfig to use and update after login.
 - `cifmw_openshift_api`: (String) Path to the kubeconfig file. If provided will be the API to authenticate against.
 - `cifmw_openshift_user`: (String) Login user. If provided, the user that logins.
