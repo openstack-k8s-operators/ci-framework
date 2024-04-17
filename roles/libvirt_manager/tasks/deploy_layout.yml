@@ -28,6 +28,7 @@
     - bootstrap
     - bootstrap_layout
   when:
+    - cifmw_use_vbmc | default(true) | bool
     - (_layout.vms.crc.target is defined and
        _layout.vms.crc.target == inventory_hostname) or
       (_layout.vms.crc is defined and
@@ -35,7 +36,8 @@
       (_layout.vms.ocp.target is defined and
        _layout.vms.ocp.target == inventory_hostname) or
       (_layout.vms.ocp is defined and
-       _layout.vms.ocp.target is undefined)
+       _layout.vms.ocp.target is undefined) or
+      (_layout.vms.crc is undefined and layout.vms.ocp is undefined)
   block:
     - name: Deploy virtualbmc
       ansible.builtin.include_role:
@@ -301,6 +303,7 @@
 
 - name: Refresh and dump vbmc hosts
   when:
+    - cifmw_use_vbmc | default(true) | bool
     - _vbmc_host is defined
     - _vbmc_host == inventory_hostname
   block:
@@ -338,6 +341,12 @@
         dest: >-
           {{ cifmw_libvirt_manager_basedir }}/artifacts/virtual-nodes.yml
         content: "{{ content | to_nice_yaml }}"
+
+# TODO(lewis) you can inject some tasks to grab sushy_emulator content
+# allowing to expose some content in the generate_bm_info.yml tasks
+
+- name: Generate baremetal-info fact
+  ansible.builtin.import_tasks: generate_bm_info.yml
 
 - name: Ensure we get proper access to CRC
   when:
