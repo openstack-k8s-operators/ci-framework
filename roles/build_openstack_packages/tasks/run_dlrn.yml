@@ -137,11 +137,51 @@
         refspec: "{{ _change.refspec }}"
         version: 'FETCH_HEAD'
 
+    - name: "Clone downstream Openstack {{ project_name_mapped.stdout }}" # noqa: name[template]
+      when:
+        - cifmw_bop_openstack_project_path | length == 0
+        - not repo_status.stat.exists
+        - "'host' in _change"
+        - "'redhat.com' in _change.host"
+      block:
+        - name: Clone the downstream project
+          ansible.builtin.git:
+            repo: '{{ _change.host }}/gerrit/{{ _change.project }}'
+            dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested'
+            refspec: "{{ _change.refspec }}"
+            version: 'FETCH_HEAD'
+
+        - name: Update the branch name for local DLRN clone # noqa: command-instead-of-module
+          ansible.builtin.command:
+            cmd: "git checkout -b {{ item }}"
+          args:
+            chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested"
+          loop:
+            - "{{ cifmw_bop_osp_release }}-rhel-9-trunk"
+            - "{{ cifmw_bop_osp_release }}-trunk-patches"
+
+        - name: Update the project reference in packages.yml # noqa: command-instead-of-module
+          vars:
+            _old_content: 'osp-patches: ssh://{{ _change.host | split("//") | last }}:22/{{ _change.project }}'
+            _new_content: 'osp-patches: file://{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested'
+          ansible.builtin.command:
+            cmd: >-
+              sed -i -e 's|{{ _old_content }}|{{ _new_content }}|g' packages.yml
+          args:
+            chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/{{ cifmw_bop_rdoinfo_repo_name }}"
+
     - name: Find the last commit from the clonned repo
       register: _commit
+      vars:
+        _project_path: >-
+          {%- if cifmw_bop_osp_release is defined -%}
+          {{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested
+          {%- else -%}
+          {{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}
+          {%- endif -%}
       ansible.builtin.command:
         cmd: git show-ref --head --hash head # noqa: command-instead-of-module
-        chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}"
+        chdir: "{{ _project_path }}"
 
     - name: Print the last commit of the git repo
       ansible.builtin.debug:
