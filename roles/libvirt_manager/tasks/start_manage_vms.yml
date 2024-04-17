@@ -23,6 +23,24 @@
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
 
+- name: "Debug Grab IPs for nodes type {{ vm_type }}"
+  register: vm_ips
+  ansible.builtin.debug:
+    msg: >-
+      virsh -c qemu:///system -q
+      domifaddr --source arp
+      cifmw-{{ nic.host }} | grep "{{ nic.mac }}"
+      {% if cifmw_openshift_api_ip_address | default(false) %}
+      | grep -v "{{ cifmw_openshift_api_ip_address }}"
+      {% endif %}
+      {% if cifmw_openshift_ingress_ip_address | default(false) %}
+      | grep -v "{{ cifmw_openshift_ingress_ip_address }}"
+      {% endif %}
+  loop: "{{ public_net_nics }}"
+  loop_control:
+    loop_var: nic
+    label: "{{ nic.host }}"
+
 - name: "Grab IPs for nodes type {{ vm_type }}"  # noqa: risky-shell-pipe
   register: vm_ips
   ansible.builtin.shell:
