@@ -8,6 +8,7 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 * `cifmw_bop_dlrn_repo_url`: (String) The URL of the DLRN repository.
 * `cifmw_bop_dlrn_from_source`: (String) Install DLRN from git. Defaults to `False`.
 * `cifmw_bop_dlrn_venv: (String) DLRN Virtualenv directory Default to `{{ ansible_user_dir }}/dlrn_venv`.
+* `cifmw_bop_patch_rebaser_repo_url`: (String) The URL of patch rebaser repository.
 * `cifmw_bop_rdoinfo_repo_url`: (String) The URL of the rdoinfo repository that contains the project definitions for DLRN.
 * `cifmw_bop_rdoinfo_repo_name`: (String) Name of the rdoinfo repository.
 * `cifmw_bop_initial_dlrn_config`: (String) Name of the initial DLRN config. Defaults to `centos9-stream`.

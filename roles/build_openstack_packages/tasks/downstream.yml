@@ -1,0 +1,65 @@
+---
+- name: Fetch patch rebaser source
+  ansible.builtin.git:
+    repo: '{{ cifmw_bop_patch_rebaser_repo_url }}'
+    dest: '{{ cifmw_bop_build_repo_dir }}/patch_rebaser'
+    version: 'master'
+  register: _git_clone
+  until: _git_clone is success
+  retries: 3
+  delay: 5
+
+- name: Install patch rebaser requirements
+  ansible.builtin.pip:
+    virtualenv: "{{ cifmw_bop_dlrn_venv }}"
+    requirements: "{{ cifmw_bop_build_repo_dir }}/patch_rebaser/requirements.txt"
+
+- name: Install patch rebaser and rhospkg
+  ansible.builtin.pip:
+    name:
+      - "{{ cifmw_bop_build_repo_dir }}/patch_rebaser"
+      - "{{ cifmw_bop_rhospkg_repo_url }}"
+    virtualenv: "{{ cifmw_bop_dlrn_venv }}"
+
+- name: Copy Downstream mock config to DLRN repo
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ansible_user_dir }}/{{ cifmw_bop_initial_dlrn_config }}.cfg"
+    dest: "{{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}.cfg"
+
+- name: Copy patch_rebaser.ini to patch_rebaser repo
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ansible_user_dir }}/patch_rebaser.ini"
+    dest: "{{ cifmw_bop_build_repo_dir }}/patch_rebaser/patch_rebaser/patch_rebaser.ini"
+
+- name: Copy Downstream scripts to DLRN repo
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ansible_user_dir }}/{{ item.key }}"
+    dest: "{{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ item.key }}"
+    mode: "{{ item.value }}"
+  with_dict:
+    - "patch_rebaser.sh": "0755"
+    - "set_nvr.sh": "0755"
+
+- name: Configure git on the system
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - 'git config --global user.email "you@example.com"'
+    - 'git config --global user.name "Your Name"'
+
+- name: Fix packages.yml for buidling packages
+  vars:
+    _ospinfo_path: "{{ cifmw_bop_build_repo_dir }}/DLRN/{{ cifmw_bop_rdoinfo_repo_name }}"
+  block:
+    - name: Replace git ssh reference with https # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: "sed -i -e 's|osp-distgit: git+ssh|osp-distgit: https|g' packages.yml"
+        chdir: "{{ _ospinfo_path }}"
+
+    - name: Replace append git before rpms in package url
+      ansible.builtin.replace:
+        path: "{{ _ospinfo_path }}/packages.yml"
+        regexp: ".com/rpms"
+        replace: ".com/git/rpms"
