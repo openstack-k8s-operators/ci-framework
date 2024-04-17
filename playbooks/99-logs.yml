@@ -34,6 +34,17 @@
             cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
             cacheable: true
 
+    - name: Set destination folder for the logs
+      ansible.builtin.set_fact:
+        logfiles_dest_dir: >-
+          {{
+            (
+              cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data'),
+              'logs/',
+              now(fmt='%Y-%m-%d_%H-%M')
+            ) | path_join
+          }}
+
     - name: Generate artifacts
       ansible.builtin.import_role:
         name: artifacts
@@ -42,36 +53,40 @@
       ansible.builtin.import_role:
         name: env_op_images
 
-    - name: Ensure ansible.log is at the expected location
-      register: ansible_log_state
-      ansible.builtin.stat:
-        path: "{{ ansible_user_dir }}/ansible.log"
+    - name: Create a versioned log folder
+      ansible.builtin.file:
+        path: "{{ logfiles_dest_dir }}"
+        state: directory
+        mode: "0775"
+
+    - name: Return a list of log files in home directory
+      ansible.builtin.find:
+        paths: "{{ ansible_user_dir }}"
+        patterns: '*.log'
+      register: _log_files
 
     - name: Ensure ansible facts cache exists
       register: ansible_facts_cache_state
       ansible.builtin.stat:
         path: "{{ ansible_user_dir }}/ansible_facts_cache"
 
-    - name: Generate log file name date
-      register: filename_date
-      ansible.builtin.command:
-        cmd: date +%F-%R
-
-    - name: Copy ansible log if exists
+    - name: Copy log files
       when:
-        - ansible_log_state.stat.exists is defined
-        - ansible_log_state.stat.exists | bool
+        - _log_files.matched > 0
       block:
-        - name: Copy ansible log to proper location
+        - name: Copy logs to proper location
           ansible.builtin.copy:
-            src: "{{ ansible_user_dir }}/ansible.log"
-            dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/logs/ansible.log-{{ filename_date.stdout|trim }}"
+            src: "{{ item.path }}"
+            dest: "{{ [ logfiles_dest_dir , item.path | basename ] | path_join }}"
             remote_src: true
+            mode: "0666"
+          loop: "{{ _log_files.files }}"
 
         - name: Remove original log from home directory
           ansible.builtin.file:
-            path: "{{ ansible_user_dir }}/ansible.log"
+            path: "{{ item.path }}"
             state: absent
+          loop: "{{ _log_files.files }}"
 
     - name: Copy Ansible facts if exists
       when:
@@ -81,7 +96,14 @@
         - name: Copy facts to dated directory
           ansible.builtin.copy:
             src: "{{ ansible_user_dir }}/ansible_facts_cache"
-            dest: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/ansible_facts-{{ filename_date.stdout|trim }}"
+            dest: >-
+              {{
+                (
+                  cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data'),
+                  "artifacts/ansible_facts." + now(fmt='%Y-%m-%d_%H-%M')
+                ) | path_join
+              }}
+            mode: "0777"
             remote_src: true
 
         - name: Clean ansible fact cache
