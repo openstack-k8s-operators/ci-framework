@@ -145,24 +145,37 @@
     chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/{{ cifmw_bop_rdoinfo_repo_name }}"
   when: ansible_distribution in ['RedHat']
 
-- name: Append repos in dlrn targets
-  ansible.builtin.shell:
-    cmd: >
-      set -o pipefail ;
-      gawk '{ print $0 }; /^# repos$/ { exit }' {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}.cfg
-      > {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-      cat {{ cifmw_bop_yum_repos_dir }}/repo-setup-*.repo >> {{cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-      find {{ cifmw_bop_yum_repos_dir }} -name "delorean*repo" ! -name "delorean*build-deps.repo" -exec cat {} \; -exec echo ""  \;
-      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-      find {{ cifmw_bop_yum_repos_dir }} -name "CentOS-Stream-*repo" -not -name "CentOS-Stream*Extras-common*repo" -exec cat {} \; -exec echo ""  \;
-      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-      find {{ cifmw_bop_yum_repos_dir }} -name "delorean*build-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
-      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-      {% if ansible_distribution in ["RedHat"] and cifmw_bop_osp_release is defined %}
-      find /etc/yum.repos.d -name "osptrunk-deps.repo" -exec sed 's/enabled=.*/enabled=1/g' {} \;
-      >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
-      {% endif %}
-      echo '"""' >> {{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg;
+- name: Find all the repos files
+  ansible.builtin.find:
+    paths: "{{ cifmw_bop_build_repo_dir }}"
+    patterns: "*.repo"
+    recurse: false
+  register: _yum_repos
+
+- name: Create local mock config
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}.cfg"
+    dest: "{{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg"
+
+- name: Remove last """ from local mock config # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      sed -i '$d' {{ cifmw_bop_initial_dlrn_config }}-local.cfg
+    chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/scripts"
+
+- name: Append repos into mock local config
+  ansible.builtin.include_tasks: append_repos.yml
+  loop: "{{ _yum_repos.files|map(attribute='path') }}"
+  loop_control:
+    loop_var: "_repo_path"
+
+- name: Append the """ content in mock local config at last
+  ansible.builtin.lineinfile:
+    path: "{{ cifmw_bop_build_repo_dir }}/DLRN/scripts/{{ cifmw_bop_initial_dlrn_config }}-local.cfg"
+    line: '"""'
+    insertafter: EOF
+    state: present
 
 - name: Check loop devices stat
   ansible.builtin.stat:
