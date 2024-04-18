@@ -7,16 +7,19 @@
   kubernetes.core.k8s:
     kind: Pod
     state: absent
+    delete_all: true
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     namespace: openshift-marketplace
 
 - name: Wait for openshift-marketplace pods to be running
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    kind: Pod
-    namespace: openshift-marketplace
-    wait: true
-    wait_condition:
-      type: Ready
-      status: "True"
-    wait_timeout: 300
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc wait pod --all --for=condition=Ready
+      -n openshift-marketplace --timeout=1m
+  register: _pod_status
+  retries: 4
+  delay: 10
+  until: _pod_status.rc == 0
