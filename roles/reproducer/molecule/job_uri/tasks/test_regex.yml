@@ -1,0 +1,43 @@
+---
+# This block is called in a loop, the loop iterates over a list of `regex_tests`
+# It will test the following scenario:
+# 1. (Success) The string passes regex and we expext it: pass = true
+# 2. (Success) The string fails regex and we expext it: pass = false
+# 3. (Failure) The string passes regex but the return value doesn't match expected.
+# 4. (Failure) The string passes regex but we don't expect it: pass = false
+# 5. (Failure) The string fails regex but we don't expect it: pass = true
+
+- name: Test regex
+  block:
+    - name: "Call task file with {{ regex_test.string }}"
+      vars:
+        cifmw_job_uri: "{{ regex_test.string }}"
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: parse_cifmw_job_uri.yml
+
+    - name: Fail if return string doesn't match expected value
+      when:
+        - regex_test.return is defined
+        - regex_test.return != _matched_url
+      ansible.builtin.fail:
+        msg: "The return string doesn't match the expected value {{ regex_test.return }} vs {{ _matched_url }}"
+
+    - name: Fail if string incorrectly passed when defined not to pass
+      ansible.builtin.assert:
+        that: regex_test.pass | bool
+      register: _string_incorrecly_passed
+
+  rescue:
+    - name: Clear errors to manually handle them
+      ansible.builtin.meta: clear_host_errors
+
+    - name: Really fail if string passed but should have failed
+      when: _string_incorrecly_passed.failed | default(false) | bool
+      ansible.builtin.fail:
+        msg: "The following string passed and it shouldn't have {{ regex_test.string }} at index {{ index }}"
+
+    - name: Really fail if string failed but should have passed
+      when: regex_test.pass | bool
+      ansible.builtin.fail:
+        msg: "The following string failed but it shouldn't have: {{ regex_test.string }} at index: {{ index }}"

@@ -75,9 +75,6 @@ looks like this:
 
 https://logserver.rdoproject.org/74/574/LONG_HASH/github-check/podified-multinode-edpm-e2e-nobuild-tagged-crc/SHORT_HASH/
 
-Please take extra care to ensure it's NOT pointing to any sub-directory of that page, such
-as "/controller" - else, it will fail to fetch the needed pieces.
-
 
 ### Inject your custom code
 As an option, you're able to inject your custom code by leveraging the
