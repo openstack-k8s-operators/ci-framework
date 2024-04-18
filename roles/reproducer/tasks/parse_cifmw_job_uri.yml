@@ -1,0 +1,27 @@
+---
+- name: Parse cifmw_job_uri
+  vars:
+    regex_pattern: "^https://[a-zA-Z\\.]+(?=\\w{3}(?:/|$))\\w{3}/.*/.*/.*/.*[a-f0-9]{7}"
+  block:
+    - name: Apply regex match filter
+      ansible.builtin.set_fact:
+        _matched_url: "{{ cifmw_job_uri | regex_search(regex_pattern) }}"
+
+    - name: Verify URL is valid
+      ansible.builtin.assert:
+        that: _matched_url | default('') | length > 0
+        quiet: true
+        msg: >-
+          The cifmw_job_uri value provided is not valid: {{ cifmw_job_uri }} More details here:
+          https://ci-framework.readthedocs.io/en/latest/reproducers/03-zuul.html#create-a-custom-environment-file-to-feed-your-job
+
+    - name: Extract job id for later reference
+      vars:
+        user_dir: "{{ lookup('env', 'HOME') }}"
+        basedir: "{{ user_dir ~ '/ci-framework-data' }}"
+        job_id: "{{ _matched_url| basename }}"
+      ansible.builtin.set_fact:
+        cacheable: true
+        _reproducer_basedir: "{{ basedir }}/ci-reproducer/{{ job_id }}"
+        data_baseurl: "{{ _matched_url }}/controller/ci-framework-data/artifacts/"
+        job_id: "{{ job_id }}"

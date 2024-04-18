@@ -4,16 +4,9 @@
     - cifmw_job_uri is defined
   delegate_to: localhost
   block:
-    - name: Extract job id for later reference
-      vars:
-        user_dir: "{{ lookup('env', 'HOME') }}"
-        basedir: "{{ user_dir ~ '/ci-framework-data' }}"
-        job_id: "{{ cifmw_job_uri | regex_replace('/$', '') | basename }}"
-      ansible.builtin.set_fact:
-        cacheable: true
-        _reproducer_basedir: "{{ basedir }}/ci-reproducer/{{ job_id }}"
-        data_baseurl: "{{ cifmw_job_uri }}/controller/ci-framework-data/artifacts/"
-        job_id: "{{ job_id }}"
+    - name: Parse cifmw_job_uri
+      ansible.builtin.include_tasks:
+        file: parse_cifmw_job_uri.yml
 
     - name: Create local directory for parameters
       ansible.builtin.file:
@@ -23,7 +16,7 @@
     - name: Check if we're facing molecule job
       register: _is_molecule
       ansible.builtin.uri:
-        url: "{{ cifmw_job_uri }}/report.html"
+        url: "{{ _matched_url }}/report.html"
         method: HEAD
         status_code:
           - 200
@@ -32,7 +25,7 @@
     - name: Fetch zuul inventory
       ansible.builtin.get_url:
         dest: "{{ _reproducer_basedir }}/zuul_inventory.yml"
-        url: "{{ cifmw_job_uri }}/zuul-info/inventory.yaml"
+        url: "{{ _matched_url }}/zuul-info/inventory.yaml"
         force: true
 
     - name: Facing non-molecule job
