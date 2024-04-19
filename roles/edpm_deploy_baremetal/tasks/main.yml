@@ -88,14 +88,119 @@
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_baremetal_compute'
 
-- name: Deploy EDPM with baremetal
+- name: Prepare OpenStack Dataplane NodeSet CR
   vars:
-    make_edpm_deploy_baremetal_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
+    make_edpm_deploy_baremetal_prep_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
       combine(cifmw_edpm_deploy_baremetal_make_openstack_env)}}"
-    make_edpm_deploy_baremetal_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
+    make_edpm_deploy_baremetal_prep_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
-    tasks_from: 'make_edpm_deploy_baremetal'
+    tasks_from: 'make_edpm_deploy_baremetal_prep'
+
+- name: Kustomize and deploy OpenStackDataPlaneNodeSet
+  when:
+    - not cifmw_edpm_deploy_baremetal_dry_run | bool
+  vars:
+    cifmw_edpm_deploy_openstack_crs_path: >-
+      {{
+        [
+          cifmw_edpm_deploy_baremetal_manifests_dir,
+          cifmw_install_yamls_defaults['NAMESPACE'],
+          'dataplane',
+          'cr'
+        ] | ansible.builtin.path_join
+      }}
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  block:
+    - name: Perform kustomizations to the OpenStackDataPlaneNodeSet CR
+      when: not cifmw_edpm_deploy_baremetal_dry_run
+      cifmw.general.ci_kustomize:
+        target_path: "{{ cifmw_edpm_deploy_openstack_crs_path }}"
+        sort_ascending: false
+        kustomizations: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          patches:
+            - target:
+                kind: OpenStackDataPlaneNodeSet
+              patch: |-
+          {% if content_provider_registry_ip is defined %}
+                - op: add
+                  path: /spec/nodeTemplate/ansible/ansibleVars/edpm_container_registry_insecure_registries
+                  value: ["{{ content_provider_registry_ip }}:5001"]
+          {% endif %}
+
+                - op: add
+                  path: /spec/nodeTemplate/ansible/ansibleVars/edpm_bootstrap_command
+                  value: sudo dnf -y update
+        kustomizations_paths: >-
+          {{
+            [
+              (
+                [
+                  cifmw_edpm_deploy_baremetal_manifests_dir,
+                  'kustomizations',
+                  'dataplane'
+                ] | ansible.builtin.path_join
+              )
+            ]
+          }}
+      register: cifmw_edpm_deploy_baremetal_crs_kustomize_result
+
+- name: Log the CR that is about to be applied
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  ansible.builtin.debug:
+    var: cifmw_edpm_deploy_baremetal_crs_kustomize_result
+
+- name: Patch OpenStackDataPlaneNodeSet to add repo-setup-downstream service
+  when:
+    - cifmw_edpm_deploy_baremetal_repo_setup_override
+    - cifmw_edpm_deploy_baremetal_create_vms | bool
+    - not cifmw_edpm_deploy_baremetal_dry_run
+  block:
+    # This file will be created in downstream job's pre-playbook
+    - name: Create repo-setup-downstream OpenStackDataPlaneService
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc apply -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          -f "{{ cifmw_installyamls_repos }}/devsetup/edpm/services/dataplane_v1beta1_openstackdataplaneservice_reposetup_downstream.yaml"
+    # to-do: We can drop this step once we drop dev-preview#1 jobs in downstream
+    # This is added because install_yamls is tagged and we don't
+    # have repo-setup service in OpenStackDataPlane in v0.1.0 tag
+    - name: Get list of services defined under OpenStackDataPlaneNodeSet resource
+      environment:
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          yq '.spec.services[]' {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
+      register: services_list
+      changed_when: false
+      ignore_errors: true  # noqa: ignore-errors
+
+    # to-do:  We can drop this step once we drop dev-preview#1 jobs in downstream
+    - name: Patch OpenStackDataPlaneNodeSet resource to add "repo-setup-downstream" service
+      when: "'repo-setup' not in services_list.stdout"
+      ansible.builtin.command:
+        cmd: >-
+          yq -i '.spec.services = ["repo-setup-downstream"] + .spec.services' {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
+
+    # to-do: We can drop the when condition once we drop dev-preview#1 jobs in downstream
+    - name: Patch OpenStackDataPlaneNodeSet resource to replace "repo-setup" with "repo-setup-downstream" service
+      when: "'repo-setup' in services_list.stdout"
+      ansible.builtin.command:
+        cmd: >-
+          yq -i '(.spec.services[] | select(. == "repo-setup")) |= "repo-setup-downstream"'  {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
+
+- name: Apply the OpenStackDataPlaneNodeSet CR
+  when: not cifmw_edpm_deploy_baremetal_dry_run
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_edpm_deploy_baremetal_basedir }}/artifacts"
+    script: "oc apply -f {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}"
 
 - name: Wait for virtual computes to be ready
   when:
@@ -158,102 +263,29 @@
       ansible.builtin.debug:
         var: compute_nodes_output.stdout_lines
 
-- name: Patch OpenStackDataPlaneNodeSet to add repo-setup-downstream service
-  when:
-    - cifmw_edpm_deploy_baremetal_repo_setup_override
-    - cifmw_edpm_deploy_baremetal_create_vms | bool
-    - not cifmw_edpm_deploy_baremetal_dry_run
-  block:
-    # This file will be created in downstream job's pre-playbook
-    - name: Create repo-setup-downstream OpenStackDataPlaneService
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc apply -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          -f "{{ cifmw_installyamls_repos }}/devsetup/edpm/services/dataplane_v1beta1_openstackdataplaneservice_reposetup_downstream.yaml"
-
-    # to-do: We can drop this step once we drop dev-preview#1 jobs in downstream
-    # This is added because install_yamls is tagged and we don't
-    # have repo-setup service in OpenStackDataPlane in v0.1.0 tag
-    - name: Get list of services defined under OpenStackDataPlaneNodeSet resource
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc get openstackdataplanenodeset openstack-edpm-ipam
-          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          -o jsonpath='{.spec.services[*]}'
-      register: services_list
-      changed_when: false
-      ignore_errors: true  # noqa: ignore-errors
-
-    # to-do:  We can drop this step once we drop dev-preview#1 jobs in downstream
-    - name: Patch OpenStackDataPlaneNodeSet resource to add "repo-setup-downstream" service
-      when: "'repo-setup' not in services_list.stdout"
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc patch openstackdataplanenodeset openstack-edpm-ipam
-          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          --type json
-          -p '[{"op": "add", "path": "/spec/services/0", "value": "repo-setup-downstream"}]'
-
-    # to-do: We can drop the when condition once we drop dev-preview#1 jobs in downstream
-    - name: Patch OpenStackDataPlaneNodeSet resource to replace "repo-setup" with "repo-setup-downstream" service
-      when: "'repo-setup' in services_list.stdout"
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc patch openstackdataplanenodeset openstack-edpm-ipam
-          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          --type json
-          -p '[{"op": "replace", "path": "/spec/services/0", "value": "repo-setup-downstream"}]'
-
-- name: Patch OpenStackDataPlaneNodeSet resource to include content provider insecure registry
-  when: content_provider_registry_ip is defined
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc patch openstackdataplanenodeset openstack-edpm-ipam
-      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-      --type json
-      -p '[{"op": "add",
-            "path": "/spec/nodeTemplate/ansible/ansibleVars/edpm_container_registry_insecure_registries",
-            "value": [{{ content_provider_registry_ip }}:5001]}]'
-
-- name: Patch OpenStackDataPlaneNodeSet resource to update bootstrap packages
+- name: Wait for OpenStackDataPlaneNodeSet to be deployed
   when: not cifmw_edpm_deploy_baremetal_dry_run
+  vars:
+    cr_name: >-
+      {{
+        (
+          cifmw_edpm_deploy_baremetal_crs_kustomize_result.result |
+          selectattr('kind', 'defined') |
+          selectattr('metadata.name', 'defined') |
+          selectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet') |
+          first
+        ).metadata.name
+      }}
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc patch openstackdataplanenodeset openstack-edpm-ipam
-      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-      --type json
-      -p '[{"op": "add",
-            "path": "/spec/nodeTemplate/ansible/ansibleVars/edpm_bootstrap_command",
-            "value": "sudo dnf -y update"}]'
+      oc wait OpenStackDataPlaneNodeSet {{ cr_name }}
+      --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+      --for=condition=ready
+      --timeout={{ cifmw_edpm_deploy_baremetal_wait_dataplane_timeout_mins }}m
 
-- name: Wait for OpenStackDataPlaneNodeSet to be Ready
-  when: not cifmw_edpm_deploy_baremetal_dry_run
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc wait --timeout={{ cifmw_edpm_deploy_baremetal_wait_dataplane_timeout_mins }}m
-      --for=condition=Ready openstackdataplanenodeset openstack-edpm-ipam
-      -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
 
 - name: Run nova-manage discover_hosts to ensure compute nodes are mapped
   when: not cifmw_edpm_deploy_baremetal_dry_run
