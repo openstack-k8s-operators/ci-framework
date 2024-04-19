@@ -1,0 +1,57 @@
+---
+- name: Add DHCP reservations
+  when:
+    - cifmw_network_dnsmasq_config is defined
+    - "'dhcp' in cifmw_network_dnsmasq_config"
+    - "'network' in cifmw_network_dnsmasq_config['dhcp']"
+  block:
+    - name: Filter the given entries to the DHCP network range ones
+      vars:
+        _dhcp_subnet: "{{ cifmw_network_dnsmasq_config.dhcp.network }}"
+      when:
+        - "'mac' in item"
+        - "'ip' in item"
+        - "'host' in item"
+      ansible.builtin.set_fact:
+        _cifmw_network_dnsmasq_config_leases_req: >-
+          {{
+            (
+              ([] if (index == 0) else (_cifmw_network_dnsmasq_config_leases_req | default([]))) +
+              [item]
+            )
+            if (item.ip | ansible.utils.ipaddr(_dhcp_subnet) | ansible.utils.ipaddr('bool')) else
+            (_cifmw_network_dnsmasq_config_leases_req | default([]))
+          }}
+      loop: "{{ cifmw_network_dnsmasq_config_static_leases | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+        index_var: index
+
+    - name: Add the static IP lease
+      become: true
+      ansible.builtin.lineinfile:
+        path: "{{ cifmw_network_dnsmasq_leases_file }}"
+        state: present
+        regexp: "^dhcp-host={{ item.mac | lower }}"
+        line: >-
+          dhcp-host={{
+            (item.mac | lower) + ',' +
+            item.host + ',' +
+            item.ip + ',' +
+            (item.time | default(cifmw_network_dnsmasq_static_leases_time))
+            }}
+        create: true
+        mode: "0644"
+        owner: root
+        group: root
+      loop: "{{ _cifmw_network_dnsmasq_config_leases_req }}"
+      loop_control:
+        label: "{{ item.host }}: {{ item.mac }} -> {{ item.ip}}"
+      register: _static_leases_append_result
+
+    - name: Reload the NetworkManager to pick the changes # noqa: no-handler
+      become: true
+      when: _static_leases_append_result is changed
+      ansible.builtin.service:
+        name: NetworkManager
+        state: "reloaded"

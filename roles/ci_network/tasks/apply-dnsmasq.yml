@@ -36,16 +36,16 @@
   become: true
   when: >
     ("'127.0.0.1' not in ansible_dns.nameservers") or
-    ("'forwarders' in cifmw_network_local_dns")
+    ("'forwarders' in cifmw_network_dnsmasq_config")
   vars:
     dns_servers: >-
       {{
-        cifmw_network_local_dns.forwarders |
+        cifmw_network_dnsmasq_config.forwarders |
         default(ansible_dns.nameservers)
       }}
     servers: "server={{ dns_servers | join('\nserver=') }}"
   ansible.builtin.copy:
-    dest: "/etc/NetworkManager/dnsmasq.d/99-dns-forwarders.conf"
+    dest: "{{ cifmw_network_dnsmasq_forwarders_file }}"
     owner: root
     group: root
     mode: "0644"
@@ -53,29 +53,62 @@
 
 - name: Prepare the dns configuration
   ansible.builtin.set_fact:
-    _dns_config: "{{ cifmw_network_local_dns }}"
+    _dnsmaq_config: "{{ cifmw_network_dnsmasq_config }}"
 
 - name: Ensure dnsmasq listens on default IPv4 address
-  when: "'listen_addresses' not in cifmw_network_local_dns"
+  when: "'listen_addresses' not in cifmw_network_dnsmasq_config"
   vars:
     data:
       listen_addresses:
         - "127.0.0.1"
         - "{{ ansible_default_ipv4.address }}"
   ansible.builtin.set_fact:
-    _dns_config: >-
+    _dnsmaq_config: >-
       {{
-        _dns_config |
+        _dnsmaq_config |
         combine(data, recursive=true)
+      }}
+
+- name: Ensure dnsmasq dhcp options are present
+  when: "'dhcp' in cifmw_network_dnsmasq_config"
+  vars:
+    _dhcp_config: "{{ cifmw_network_dnsmasq_config.dhcp }}"
+    _nameservers: >-
+      {{
+        _dhcp_config['dns']
+        if _dhcp_config['dns'] is string else
+        _dhcp_config['dns']| join(',')
+      }}
+  ansible.builtin.set_fact:
+    _dnsmaq_config: >-
+      {{
+        _dnsmaq_config |
+        combine(
+          {'dhcp': {'options': {
+              '1': _dhcp_config['network'] | ansible.utils.ipaddr('netmask')}
+            }}
+          if 'network' in _dhcp_config else {}
+          , recursive=true
+        ) |
+        combine(
+          {'dhcp': {'options': {'3': _dhcp_config['gateway']}}}
+          if 'gateway' in _dhcp_config else {}
+          , recursive=true
+        ) |
+                combine(
+          {'dhcp': {'options': {'6': _nameservers}}}
+          if _nameservers | length > 0 else {}
+          , recursive=true
+        )
       }}
 
 - name: Copy the local dns configuration
   become: true
   vars:
-    config: "{{ _dns_config }}"
+    config: "{{ _dnsmaq_config }}"
   ansible.builtin.template:
     src: "templates/local_domain.conf.j2"
-    dest: "/etc/NetworkManager/dnsmasq.d/cifmw_local_domain.conf"
+    dest: "{{ cifmw_network_dnsmasq_config_file }}"
     owner: root
     group: root
     mode: "0644"
