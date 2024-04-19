@@ -54,6 +54,25 @@
       There seems to be an error in the virtual network, no IP were
       detected.
 
+- name: "Add the IP to the libvirt host port details fact for {{ vm_type }}"
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+  ansible.builtin.set_fact:
+    cifmw_hosts_ports: >-
+      {{
+        cifmw_hosts_ports | default({}) |
+        combine({
+          vm_ip.nic.host : {
+            vm_ip.nic.network :
+              (vm_ip.nic | combine({'ip': extracted_ip}, recursive=true))
+          }
+        }, recursive=true)
+      }}
+  loop: "{{ vm_ips.results }}"
+  loop_control:
+    loop_var: vm_ip
+    label: "{{ vm_ip.nic.host }}"
+
 - name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
   when:
     - inventory_hostname != 'localhost'
