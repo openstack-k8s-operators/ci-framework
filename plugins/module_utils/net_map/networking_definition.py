@@ -105,7 +105,7 @@ def _validate_parse_netadrr(
 def _validate_parse_field_type(
     field_name: str,
     raw_definition: typing.Dict[str, typing.Any],
-    expected_type: typing.Type,
+    expected_type: "typing.Type",
     parent_name: str = None,
     parent_type: str = None,
     mandatory: bool = False,

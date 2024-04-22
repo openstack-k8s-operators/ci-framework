@@ -600,7 +600,7 @@ class NetworkingNetworksMapper:
     @staticmethod
     def __build_network_tool_common(
         tool_net_def: networking_definition.SubnetBasedNetworkToolDefinition,
-        tool_type: typing.Type,
+        tool_type: "typing.Type",
     ) -> typing.Union[
         networking_env_definitions.MappedMetallbNetworkConfig,
         networking_env_definitions.MappedMultusNetworkConfig,
