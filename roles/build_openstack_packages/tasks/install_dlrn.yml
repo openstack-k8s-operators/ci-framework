@@ -74,7 +74,7 @@
 - name: Create dlrn-venv
   ansible.builtin.pip:  # noqa: package-latest
     name: pip
-    virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
+    virtualenv: "{{ cifmw_bop_dlrn_venv }}"
     virtualenv_command: "/usr/bin/python3 -m venv"
     state: latest
     extra_args: --upgrade
@@ -93,30 +93,25 @@
       retries: 3
       delay: 5
 
-    - name: Install DLRN
-      ansible.builtin.shell: >
-        source {{ cifmw_bop_build_repo_dir }}/dlrn-venv/bin/activate;
-        pip install -r requirements.txt;
-        python3 setup.py install;
-      args:
-        chdir: '{{ cifmw_bop_build_repo_dir }}/DLRN'
+    - name: Install DLRN requirements
+      ansible.builtin.pip:
+        virtualenv: "{{ cifmw_bop_dlrn_venv }}"
+        requirements: "{{ cifmw_bop_build_repo_dir }}/DLRN/requirements.txt"
 
-- name: Install DLRN from pip
+    - name: Install DLRN from source
+      ansible.builtin.command:
+        cmd: "{{ cifmw_bop_dlrn_venv }}/bin/python setup.py install"
+        chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN"
+        creates: "{{ cifmw_bop_dlrn_venv }}/bin/dlrn"
+
+- name: Install DLRN and rdopkg from pip
   when: not cifmw_bop_dlrn_from_source|bool
-  block:
-    - name: Pip install rdopkg
-      ansible.builtin.pip:  # noqa: package-latest
-        name: rdopkg
-        virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
-        virtualenv_command: "/usr/bin/python3 -m venv"
-        state: latest
-
-    - name: Pip install DLRN
-      ansible.builtin.pip:  # noqa: package-latest
-        name: dlrn
-        virtualenv: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv"
-        virtualenv_command: "/usr/bin/python3 -m venv"
-        state: latest
+  ansible.builtin.pip:  # noqa: package-latest
+    name:
+      - rdopkg
+      - dlrn
+    virtualenv: "{{ cifmw_bop_dlrn_venv }}"
+    state: latest
 
 - name: Drop in the templated version of projects.ini
   ansible.builtin.template:
@@ -125,7 +120,7 @@
 
 - name: Copy the DLRN scripts in the virtualenv to the scripts dir
   ansible.posix.synchronize:
-    src: "{{ cifmw_bop_build_repo_dir }}/dlrn-venv/share/dlrn/scripts"
+    src: "{{ cifmw_bop_dlrn_venv }}/share/dlrn/scripts"
     dest: "{{ cifmw_bop_build_repo_dir }}/DLRN"
   delegate_to: "{{ inventory_hostname }}"
 
