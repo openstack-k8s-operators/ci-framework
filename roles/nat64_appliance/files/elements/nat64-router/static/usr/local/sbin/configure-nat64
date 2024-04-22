@@ -1,0 +1,96 @@
+#!/bin/bash
+# Copyright 2024 Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -xe
+
+# Only run the configuration once
+# if file /etc/nat64/config-complete exists -> NOOP.
+if [ -f /etc/nat64/config-complete ]; then
+    echo "Config already applied, not running again."
+    echo "Remove file: /etc/nat64/config-complete to force re-run"
+    exit 0
+fi
+
+source /etc/nat64/config-data
+
+if [ -z "${NAT64_IPV6_PREFIX}" ]; then
+    echo "Please set NAT64_IPV6_PREFIX"; exit 1
+fi
+if [ -z "${NAT64_HOST_IPV6}" ]; then
+    echo "Please set NAT64_HOST_IPV6"; exit 1
+fi
+if [ -z "${NAT64_TAYGA_IPV6}" ]; then
+    echo "Please set NAT64_TAYGA_IPV6"; exit 1
+fi
+
+NAT64_TAYGA_IPV6_PREFIX=${NAT64_TAYGA_IPV6_PREFIX:-"fd00:abcd:abcd:fcff::/96"}
+NAT64_TAYGA_DYNAMIC_POOL=${NAT64_TAYGA_DYNAMIC_POOL:-"192.168.255.0/24"}
+NAT64_TAYGA_IPV4=${NAT64_TAYGA_IPV4:-"192.168.255.1"}
+
+function replace_vars {
+
+    pushd /etc/nat64/v6-dnsmasq
+        sed -i s~%%_NAT64_HOST_IPV6_%%~${NAT64_HOST_IPV6%%/*}~g dnsmasq.conf
+    popd
+
+    pushd /etc/unbound/
+        sed -i s~%%_NAT64_IPV6_PREFIX_%%~${NAT64_IPV6_PREFIX}~g unbound.conf
+        sed -i s~%%_NAT64_TAYGA_IPV6_PREFIX_%%~${NAT64_TAYGA_IPV6_PREFIX}~g unbound.conf
+    popd
+
+    pushd /etc/tayga
+        sed -i s~%%_NAT64_TAYGA_IPV4_%%~${NAT64_TAYGA_IPV4}~g default.conf
+        sed -i s~%%_NAT64_TAYGA_IPV6_PREFIX_%%~${NAT64_TAYGA_IPV6_PREFIX}~g default.conf
+        sed -i s~%%_NAT64_TAYGA_DYNAMIC_POOL_%%~${NAT64_TAYGA_DYNAMIC_POOL}~g default.conf
+    popd
+
+    pushd /etc/NetworkManager/system-connections
+        sed -i s~%%_NAT64_TAYGA_IPV6_%%~${NAT64_TAYGA_IPV6}~g nat64.nmconnection
+        sed -i s~%%_NAT64_TAYGA_IPV6_PREFIX_%%~${NAT64_TAYGA_IPV6_PREFIX}~g nat64.nmconnection
+        sed -i s~%%_NAT64_TAYGA_DYNAMIC_POOL_%%~${NAT64_TAYGA_DYNAMIC_POOL}~g nat64.nmconnection
+    popd
+
+    pushd /etc/nftables
+        sed -i s~%%_NAT64_TAYGA_DYNAMIC_POOL_%%~${NAT64_TAYGA_DYNAMIC_POOL}~g nat64.nft
+    popd
+}
+
+function enable_services {
+    systemctl daemon-reload
+
+    systemctl enable nat64-v4-dnsmasq.service
+    systemctl enable nat64-v6-dnsmasq.service
+    systemctl enable unbound.service
+    systemctl enable tayga@default.service
+    systemctl enable nftables.service
+}
+
+function start_services {
+    systemctl restart NetworkManager.service
+    systemctl start nat64-v4-dnsmasq.service
+    systemctl start nat64-v6-dnsmasq.service
+    systemctl start unbound.service
+    systemctl start tayga@default.service
+    systemctl start nftables.service
+}
+
+
+replace_vars
+enable_services
+start_services
+
+touch /etc/nat64/config-complete
+
+exit 0

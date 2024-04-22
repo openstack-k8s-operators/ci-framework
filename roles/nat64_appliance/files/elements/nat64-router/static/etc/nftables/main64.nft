@@ -1,0 +1,43 @@
+# drop any existing nftables ruleset
+flush ruleset
+
+# a common table for both IPv4 and IPv6
+table inet nftables_svc {
+    # protocols to allow
+    set allowed_protocols {
+        type inet_proto
+        elements = { icmp, icmpv6 }
+    }
+    # interfaces to accept any traffic on
+    set allowed_interfaces {
+        type ifname
+        elements = { "lo" }
+    }
+    # services to allow (TCP)
+    set allowed_tcp_dports {
+        type inet_service
+        elements = { domain, ssh }
+    }
+    # services to allow (UDP)
+    set allowed_udp_dports {
+        type inet_service
+        elements = { domain }
+    }
+    # this chain gathers all accept conditions
+    chain allow {
+        ct state established,related accept
+        meta l4proto @allowed_protocols accept
+        iifname @allowed_interfaces accept
+        tcp dport @allowed_tcp_dports accept
+        udp dport @allowed_udp_dports accept
+    }
+    # base-chain for traffic to this host
+    chain INPUT {
+        type filter hook input priority filter + 20
+        policy accept
+        jump allow
+        reject with icmpx type port-unreachable
+    }
+}
+
+include "/etc/nftables/nat64.nft"
