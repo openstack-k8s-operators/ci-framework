@@ -44,6 +44,19 @@ Note that all of the SSH keys should be in `ecdsa` format to comply with FIPS di
 ### Required parameters only when baremetal compute nodes are used.
 * `cifmw_ci_gen_kustomize_values_ctlplane_interface`: (String) Used to override default controlplane interface for OSP compute nodes.
 
+## Adding a new template
+
+The template must have a leading comment staging its source. For example, if your template is located in
+`templates/foo/edpm-values/values.yaml.j2` it must have the following header:
+
+```YAML
+---
+# source: foo/edpm-values/values.yaml.j2
+```
+
+The `source` must be relative to the `templates` directory. This will help during debugging sessions, since it will show the used template
+directly in `ci-framework-data/ci_k8s_snippets/TYPE/02_ci_data.yaml`.
+
 ## Examples
 
 ### Generate controlplane values.yaml for `nfv/sriov` VA
