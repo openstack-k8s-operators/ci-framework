@@ -46,6 +46,36 @@
     - vm_ips.rc == 0
     - vm_ips.stdout != ''
 
+- name: "Fetch the fresh output of the domifaddr for troubleshooting {{ vm_type }}"  # noqa: risky-shell-pipe
+  register: _fetch_domifaddr_outs
+  ansible.builtin.shell:
+    cmd: >-
+      virsh -c qemu:///system -q
+      domifaddr --source arp
+      cifmw-{{ nic.host }} | grep "{{ nic.mac }}"
+  loop: "{{ public_net_nics }}"
+  loop_control:
+    loop_var: nic
+    label: "{{ nic.host }}"
+  retries: 20
+  delay: 5
+  until:
+    - _fetch_domifaddr_outs.rc == 0
+    - _fetch_domifaddr_outs.stdout != ''
+
+- name: "Save the fresh output of the domifaddr for troubleshooting {{ vm_type }}"
+  ansible.builtin.copy:
+    dest: >-
+      {{
+        [
+          cifmw_libvirt_manager_basedir,
+          'artifacts',
+          'libvirt-domifaddr-type-' + vm_type + '.yml'
+        ] | path_join
+      }}
+    mode: "0644"
+    content: "{{ _fetch_domifaddr_outs | to_nice_yaml }}"
+
 - name: "Assert we have IPs for {{ vm_type }}"
   ansible.builtin.assert:
     that:
