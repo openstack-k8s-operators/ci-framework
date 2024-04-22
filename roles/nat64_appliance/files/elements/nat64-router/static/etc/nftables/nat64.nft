@@ -1,0 +1,25 @@
+table ip nftables_svc {
+
+  set masq_interfaces {
+    type ifname
+    elements = { "nat64" }
+  }
+
+  set masq_ips {
+    type ipv4_addr
+    flags interval
+    elements = { %%_NAT64_TAYGA_DYNAMIC_POOL_%% }
+  }
+
+  chain do_masquerade {
+    meta iif > 0 th sport < 16384 th dport >= 32768 masquerade random
+    masquerade
+  }
+
+  chain POSTROUTING {
+    type nat hook postrouting priority srcnat + 20
+    policy accept
+    oifname @masq_interfaces jump do_masquerade
+    ip saddr @masq_ips jump do_masquerade
+  }
+}
