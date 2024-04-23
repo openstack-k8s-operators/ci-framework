@@ -57,63 +57,69 @@
       {{ testjob.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Start test-operator-logs-pod
+- name: Collect logs
   when:
     - not cifmw_test_operator_dry_run | bool
     - not testjob_timed_out
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Pod
-      metadata:
-        name: "test-operator-logs-pod-{{ run_test_fw }}"
-        namespace: "{{ cifmw_test_operator_namespace }}"
-      spec:
-        containers:
-          - name: test-operator-logs-container
-            image: "{{ cifmw_test_operator_logs_image }}"
-            command: ["sleep"]
-            args: ["infinity"]
-            volumeMounts:
+  block:
+    - name: Get information about PVC that stores the logs
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: PersistentVolumeClaim
+        label_selectors:
+          - "instanceName={{ test_operator_job_name }}"
+      register: logsPVC
+
+    - name: Start test-operator-logs-pod
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: "test-operator-logs-pod-{{ run_test_fw }}"
+            namespace: "{{ cifmw_test_operator_namespace }}"
+          spec:
+            containers:
+              - name: test-operator-logs-container
+                image: "{{ cifmw_test_operator_logs_image }}"
+                command: ["sleep"]
+                args: ["infinity"]
+                volumeMounts:
+                  - name: logs-volume
+                    mountPath: /mnt
+            volumes:
               - name: logs-volume
-                mountPath: /mnt
-        volumes:
-          - name: logs-volume
-            persistentVolumeClaim:
-              claimName: "{{ test_operator_cr.metadata.name }}"
+                persistentVolumeClaim:
+                  claimName: "{{ logsPVC.resources[0].metadata.name }}"
 
-- name: Ensure that the test-operator-logs-pod is Running
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-    name: "test-operator-logs-pod-{{ run_test_fw }}"
-    wait: true
-  register: logs_pod
-  until: logs_pod.resources[0].status.phase == "Running"
-  delay: 10
-  retries: 20
-  when:
-    - not cifmw_test_operator_dry_run | bool
-    - not testjob_timed_out
+    - name: Ensure that the test-operator-logs-pod is Running
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_test_operator_namespace }}"
+        kind: Pod
+        name: "test-operator-logs-pod-{{ run_test_fw }}"
+        wait: true
+      register: logs_pod
+      until: logs_pod.resources[0].status.phase == "Running"
+      delay: 10
+      retries: 20
 
-- name: Get logs from test-operator-logs-pod
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.shell: >
-    oc cp -n {{ cifmw_test_operator_namespace }}
-    openstack/test-operator-logs-pod-{{ run_test_fw }}:mnt/
-    {{ cifmw_test_operator_artifacts_basedir }}
-  when:
-    - not cifmw_test_operator_dry_run | bool
-    - not testjob_timed_out
+    - name: Get logs from test-operator-logs-pod
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: >
+        oc cp -n {{ cifmw_test_operator_namespace }}
+        openstack/test-operator-logs-pod-{{ run_test_fw }}:mnt/
+        {{ cifmw_test_operator_artifacts_basedir }}
 
 - name: Get list of all pods
   kubernetes.core.k8s_info:
