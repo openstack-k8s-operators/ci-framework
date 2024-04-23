@@ -11,16 +11,22 @@
   tasks:
     # end_play will end only current play, not the main edpm-deploy.yml
     - name: Early end if not architecture deploy
+      tags:
+        - always
       when:
         - cifmw_architecture_scenario is not defined
       ansible.builtin.meta: end_play
 
     - name: Load Networking Environment Definition
+      tags:
+        - always
       ansible.builtin.include_role:
         name: networking_mapper
         tasks_from: load_env_definition.yml
 
     - name: Fetch network facts
+      tags:
+        - always
       when:
         - "not item.startswith('ocp-')"
       ansible.builtin.setup:
@@ -32,11 +38,15 @@
         label: "{{ item }}"
 
     - name: Look for nova migration keypair file
+      tags:
+        - edpm_bootstrap
       register: _nova_key_file
       ansible.builtin.stat:
         path: "{{ cifmw_basedir }}/artifacts/nova_migration_key"
 
     - name: Ensure nova migration keypair details are propagated
+      tags:
+        - always
       vars:
         _ssh_file: >-
           {{
@@ -94,11 +104,15 @@
               }}
 
     - name: Load architecture automation file
+      tags:
+        - edpm_deploy
       register: _automation
       ansible.builtin.slurp:
         path: "{{ cifmw_architecture_automation_file }}"
 
     - name: Prepare automation data
+      tags:
+        - edpm_deploy
       vars:
         _parsed: "{{ _automation.content | b64decode | from_yaml }}"
       ansible.builtin.set_fact:
@@ -106,6 +120,8 @@
           {{ _parsed['vas'][cifmw_architecture_scenario] }}
 
     - name: Check requirements
+      tags:
+        - edpm_bootstrap
       ansible.builtin.import_role:
         name: kustomize_deploy
         tasks_from: check_requirements.yml
@@ -116,32 +132,40 @@
         tasks_from: install_operators.yml
       tags:
         - operator
+        - edpm_bootstrap
 
     - name: Configure Storage Class
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         name: ci_local_storage
       tags:
         - storage
+        - edpm_bootstrap
 
     - name: Execute deployment steps
+      tags:
+        - edpm_deploy
       ansible.builtin.include_role:
         name: kustomize_deploy
         tasks_from: execute_step.yml
+        apply:
+          tags:
+            - edpm_deploy
       loop: "{{ cifmw_deploy_architecture_steps.stages }}"
       loop_control:
         label: "{{ stage.path }}"
         loop_var: stage
         index_var: stage_id
-      tags:
-        - edpm_deploy
 
     - name: Extract and install OpenStackControlplane CA
-      ansible.builtin.include_role:
+      ansible.builtin.import_role:
         role: install_openstack_ca
       tags:
         - openstack_ca
+        - edpm_post
 
     - name: Run nova host discover process
+      tags:
+        - edpm_post
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
