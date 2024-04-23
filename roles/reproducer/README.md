@@ -37,7 +37,7 @@ None
 This role isn't intended to be called outside of the `reproducer.yml` playbook.
 
 ## Examples
-Please follow the [documentation about the overall "reproducer" feature](https://ci-framework.readthedocs.io/en/latest/cookbooks/reproducer.html).
+Please follow the [documentation about the overall "reproducer" feature](https://ci-framework.readthedocs.io/en/latest/roles/reproducer.html).
 
 ### Push repositories
 #### Local repositories on your laptop
