@@ -1,0 +1,60 @@
+---
+- name: Save k8s cert-manager OLM manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_cert_manager_manifests_dir }}/cert-manager-{{ item.kind | lower }}-olm.yaml"
+    content: "{{ item | to_nice_yaml }}"
+  loop:
+    - "{{ cifmw_cert_manager_olm_operator_group }}"
+    - "{{ cifmw_cert_manager_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Create the cert-manager OLM subscription resources
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition: "{{ item }}"
+    state: present
+  loop:
+    - "{{ cifmw_cert_manager_olm_operator_group }}"
+    - "{{ cifmw_cert_manager_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Get the operator name
+  ansible.builtin.set_fact:
+    _operator_name: "{{ cifmw_cert_manager_olm_subscription.metadata.name }}"
+
+- name: Wait for the cert-manager operator deployment to be Ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_cert_manager_operator_namespace }}"
+    kind: Deployment
+    name: "{{ _operator_name }}"
+    wait_sleep: 10
+    wait_timeout: 360
+    wait_condition:
+      type: Ready
+      status: "True"
+
+- name: Wait for the cert-manager operator csv to be installed
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      -n "{{ cifmw_cert_manager_operator_namespace }}"
+      -o jsonpath='{.items[*].status.phase}'
+  changed_when: false
+  register: _certmanager_csv_out
+  retries: 12
+  delay: 10
+  until:
+    - _certmanager_csv_out is defined
+    - _certmanager_csv_out.failed is false
+    - _certmanager_csv_out.stdout_lines | length > 0
+    - "(_certmanager_csv_out.stdout_lines[0] | lower) == 'succeeded'"
