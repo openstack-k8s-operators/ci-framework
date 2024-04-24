@@ -156,41 +156,70 @@
         - bootstrap
       ansible.builtin.include_tasks: push_code.yml
 
-    - name: Rotate some logs
-      tags:
-        - always
-      ansible.builtin.include_tasks: rotate_log.yml
-      loop:
-        - "/home/zuul/ansible-bootstrap.log"
-
-    - name: Bootstrap environment on controller-0
+    - name: Group tasks on controller-0
       delegate_to: controller-0
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
-      no_log: true
-      ansible.builtin.command:
-        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          -e @~/ci-framework-data/parameters/reproducer-variables.yml
-          -e @scenarios/reproducers/networking-definition.yml
-          playbooks/01-bootstrap.yml
-        creates: "/home/zuul/ansible-bootstrap.log"
+      block:
+        - name: Rotate some logs
+          tags:
+            - always
+          ansible.builtin.include_tasks: rotate_log.yml
+          loop:
+            - "/home/zuul/ansible-bootstrap.log"
 
-    - name: Install dev tools from install_yamls on controller-0
-      when: >
-         (operator_content_provider| default(false) | bool) or
-         (openstack_content_provider| default(false) | bool)
-      delegate_to: controller-0
-      environment:
-        ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
-      no_log: true
-      ansible.builtin.command:
-        chdir: "/home/zuul/src/github.com/openstack-k8s-operators/install_yamls/devsetup"
-        cmd: >-
-          ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-          download_tools.yaml
-        creates: "/home/zuul/bin/operator-sdk"
+        - name: Bootstrap environment on controller-0
+          environment:
+            ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+          no_log: true
+          ansible.builtin.command:
+            chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
+            cmd: >-
+              ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+              -e @~/ci-framework-data/parameters/reproducer-variables.yml
+              -e @scenarios/reproducers/networking-definition.yml
+              playbooks/01-bootstrap.yml
+            creates: "/home/zuul/ansible-bootstrap.log"
+
+        - name: Install dev tools from install_yamls on controller-0
+          when: >
+             (operator_content_provider| default(false) | bool) or
+             (openstack_content_provider| default(false) | bool)
+          environment:
+            ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+          no_log: true
+          ansible.builtin.command:
+            chdir: "/home/zuul/src/github.com/openstack-k8s-operators/install_yamls/devsetup"
+            cmd: >-
+              ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+              download_tools.yaml
+            creates: "/home/zuul/bin/operator-sdk"
+
+        - name: Configure CRC network if needed
+          when:
+            - _layout.vms.crc is defined
+            - (_layout.vms.crc.amount is defined and
+               (_layout.vms.crc.amount | int ) > 0) or
+              _layout.vms.crc.amount is undefined
+          environment:
+            KUBECONFIG: "/home/zuul/.kube/config"
+            PATH: "{{ cifmw_path }}"
+          block:
+            - name: Get network.operator backend
+              register: _network_backend
+              ansible.builtin.command:
+                cmd: oc get network.operator cluster -o json
+
+            - name: Patch network.operator if needed
+              vars:
+                _output: "{{ _network_backend.stdout | from_json }}"
+                _backend: "{{ _output.spec.defaultNetwork.type }}"
+              when:
+                - _backend == 'OVNKubernetes'
+              ansible.builtin.command:
+                cmd: >-
+                  oc patch network.operator cluster
+                  -p '{"spec":{"defaultNetwork":{"ovnKubernetesConfig":
+                  {"gatewayConfig":{"routingViaHost": true,
+                  "ipForwarding": "Global"}}}}}' --type=merge
 
     - name: Emulate CI job
       when:
