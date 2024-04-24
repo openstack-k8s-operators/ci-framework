@@ -5,18 +5,22 @@
       - stage is defined
       - stage_id is defined
       - stage['path'] is defined
-      - (stage.wait_conditions is defined and
-         stage.wait_conditions | length > 0)
+      - stage['wait_conditions'] is defined
+      - stage['wait_conditions'] | length > 0
       - stage['values'] is defined
       - stage['values'] | length > 0
+      - stage['build_output'] is defined
+      - stage['build_output'] | length > 0
 
 - name: Assert all wait conditions are valid
   vars:
-    _stage_name: "stage_{{ stage_id }}"
+    _stage_name_id: "stage_{{ stage_id }}"
+    _stage_name: "stage_{{ stage.build_output | basename | splitext | first }}"
     _custom_conditions: >-
       {{
         cifmw_architecture_wait_condition[_stage_name] |
-        default([])
+        default(cifmw_architecture_wait_condition[_stage_name_d] |
+        default([]))
       }}
     _pattern: '^(oc|kubectl).*wait.*$'
   block:
@@ -46,9 +50,16 @@
         msg: >-
           Review and correct the faulty wait_conditions listed above.
 
-- name: Group tasks under the same tag
+    - name: Set stage_wait_conditions fact
+      ansible.builtin.set_fact:
+        _wait_conditions: "{{ stage.wait_conditions + _custom_conditions }}"
+
+- name: Group tasks under the same tags
   vars:
-    _stage: "deploy_architecture_stage_{{ stage_id }}"
+    _stage_name_id: "stage_{{ stage_id }}"
+    _stage_name: "stage_{{ stage.build_output | basename | splitext | first }}"
+    _tag_name_id: "deploy_architecture_{{ _stage_name_id }}"
+    _tag_name: "deploy_architecture_{{ _stage_name }}"
     _skip_tags: >-
       {% if cifmw_deploy_architecture_skip_stages is defined and
          cifmw_deploy_architecture_skip_stages is string -%}
@@ -63,7 +74,8 @@
   tags:
     - "deploy_architecture_stage_{{ stage_id }}"
   when:
-    - _stage not in _skip_tags
+    - _tag_name not in _skip_tags
+    - _tag_name_id not in _skip_tags
   block:
     - name: Ensure source files exists
       register: _src
@@ -95,7 +107,7 @@
         - stage.pre_stage_run is defined
       vars:
         hooks: "{{ stage.pre_stage_run }}"
-        step: "pre_stage_{{ stage_id }}_run"
+        step: "pre_{{ _stage_name_id }}_run"
       ansible.builtin.include_role:
         name: run_hook
 
@@ -103,7 +115,6 @@
       when:
         - _val.src_file is defined
       vars:
-        _stage_id: "stage_{{ stage_id }}"
         _name: "{{ _val['name'] }}"
         cifmw_ci_gen_kustomize_values_name: "{{ _name }}"
         cifmw_ci_gen_kustomize_values_src_file: >-
@@ -116,9 +127,17 @@
         cifmw_ci_gen_kustomize_values_userdata: >-
           {{
             (cifmw_architecture_user_kustomize is defined and
-             cifmw_architecture_user_kustomize[_stage_id][_name] is defined
-            ) | ternary(cifmw_architecture_user_kustomize[_stage_id][_name],
-                        {})
+             cifmw_architecture_user_kustomize[_stage_name_id][_name] is defined
+            ) |
+            ternary(cifmw_architecture_user_kustomize[_stage_name_id][_name],
+                    {}) |
+            combine(
+            (cifmw_architecture_user_kustomize is defined and
+             cifmw_architecture_user_kustomize[_stage_name][_name] is defined
+            ) |
+            ternary(cifmw_architecture_user_kustomize[_stage_name][_name],
+                    {})
+            )
           }}
       ansible.builtin.include_role:
         name: ci_gen_kustomize_values
@@ -155,9 +174,11 @@
     - name: Stop before building kustomization if requested
       when:
         - cifmw_deploy_architecture_stopper is defined
-        - cifmw_deploy_architecture_stopper == _stage_stopper
+        - cifmw_deploy_architecture_stopper in _stage_stopper
       vars:
-        _stage_stopper: "pre_kustomize_stage_{{ stage_id }}"
+        _stage_stopper:
+          - "pre_kustomize_{{ _stage_name_id }}"
+          - "pre_kustomize_{{ _stage_name  }}"
       ansible.builtin.fail:
         msg: "Failing on demand {{ cifmw_deploy_architecture_stopper }}"
 
@@ -202,9 +223,11 @@
     - name: Stop after building kustomization if requested
       when:
         - cifmw_deploy_architecture_stopper is defined
-        - cifmw_deploy_architecture_stopper == _stage_stopper
+        - cifmw_deploy_architecture_stopper in _stage_stopper
       vars:
-        _stage_stopper: "post_kustomize_stage_{{ stage_id }}"
+        _stage_stopper:
+          - "post_kustomize_{{ _stage_name_id }}"
+          - "post_kustomize_{{ _stage_name }}"
       ansible.builtin.fail:
         msg: "Failing on demand {{ cifmw_deploy_architecture_stopper }}"
 
@@ -234,17 +257,6 @@
     - name: "Build Wait Conditions for {{ stage.path }}"
       when:
         - not cifmw_kustomize_deploy_generate_crs_only | bool
-      vars:
-        _stage_name: "stage_{{ stage_id }}"
-        _custom_conditions: >-
-          {{
-            cifmw_architecture_wait_condition[_stage_name] |
-            default([])
-          }}
-        _commands: >-
-          {{
-            stage['wait_conditions'] + _custom_conditions
-           }}
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
@@ -252,16 +264,18 @@
         - name: "Run Wait Conditions for {{ stage.path }}"
           ansible.builtin.command:
             cmd: "{{ wait_condition }}"
-          loop: "{{ _commands }}"
+          loop: "{{ _wait_conditions }}"
           loop_control:
             loop_var: wait_condition
 
     - name: Stop after applying CRs if requested
       when:
         - cifmw_deploy_architecture_stopper is defined
-        - cifmw_deploy_architecture_stopper == _stage_stopper
+        - cifmw_deploy_architecture_stopper in _stage_stopper
       vars:
-        _stage_stopper: "post_apply_stage_{{ stage_id }}"
+        _stage_stopper:
+          - "post_apply_{{ _stage_name_id }}"
+          - "post_apply_{{ _stage_name }}"
       ansible.builtin.fail:
         msg: "Failing on demand {{ cifmw_deploy_architecture_stopper }}"
 
@@ -271,6 +285,6 @@
         - stage.post_stage_run is defined
       vars:
         hooks: "{{ stage.post_stage_run }}"
-        step: "post_stage_{{ stage_id }}_run"
+        step: "post_{{ _stage_name_id }}_run"
       ansible.builtin.include_role:
         name: run_hook
