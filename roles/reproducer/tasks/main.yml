@@ -203,23 +203,37 @@
             KUBECONFIG: "/home/zuul/.kube/config"
             PATH: "{{ cifmw_path }}"
           block:
-            - name: Get network.operator backend
-              register: _network_backend
-              ansible.builtin.command:
-                cmd: oc get network.operator cluster -o json
+            - name: Gather network.operator info
+              register: _network
+              kubernetes.core.k8s_info:
+                api_version: "operator.openshift.io/v1"
+                kubeconfig: "~/.kube/config"
+                kind: Network
+                name: cluster
 
-            - name: Patch network.operator if needed
+            - name: Patch network operator
               vars:
-                _output: "{{ _network_backend.stdout | from_json }}"
-                _backend: "{{ _output.spec.defaultNetwork.type }}"
+                _network_backend: >-
+                  {{
+                    _network.resources |
+                    map(attribute="spec.defaultNetwork.type") |
+                    first
+                  }}
               when:
-                - _backend == 'OVNKubernetes'
-              ansible.builtin.command:
-                cmd: >-
-                  oc patch network.operator cluster
-                  -p '{"spec":{"defaultNetwork":{"ovnKubernetesConfig":
-                  {"gatewayConfig":{"routingViaHost": true,
-                  "ipForwarding": "Global"}}}}}' --type=merge
+                - _network_backend == "OVNKubernetes"
+              kubernetes.core.k8s_json_patch:
+                api_version: "operator.openshift.io/v1"
+                kubeconfig: "~/.kube/config"
+                kind: Network
+                name: cluster
+                persist_config: true
+                patch:
+                  - path: "/spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/routingViaHost"
+                    value: true
+                    op: replace
+                  - path: "/spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/ipForwarding"
+                    value: "Global"
+                    op: replace
 
     - name: Emulate CI job
       when:
