@@ -46,6 +46,9 @@ cifmw_baremetal_hosts:
     status: running
     # Optional: (string) The storage device to use for provisioning.
     root_device_hint: /dev/sda
+    # Optional: (string) The field to be used as rootHint. Defaults
+    #     to the cifmw_deploy_bmh_root_device_hint_field.
+    root_device_hint_field: deviceName
     # Optional: (dict) Nmstate to apply to the host when provisioned
     nmstate:
       # interfaces: # Sample nmstate state snippet
