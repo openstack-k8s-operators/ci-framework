@@ -13,6 +13,8 @@ CI_CTX_NAME ?= localhost/cifmw:latest
 MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 # Run molecule against all tests
 TEST_ALL_ROLES ?= ${TEST_ALL_ROLES:-no}
+# Log output location
+LOG_DIR ?= /tmp
 
 # target vars for generic operator install info 1: target name , 2: operator name
 define vars
@@ -79,18 +81,18 @@ pre_commit_nodeps: ## Run pre-commit tests without installing dependencies
 	pushd $(BASEDIR); \
 	git config --global safe.directory '*'; \
 	if [ "x$(USE_VENV)" ==  'xyes' ]; then \
-		${HOME}/test-python/bin/pre-commit run --all-files; \
+		${HOME}/test-python/bin/pre-commit run --all-files 2>&1 | tee $(LOG_DIR)/pre_commit.log; \
 	else \
-		pre-commit run --all-files; \
+		pre-commit run --all-files 2>&1 | tee $(LOG_DIR)/pre_commit.log; \
 	fi
 
 .PHONY: check_zuul_files
 check_zuul_files: role_molecule ## Regenerate zuul files and check if they have not been modified manually
-	./scripts/check_zuul_files.sh
+	./scripts/check_zuul_files.sh 2>&1 | tee $(LOG_DIR)/check_zuul_files.log
 
 .PHONY: check_k8s_snippets_comment
 check_k8s_snippets_comment:
-	./scripts/check_k8s_snippets_comment.sh
+	./scripts/check_k8s_snippets_comment.sh 2>&1 | tee $(LOG_DIR)/check_k8s_snippets_comment.log
 
 ##@ Ansible-test testing
 .PHONY: ansible_test
@@ -98,7 +100,7 @@ ansible_test: setup_tests ansible_test_nodeps ## Runs ansible-test with dependen
 
 .PHONY: ansible_test_nodeps
 ansible_test_nodeps: ## Run ansible-test without installing dependencies
-	bash scripts/run_ansible_test
+	bash scripts/run_ansible_test 2>&1 | tee $(LOG_DIR)/ansible_tests.log
 
 ##@ Container targets
 .PHONY: ci_ctx
