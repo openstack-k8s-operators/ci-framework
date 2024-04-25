@@ -20,12 +20,18 @@
     state: directory
     mode: '0755'
 
-- name: Install cert-manager cmctl CLI
-  ansible.builtin.unarchive:
-    src:
-      "https://github.com/cert-manager/cert-manager/releases/{{ cifmw_cert_manager_version }}/download/cmctl-linux-amd64.tar.gz"
-    dest: "{{ lookup('env', 'HOME') }}/bin/"
-    remote_src: true
+# jinja[invalid] is triggered by the call to the lookup_plugin.pipe
+# against go binary while it doesn't existin in the env running
+# ansible-lint
+- name: Install cert-manager cmctl CLI  # noqa: jinja[invalid]
+  become: true
+  vars:
+    _os: "{{ lookup('pipe', 'go env GOOS') }}"
+    _arch: "{{ lookup('pipe', 'go env GOARCH') }}"
+  ansible.builtin.get_url:
+    url: "https://github.com/cert-manager/cmctl/releases/{{ cifmw_cert_manager_version }}/download/cmctl_{{ _os }}_{{ _arch }}"
+    dest: "{{ lookup('env', 'HOME') }}/bin/cmctl"
+    mode: "0755"
 
 - name: Verify cert_manager api
   environment:
