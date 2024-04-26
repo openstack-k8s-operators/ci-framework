@@ -1,0 +1,49 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Destination directory exists
+  ansible.builtin.file:
+    state: directory
+    recurse: true
+    path: "{{ cifmw_update_containers_dest_path | dirname }}"
+
+- name: Generate update containers yaml file
+  ansible.builtin.template:
+    src: "update_containers.j2"
+    dest: "{{ cifmw_update_containers_dest_path }}"
+
+- name: Update the containers
+  when: cifmw_update_containers | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: "oc apply -f {{ cifmw_update_containers_dest_path }}"
+
+  # Note(chkumar): It will be removed once ansiblee runner
+  # support is enabled in openstackversion interface.
+- name: Update Ansibleee Runner container
+  when: cifmw_update_containers_ansibleee_image_url is defined
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc patch csv -n openstack-operators openstack-ansibleee-operator.v0.0.1
+      --type='json' -p='[{
+      "op":"replace", "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
+      "value": {"name": "RELATED_IMAGE_ANSIBLEEE_IMAGE_URL_DEFAULT",
+      "value": {{ cifmw_update_containers_ansibleee_image_url }}}}]'
