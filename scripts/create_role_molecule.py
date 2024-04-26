@@ -54,19 +54,21 @@ def get_project_paths(project_dir=None):
     return project_paths
 
 
-def generate_zuul_job_role_yaml(roles_name, templates_dir):
+def generate_zuul_job_role_yaml(roles_name, templates_dir, template_name):
     """
     Generate YAML structure for a Zuul job based on given role.
 
     Args:
         roles_name (str): Name of the role.
+        templates_dir (str): Location of the templates.
+        template_name (str): Name of the template to use.
 
     Returns:
         dict: YAML structure for the role.
     """
     template_loader = FileSystemLoader(searchpath=templates_dir)
     template_env = Environment(loader=template_loader)
-    template = template_env.get_template("molecule.yaml.j2")
+    template = template_env.get_template(template_name)
     zuul_rendered_template_jobs = yaml.safe_load(template.render(role_names=roles_name))
     return zuul_rendered_template_jobs
 
@@ -83,9 +85,6 @@ def regenerate_projects_zuul_jobs_yaml(generated_paths):
     for role_directory in sorted(generated_paths["roles_dir"].iterdir()):
         if not role_directory.is_dir():
             logging.warning("Skipping %s. Not a role directory", role_directory.name)
-            continue
-        if not role_directory.joinpath("molecule").is_dir():
-            logging.warning("Skipping %s. No molecule directory", role_directory.name)
             continue
         projects_jobs_info[0]["project"]["github-check"]["jobs"].append(
             f"cifmw-molecule-{role_directory.name}"
@@ -105,8 +104,21 @@ def regenerate_molecule_zuul_jobs_yaml(generated_paths):
         if (entry.is_dir() and entry.joinpath("molecule").is_dir())
     ]
     molecule_yaml_zuul_jobs = generate_zuul_job_role_yaml(
-        role_directories, generated_paths["ci_templates_dir"]
+        role_directories, generated_paths["ci_templates_dir"], "molecule.yaml.j2"
     )
+
+    # Noop molecule jobs for proper dependencies
+    noop_roles = [
+        entry.name
+        for entry in generated_paths["roles_dir"].iterdir()
+        if (entry.is_dir() and not entry.joinpath("molecule").is_dir())
+    ]
+    noop_jobs = generate_zuul_job_role_yaml(
+        noop_roles, generated_paths["ci_templates_dir"], "noop-molecule.yaml.j2"
+    )
+
+    # Append the noop to the normal list
+    molecule_yaml_zuul_jobs = molecule_yaml_zuul_jobs + noop_jobs
 
     molecule_ci_config_yaml = generated_paths["ci_config_dir"] / "molecule.yaml"
     with open(molecule_ci_config_yaml, "r") as file:
