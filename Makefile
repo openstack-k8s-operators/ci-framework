@@ -91,7 +91,7 @@ check_zuul_files: role_molecule ## Regenerate zuul files and check if they have 
 	./scripts/check_zuul_files.sh 2>&1 | ansi2txt | tee $(LOG_DIR)/check_zuul_files.log
 
 .PHONY: check_k8s_snippets_comment
-check_k8s_snippets_comment:
+check_k8s_snippets_comment: ## Check template snippets in ci_gen_kustomize_values to ensure proper source is set
 	./scripts/check_k8s_snippets_comment.sh 2>&1 | ansi2txt | tee $(LOG_DIR)/check_k8s_snippets_comment.log
 
 ##@ Ansible-test testing
@@ -99,8 +99,11 @@ check_k8s_snippets_comment:
 ansible_test: setup_tests ansible_test_nodeps ## Runs ansible-test with dependencies install
 
 .PHONY: ansible_test_nodeps
+ansible_test_nodeps: export HOME=/tmp
+ansible_test_nodeps: export ANSIBLE_LOCAL_TMP=/tmp
+ansible_test_nodeps: export ANSIBLE_REMOTE_TMP=/tmp
 ansible_test_nodeps: ## Run ansible-test without installing dependencies
-	bash scripts/run_ansible_test 2>&1 | ansi2txt | tee $(LOG_DIR)/ansible_tests.log
+	bash scripts/run_ansible_test 2>&1 | ansi2txt | tee $(LOG_DIR)/ansible_test.log
 
 ##@ Container targets
 .PHONY: ci_ctx
