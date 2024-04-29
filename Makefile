@@ -1,4 +1,4 @@
-SHELL := /bin/bash
+SHELL := /bin/bash -o pipefail -e
 # Roles directory location. May point outside of this repository
 ROLE_DIR ?= roles/
 # Code base directory - used for pre-commit check
