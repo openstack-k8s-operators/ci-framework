@@ -43,9 +43,9 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     containerImage: "{{ cifmw_test_operator_tempest_image }}:{{ cifmw_test_operator_tempest_image_tag }}"
     tempestRun:
       includeList: |
-        {{ cifmw_test_operator_include_list | default('') }}
+        {{ cifmw_test_operator_tempest_include_list | default('') }}
       excludeList: |
-        {{ cifmw_test_operator_exclude_list | default('') }}
+        {{ cifmw_test_operator_tempest_exclude_list | default('') }}
       concurrency: "{{ cifmw_test_operator_concurrency }}"
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
     tempestconfRun: "{{ cifmw_tempest_tempestconf_config | default(omit) }}"
