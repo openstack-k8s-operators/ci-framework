@@ -101,6 +101,7 @@
   when:
     - not cifmw_edpm_deploy_baremetal_dry_run | bool
   vars:
+    osp_trunk_repo: "/etc/yum.repos.d/osptrunk-candidate-deps.repo"
     cifmw_edpm_deploy_openstack_crs_path: >-
       {{
         [
@@ -131,10 +132,25 @@
                   path: /spec/nodeTemplate/ansible/ansibleVars/edpm_container_registry_insecure_registries
                   value: ["{{ content_provider_registry_ip }}:5001"]
           {% endif %}
-
+          {% cifmw_edpm_deploy_baremetal_repo_setup_override | bool %}
+                - op: add
+                  path: /spec/nodeTemplate/ansible/ansibleVars/edpm_bootstrap_command
+                  value: |
+                    curl -O http://download.devel.redhat.com/rcm-guest/puddles/OpenStack/rhos-release/rhos-release-latest.noarch.rpm
+                    dnf -y localinstall rhos-release-latest.noarch.rpm
+                    rhos-release rhel-9.2
+                    curl -o /etc/yum.repos.d/delorean.repo https://osp-trunk.hosted.upshift.rdu2.redhat.com/rhel9-osp18/current-podified/delorean.repo
+                    echo "[osptrunk-candidate-deps]" >> "{{ osp_trunk_repo }}"
+                    echo "name=osptrunk-candidate-deps" >> "{{ osp_trunk_repo }}"
+                    echo "baseurl=http://download.eng.bos.redhat.com/brewroot/repos/rhos-18.0-rhel-9-trunk-candidate/latest/x86_64/" >> "{{ osp_trunk_repo }}"
+                    echo "gpgcheck=0" >> "{{ osp_trunk_repo }}"
+                    echo "enabled=1" >> "{{ osp_trunk_repo }}"
+                    echo "priority=1" >> "{{ osp_trunk_repo }}"
+          {% else %}
                 - op: add
                   path: /spec/nodeTemplate/ansible/ansibleVars/edpm_bootstrap_command
                   value: sudo dnf -y update
+          {% endif %}
         kustomizations_paths: >-
           {{
             [
@@ -153,48 +169,6 @@
   when: not cifmw_edpm_deploy_baremetal_dry_run
   ansible.builtin.debug:
     var: cifmw_edpm_deploy_baremetal_crs_kustomize_result
-
-- name: Patch OpenStackDataPlaneNodeSet to add repo-setup-downstream service
-  when:
-    - cifmw_edpm_deploy_baremetal_repo_setup_override
-    - cifmw_edpm_deploy_baremetal_create_vms | bool
-    - not cifmw_edpm_deploy_baremetal_dry_run
-  block:
-    # This file will be created in downstream job's pre-playbook
-    - name: Create repo-setup-downstream OpenStackDataPlaneService
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc apply -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          -f "{{ cifmw_installyamls_repos }}/devsetup/edpm/services/dataplane_v1beta1_openstackdataplaneservice_reposetup_downstream.yaml"
-    # to-do: We can drop this step once we drop dev-preview#1 jobs in downstream
-    # This is added because install_yamls is tagged and we don't
-    # have repo-setup service in OpenStackDataPlane in v0.1.0 tag
-    - name: Get list of services defined under OpenStackDataPlaneNodeSet resource
-      environment:
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          yq '.spec.services[]' {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
-      register: services_list
-      changed_when: false
-      ignore_errors: true  # noqa: ignore-errors
-
-    # to-do:  We can drop this step once we drop dev-preview#1 jobs in downstream
-    - name: Patch OpenStackDataPlaneNodeSet resource to add "repo-setup-downstream" service
-      when: "'repo-setup' not in services_list.stdout"
-      ansible.builtin.command:
-        cmd: >-
-          yq -i '.spec.services = ["repo-setup-downstream"] + .spec.services' {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
-
-    # to-do: We can drop the when condition once we drop dev-preview#1 jobs in downstream
-    - name: Patch OpenStackDataPlaneNodeSet resource to replace "repo-setup" with "repo-setup-downstream" service
-      when: "'repo-setup' in services_list.stdout"
-      ansible.builtin.command:
-        cmd: >-
-          yq -i '(.spec.services[] | select(. == "repo-setup")) |= "repo-setup-downstream"'  {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
 
 - name: Apply the OpenStackDataPlaneNodeSet CR
   when: not cifmw_edpm_deploy_baremetal_dry_run
