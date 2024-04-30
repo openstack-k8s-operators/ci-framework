@@ -136,7 +136,17 @@ def merge_yaml_jobs_by_name(job_list1, job_list2):
     for job1 in job_list1:
         for job2 in job_list2:
             if job1["job"]["name"] == job2["job"]["name"]:
-                job1["job"].update(job2["job"])
+                for key, val in job2["job"].items():
+                    if isinstance(val, list):
+                        if key not in job1["job"]:
+                            job1["job"][key] = []
+                        job1["job"][key] += job2["job"][key]
+                    if isinstance(val, dict):
+                        if key not in job1["job"]:
+                            job1["job"][key] = {}
+                        job1["job"][key].update(job2["job"][key])
+                    if isinstance(val, str) or isinstance(val, int):
+                        job1["job"][key] = job2["job"][key]
 
     return job_list1
 
