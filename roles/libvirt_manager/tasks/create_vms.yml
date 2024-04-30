@@ -4,20 +4,22 @@
   vars:
     _base_img_name: >-
       {{
-        (vm_data.value.image_local_dir | default(ansible_user_dir),
-         vm_data.value.disk_file_name) |
-         path_join
+        (
+          vm_data.value.image_local_dir | default(ansible_user_dir),
+          vm_data.value.disk_file_name
+        ) | ansible.builtin.path_join
       }}
     _img: >-
       {{
         (vm_type is match('.*ocp.*')) |
-        ternary(_base_img_name ~ "_" ~ vm_id ~ ".qcow2",
-                _base_img_name)
+        ternary(_base_img_name ~ "_" ~ vm_id ~ ".qcow2", _base_img_name)
       }}
     _workload: "{{ cifmw_libvirt_manager_basedir }}/workload"
     _ocp_pool: "{{ ansible_libvirt_pools['oooq_pool']['path'] | default('') }}"
     _chdir: >-
-      {{ (vm_type is match('.*ocp.*')) | ternary(_ocp_pool, _workload) }}
+      {{
+        (vm_type is match('.*ocp.*')) | ternary(_ocp_pool, _workload)
+      }}
   block:
     - name: "Create VM overlay for {{ vm_type }}"
       vars:
@@ -31,13 +33,20 @@
           {% endif %}
           -f qcow2
           "{{ _vm_img }}"
-          "{{ vm_data.value.disksize|default ('40') }}G"
+          "{{ vm_data.value.disksize |default ('40') }}G"
         creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
         chdir: "{{ _chdir }}"
       loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
         index_var: vm_id
         label: "{{ vm_type }}-{{ vm_id }}"
+
+    - name: Include the static IP address configuration script.
+      when:
+        - vm_data.value.ip_address is defined
+        - vm_type is not match('.*ocp.*')
+      ansible.builtin.include_tasks:
+        file: add_static_ip_script.yml
 
     - name: "Ensure file ownership and rights for {{ vm_type }}"
       become: true
