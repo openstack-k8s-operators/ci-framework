@@ -99,20 +99,20 @@ If you want to list multiple hooks, you have to use the following parameter name
 - `post_package_build`: after building packages against sources
 - `pre_container_build`: before building container images
 - `post_container_build`: after building container images
+- `pre_operator_build`: before building operators
+- `post_operator_build`: after building operators
 - `pre_deploy`: before deploying EDPM
+- `post_ctlplane_deploy`: after Control Plane deployment (not architecture)
 - `post_deploy`: after deploying EDPM
-- `post_ctlplane_deploy`: after Control Plane deployment
-- `pre_tests`: before running tests
-- `post_tests`: after running tests
 - `pre_admin_setup`: before admin setup
 - `post_admin_setup`: before admin setup
-- `pre_reporting`: before running reporting
-- `post_reporting`: after running reporting
+- `pre_tests`: before running tests
+- `post_tests`: after running tests
 
 Since we're already providing hooks as list, you may want to just add one or two hooks
 using your own environment file. Parameter structure is simple: `PREFIX_HOOKNAME: {hook struct}`
 
-PREFIX must match the above parameters (`pre_infra`, `post_reporting` and so on).
+PREFIX must match the above parameters (`pre_infra`, `post_admin_setup` and so on).
 
 The `{hook struct}` is the same as a listed hook, but you'll remove the `name` entry.
 
