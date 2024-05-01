@@ -30,6 +30,7 @@ with a message.
   Defaults to `[]`.
 * `cifmw_ci_gen_kustomize_values_userdata`: (Dict) Data structure you want to combine in the generated output.
   Defaults to `{}`.
+* `ci_gen_kustomize_fetch_ocp_state`: (Boolean) If true it enables generating CI templates based on the OCP state. Defaults to `true`.
 
 ### Specific parameters for edpm-values
 This configMap needs some more parameters in order to properly override the `architecture` provided one. Those parameters aren't set by default, and are mandatory for `edpm-values`.
