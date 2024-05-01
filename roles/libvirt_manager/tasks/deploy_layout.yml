@@ -195,6 +195,38 @@
   community.libvirt.virt_net:
     command: "list_nets"
 
+- name: Get libvirt networks facts
+  community.libvirt.virt_net:
+    command: "facts"
+
+- name: Get libvirt networks ip addr show
+  when: 'item.value.state == "active"'
+  register: _virt_nets_ip_addr_show
+  ansible.builtin.command: ip -json addr show {{ item.value.bridge }}
+  loop: "{{ ansible_libvirt_networks | dict2items }}"
+
+- name: Format the libvirt networks ip addr show
+  ansible.builtin.set_fact:
+    virt_nets_addr_info: >-
+      {{
+        virt_nets_addr_info | default({}) |
+        combine(
+          {
+            net.item.key: (net.stdout | from_json | first).addr_info
+            | community.general.json_query(
+                "[?scope=='global'].{
+                    address: local,
+                    prefixlen: prefixlen,
+                    family: family
+                  }"
+              )
+          }
+        )
+      }}
+  loop: "{{ _virt_nets_ip_addr_show.results }}"
+  loop_control:
+    loop_var: net
+
 - name: Gather pool fact
   when:
     - ansible_libvirt_pools is undefined

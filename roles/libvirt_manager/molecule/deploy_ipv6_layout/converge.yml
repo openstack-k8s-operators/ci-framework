@@ -1,0 +1,134 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: "One hypervisor - hybrid, pre-created bridges"
+  hosts: instance
+  vars:
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_basedir: "/opt/basedir"
+    cifmw_libvirt_manager_fixed_networks:
+      - osp_trunk
+    cifmw_libvirt_manager_pub_net: ocpbm
+    cifmw_libvirt_manager_configuration:
+      vms:
+        compute:
+          amount: 2
+          image_url: "{{ cifmw_discovered_image_url }}"
+          sha256_image_name: "{{ cifmw_discovered_hash }}"
+          image_local_dir: "{{ cifmw_basedir }}/images/"
+          disk_file_name: "centos-stream-9.qcow2"
+          disksize: 20
+          memory: 1
+          cpus: 1
+          nets:
+            - ocpbm
+            - osp_trunk
+      networks:
+        ocpbm: |
+          <network>
+            <name>ocpbm</name>
+            <forward mode='bridge' />
+            <bridge name='ocpbm' />
+          </network>
+        osp_trunk: |
+          <network>
+            <name>osp_trunk</name>
+            <forward mode='bridge' />
+            <bridge name='osp_trunk' />
+          </network>
+    bridges:
+      ocpbm:
+        address: "fd00:abcd:aaaa::1"
+        prefix: "64"
+        dhcp_start: "fd00:abcd:aaaa::000a"
+        dhcp_end: "fd00:abcd:aaaa::aaaa"
+      osp_trunk:
+        address: "fd00:abcd:bbbb::1"
+        prefix: "64"
+        dhcp_start: "fd00:abcd:bbbb::000a"
+        dhcp_end: "fd00:abcd:bbbb::aaaa"
+  pre_tasks:
+    - name: Create NetworkManager connection files
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/NetworkManager/system-connections/{{ item.key }}.nmconnection"
+        content: |
+          [connection]
+          id={{ item.key }}
+          type=bridge
+          interface-name={{ item.key }}
+          autoconnect=true
+
+          [bridge]
+          stp=false
+
+          [ipv4]
+          method=disabled
+
+          [ipv6]
+          addr-gen-mode=stable-privacy
+          method=manual
+          address1={{ item.value.address }}/{{ item.value.prefix }}
+        owner: root
+        group: root
+        mode: '0600'
+      loop: "{{ bridges | dict2items }}"
+
+    - name: Load and bring up NetworkManager connections
+      become: true
+      ansible.builtin.shell: |
+        nmcli con load /etc/NetworkManager/system-connections/{{ item.key }}.nmconnection
+        nmcli con up {{ item.key }}
+      loop: "{{ bridges | dict2items }}"
+
+    - name: Create dnsmasq services for bridges
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item.key }}-dnsmasq.service"
+        content: |
+           [Unit]
+           Description=DHCP service for {{ item.key }} bridge
+           Documentation=man:dnsmasq(8)
+           Wants=network-online.target
+           After=network-online.target
+
+           [Service]
+           Type=simple
+           ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --pid-file=/run/{{ item.key }}-dnsmasq.pid --except-interface=lo --interface={{ item.key }} --enable-ra --dhcp-range={{ item.value.dhcp_start}},{{ item.value.dhcp_end}},64,2m
+           StandardError=null
+           PIDFile=/run/{{ item.key }}-dnsmasq.pid
+
+           [Install]
+           WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+      loop: "{{ bridges | dict2items }}"
+
+    - name: Reload systemd daemon and start dnsmasq DHCP services
+      become: true
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        state: started
+        name: "{{ item.key }}-dnsmasq.service"
+      loop: "{{ bridges | dict2items }}"
+  roles:
+    - role: "discover_latest_image"
+  tasks:
+    - name: Deploy layout
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: deploy_layout

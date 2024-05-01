@@ -25,23 +25,28 @@
 
 - name: "Grab IPs for nodes type {{ vm_type }}"  # noqa: risky-shell-pipe
   register: vm_ips
-  ansible.builtin.shell:
-    cmd: >-
-      virsh -c qemu:///system -q
-      domifaddr --source arp
-      cifmw-{{ nic.host }} | grep "{{ nic.mac }}"
+  vars:
+    jq_filter: >-
+      '.[]
+      | select(has("lladdr") and has("dst") and .lladdr == "{{ nic.mac }}")
       {% if cifmw_openshift_api_ip_address | default(false) %}
-      | grep -v "{{ cifmw_openshift_api_ip_address }}/"
+      | select(.dst != "{{ cifmw_openshift_api_ip_address }}")
       {% endif %}
       {% if cifmw_openshift_ingress_ip_address | default(false) %}
-      | grep -v "{{ cifmw_openshift_ingress_ip_address }}/"
+      | select(.dst != "{{ cifmw_openshift_ingress_ip_address }}")
       {% endif %}
+      | .dst'
+    net_ip_addr: >-
+      {{ virt_nets_addr_info[nic.network][0]["address"] }}/{{ virt_nets_addr_info[nic.network][0]["prefixlen"] }}
+  ansible.builtin.shell:
+    cmd: >-
+      ip -json neighbour show dev {{ nic.network }} to {{ net_ip_addr }} | jq -r {{ jq_filter }}
   loop: "{{ public_net_nics }}"
   loop_control:
     loop_var: nic
     label: "{{ nic.host }}"
   retries: 20
-  delay: 5
+  delay: 10
   until:
     - vm_ips.rc == 0
     - vm_ips.stdout != ''
@@ -56,7 +61,7 @@
 
 - name: "Add the IP to the libvirt host port details fact for {{ vm_type }}"
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    extracted_ip: "{{ vm_ip.stdout | ansible.utils.ipaddr('address') }}"
   ansible.builtin.set_fact:
     cifmw_hosts_ports: >-
       {{
@@ -80,7 +85,7 @@
     - _need_start | bool
   delegate_to: localhost
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    extracted_ip: "{{ vm_ip.stdout | ansible.utils.ipaddr('address') }}"
     proxy_hostname: "{{ ansible_host | default(inventory_hostname) }}"
   ansible.builtin.blockinfile:
     create: true
@@ -103,7 +108,7 @@
   when:
     - _need_start | bool
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    extracted_ip: "{{ vm_ip.stdout | ansible.utils.ipaddr('address') }}"
     identity_file: >-
       {{
         cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type == 'ocp' else
@@ -130,7 +135,7 @@
 - name: Inject nodes in the ansible inventory
   delegate_to: localhost
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    extracted_ip: "{{ vm_ip.stdout | ansible.utils.ipaddr('address') }}"
   ansible.builtin.add_host:
     name: "{{ vm_ip.nic.host }}"
     groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
@@ -153,7 +158,7 @@
   when:
     - _need_start | bool
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    extracted_ip: "{{ vm_ip.stdout | ansible.utils.ipaddr('address') }}"
   ansible.builtin.wait_for:
     host: "{{ extracted_ip }}"
     port: 22
@@ -246,7 +251,7 @@
 - name: Update inventory to consume correct user
   delegate_to: localhost
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+    extracted_ip: "{{ vm_ip.stdout | ansible.utils.ipaddr('address') }}"
   ansible.builtin.add_host:
     name: "{{ vm_ip.nic.host }}"
     groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"

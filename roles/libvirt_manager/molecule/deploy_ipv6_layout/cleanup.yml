@@ -1,0 +1,116 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Cleanup
+  hosts: instance
+  gather_facts: true
+  vars:
+    log_dir: "{{ ansible_user_dir }}/ci-framework-data/logs"
+    cifmw_basedir: "/opt/basedir"
+    bridges:
+      ocpbm:
+        address: "fd00:abcd:aaaa::1"
+        prefix: "64"
+        dhcp_start: "fd00:abcd:aaaa::000a"
+        dhcp_end: "fd00:abcd:aaaa::aaaa"
+      osp_trunk:
+        address: "fd00:abcd:bbbb::1"
+        prefix: "64"
+        dhcp_start: "fd00:abcd:bbbb::000a"
+        dhcp_end: "fd00:abcd:bbbb::aaaa"
+  tasks:
+    - name: Get logs
+      block:
+        - name: Ensure directories
+          ansible.builtin.file:
+            path: "{{ log_dir }}"
+            state: directory
+            owner: zuul
+            group: zuul
+            mode: "0755"
+        - name: Get dnsmasq logs
+          become: true
+          register: dnsmasq_logs
+          ansible.builtin.command: "journalctl -u {{ item.key }}-dnsmasq.service --no-pager"
+          loop: "{{ bridges | dict2items }}"
+        - name: Write dnsmasq_logs to file
+          ansible.builtin.copy:
+            dest: "{{ log_dir }}/{{ item.item.key }}-dnsmasq.service.log"
+            content: "{{ item.stdout }}"
+            owner: zuul
+            group: zuul
+            mode: '0644'
+          loop: "{{ dnsmasq_logs.results }}"
+        - name: Stat /var/log/libvirt/qemu
+          become: true
+          register: stat_var_log_libvirt_qemu
+          ansible.builtin.stat:
+            path: /var/log/libvirt/qemu
+        - name: Get VM console and serial logs /var/log/libvirt/qemu
+          when: stat_var_log_libvirt_qemu.stat.isdir is defined and stat_var_log_libvirt_qemu.stat.isdir
+          become: true
+          ansible.builtin.copy:
+            src: /var/log/libvirt/qemu
+            dest: "{{ log_dir }}/"
+            owner: zuul
+            group: zuul
+            mode: '0644'
+        - name: Change ownership
+          become: true
+          ansible.builtin.file:
+            path: "{{ log_dir }}"
+            state: directory
+            recurse: true
+            owner: zuul
+            group: zuul
+
+    - name: Clean layout
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: clean_layout.yml
+
+    - name: Stop dnsmasq services
+      become: true
+      ansible.builtin.systemd_service:
+        state: stopped
+        name: "{{ item.key }}-dnsmasq.service"
+      loop: "{{ bridges | dict2items }}"
+
+    - name: Delete dnsmasq systemd unit files
+      become: true
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item.key }}-dnsmasq.service"
+        state: absent
+      loop: "{{ bridges | dict2items }}"
+
+    - name: Reload systemd daemon
+      become: true
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Bring down bridges
+      become: true
+      ansible.builtin.shell: |
+        nmcli con down {{ item.key }}
+        nmcli con delete {{ item.key }}
+      loop: "{{ bridges | dict2items }}"
+
+    - name: Delete bridge nmconnection files
+      become: true
+      ansible.builtin.file:
+        path: "/etc/NetworkManager/system-connections/{{ item.key }}.nmconnection"
+        state: absent
+      loop: "{{ bridges | dict2items }}"
