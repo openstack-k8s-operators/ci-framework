@@ -45,9 +45,8 @@
     script: >-
       oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim }}" --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_kernel_args": "default_hugepagesz=1gb hugepagesz=1g hugepages=64 iommu=pt intel_iommu=on tsx=off isolcpus=2-11,14-23"}}}}}'
 
-# The reboot-os service doesn't exist by default. So we need to create this service in
-# order to reboot the nodes.
-- name: Create reboot service
+# Define an ad-hoc reboot service for our node reboot
+- name: Create ad-hoc reboot service
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
@@ -58,9 +57,15 @@
       apiVersion: dataplane.openstack.org/v1beta1
       kind: OpenStackDataPlaneService
       metadata:
-        name: reboot-os
+        name: reboot-adhoc
       spec:
-        playbook: osp.edpm.reboot
+        play: |
+          - hosts: all
+            become: true
+            tasks:
+              - name: Reboot nodes
+                ansible.builtin.reboot:
+                  msg: "Node will be rebooted now!"
       EOF
 
 # Create a new OpenStackDataPlaneDeployment to set the reboot variable. We also only need to execute
@@ -81,11 +86,9 @@
       spec:
         nodeSets:
           - "{{ deployed_nodeset_name.stdout | trim }}"
-        ansibleExtraVars:
-          edpm_reboot_force_reboot: "true"
         servicesOverride:
           - bootstrap
-          - reboot-os
+          - reboot-adhoc
       EOF
 
 # loop check the status of the openstackdataplanedeployment until it is either completed,
