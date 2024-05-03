@@ -1,0 +1,84 @@
+---
+# NNCP: modify kustomization.yaml
+# - remove node_1 and node_2 related entries
+- name: NNCP block to reduce OCP cluster size
+  vars:
+    _nncp_lib_path: >-
+      {{
+        (cifmw_kustomize_deploy_architecture_repo_dest_dir,
+         'lib/nncp/') | path_join
+      }}
+    _nncp_kust_path: >-
+      {{
+        (_nncp_lib_path, 'kustomization.yaml') | path_join
+      }}
+    _nncp_ocp_nodes_path: >-
+      {{
+        (_nncp_lib_path, 'ocp_nodes_nncp.yaml') | path_join
+      }}
+  block:
+    - name: Load nncp kustomization.yaml
+      register: nncp_kust_raw
+      ansible.builtin.slurp:
+        path: "{{ _nncp_kust_path }}"
+
+    - name: Remove node_1 and node_2
+      vars:
+        _nncp_kust: "{{ nncp_kust_raw.content | b64decode | from_yaml }}"
+        _nncp_reduced: >-
+          {% set _out = [] -%}
+          {% for replacement in _nncp_kust.replacements -%}
+          {%   if (replacement.targets | rejectattr("select.name", "undefined") | map(attribute="select.name")) | length > 0 -%}
+          {%     set _= _out.append(replacement) if (replacement.targets | map(attribute="select.name") | first) is not match('^node-[1-9]+$') -%}
+          {%   else -%}
+          {%     set _= _out.append(replacement) -%}
+          {% endif -%}
+          {% endfor -%}
+          {{ _out }}
+        _nncp_no_replace: >-
+          {{
+            _nncp_kust |
+            dict2items |
+            rejectattr('key','equalto', 'replacements') |
+            items2dict
+          }}
+        _nncp_updated: >-
+          {{
+            _nncp_no_replace |
+            combine({'replacements': _nncp_reduced})
+          }}
+      ansible.builtin.copy:
+        backup: true
+        content: "{{ _nncp_updated | to_nice_yaml }}"
+        dest: "{{ _nncp_kust_path }}"
+        mode: "0644"
+
+    - name: Reduce NNCP ocp_nodes
+      ansible.builtin.copy:
+        backup: true
+        dest: "{{ _nncp_ocp_nodes_path }}"
+        mode: "0644"
+        content: |
+          ---
+          apiVersion: nmstate.io/v1
+          kind: NodeNetworkConfigurationPolicy
+          metadata:
+            name: node-0
+            labels:
+              osp/nncm-config-type: standard
+
+- name: Controlplane block to reduce replicas to 1
+  vars:
+    _ctlplane_path: >-
+      {{
+        (cifmw_kustomize_deploy_architecture_repo_dest_dir,
+         'lib/control-plane/openstackcontrolplane.yaml') |
+         path_join
+      }}
+  block:
+    - name: Replace replicas
+      ansible.builtin.replace:
+        backup: true
+        path: "{{ _ctlplane_path }}"
+        regexp: '^(.+) replicas: [2-9]+$'
+        replace: '\1 replicas: 1'
