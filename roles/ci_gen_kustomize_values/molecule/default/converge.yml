@@ -56,14 +56,18 @@
         priv_key: "{{ lookup('file', '~/.ssh/id_cifw') }}"
         pub_key: "{{ lookup('file', '~/.ssh/id_cifw.pub') }}"
         authorized_keys: "{{ lookup('file', '~/.ssh/authorized_keys') }}"
-        net_env: >-
+        single_net_env: >-
           {{
-            lookup('file',
-                   '/etc/ci/env/networking-environment-definition.yml')
+            lookup('file', 'networking-environment-definition.yml')
+          }}
+        multi_ocp_net_env: >-
+          {{
+            lookup('file', '3-ocp-net-def.yml')
           }}
         _nova_priv_key: "{{ lookup('file', _nova_key.filename) }}"
       ansible.builtin.set_fact:
-        cifmw_networking_env_definition: "{{ net_env | from_yaml }}"
+        cifmw_networking_env_definition: "{{ single_net_env | from_yaml }}"
+        ocp_cluster_networking_env_definition: "{{ multi_ocp_net_env | from_yaml}}"
         cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
           {{ authorized_keys }}
         cifmw_ci_gen_kustomize_values_ssh_private_key: >-
@@ -76,7 +80,7 @@
           {{ _nova_priv_key }}
         cifmw_ci_gen_kustomize_values_sshd_ranges: >-
           {{
-            [(net_env | from_yaml)['networks']['ctlplane']['network_v4']]
+            [(single_net_env | from_yaml)['networks']['ctlplane']['network_v4']]
           }}
 
     - name: Generate network-values
@@ -124,7 +128,7 @@
       loop_control:
         label: "{{ item.stat.path }}"
 
-    - name: Ensure we do not case MAC anymore
+    - name: Ensure we have correct MAC
       vars:
         _val_file: "{{ artifacts }}/ci_gen_kustomize_values/edpm-nodeset-values/values.yaml"
         _edpm_val: "{{ lookup('file', _val_file) | from_yaml }}"
@@ -133,6 +137,46 @@
           - _edpm_val.data.nodeset.ansible.ansibleVars.edpm_network_config_os_net_config_mappings['edpm-compute-0'].nic2 == '52:54:00:17:05:43'
         msg: >-
           Got {{ _edpm_val.data.nodeset.ansible.ansibleVars.edpm_network_config_os_net_config_mappings['edpm-compute-0'].nic2 }}
+
+    - name: Ensure we don't have node_1 nor node_2
+      vars:
+        _val_file: "{{ artifacts }}/ci_gen_kustomize_values/network-values/values.yaml"
+        _network_val: "{{ lookup('file', _val_file) | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - _network_val.data.node_1 is undefined
+          - _network_vak.data.node_2 is undefined
+        msg: >-
+          Got either node_1 and/or node_2 in the generated content,
+          should only get node_0
+
+    - name: Regenerate with 3-OCP cluster data
+      block:
+        - name: Update cifmw_networking_env_definition
+          ansible.builtin.set_fact:
+            cifmw_networking_env_definition: "{{ ocp_cluster_networking_env_definition }}"
+
+        - name: Regenerate network-values
+          vars:
+            cifmw_ci_gen_kustomize_values_name: "network-values"
+            cifmw_ci_gen_kustomize_values_src_file: >-
+              {{
+                [architecture_repo,
+                 "examples/va/hci/control-plane/nncp/values.yaml"] | path_join
+              }}
+          ansible.builtin.include_role:
+            name: ci_gen_kustomize_values
+
+        - name: Regenerate edpm-nodeset-values
+          vars:
+            cifmw_ci_gen_kustomize_values_name: "edpm-nodeset-values"
+            cifmw_ci_gen_kustomize_values_src_file: >-
+              {{
+                [architecture_repo,
+                 "examples/va/hci/edpm-pre-ceph/nodeset/values.yaml"] | path_join
+              }}
+          ansible.builtin.include_role:
+            name: ci_gen_kustomize_values
 
     - name: Copy generated values to correct location
       ansible.builtin.copy:
