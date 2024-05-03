@@ -1,0 +1,124 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Put the testing manifest files in place
+  ansible.builtin.template:
+    src: "templates/test/{{ item }}.yaml.j2"
+    dest: "{{ cifmw_lvms_manifests_dir }}/{{ item }}.yaml"
+    mode: "0644"
+    force: true
+  loop:
+    - test-pvc
+    - test-pod
+
+- name: Apply test-pvc manifest file
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    src: "{{ cifmw_lvms_manifests_dir }}/test-pvc.yaml"
+    state: present
+
+- name: Wait for test PVC to be pending
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: PersistentVolumeClaim
+    name: lvms-test-pvc
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: pvc
+  until:
+    - pvc.resources | length > 0
+    - pvc.resources[0].status is defined
+    - pvc.resources[0].status.phase is defined
+    - pvc.resources[0].status.phase == "Pending"
+  retries: "{{ cifmw_lvms_retries }}"
+  delay: "{{ cifmw_lvms_delay }}"
+
+- name: Display test PVC info
+  ansible.builtin.debug:
+    var: pvc
+
+- name: Apply test-pod manifest file
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    src: "{{ cifmw_lvms_manifests_dir }}/test-pod.yaml"
+    state: present
+
+- name: Wait for test pod to be running
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Pod
+    name: lvms-test-pod
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: pod
+  until:
+    - pod.resources | length > 0
+    - pod.resources[0].status is defined
+    - pod.resources[0].status.phase is defined
+    - pod.resources[0].status.phase == "Running"
+  retries: "{{ cifmw_lvms_retries }}"
+  delay: "{{ cifmw_lvms_delay }}"
+
+- name: Display test pod volumes
+  ansible.builtin.debug:
+    var: item
+  loop: "{{ pod.resources[0].spec.volumes | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - item.name == "lvms-test-volume"
+
+- name: Display test pod volumeMounts
+  ansible.builtin.debug:
+    var: item
+  loop: "{{ pod.resources[0].spec.containers[0].volumeMounts | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - item.name == "lvms-test-volume"
+
+- name: Get test PVC information now that test POD is running
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: PersistentVolumeClaim
+    name: lvms-test-pvc
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: pvc
+
+- name: Display test PVC status
+  ansible.builtin.debug:
+    var: pvc.resources[0].status.phase
+
+- name: Delete resources created by manifest files
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    src: "{{ cifmw_lvms_manifests_dir }}/{{ item }}.yaml"
+    state: absent
+    wait: true
+  failed_when: false
+  loop:
+    - test-pod
+    - test-pvc

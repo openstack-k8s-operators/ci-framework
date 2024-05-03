@@ -1,0 +1,60 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get pods in LVMS namespace
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Pod
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: pod_info
+
+- name: Display pod names and status
+  ansible.builtin.debug:
+    msg: "Pod: {{ pod_info.resources[my_loop_index].metadata.name }}, Status: {{ pod_info.resources[my_loop_index].status.phase }}"
+  loop: "{{ range(0, pod_info.resources|length) | list }}"
+  loop_control:
+    loop_var: my_loop_index
+
+- name: Get lvmcluster deviceClassStatuses
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: LVMCluster
+    api_version: lvm.topolvm.io/v1alpha1
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: lvm_cluster
+
+- name: Display deviceClassStatuses
+  ansible.builtin.debug:
+    var: lvm_cluster.resources[0].status
+
+- name: Get cifmw_lvms_storage_class
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: StorageClass
+    api_version: storage.k8s.io/v1
+    name: "lvms-{{ cifmw_lvms_storage_class }}"
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: sc
+
+- name: Display StorageClass
+  ansible.builtin.debug:
+    var: sc
