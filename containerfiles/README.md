@@ -2,8 +2,8 @@
 
 The project provides two types of containers:
 
-- Containerfile.ci: builds a really basic container, mostly used in Prow, exposing needed tools
-- Containerfile.tests: based upon the previous one, allows to run some tests locally, or run the framework
+- `Containerfile.ci`: builds a really basic container, mostly used in Prow, exposing needed tools
+- `Containerfile.tests`: based upon the previous one, allows to run some tests locally, or run the framework
 
 ## Build containers
 
