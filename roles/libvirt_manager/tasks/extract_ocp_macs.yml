@@ -1,0 +1,62 @@
+---
+# Load and extract MAC addresses present in
+# a specific XML file.
+# It injects the data in the pre-existing fact
+# cifmw_libvirt_manager_bm_mac_mapping
+
+- name: Get XML status
+  register: _xml_state
+  ansible.builtin.stat:
+    path: "{{ _xml_path }}"
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+
+- name: Run only if XML exists
+  when:
+    - _xml_state.stat.exists
+  block:
+    - name: Load XML file
+      register: _xml_raw
+      ansible.builtin.slurp:
+        path: "{{ _xml_path }}"
+
+    - name: Extract MAC and inject it in the fact
+      register: _extracted
+      vars:
+        _content: >-
+          {{
+            _xml_raw.content | b64decode
+          }}
+      community.general.xml:
+        xmlstring: "{{ _content }}"
+        xpath: "/domain/devices/interface/*[@address or @bridge]"
+        content: attribute
+
+    - name: Build dataset
+      vars:
+        _mac: >-
+          {{
+            _extracted.matches |
+            selectattr('mac.address', 'defined') |
+            map(attribute='mac.address')
+          }}
+        _net: >-
+          {{
+            _extracted.matches |
+            selectattr('source.bridge', 'defined') |
+            map(attribute='source.bridge') |
+            map('replace', 'cifmw-', '')
+          }}
+        _mac_mapping: >-
+          {{
+            dict(_net | zip(_mac)) |
+            dict2items(key_name='network', value_name='mac')
+          }}
+        vm_name: "ocp-{{ ocp_id }}"
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_bm_mac_mapping: >-
+          {{
+            cifmw_libvirt_manager_bm_mac_mapping |
+            combine({vm_name: _mac_mapping}, recursive=true)
+          }}

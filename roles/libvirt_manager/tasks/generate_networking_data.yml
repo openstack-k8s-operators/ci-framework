@@ -1,0 +1,160 @@
+---
+# Pre-generate MAC addresses for future fixed IP support
+- name: Pre-generate MAC addresses
+  vars:
+    _nic_info: >-
+      {{
+        (cifmw_libvirt_manager_basedir,
+         'artifacts/interfaces-info.yml') |
+         path_join
+      }}
+  block:
+    - name: Ensure fact is existing, and empty
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_bm_mac_mapping: {}
+
+    - name: Check if we get an existing interfaces-info.yml
+      register: _nic_exists
+      ansible.builtin.stat:
+        path: "{{ _nic_info }}"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Load file if exists
+      when:
+        - _nic_exists.stat.exists | bool
+      register: _existing_nic_info
+      ansible.builtin.slurp:
+        path: "{{ _nic_info }}"
+
+    - name: Update fact with existing content
+      when:
+        - _nic_exists.stat.exists | bool
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_bm_mac_mapping: >-
+          {{ _existing_nic_info.content | b64decode | from_yaml }}
+
+    - name: Generate VM list
+      vars:
+        vm_list: >-
+          {% set _vm_list = [] -%}
+          {% set _range = [] -%}
+          {% for _type in _cifmw_libvirt_manager_layout.vms.keys() -%}
+          {%   set _range = range(0, _cifmw_libvirt_manager_layout.vms[_type].amount | default(1) | int) -%}
+          {%   set _vms = [_type] | product(_range) | map('join', cifmw_libvirt_manager_vm_separator) -%}
+          {%   set _ = _vm_list.append(_vms) -%}
+          {% endfor -%}
+          {{ _vm_list | list | flatten }}
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_all_vms: "{{ vm_list }}"
+
+    - name: Generate VM list and associate MAC address
+      ansible.builtin.import_tasks: generate_macs.yml
+
+    - name: Dump MAC mapping
+      ansible.builtin.copy:
+        dest: "{{ _nic_info }}"
+        content: "{{ cifmw_libvirt_manager_bm_mac_mapping | to_nice_yaml }}"
+# END MAC pre-generation management
+#
+# START generate all IPs using networking_mapper role/module
+- name: Inject all VMs in the inventory
+  vars:
+    _vm_type: "{{ item.key | regex_replace('(cifmw\\-)?([a-z]+)\\-[0-9]+', '\\2') }}"
+    _group: "{{ (_vm_type == 'crc') | ternary('ocp', _vm_type) }}"
+  ansible.builtin.add_host:
+    name: "{{ item.key }}"
+    groups: "{{ _group }}s"
+  loop: "{{ cifmw_libvirt_manager_bm_mac_mapping | dict2items }}"
+
+- name: Generate all IPs based on MAC and networks
+  vars:
+    cifmw_networking_mapper_ifaces_info: >-
+      {{ cifmw_libvirt_manager_bm_mac_mapping }}
+    cifmw_networking_mapper_network_name: "{{ cifmw_libvirt_manager_pub_net }}"
+    cifmw_networking_mapper_gather_facts: false
+  ansible.builtin.import_role:
+    name: networking_mapper
+# END networking_mapper
+
+- name: Manage networks if needed
+  when:
+    - _cifmw_libvirt_manager_layout.networks is defined
+  ansible.builtin.import_tasks: create_networks.yml
+
+- name: Craft patch for cifmw_networking_definition
+  vars:
+    _match: "^.*{{ cifmw_libvirt_manager_pub_net }}$"
+    _lnet_data: >-
+      {{
+        _network_data |
+        selectattr('name', 'match', _match) | first
+      }}
+    _dataset: |
+      networks:
+        {{ _lnet_data.name | replace('cifmw_', '') }}:
+      {% if _lnet_data.ranges[0].start_v4 is defined and _lnet_data.ranges[0].start_v4 | length > 0                     %}
+        {% set net_4 = _lnet_data.ranges[0].start_v4 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v4)    %}
+          network-v4: {{ net_4}}
+      {% endif                                                                                                          %}
+      {% if _lnet_data.ranges[0].start_v6 is defined and _lnet_data.ranges[0].start_v6 | length > 0                     %}
+          {% set net_6 = _lnet_data.ranges[0].start_v6 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v6)  %}
+          network-v6: {{ net_6 }}
+      {% endif %}
+      group-templates:
+      {% for group in _cifmw_libvirt_manager_layout.vms.keys() if group != 'controller' %}
+        {{ (group == 'crc') | ternary('ocp', group) }}s:
+          networks:
+            {{ _lnet_data.name | replace('cifmw_', '') }}: {}
+      {% endfor                           %}
+      instances:
+        controller-0:
+          networks:
+            {{ _lnet_data.name | replace('cifmw_', '') }}:
+      {% if net_4 is defined %}
+              ip-v4: "{{ net_4 | ansible.utils.nthhost(9) }}"
+      {% endif %}
+      {% if net_6 is defined %}
+              ip-v6: "{{ net_6 | ansible.utils.nthhost(9) }}"
+      {% endif %}
+  ansible.builtin.set_fact:
+    cifmw_networking_mapper_definition_patch_01_libvirt: >-
+      {{ _dataset | from_yaml }}
+
+- name: Re-run networking_mapper with new network
+  vars:
+    cifmw_networking_mapper_ifaces_info: >-
+      {{ cifmw_libvirt_manager_bm_mac_mapping }}
+    cifmw_networking_mapper_network_name: "{{ cifmw_libvirt_manager_pub_net }}"
+    cifmw_networking_mapper_gather_facts: false
+  ansible.builtin.import_role:
+    name: networking_mapper
+
+- name: Be sure to save current state of networking_mapper environment
+  ansible.builtin.set_fact:
+    _libvirt_manager_networking: "{{ cifmw_networking_env_definition }}"
+
+- name: Unset patch
+  ansible.builtin.set_fact:
+    cifmw_networking_mapper_definition_patch_01_libvirt: {}
+
+# START inject reserved IPs in dnsmasq, based on networking_mapper output
+- name: Reserve IPs on networks
+  when:
+    - net.name not in _no_dnsmasq
+  vars:
+    _no_dnsmasq: >-
+      {{
+        cifmw_libvirt_manager_no_dnsmasq_nets_defaults +
+        cifmw_libvirt_manager_no_dnsmasq_nets
+      }}
+  ansible.builtin.include_tasks: reserve_dnsmasq_ips.yml
+  loop: "{{ _network_data }}"
+  loop_control:
+    loop_var: "net"
+    label: "{{ net.name }}"
+
+- name: Ensure dnsmasq is reloaded now
+  ansible.builtin.meta: flush_handlers
+# END inject reserved IPs

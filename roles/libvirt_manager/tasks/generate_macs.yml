@@ -1,0 +1,65 @@
+---
+# We pre-generate MAC addresses
+# in order to get fixed IPs.
+# For controller-0, CRC and computes, we take
+# randome MAC addresses.
+# For OCP cluster nodes, we have to extract the
+# existing MAC from the XML files.
+
+- name: Extract MAC from OCP XML if needed
+  when:
+    - _cifmw_libvirt_manager_layout.vms.ocp.xml_paths is defined
+  ansible.builtin.include_tasks: extract_ocp_macs.yml
+  loop: "{{ _cifmw_libvirt_manager_layout.vms.ocp.xml_paths | sort }}"
+  loop_control:
+    loop_var: "_xml_path"
+    index_var: ocp_id
+
+# Here, we generate new MAC if and only if we don't have
+# the data in the fact.
+# For the records, the fact is updated if the file exists.
+# That means that re-running the libvirt_manager will only
+# add new data, not change existing ones. Meaning we have
+# mostly "fixed MAC addresses".
+# The bellow code does all the magic.
+- name: Generate/update mapping all nodes
+  vars:
+    _mac_seed: "{{ '52:54:%02i' % vm_id }}"
+    _matcher: >-
+      {{
+        '(' ~ cifmw_libvirt_manager_vm_prefix ~ ')?' ~
+        '([a-z]+).[0-9]+'
+      }}
+    _vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    _generated: >-
+      {% set output = [] -%}
+      {% set _macs = [] -%}
+      {% if cifmw_libvirt_manager_bm_mac_mapping[vm] is defined -%}
+      {%   set _macs = cifmw_libvirt_manager_bm_mac_mapping[vm] -%}
+      {% endif -%}
+      {% for network in _cifmw_libvirt_manager_layout.vms[_vm_type].nets -%}
+      {%   if cifmw_libvirt_manager_bm_mac_mapping |
+              dict2items | selectattr('key', 'equalto', vm) |
+              map(attribute='value') | first | default([]) |
+              items2dict(key_name='network', value_name='mac') |
+              dict2items | map(attribute='key') |
+              select('equalto', network) | length == 0 -%}
+      {%     set _ = _macs.append({'network': network,
+                                   'mac': _mac_seed |
+                     community.general.random_mac}) -%}
+      {%   endif -%}
+      {% endfor -%}
+      {% if _macs | length != 0 -%}
+      {%   set _ = output.append({vm: _macs}) -%}
+      {% endif -%}
+      {{ output }}
+  ansible.builtin.set_fact:
+    cifmw_libvirt_manager_bm_mac_mapping: >-
+      {{
+        cifmw_libvirt_manager_bm_mac_mapping |
+        combine(_generated, recursive=true)
+      }}
+  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop_control:
+    index_var: vm_id
+    loop_var: vm

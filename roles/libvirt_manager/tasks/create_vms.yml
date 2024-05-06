@@ -21,10 +21,11 @@
   block:
     - name: "Create VM overlay for {{ vm_type }}"
       vars:
-        _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        _vm_img: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}.qcow2"
       register: _create_overlays
-      ansible.builtin.command:
-        cmd: >-
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_libvirt_manager_basedir }}/artifacts"
+        script: >-
           qemu-img create
           {% if vm_data.value.disk_file_name != 'blank' %}
           -o backing_file={{ _img }},backing_fmt=qcow2
@@ -32,17 +33,17 @@
           -f qcow2
           "{{ _vm_img }}"
           "{{ vm_data.value.disksize|default ('40') }}G"
-        creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        creates: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}.qcow2"
         chdir: "{{ _chdir }}"
       loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
         index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
+        label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
 
     - name: "Ensure file ownership and rights for {{ vm_type }}"
       become: true
       vars:
-        _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        _vm_img: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}.qcow2"
       ansible.builtin.file:
         path: "{{ (_chdir, _vm_img) | path_join }}"
         group: "qemu"
@@ -52,7 +53,7 @@
       loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
         index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
+        label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
 
 - name: "Manipulate XMLs and load them if provided for {{ vm_type }}"
   when:
@@ -62,7 +63,7 @@
   loop_control:
     loop_var: "_xml"
     index_var: "_xml_id"
-    label: "{{ vm_type }}-{{ _xml_id }}"
+    label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ _xml_id }}"
 
 - name: "Define the requested virtual machines {{ vm_type }}"
   when:
@@ -73,25 +74,25 @@
         - vm_data.value.extra_disks_num is defined
         - vm_data.value.extra_disks_num | int != 0
       vars:
-        vol_prefix: "cifmw-{{ vm_type }}-{{ vm_id }}"
+        vol_prefix: "{{ cifmw_libvirt_manager_vm_prefix }}{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
         vol_num: "{{ vm_data.value.extra_disks_num }}"
         vol_size: "{{ vm_data.value.extra_disks_size }}"
       ansible.builtin.include_tasks: volumes.yml
       loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
         index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
+        label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
         loop_var: vms_id
 
-    - name: "Define VMs with default template for type {{ vm_type }}"
+    - name: "Define VMs with template for type {{ vm_type }}"
       community.libvirt.virt:
         command: define
-        xml: "{{ lookup('template', 'domain.xml.j2') }}"
+        xml: "{{ lookup('template', cifmw_libvirt_manager_vm_template) }}"
         uri: "qemu:///system"
       loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
         index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
+        label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
 
 - name: "Attach listed networks to the VMs {{ vm_type }}"  # noqa: no-handler
   when:
@@ -100,13 +101,13 @@
       not cifmw_libvirt_manager_spineleaf_setup or
       'controller' in vm_type
   vars:
-    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    vm_item: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
     networks: "{{ vm_data.value.nets }}"
   ansible.builtin.include_tasks: net_to_vms.yml
   loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
+    label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
 
 - name: "Attach spines/leafs networks to the VMs {{ vm_type }}"
   when:
@@ -114,110 +115,13 @@
     - cifmw_libvirt_manager_spineleaf_setup
     - "'controller' not in vm_type"
   vars:
-    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    vm_item: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
     networks: "{{ vm_data.value.spineleafnets[vm_id] }}"
   ansible.builtin.include_tasks: net_to_vms.yml
   loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
-
-- name: "Fetch per-vm ports for {{ vm_type }}"
-  register: _vm_ports
-  ansible.builtin.command:
-    cmd: >-
-      virsh -c qemu:///system -q
-      domiflist cifmw-{{ vm_type }}-{{ vm_id }}
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
-
-- name: "Format port list to something more consumable for {{ vm_type }}"
-  vars:
-    _prefixed_net_names: >-
-      {{
-        _virt_nets.list_nets |
-        map('regex_replace', '^', 'cifmw-')
-      }}
-    _vals: >-
-      {{
-        item.stdout_lines |
-        product([' ' ~ vm_type ~ '-' ~ index]) |
-        map('join') |
-        map('split')
-      }}
-    _macs: >-
-      {{
-        _vals |
-        map('zip', ['nic', 'type', 'network', 'driver', 'mac', 'host' ]) |
-        map('map', 'reverse') |
-        map('community.general.dict')
-      }}
-  ansible.builtin.set_fact:
-    macs: >-
-      {{
-        (macs | default([]) + _macs) |
-        selectattr('network', 'in', _virt_nets.list_nets + _prefixed_net_names)
-      }}
-    public_net_nics: >-
-      {{
-        (public_net_nics | default([]) + _macs) |
-        selectattr('network',
-                   'match', '^(cifmw-)?' ~ cifmw_libvirt_manager_pub_net) |
-        selectattr('host', 'match', '.*' ~ vm_type ~ '.*')
-      }}
-  loop: "{{ _vm_ports.results }}"
-  loop_control:
-    index_var: index
-    label: "{{ vm_type }}-{{ index }}"
-
-- name: "Assert we have macs data for {{ vm_type }}"
-  ansible.builtin.assert:
-    that:
-      - macs | length > 0
-    msg: >-
-      Something went wrong while trying to extract interface mac addresses.
-      Please double-check your scenario!
-
-- name: "Assert we have public_net_nics {{ vm_type }}"
-  when: vm_data.value.manage | default(true) | bool
-  ansible.builtin.assert:
-    that:
-      - public_net_nics | length > 0
-    msg: >-
-      Something went wrong while trying to extract interfaces associated to
-      cifmw_libvirt_manager_pub_net ({{ cifmw_libvirt_manager_pub_net }}).
-      Please double-check your scenario!
-
-- name: Create VBMC entity
-  when:
-    - _vbmc_available is defined
-    - _vbmc_available | bool
-  vars:
-    cifmw_virtualbmc_machine: "cifmw-{{ vm_type }}-{{ index }}"
-    cifmw_virtualbmc_ipmi_port: >-
-      {{
-        cifmw_virtualbmc_ipmi_base_port + (family_id*10) + index
-      }}
-    cifmw_virtualbmc_action: "add"
-    _ipmi_host: >-
-      {%- if _cifmw_libvirt_manager_layout.vms.crc.target is defined -%}
-      {{ _cifmw_libvirt_manager_layout.vms.crc.target }}
-      {%- elif _cifmw_libvirt_manager_layout.vms.ocp.target is defined -%}
-      {{ _cifmw_libvirt_manager_layout.vms.ocp.target }}
-      {%- else -%}
-      {{ inventory_hostname }}
-      {%- endif -%}
-    cifmw_virtualbmc_ipmi_address: >-
-      {{ hostvars[_ipmi_host].ansible_default_ipv4.address }}
-  ansible.builtin.include_role:
-    name: virtualbmc
-    tasks_from: manage_host
-  loop: "{{ _vm_ports.results }}"
-  loop_control:
-    index_var: index
-    label: "{{ vm_type }}-{{ index }}"
+    label: "{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
 
 - name: "Start (power-on) {{ vm_type }}"
   when:
