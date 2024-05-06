@@ -12,7 +12,7 @@
       {% else -%}
       --tag {{cifmw_repo_setup_promotion }}
       {% endif -%}
-      {% if cifmw_repo_setup_dlrn_hash_tag | length > 0 -%}
+      {% if (cifmw_repo_setup_dlrn_hash_tag | length > 0) and (cifmw_repo_setup_component_name | length <= 0) -%}
       --dlrn-hash-tag {{ cifmw_repo_setup_dlrn_hash_tag }}
       {% endif -%}
       --json
@@ -24,9 +24,16 @@
     _repo_setup_json: "{{ _get_hash.stdout | from_json }}"
   block:
     - name: Dump full hash in delorean.repo.md5 file
+      when: cifmw_repo_setup_component_promotion_tag is not defined
       ansible.builtin.copy:
         content: |
           {{ _repo_setup_json['full_hash'] }}
+        dest: "{{ cifmw_repo_setup_basedir }}/artifacts/repositories/delorean.repo.md5"
+
+    - name: Dump current-podified hash when using with component repo
+      when: cifmw_repo_setup_component_promotion_tag is defined
+      ansible.builtin.get_url:
+        url: "{{ cifmw_repo_setup_dlrn_uri }}/{{ cifmw_repo_setup_os_release }}{{ cifmw_repo_setup_dist_major_version }}-{{ cifmw_repo_setup_branch }}/current-podified/delorean.repo.md5"
         dest: "{{ cifmw_repo_setup_basedir }}/artifacts/repositories/delorean.repo.md5"
 
     - name: Export hashes facts for further use
