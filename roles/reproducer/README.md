@@ -20,6 +20,7 @@ None
 * `cifmw_reproducer_dnf_tweaks`: (List) Options you want to inject in dnf.conf, both on controller-0 and hypervisor. Defaults to `[]`.
 * `cifmw_reproducer_skip_fetch_repositories`: (Bool) Skip fetching repositories from zuul var and simply copy the code from the ansible controller. Defaults to `false`.
 * `cifmw_reproducer_supported_hypervisor_os`: (List) List of supported hypervisor operating systems and their minimum version.
+* `cifmw_reproducer_nat_public_interfaces`: (Bool) All traffic allowed to masquerade out from the hypervisor via the public interface
 
 ### run_job and run_content_provider booleans and risks.
 

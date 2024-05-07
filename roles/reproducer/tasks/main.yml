@@ -142,6 +142,33 @@
       }}
   failed_when: false
 
+- name: Ensure custom networks can be routed outside to the hypervisor
+  when:
+    - cifmw_reproducer_nat_public_interfaces | default ('false') | bool
+  become: true
+  block:
+    - name: Enable masquered over public interfaces
+      ansible.posix.firewalld:
+        masquerade: true
+        zone: public
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Ensure network is in libvirt zone
+      when:
+        - cifmw_ci_nmstate_instance_config is defined
+      ansible.posix.firewalld:
+        zone: libvirt
+        interface: "{{ item.name }}"
+        state: enabled
+        permanent: true
+        immediate: true
+      loop: >-
+        {{ cifmw_ci_nmstate_instance_config[inventory_hostname].interfaces | default([]) }}
+      loop_control:
+        label: "{{ item.name }}"
+
 - name: Run only on hypervisor with controller-0
   when:
     - (
