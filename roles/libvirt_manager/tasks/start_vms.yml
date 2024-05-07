@@ -1,0 +1,24 @@
+---
+- name: Refresh oooq_pool before starting VMs
+  when:
+    - "item.value.status == 'running'"
+  community.libvirt.virt_pool:
+    command: refresh
+    name: "{{ item.key }}"
+  loop: "{{ ansible_libvirt_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# Start and manage VMs, such as injecting SSH configurations,
+# inject the VMs in the live inventory for later reference, and so on.
+# In case we create a "blank" VM, without any OS, it shouldn't be known by
+# ansible, so no access should be done.
+- name: "Start VMs for type {{ vm_type }}"
+  community.libvirt.virt:
+    state: running
+    name: "cifmw-{{ vm_type }}-{{ vm_id }}"
+    uri: "qemu:///system"
+  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop_control:
+    index_var: vm_id
+    label: "{{ vm_type }}-{{ vm_id }}"

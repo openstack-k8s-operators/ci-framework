@@ -44,7 +44,9 @@ The following structure has to be passed via the configuration parameter:
 ```YAML
 cifmw_libvirt_manager_configuration:
   vms:
-    type_name:  # (string, such as "compute", "controller")
+    type_name:  # (string, such as "compute", "controller"
+      start: (boolean, toggle if the VM should be strated or not. Optional, defaults to true)
+      manage: (boolean, toogle if the VM should be added to the inventory. Managed VM's must be on the cifmw_libvirt_manager_pub_net network. Optional, defaults to true)
       amount: (integer, optional. Optional, defaults to 1, allowed [0-9]+)
       image_url: (string, URI to the base image. Optional if disk_file_name is set to "blank")
       sha256_image_name: (string, image checksum. Optional if disk_file_name is set to "blank")
