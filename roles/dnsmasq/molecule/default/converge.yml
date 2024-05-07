@@ -1,0 +1,106 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_dnsmasq_global_options:
+      dhcp-authoritative:
+      log-dhcp:
+  roles:
+    - role: "dnsmasq"
+  tasks:
+    - name: Create network
+      vars:
+        cifmw_dnsmasq_network_name: starwars
+        cifmw_dnsmasq_network_state: present
+        cifmw_dnsmasq_network_definition:
+          ranges:
+            - label: ian
+              start_v4: 192.168.254.10
+              start_v6: "2345:0425:2CA1::0567:5673:23b5"
+              options:
+                - "3,192.168.254.1"
+                - "option6:dns-server,[2345:0425:2CA1::0567:5673:0001]"
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_network.yml
+
+    - name: Create second network
+      vars:
+        cifmw_dnsmasq_network_name: startrek
+        cifmw_dnsmasq_network_state: present
+        cifmw_dnsmasq_network_definition:
+          ranges:
+            - label: ian
+              start_v4: 192.168.253.10
+              prefix_length_v4: 26
+              start_v6: "2345:0426:2CA1::0567:5673:23b5"
+              prefix_length_v6: 120
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_network.yml
+
+    - name: Inject some node in starwars network
+      vars:
+        cifmw_dnsmasq_host_network: "{{ item.net }}"
+        cifmw_dnsmasq_host_state: "{{ item.state }}"
+        cifmw_dnsmasq_host_mac: "{{ item.mac }}"
+        cifmw_dnsmasq_host_ipv6: "{{ item.ipv6 }}"
+        cifmw_dnsmasq_host_ipv4: "{{ item.ipv4 }}"
+        cifmw_dnsmasq_host_name: "{{ item.name | default(null) }}"
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_host.yml
+      loop:
+        - net: starwars
+          state: present
+          mac: "0a:19:02:f8:4c:a7"
+          ipv6: "2345:0425:2CA1::0567:5673:cafe"
+          ipv4: "192.168.254.11"
+        - net: starwars
+          state: present
+          mac: "0a:19:02:f8:4c:a8"
+          ipv6: "2345:0425:2CA1::0567:5673:babe"
+          ipv4: "192.168.254.12"
+          name: "solo"
+        - net: startrek
+          state: present
+          mac: "0a:19:02:f8:4c:a8"
+          ipv6: "2345:0426:2CA1::0567:5673:babe"
+          ipv4: "192.168.253.12"
+          name: "spock"
+
+    - name: Copy generated content in ci-framework-data/artifacts
+      vars:
+        dest_dir: >-
+          {{
+            (ansible_user_dir,
+             'ci-framework-data',
+             'artifacts') | path_join
+          }}
+        fname: "{{ item | basename }}"
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ item }}"
+        dest: "{{ dest_dir }}/{{ fname }}"
+      loop:
+        - /etc/cifmw-dnsmasq.conf
+        - /etc/cifmw-dnsmasq.d/starwars.conf
+        - /etc/cifmw-dnsmasq.d/starwars-hosts.conf
+        - /etc/cifmw-dnsmasq.d/startrek.conf
+        - /etc/cifmw-dnsmasq.d/startrek-hosts.conf
