@@ -133,12 +133,20 @@
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc patch csv -n openstack-operators openstack-ansibleee-operator.v0.0.1
-      --type='json' -p='[{
-      "op":"replace", "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
-      "value": {"name": "RELATED_IMAGE_ANSIBLEEE_IMAGE_URL_DEFAULT", "value": "quay.io/openstack-k8s-operators/openstack-ansibleee-runner:latest"}}]'
+  block:
+    - name: Get ansibleee-operator csv name
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        oc get csv -n openstack-operators -o name | grep ansibleee-operator
+      register: _ansibleee_csv_name
+
+    - name: Patch ansible runner image
+      ansible.builtin.command:
+        cmd: >-
+          oc patch -n openstack-operators "{{ _ansibleee_csv_name.stdout }}"
+          --type='json' -p='[{
+          "op":"replace", "path":"/spec/install/spec/deployments/0/spec/template/spec/containers/1/env/0",
+          "value": {"name": "RELATED_IMAGE_ANSIBLEEE_IMAGE_URL_DEFAULT", "value": "quay.io/openstack-k8s-operators/openstack-ansibleee-runner:latest"}}]'
 
 # Prepare and kustomize the OpenStackControlPlane CR
 - name: Prepare OpenStack control plane CR
