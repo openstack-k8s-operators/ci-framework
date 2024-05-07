@@ -1,0 +1,96 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install needed packages
+  become: true
+  ansible.builtin.package:
+    name: "{{ cifmw_dnsmasq_packages }}"
+    state: present
+
+- name: Ensure SELinux knows about the new files and directories
+  become: true
+  community.general.sefcontext:
+    target: "{{ item.target }}"
+    setype: "{{ item.setype }}"
+    state: "{{ (_act == 'cleanup') | ternary('absent', 'present') }}"
+  loop:
+    - target: "/etc/cifmw-dnsmasq.conf"
+      setype: "dnsmasq_etc_t"
+    - target: "{{ cifmw_dnsmasq_basedir }}(/.*)?"
+      setype: "dnsmasq_etc_t"
+    - target: "/var/run/cifmw-dnsmasq.pid"
+      setype: "dnsmasq_var_run_t"
+
+- name: Manage configuration directory
+  become: true
+  ansible.builtin.file:
+    mode: "0755"
+    path: "{{ cifmw_dnsmasq_basedir }}"
+    state: "{{ (_act == 'cleanup') | ternary('absent', 'directory') }}"
+
+- name: Manage systemd unit file
+  become: true
+  when:
+    - _act == 'install'
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/cifmw-dnsmasq.service"
+    mode: "0644"
+    src: "cifmw-dnsmasq.service"
+
+- name: Manage base configuration file
+  become: true
+  when:
+    - _act == 'install'
+  ansible.builtin.template:
+    dest: "/etc/cifmw-dnsmasq.conf"
+    mode: "0644"
+    src: "cifmw-dnsmasq.conf.j2"
+    validate: "/usr/sbin/dnsmasq -C %s --test"
+
+- name: Manage and start dnsmasq instance
+  become: true
+  when:
+    - _act == 'install'
+  ansible.builtin.systemd_service:
+    name: cifmw-dnsmasq.service
+    state: started
+    enabled: true
+    daemon-reload: true
+
+- name: Stop service
+  become: true
+  when:
+    - _act == 'cleanup'
+  ansible.builtin.systemd_service:
+    name: cifmw-dnsmasq.service
+    state: stopped
+    enabled: false
+
+- name: Remove unit file
+  become: true
+  when:
+    - _act == 'cleanup'
+  ansible.builtin.file:
+    path: "/etc/systemd/system/cifmw-dnsmasq.service"
+    state: absent
+
+- name: Remove main configuration file
+  become: true
+  when:
+    - _act == 'cleanup'
+  ansible.builtin.file:
+    path: "/etc/cifmw-dnsmasq.conf"
+    state: absent
