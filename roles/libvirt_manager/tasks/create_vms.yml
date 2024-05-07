@@ -172,10 +172,18 @@
     index_var: index
     label: "{{ vm_type }}-{{ index }}"
 
-- name: "Assert we have public_net_nics and macs data for {{ vm_type }}"
+- name: "Assert we have macs data for {{ vm_type }}"
   ansible.builtin.assert:
     that:
       - macs | length > 0
+    msg: >-
+      Something went wrong while trying to extract interface mac addresses.
+      Please double-check your scenario!
+
+- name: "Assert we have public_net_nics {{ vm_type }}"
+  when: vm_data.value.manage | default(true) | bool
+  ansible.builtin.assert:
+    that:
       - public_net_nics | length > 0
     msg: >-
       Something went wrong while trying to extract interfaces associated to
@@ -211,9 +219,17 @@
     index_var: index
     label: "{{ vm_type }}-{{ index }}"
 
-- name: "Start and grab IP if image is not blank for {{ vm_type }}"
+- name: "Start (power-on) {{ vm_type }}"
   when:
-    - vm_data.value.disk_file_name != 'blank'
+    - vm_data.value.start | default(true) | bool
+    - "vm_data.value.disk_file_name != 'blank'"
+  ansible.builtin.include_tasks: start_vms.yml
+
+- name: "Grab IP address and manage {{ vm_type }}"
+  when:
+    - vm_data.value.manage | default(true) | bool
+    - vm_data.value.start | default(true) | bool
+    - "vm_data.value.disk_file_name != 'blank'"
   vars:
     _need_start: "{{ _create_overlays is changed }}"
-  ansible.builtin.include_tasks: start_manage_vms.yml
+  ansible.builtin.include_tasks: manage_vms.yml
