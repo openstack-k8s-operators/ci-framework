@@ -434,7 +434,6 @@ class CifmwKustomizeWrapper:
         if self.target_path.is_dir():
             manifests_contents = self.__get_manifests_paths_from_dir_candidates(
                 self.target_path,
-                skip_paths=[self.output_path],
                 skip_regexes=self.__skip_regexes,
                 include_regexes=self.__include_regexes,
             )
