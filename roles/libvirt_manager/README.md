@@ -59,6 +59,7 @@ cifmw_libvirt_manager_configuration:
       password: (string, optional, defaults to fooBar. Root password for console access)
       target: (Hypervisor hostname you want to deploy the family on. Optional)
       uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
+      bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
   networks:
     net_name: <XML definition of the network to create>
 ```
@@ -101,6 +102,15 @@ cifmw_libvirt_manager_configuration:
       nets:
         - public
         - osp_trunk
+    baremetal_instance:
+      amount: 2
+      disk_file_name: "blank"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      bootmenu_enable: "yes"
+      nets:
+        - public
   networks:
     public: |-
       <network>
