@@ -49,7 +49,7 @@
         cmd: >-
           oc get ClusterServiceVersion
           -l operators.coreos.com/openstack-operator.openstack-operators
-          -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
+          --all-namespaces
           -o yaml
       register: _csvs_out
 
@@ -86,9 +86,15 @@
         label: "{{ item.name }}"
 
     - name: Get all the pods in openstack-operator namespace
+      vars:
+        csv_items: "{{ (_csvs_out.stdout | from_yaml)['items'] }}"
       kubernetes.core.k8s_info:
         kind: Pod
-        namespace: "{{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}"
+        namespace: >-
+          {{
+            ((csv_items | first).metadata.namespace)
+            if csv_items | length > 0 else omit
+          }}
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
         context: "{{ cifmw_openshift_context | default(omit)}}"
