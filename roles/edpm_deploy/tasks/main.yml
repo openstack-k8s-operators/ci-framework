@@ -122,7 +122,38 @@
       when: not cifmw_edpm_deploy_dryrun
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
-        script: "oc apply -f {{ cifmw_edpm_deploy_crs_kustomize_result.output_path }}"
+        script: |-
+          yq 'select(.kind != "OpenStackDataPlaneDeployment")' {{ cifmw_edpm_deploy_crs_kustomize_result.output_path }} | oc apply -f -
+
+    - name: Wait for OpenStackDataPlaneNodeSet setup
+      when: not cifmw_edpm_deploy_dryrun
+      vars:
+        cr_name: >-
+          {{
+            (
+              cifmw_edpm_deploy_crs_kustomize_result.result |
+              selectattr('kind', 'defined') |
+              selectattr('metadata.name', 'defined') |
+              selectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet') |
+              first
+            ).metadata.name
+          }}
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc wait OpenStackDataPlaneNodeSet {{ cr_name }}
+          --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+          --for=condition=SetupReady
+          --timeout={{ cifmw_edpm_deploy_timeout }}m
+
+    - name: Apply the OpenStackDataPlaneDeployment CR
+      when: not cifmw_edpm_deploy_dryrun
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_edpm_deploy_basedir }}/artifacts"
+        script: |-
+          yq 'select(.kind == "OpenStackDataPlaneDeployment")' {{ cifmw_edpm_deploy_crs_kustomize_result.output_path }} | oc apply -f -
 
     - name: Wait for OpenStackDataPlaneNodeSet to be deployed
       when: not cifmw_edpm_deploy_dryrun
