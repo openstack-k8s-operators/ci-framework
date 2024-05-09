@@ -1,0 +1,194 @@
+---
+# Usage and expected parameters
+# $ ansible-playbook -i localhost, -c local \
+#     validate-architecture.yml \
+#     -e cifmw_architecture_repo=$HOME/architecture \
+#     -e cifmw_architecture_scenario=hci \
+#     -e cifmw_networking_mapper_networking_env_def_path=$HOME/net-env.yml
+#     [any other parameter/files your VA/DT might need]
+#
+# cifmw_architecture_repo: location of the architecture repository.
+# cifmw_architecture_scenario: the scenario you want to test.
+# cifmw_networking_mapper_networking_env_def_path: path to the
+#        networking-mapper environment definition file.
+#
+# Special parameters set in the playbook (you can override them)
+# cifmw_basedir: defaults to ~/ci-framework-data
+# cifmw_zuul_target_host: target host. Defaults to localhost
+
+- name: Test architecture automations
+  hosts: "{{ cifmw_zuul_target_host | default('controller') }}"
+  gather_facts: true
+  vars:
+    cifmw_kustomize_deploy_generate_crs_only: true
+    ci_gen_kustomize_fetch_ocp_state: false
+    _homedir: "{{ ansible_user_dir | default(lookup('env', 'HOME')) }}"
+    cifmw_basedir: >-
+      {{
+        (_homedir,
+         'ci-framework-data') |
+        path_join
+      }}
+    _automation_relative: "automation/vars/"
+    cifmw_path: >-
+      {{
+        ['~/bin',
+         ansible_env.PATH] | join(':')
+      }}
+  pre_tasks:
+    - name: Assert we have the bare minimum to run
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - cifmw_architecture_repo is defined
+          - cifmw_architecture_scenario is defined
+          - cifmw_networking_mapper_networking_env_def_path is defined
+
+    - name: Deploy basic dependencies
+      ansible.builtin.import_role:
+        name: 'ci_setup'
+
+    - name: Install kustomize
+      when:
+        - zuul.projects is defined
+        - zuul.projects['github.com/openstack-k8s-operators/install_yamls'] is defined
+      vars:
+        _chdir: >-
+          {{
+            [zuul.projects['github.com/openstack-k8s-operators/install_yamls'].src_dir,
+             'devsetup'] | path_join
+          }}
+      ansible.builtin.command:
+        chdir: "{{ _chdir }}"
+        cmd: >-
+          ansible-playbook -i localhost, -c local
+          download_tools.yaml --tags kustomize
+
+    - name: Create needed directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ cifmw_basedir }}/logs"
+        - "{{ cifmw_basedir }}/artifacts"
+
+    - name: Ensure kustomize_deploy is bootstraped
+      ansible.builtin.import_role:
+        name: "kustomize_deploy"
+        tasks_from: "check_requirements.yml"
+  tasks:
+    - name: Output kubectl data
+      ansible.builtin.shell:
+        cmd: |
+          which kubectl
+          kubectl version --client=true
+          kubectl kustomize --help
+
+    - name: Load networking mapper environment
+      ansible.builtin.import_role:
+        name: "networking_mapper"
+        tasks_from: "load_env_definition.yml"
+
+    - name: Discover automation files
+      register: _automation_files
+      ansible.builtin.find:
+        paths: >-
+          {{
+            [cifmw_architecture_repo, _automation_relative] |
+            path_join
+          }}
+        patterns: "*.yaml"
+
+    - name: Get automation contents
+      register: _automation_contents
+      ansible.builtin.slurp:
+        path: "{{ item.path }}"
+      loop: "{{ _automation_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: Load automation files as fact
+      ansible.builtin.set_fact:
+        vas: >-
+          {{
+            vas | default({}) |
+            combine(item.content | b64decode | from_yaml, recursive=true)
+          }}
+      loop: "{{ _automation_contents.results }}"
+      loop_control:
+        label: "{{ item.source | basename }}"
+
+    - name: Prepare automation data
+      ansible.builtin.set_fact:
+        cifmw_deploy_architecture_steps: >-
+          {{ vas['vas'][cifmw_architecture_scenario] }}
+
+    - name: Create needed SSH keypairs
+      community.crypto.openssh_keypair:
+        comment: "{{ item.comment }}"
+        path: "{{ item.path }}"
+        type: "ecdsa"
+        size: "521"
+      loop:
+        - comment: "Nova migration"
+          path: "{{ cifmw_basedir }}/artifacts/ecdsa_nova_migration"
+        - comment: "EDPM deploy key"
+          path: "{{ cifmw_basedir }}/artifacts/ecdsa_deploy"
+
+    - name: Load public SSH keys
+      register: _pub_keys
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      loop:
+        - "{{ cifmw_basedir }}/artifacts/ecdsa_nova_migration.pub"
+        - "{{ cifmw_basedir }}/artifacts/ecdsa_deploy.pub"
+
+    - name: Load private SSH keys
+      register: _priv_keys
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      loop:
+        - "{{ cifmw_basedir }}/artifacts/ecdsa_nova_migration"
+        - "{{ cifmw_basedir }}/artifacts/ecdsa_deploy"
+
+    - name: Generate needed facts out of local files
+      vars:
+      ansible.builtin.set_fact:
+        cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+          {{
+            _pub_keys.results[1].content | b64decode
+          }}
+        cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+          {{
+            _priv_keys.results[1].content | b64decode
+          }}
+        cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+          {{
+            _pub_keys.results[1].content | b64decode
+          }}
+        cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+          {{
+            _pub_keys.results[0].content | b64decode
+          }}
+        cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+          {{
+            _priv_keys.results[0].content | b64decode
+          }}
+        cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+          {{
+            [cifmw_networking_env_definition.networks.ctlplane.network_v4]
+          }}
+
+    - name: Execute deployment steps
+      ansible.builtin.include_role:
+        name: kustomize_deploy
+        tasks_from: execute_step.yml
+        apply:
+          tags:
+            - edpm_deploy
+      loop: "{{ cifmw_deploy_architecture_steps.stages }}"
+      loop_control:
+        label: "{{ stage.path }}"
+        loop_var: stage
+        index_var: stage_id
