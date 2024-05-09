@@ -1,0 +1,31 @@
+# Marks all newly opened and reopened pull requests as drafts
+# and adds a helpful comment to the PR
+
+# Run only on opened and reopened pull request events
+name: Set to draft status when PR is [re]opened
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  mark-as-draft:
+    runs-on: ubuntu-latest
+    permissions: # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+      contents: write # Required for setting draft state
+      pull-requests: write # Required for posting comment
+    steps:
+      # Use the gh cli tool to set the PR into draft state if opened without it
+      # and add a helpful comment
+      - name: Set to draft and add comment
+        continue-on-error: true # We should not block if this action fails for some reason
+        if: github.event.pull_request.draft == false
+        shell: bash
+        run: >
+          gh pr ready "$URL" --undo &&
+          printf 'Thanks for the PR! :heart:\nI am marking it as a draft,
+          once passing your happy and the PR is passing CI click the
+          \"Ready for review\" button below.' |
+          gh pr comment "$URL" -F -
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          URL: ${{ github.event.pull_request.html_url }}

@@ -39,7 +39,7 @@ In case of emergency, or if we didn't come back to you in a reasonable time (exp
 
 
 .. _`issue in Jira`: https://issues.redhat.com/
-.. _`Slack channel`: https://redhat.enterprise.slack.com/archives/C04SKQ5KSJ0
+.. _`Slack channel`: https://redhat.enterprise.slack.com/archives/C03MD4LG22Z
 
 
 .. toctree::
