@@ -1,0 +1,20 @@
+---
+- name: Create cinder resources needed for tempest run
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Set the multiattach volume type name
+      ansible.builtin.set_fact:
+        cifmw_volume_multiattach_type: "{{ cifmw_volume_multiattach_type|default('multiattach') }}"
+
+    - name: Set a multiattach volume type and create it if needed
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: |
+        oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} rsh openstackclient \
+          openstack volume type show {{ cifmw_volume_multiattach_type }} &>/dev/null || \
+            oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} rsh openstackclient \
+              openstack volume type create {{ cifmw_volume_multiattach_type }}
+        oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} rsh openstackclient \
+          openstack volume type set --property multiattach="<is> True" {{ cifmw_volume_multiattach_type }}
