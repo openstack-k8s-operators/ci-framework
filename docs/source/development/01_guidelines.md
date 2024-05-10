@@ -51,12 +51,28 @@ either rely on [molecule](./02_molecule.md) or, maybe,
 
 ## Review workflow
 
-Once your patch is passing CI and not in draft status a reviewer will review your patch.
+### Auto draft status automation
+
+When a PR is opened or reopened on the CI-Framework repo the Github bot will enable the draft status.
+Once your patch is passing CI and you would be happy with it merging, click the "Ready for review" button,
+this will trigger the review ready workflow
+
+### Review ready automation
+
+Once your PR is out of draft status it will be evaluated by the review ready workflow, if your patch passes
+the following evaluations the "Ready for Review" label will be added informing the Ci-Framework maintainers
+to review your patch.
+
+The evaluation steps are:
+
+- There are no failed CI jobs
+- There are no Pending CI jobs excluding Tide
+- The PR isn't in draft state
+- The commit isn't found in more than one PR
+
+If at any time your patch no longer meets this criteria the label will be removed.
+
+### Escalating your review
+
 If you would like to bring attention to your patch before a reviewer has made it to your patch
-reached out in our [slack channel](https://redhat.enterprise.slack.com/archives/C03MD4LG22Z)
-
-### Auto Draft status
-
-When a PR is opened or reopened the Github bot will enable the draft status. Once your patch is
-passing CI and you would be happy with it merging, click the "Ready for review" button, this will
-then trigger the Review workflow mentioned above.
+reach out in our [slack channel](https://redhat.enterprise.slack.com/archives/C03MD4LG22Z)
