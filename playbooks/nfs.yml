@@ -22,6 +22,9 @@
       when:
         - not cifmw_edpm_deploy_nfs | default('false') | bool
       ansible.builtin.meta: end_play
+  vars:
+    nftables_path: /etc/nftables
+    nftables_conf: /etc/sysconfig/nftables.conf
   tasks:
     - name: Install required packages
       ansible.builtin.package:
@@ -79,20 +82,33 @@
             } | to_nice_yaml
           }}
 
-    - name: Add nfs ports to firewall
-      ansible.builtin.iptables:
-        action: "insert"
-        chain: "INPUT"
-        destination_ports:
-          - "32765:32768"
-          - "2049"
-          - "111"
-        jump: "ACCEPT"
-        source: "{{ cifmw_nfs_network_range }}"
-        protocol: "{{ item }}"
-      loop:
-        - tcp
-        - udp
+    # NOTE: This represents a workaround because there's an edpm-nftables role
+    #       in edpm-ansible already. That role should contain the implementation
+    #       of the firewall rules for NFS, and they should be included in the
+    #       main edpm-rules.nft file. The following firewall config assumes that
+    #       the EDPM node has been configured in terms of networks and firewall.
+    - name: Configure firewall
+      become: true
+      tags:
+        - nft
+      block:
+        - name: Generate nftables rules file
+          ansible.builtin.copy:
+            content: |
+              add rule inet filter EDPM_INPUT tcp dport 2049 accept
+            dest: "{{ nftables_path }}/nfs-server.nft"
+            mode: '0666'
+
+        - name: Update nftables.conf and include nfs rules at the bottom
+          ansible.builtin.lineinfile:
+            path: "{{ nftables_conf }}"
+            line: include "{{ nftables_path }}/nfs-server.nft"
+            insertafter: EOF
+
+        - name: Restart nftables service
+          ansible.builtin.systemd:
+            name: nftables
+            state: restarted
 
     - name: Configure the ip the nfs server should listen on
       community.general.ini_file:
@@ -103,7 +119,7 @@
         backup: true
 
     - name: Enable and restart nfs-server service
-      ansible.builtin.service:
+      ansible.builtin.systemd:
         name: nfs-server
         state: restarted
         enabled: true
