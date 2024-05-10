@@ -13,6 +13,7 @@ Required to installed required packages.
 ## Parameters
 
 * `cifmw_sushy_emulator_driver`: (String) Select between `openstack` and `libvirt` sushy emulator driver. Defaults to `libvirt`
+* `cifmw_sushy_emulator_libvirt_host`: (String) Hostname of hypervisor when using `libvirt` driver.
 * `cifmw_sushy_emulator_sshkey_path`: (String) Path of SSH key used by sushy emulator to talk to libvirt socket. Defaults to `"{{ ansible_user_dir }}/.ssh/id_cifw"`
 * `cifmw_sushy_emulator_libvirt_user`: (String) Username used by Sushi Emulator to connect to Libvirt socket. Defaults to `zuul`
 * `cifmw_sushy_emulator_listen_ip`: (String) IP Sushi Emulator service listens on. Defaults to `0.0.0.0`
@@ -32,7 +33,7 @@ Required to installed required packages.
 ```yaml
 - hosts: all
   vars:
-    cifmw_baremetal_hypervisor_target: baremetal-hypervisor
+    cifmw_sushy_emulator_libvirt_host: hypervisor-1.example.com
   tasks:
     - name: Deploy and configure sushy-emulator
       ansible.builtin.import_role:
