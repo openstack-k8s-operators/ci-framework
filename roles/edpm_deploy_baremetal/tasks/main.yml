@@ -62,17 +62,23 @@
       }}
     cifmw_edpm_deploy_baremetal_operators_build_output: "{{ operators_build_output }}"
 
-- name: Create virtual baremetal
-  when: cifmw_edpm_deploy_baremetal_create_vms | bool
-  vars:
-    make_edpm_baremetal_compute_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
-      combine(cifmw_edpm_deploy_baremetal_make_openstack_env)}}"
-    make_edpm_baremetal_compute_dryrun: "{{ cifmw_edpm_deploy_baremetal_dry_run }}"
-  ansible.builtin.include_role:
-    name: 'install_yamls_makes'
-    tasks_from: 'make_edpm_baremetal_compute'
+- name: Set facts for baremetal UEFI image url
+  ansible.builtin.set_fact:
+    cifmw_set_openstack_containers_overrides:
+      RELATED_IMAGE_OS_CONTAINER_IMAGE_URL_DEFAULT: "{{ cifmw_build_images_output['images']['edpm-hardened-uefi']['image'] }}"
+    cacheable: true
+  when: cifmw_build_images_output is defined
 
-- name: Prepare OpenStack Dataplane NodeSet CR
+- name: Patch baremetal CSV to override the uefi image
+  when:
+    - not cifmw_edpm_deploy_baremetal_dry_run
+    - (cifmw_edpm_deploy_baremetal_update_os_containers|bool) or (cifmw_build_images_output is defined)
+  vars:
+    cifmw_set_openstack_containers_operator_name: openstack-baremetal
+  ansible.builtin.include_role:
+    name: set_openstack_containers
+
+- name: Deploy EDPM with baremetal
   vars:
     make_edpm_deploy_baremetal_prep_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
       combine(cifmw_edpm_deploy_baremetal_make_openstack_env)}}"
@@ -181,6 +187,9 @@
           yq -i '(.spec.services[] | select(. == "repo-setup")) |= "repo-setup-downstream"'  {{ cifmw_edpm_deploy_baremetal_crs_kustomize_result.output_path }}
 
 - name: Apply the OpenStackDataPlaneNodeSet CR
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
   when: not cifmw_edpm_deploy_baremetal_dry_run
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_edpm_deploy_baremetal_basedir }}/artifacts"

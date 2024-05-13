@@ -1,0 +1,34 @@
+---
+- name: "Run ci/playbooks/edpm_baremetal_deployment/run_extracted.yml"
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: true
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Check for edpm-ansible.yml file
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
+      register: edpm_file
+
+    - name: Perform Podified and EDPM deployment on compute nodes with virtual baremetal
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook deploy-edpm.yml
+          -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          -e @scenarios/centos-9/base.yml
+          -e @scenarios/centos-9/edpm_baremetal_deployment_ci_extracted.yml
+          {%- if edpm_file.stat.exists %}
+          -e @{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml
+          {%- endif %}
+          {%- if cifmw_extras is defined %}
+          {%-   for extra_var in cifmw_extras %}
+          -e "{{   extra_var }}"
+          {%-   endfor %}
+          {%- endif %}
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
