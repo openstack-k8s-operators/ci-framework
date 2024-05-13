@@ -18,3 +18,38 @@
   ansible.builtin.file:
     state: absent
     path: "{{ cifmw_nat64_appliance_workdir }}/nat64-appliance.qcow2"
+
+- name: Stop the nat64_appliance VM
+  community.libvirt.virt:
+    command: destroy
+    name: "{{ cifmw_nat64_appliance_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Undefine the nat64_appliance VM
+  community.libvirt.virt:
+    command: undefine
+    name: "{{ cifmw_nat64_appliance_name }}"
+    force: true
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Destroy the nat64 networks
+  register: net_destroy
+  community.libvirt.virt_net:
+    command: destroy
+    name: "{{ item }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+  loop:
+    - "{{ cifmw_nat64_network_ipv4_name }}"
+    - "{{ cifmw_nat64_network_ipv6_name }}"
+  failed_when:
+    - net_destroy.rc is defined
+    - net_destroy.rc > 1
+
+- name: Undefine the nat64 networks
+  community.libvirt.virt_net:
+    command: undefine
+    name: "{{ item }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+  loop:
+    - "{{ cifmw_nat64_network_ipv4_name }}"
+    - "{{ cifmw_nat64_network_ipv6_name }}"

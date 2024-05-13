@@ -25,10 +25,9 @@
 
 - name: Ensure working directory exists
   ansible.builtin.file:
-    path: "{{ cifmw_nat64_appliance_workdir }}"
+    path: "{{ cifmw_nat64_appliance_workdir }}/tmp"
     state: directory
     mode: "0755"
-
 
 - name: Install required RPM packages
   tags:
@@ -61,12 +60,21 @@
     - "elements/"
     - nat64-appliance.yaml
 
+- name: Clone edpm-image-builder (reset-bls-entries dib element)
+  ansible.builtin.git:
+    repo: https://github.com/openstack-k8s-operators/edpm-image-builder.git
+    dest: "{{ cifmw_nat64_appliance_workdir }}/edpm-image-builder"
+    version: main
+
 - name: Build the nat64-appliance image using DIB
+  become: "{{ cifmw_nat64_appliance_run_dib_as_root | default(false) | bool }}"
   environment:
-    ELEMENTS_PATH: "{{ cifmw_nat64_appliance_workdir }}/elements"
+    ELEMENTS_PATH: "{{ cifmw_nat64_appliance_workdir }}/elements:{{ cifmw_nat64_appliance_workdir }}/edpm-image-builder/dib/"
     DIB_IMAGE_CACHE: "{{ cifmw_nat64_appliance_workdir }}/cache"
+    DIB_DEBUG_TRACE: '1'
   cifmw.general.ci_script:
     chdir: "{{ cifmw_nat64_appliance_workdir }}"
     output_dir: "{{ cifmw_nat64_appliance_basedir }}/artifacts"
     creates: "{{ cifmw_nat64_appliance_workdir }}/nat64-appliance.qcow2"
     script: "{{ cifmw_nat64_appliance_venv_dir }}/bin/diskimage-builder nat64-appliance.yaml {{ extra_args | default('') }}"
+    executable: "/bin/bash"

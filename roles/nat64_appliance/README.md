@@ -1,12 +1,31 @@
 # nat64_appliance
 
-`diskimage-builder` definition and element to build a NAT64 + DNS64 appliance VM image.
+`main.yml`: Tasks to build a NAT64 + DNS64 appliance VM image, uses `diskimage-builder`.
+`deploy.yml`: Tasks to deploy networks and appliance VM on a libvirt hypervisor.
+`cleanup.yml`: Tasks to destroy and undefine the VM and networks on a libvirt hypervisor, and delete the built image.
 
 ## Parameters
 
 * `cifmw_nat64_appliance_basedir`: (String) Base directory. Defaults to `{{ cifmw_basedir }}` which defaults to `~/ci-framework-data`.
 * `cifmw_nat64_appliance_workdir`: (String) Working directory. Defaults to `{{ cifmw_nat64_appliance_basedir }}/nat64_appliance`.
 * `cifmw_nat64_appliance_venv_dir`: (String) Python virtual environment directory. Defaults to `{{ cifmw_nat64_appliance_workdir }}/venv`.
+* `cifmw_nat64_libvirt_uri`: (String) The libvirt URI for the hypervisor to deploy on. Defaults to `qemu:///system`.
+* `cifmw_nat64_network_ipv4_name`: (String) Name of the nat64 IPv4 libvirt network. Defaults to: `nat64-net-v4`.
+* `cifmw_nat64_network_ipv4_bridge_name`: (String) Bridge name for the nat64 IPv4 libvirt network. Defaults to: `br-64v4`.
+* `cifmw_nat64_network_ipv4_address`: (String) IP address for the nat64 IPv4 libvirt network. Defaults to: `172.31.255.1`.
+* `cifmw_nat64_network_ipv4_prefix`: (Integer) IP prefix length for the nat64 IPv4 libvirt network. Defaults to: `24`.
+* `cifmw_nat64_network_ipv6_name`: (String) Name of the nat64 IPv6 libvirt network. Defaults to: `nat64-net-v6`.
+* `cifmw_nat64_network_ipv6_bridge_name`: (String) The bridge name for the nat64 IPv6 libvirt network. Defaults to: `br-64v6`.
+* `cifmw_nat64_network_ipv6_address`: (String) IP address for the nat64 IPv6 libvirt network. Defaults to: `fc00:abcd:abcd:fc00::1`.
+* `cifmw_nat64_network_ipv6_prefix`: (Integer) IP prefix length for the nat64 IPv6 libvirt network. Defaults to: `64`.
+* `cifmw_nat64_appliance_name`: (String) Name and hostname for the nat64 appliance VM. Defaults to: `nat64-appliance`.
+* `cifmw_nat64_appliance_ipv4_address`: (String) IPv4 address for the nat64 appliance VM. Defaults to: `172.31.255.2`.
+* `cifmw_nat64_appliance_ipv6_address`: (String) IPv6 address for the nat64 appliance VM. Defaults to: `fc00:abcd:abcd:fc00::2`.
+* `cifmw_nat64_appliance_memory`: (Integer) Memory in GiB for the nat64 appliance VM. Defaults to: `2`.
+* `cifmw_nat64_appliance_cpus`: (Integer) Virtual CPUs for the nat64 appliance VM. Defaults to: `2`.
+* `cifmw_nat64_appliance_ssh_pub_keys`: (List) List of SSH public key for the nat64 appliance VM. Defaults to: `[]`.
+* `cifmw_nat64_ipv6_prefix`: (String) IPv6 prefix for nat64. Defaults to: `fc00:abcd:abcd:fc00::/64`.
+* `cifmw_nat64_ipv6_tayga_address`: (String) Tayga IPv6 address. Defaults to: `fc00:abcd:abcd:fc00::3`.
 
 ## Building the image
 
@@ -18,12 +37,34 @@ Include the `nat64_appliance` role in a playbook. For example:
   roles:
     - nat64_appliance
 ```
-The built image will be in: `{{ cifmw_basedir }}/artifacts/roles/nat64-appliance/nat64-appliance.qcow2`
+
+The built image will be in: `{{ cifmw_nat64_appliance_workdir }}/nat64-appliance.qcow2`
 
 ## Using the nat64-appliance
 
-- [With Openstack cloud](#with-openstack-cloud){#toc-with-openstack-cloud}
 - [With Libvirt](#with-libvirt){#toc-with-libvirt}
+- [With Openstack cloud](#with-openstack-cloud){#toc-with-openstack-cloud}
+
+### With Libvirt
+
+```
+- name: "Build nat64 appliance image"
+  ansible.builtin.include_role:
+    name: nat64_appliance
+- name: "Deploy the nat64 appliance and networks"
+  ansible.builtin.include_role:
+    name: nat64_appliance
+    tasks_from: deploy.yml
+```
+
+To cleanup the libvirt nat64 deployment:
+```
+- name: "Build nat64 appliance image"
+  ansible.builtin.include_role:
+    name: nat64_appliance
+    tasks_from: cleanup.yml
+```
+
 
 ### With Openstack cloud
 
@@ -64,8 +105,8 @@ openstack subnet create nat64-subnet \
   --network nat64-network \
   --ip-version 6 \
   --no-dhcp \
-  --subnet-range fd00:abcd:abcd:fc00::/64 \
-  --gateway fd00:abcd:abcd:fc00::1
+  --subnet-range fc00:abcd:abcd:fc00::/64 \
+  --gateway fc00:abcd:abcd:fc00::1
 ```
 
 #### Create security group
@@ -86,12 +127,12 @@ openstack port create nat64-appliance-ipv4 \
 openstack port create nat64-appliance-ipv6 \
   --network nat64-network \
   --disable-port-security \
-  --fixed-ip subnet=nat64-subnet,ip-address=fd00:abcd:abcd:fc00::2
+  --fixed-ip subnet=nat64-subnet,ip-address=fc00:abcd:abcd:fc00::2
 openstack port create nat64-appliance-ipv6-tayga \
   --description "NAT64 Tayga TAP interface IP address allocation. (Port is not bound/attached to instance)" \
   --network nat64-network \
   --disable-port-security \
-  --fixed-ip subnet=nat64-subnet,ip-address=fd00:abcd:abcd:fc00::3
+  --fixed-ip subnet=nat64-subnet,ip-address=fc00:abcd:abcd:fc00::3
 ```
 
 #### Create router in the openstack cloud
@@ -131,7 +172,7 @@ EOF
 ```
 
 > \[!NOTE\] Optional user_data configurations, and their default
-> values. - `NAT64_TAYGA_IPV6_PREFIX=fd00:abcd:abcd:fcff::/96` -
+> values. - `NAT64_TAYGA_IPV6_PREFIX=fc00:abcd:abcd:fcff::/96` -
 > `NAT64_TAYGA_DYNAMIC_POOL=192.168.255.0/24` -
 > `NAT64_TAYGA_IPV4=192.168.255.1`
 
@@ -167,7 +208,7 @@ openstack subnet create my-ipv6-subnet \
   --network my-ipv6-network \
   --ip-version 6 \
   --no-dhcp \
-  --subnet-range fd00:abcd:aaaa:fc00::/64 \
+  --subnet-range fc00:abcd:aaaa:fc00::/64 \
   --dns-nameserver "$(openstack port show nat64-appliance-ipv6 -f json -c fixed_ips | jq -r .fixed_ips[0].ip_address)"
 openstack router add subnet nat64-router my-ipv6-subnet
 openstack server create test-ipv6-only \
@@ -191,7 +232,7 @@ $ openstack server show my-ipv6-network-jump-host -c addresses
 +-----------+------------------------------------------------------------------+
 | Field     | Value                                                            |
 +-----------+------------------------------------------------------------------+
-| addresses | my-ipv6-network=fd00:abcd:aaaa:fc00::38; private=192.168.253.139 |
+| addresses | my-ipv6-network=fc00:abcd:aaaa:fc00::38; private=192.168.253.139 |
 +-----------+------------------------------------------------------------------+
 $ openstack floating ip create provider
 +---------------------+-----------------+
@@ -204,23 +245,19 @@ $ openstack server show test-ipv6-only -c addresses
 +-----------+------------------------------------------+
 | Field     | Value                                    |
 +-----------+------------------------------------------+
-| addresses | my-ipv6-network=fd00:abcd:aaaa:fc00::2b8 |
+| addresses | my-ipv6-network=fc00:abcd:aaaa:fc00::2b8 |
 +-----------+------------------------------------------+
-$ ssh -J fedora@192.168.254.164 fedora@fd00:abcd:aaaa:fc00::2b8
+$ ssh -J fedora@192.168.254.164 fedora@fc00:abcd:aaaa:fc00::2b8
 [fedora@test-ipv6-only ~]$ ip addr show eth0
 2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1442 qdisc fq_codel state UP group default qlen 1000
     link/ether fa:16:3e:8a:c1:af brd ff:ff:ff:ff:ff:ff
     altname enp0s3
     altname ens3
-    inet6 fd00:abcd:aaaa:fc00::2b8/64 scope global noprefixroute
+    inet6 fc00:abcd:aaaa:fc00::2b8/64 scope global noprefixroute
        valid_lft forever preferred_lft forever
     inet6 fe80::f816:3eff:fe8a:c1af/64 scope link noprefixroute
        valid_lft forever preferred_lft forever
 [fedora@test-ipv6-only ~]$ ping sunet.se
-PING sunet.se(fd00:abcd:abcd:fcff::259c:c033 (fd00:abcd:abcd:fcff::259c:c033)) 56 data bytes
-64 bytes from fd00:abcd:abcd:fcff::259c:c033 (fd00:abcd:abcd:fcff::259c:c033): icmp_seq=1 ttl=53 time=4.91 ms
+PING sunet.se(fc00:abcd:abcd:fcff::259c:c033 (fc00:abcd:abcd:fcff::259c:c033)) 56 data bytes
+64 bytes from fc00:abcd:abcd:fcff::259c:c033 (fc00:abcd:abcd:fcff::259c:c033): icmp_seq=1 ttl=53 time=4.91 ms
 ```
-
-### With Libvirt
-
-TODO

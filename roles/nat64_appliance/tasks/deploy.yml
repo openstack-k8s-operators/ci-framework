@@ -1,0 +1,111 @@
+---
+- name: Set MAC address facts
+  ansible.builtin.set_fact:
+    cifmw_nat64_appliance_ipv4_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
+    cifmw_nat64_appliance_ipv6_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
+
+- name: Create the IPv4 libvirt network for nat64
+  community.libvirt.virt_net:
+    command: define
+    name: "{{ cifmw_nat64_network_ipv4_name }}"
+    xml: "{{ lookup('template', 'ipv4_network.xml.j2') }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Ensure the IPv4 libvirt network for nat64 is created/started
+  community.libvirt.virt_net:
+    command: create
+    name: "{{ cifmw_nat64_network_ipv4_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Ensure the IPv4 libvirt network for nat64 is active
+  community.libvirt.virt_net:
+    state: active
+    name: "{{ cifmw_nat64_network_ipv4_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Ensure the IPv4 libvirt network for nat64 is enabled to autostart
+  community.libvirt.virt_net:
+    autostart: true
+    name: "{{ cifmw_nat64_network_ipv4_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Create the IPv6 libvirt network for nat64
+  community.libvirt.virt_net:
+    command: define
+    name: "{{ cifmw_nat64_network_ipv6_name }}"
+    xml: "{{ lookup('template', 'ipv6_network.xml.j2') }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Ensure the IPv6 libvirt network for nat64 is created/started
+  community.libvirt.virt_net:
+    command: create
+    name: "{{ cifmw_nat64_network_ipv6_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Ensure the IPv6 libvirt network for nat64 network is active
+  community.libvirt.virt_net:
+    state: active
+    name: "{{ cifmw_nat64_network_ipv6_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: Ensure the IPv6 libvirt network for nat64 is enabled to autostart
+  community.libvirt.virt_net:
+    autostart: true
+    name: "{{ cifmw_nat64_network_ipv6_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: "Generate nat64-appliance UUID"
+  ansible.builtin.set_fact:
+    nat64_appliance_uuid: "{{ 99999999 | random | to_uuid | lower }}"
+
+- name: "Create the config-drive ISO for the nat64-appliance"
+  vars:
+    cifmw_config_drive_iso_image: "{{ cifmw_nat64_appliance_workdir }}/{{ nat64_appliance_uuid }}.iso"
+    cifmw_config_drive_uuid: "{{ nat64_appliance_uuid }}"
+    cifmw_config_drive_name: "{{ cifmw_nat64_appliance_name }}"
+    cifmw_config_drive_hostname: "{{ cifmw_nat64_appliance_name }}"
+    cifmw_config_drive_userdata:
+      ssh_authorized_keys: "{{ cifmw_nat64_appliance_ssh_pub_keys }}"
+      write_files:
+        - path: "/etc/nat64/config-data"
+          owner: "root:root"
+          content: "{{ lookup('template', 'config-data.j2') }}"
+    cifmw_config_drive_networkconfig:
+      network:
+        version: 2
+        ethernets:
+          id0:
+            match:
+              macaddress: "{{ cifmw_nat64_appliance_ipv4_mac_address }}"
+            addresses:
+              - "{{ cifmw_nat64_appliance_ipv4_address }}/{{ cifmw_nat64_network_ipv4_prefix }}"
+            routes:
+              - to: '0.0.0.0/0'
+                via: "{{ cifmw_nat64_network_ipv4_address }}"
+                on-link: true
+            nameservers:
+              addresses:
+                - "{{ cifmw_nat64_network_ipv4_address }}"
+          id1:
+            match:
+              macaddress: "{{ cifmw_nat64_appliance_ipv6_mac_address }}"
+            addresses:
+              - "{{ cifmw_nat64_appliance_ipv6_address }}/{{ cifmw_nat64_network_ipv6_prefix }}"
+            routes:
+              - to: '::/0'
+                via: "{{ cifmw_nat64_network_ipv6_address }}"
+                on-link: true
+  ansible.builtin.include_role:
+    name: config_drive
+
+- name: "Define nat64-appliance VM"
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('template', 'domain.xml.j2') }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
+
+- name: "Start nat64-appliance VM"
+  community.libvirt.virt:
+    state: running
+    name: "{{ cifmw_nat64_appliance_name }}"
+    uri: "{{ cifmw_nat64_libvirt_uri }}"
