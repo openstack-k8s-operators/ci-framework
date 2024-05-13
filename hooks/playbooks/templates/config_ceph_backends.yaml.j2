@@ -1,0 +1,104 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+namespace: {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+patches:
+- target:
+    kind: OpenStackControlPlane
+  patch: |-
+    - op: add
+      path: /spec/extraMounts
+      value:
+        - name: v1
+          region: r1
+          extraVol:
+            - propagation:
+              - CinderVolume
+              - CinderBackup
+              - GlanceAPI
+              - ManilaShare
+              extraVolType: Ceph
+              volumes:
+              - name: ceph
+                projected:
+                  sources:
+                  - secret:
+                      name: ceph-conf-files
+              mounts:
+              - name: ceph
+                mountPath: "/etc/ceph"
+                readOnly: true
+
+    - op: replace
+      path: /spec/cinder/template/cinderBackup/replicas
+      value: {{ cifmw_services_cinder_bkp_replicas | default(1) }}
+
+    - op: add
+      path: /spec/cinder/template/cinderBackup/customServiceConfig
+      value: |
+        [DEFAULT]
+        backup_driver = cinder.backup.drivers.ceph.CephBackupDriver
+        backup_ceph_pool = backups
+        backup_ceph_user = openstack
+
+    - op: replace
+      path: /spec/cinder/template/cinderVolumes/volume1/replicas
+      value: {{ cifmw_services_cinder_vol_replicas | default(1) }}
+
+    - op: add
+      path: /spec/cinder/template/cinderVolumes/volume1/customServiceConfig
+      value: |
+        [DEFAULT]
+        enabled_backends=ceph
+        [ceph]
+        volume_backend_name=ceph
+        volume_driver=cinder.volume.drivers.rbd.RBDDriver
+        rbd_ceph_conf=/etc/ceph/ceph.conf
+        rbd_user=openstack
+        rbd_pool=volumes
+        rbd_flatten_volume_from_snapshot=False
+        report_discard_supported=True
+        backend_host=hostgroup
+        rbd_secret_uuid={{ cifmw_ceph_fsid }}
+
+    - op: replace
+      path: /spec/glance/template/glanceAPIs/default/replicas
+      value: {{ cifmw_services_glance_apis_replicas | default(1) }}
+
+    - op: add
+      path: /spec/glance/template/customServiceConfig
+      value: |
+        [DEFAULT]
+        enabled_backends = default_backend:rbd
+        [glance_store]
+        default_backend = default_backend
+        [default_backend]
+        rbd_store_ceph_conf = /etc/ceph/ceph.conf
+        store_description = "RBD backend"
+        rbd_store_pool = images
+        rbd_store_user = openstack
+
+    - op: replace
+      path: /spec/glance/template/glanceAPIs/default/type
+      value: split
+
+    - op: add
+      path: /spec/manila/enabled
+      value: {{ cifmw_services_manila_enabled | default('false') }}
+
+    - op: add
+      path: /spec/manila/template/customServiceConfig
+      value: |
+        [DEFAULT]
+        enabled_share_backends=cephfs
+        enabled_share_protocols=cephfs
+        debug=True
+        [cephfs]
+        driver_handles_share_servers=False
+        share_backend_name=cephfs
+        share_driver=manila.share.drivers.cephfs.driver.CephFSDriver
+        cephfs_conf_path=/etc/ceph/ceph.conf
+        cephfs_auth_id=openstack
+        cephfs_cluster_name=ceph
+        cephfs_volume_mode=0755
+        cephfs_protocol_helper_type=CEPHFS
