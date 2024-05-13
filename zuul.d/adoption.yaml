@@ -141,11 +141,11 @@
     nodeset: centos-9-multinode-rhel-9-2-crc-extracted-2.30-3xl
     roles:
       - zuul: github.com/openstack-k8s-operators/ci-framework
-    pre-run:
+    pre-run: &multinode-prerun
       - ci/playbooks/multinode-customizations.yml
       - ci/playbooks/e2e-prepare.yml
       - ci/playbooks/dump_zuul_data.yml
-    post-run:
+    post-run: &multinode-postrun
       - ci/playbooks/e2e-collect-logs.yml
       - ci/playbooks/collect-logs.yml
       - ci/playbooks/multinode-autohold.yml
@@ -173,7 +173,7 @@
             vlan: 44
             range: 172.21.0.0/24
         instances:
-          controller:
+          controller: &multinode-crlr
             networks:
               default:
                 ip: 192.168.122.11
@@ -185,7 +185,7 @@
                 ip: 172.19.0.4
               storage_mgmt:
                 ip: 172.20.0.4
-          crc:
+          crc: &multinode-crc
             networks:
               default:
                 ip: 192.168.122.10
@@ -199,7 +199,7 @@
                 ip: 172.20.0.5
               external:
                 ip: 172.21.0.5
-          undercloud:
+          undercloud: &multinode-uc
             networks:
               default:
                 ip: 192.168.122.100
@@ -219,7 +219,7 @@
               external:
                 ip: 172.21.0.100
                 config_nm: false
-          overcloud-controller-0:
+          overcloud-controller-0: &multinode-crlr-leaf0
             networks:
               default:
                 ip: 192.168.122.103
@@ -298,4 +298,105 @@
                 config_nm: false
               external:
                 ip: 172.21.0.106
+                config_nm: false
+
+- job:
+    name: cifmw-adoption-base-source-multinode-novacells
+    parent: base-extracted-crc
+    abstract: true
+    voting: false
+    timeout: 10800
+    attempts: 1
+    nodeset: centos-9-multinode-rhel-9-2-crc-extracted-2.30-3xl-novacells
+    roles:
+      - zuul: github.com/openstack-k8s-operators/ci-framework
+    pre-run: *multinode-prerun
+    post-run: *multinode-postrun
+    vars:
+      <<: *adoption_vars
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1440', '1500') }}"
+            router_net: "{{ ('ibm' in nodepool.cloud) | ternary('hostonly', 'public') }}"
+            range: 192.168.122.0/24
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/16
+          storage:
+            vlan: 21
+            range: 172.18.0.0/16
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/16
+          storage_mgmt:
+            vlan: 23
+            range: 172.20.0.0/16
+          external:
+            vlan: 44
+            range: 172.21.0.0/16
+        instances:
+          controller: *multinode-crlr
+          crc: *multinode-crc
+          undercloud: *multinode-uc
+          overcloud-controller-0: *multinode-crlr-leaf0
+          cell1-controller-0:
+            networks:
+              default:
+                ip: 192.168.122.104
+                config_nm: false
+              internal-api:
+                ip: 172.17.1.104
+                config_nm: false
+              storage:
+                ip: 172.18.1.104
+                config_nm: false
+              tenant:
+                ip: 172.19.1.104
+                config_nm: false
+              storage_mgmt:
+                ip: 172.20.1.104
+                config_nm: false
+              external:
+                ip: 172.21.1.104
+                config_nm: false
+          cell2-controller-compute-0:
+            networks:
+              default:
+                ip: 192.168.122.105
+                config_nm: false
+              internal-api:
+                ip: 172.17.2.105
+                config_nm: false
+              storage:
+                ip: 172.18.2.105
+                config_nm: false
+              tenant:
+                ip: 172.19.2.105
+                config_nm: false
+              storage_mgmt:
+                ip: 172.20.2.105
+                config_nm: false
+              external:
+                ip: 172.21.2.105
+                config_nm: false
+          cell1-compute-0:
+            networks:
+              default:
+                ip: 192.168.122.106
+                config_nm: false
+              internal-api:
+                ip: 172.17.1.106
+                config_nm: false
+              storage:
+                ip: 172.18.1.106
+                config_nm: false
+              tenant:
+                ip: 172.19.1.106
+                config_nm: false
+              storage_mgmt:
+                ip: 172.20.1.106
+                config_nm: false
+              external:
+                ip: 172.21.1.106
                 config_nm: false
