@@ -26,6 +26,7 @@ class NetworkingMapperOptions:
     """
 
     search_domain_base: str = None
+    interfaces_info_translations: typing.Dict[str, typing.List[str]] = None
 
     @classmethod
     def from_dict(cls, data: typing.Dict[str, typing.Any]) -> "NetworkingMapperOptions":
@@ -120,12 +121,13 @@ class NetworkingInstanceMapper:
         self,
         instance_name,
         pools_manager: ip_pools.IPPoolsManager,
+        options: NetworkingMapperOptions = None,
         host_vars: typing.Dict[str, typing.Any] = None,
         group_templates: typing.Dict[
             str, networking_definition.GroupTemplateDefinition
         ] = None,
         instance_definition: networking_definition.InstanceDefinition = None,
-        interface_info: typing.Dict[str, typing.Any] = None,
+        interfaces_info: typing.List[typing.Dict[str, typing.Any]] = None,
     ):
         """Initializes a NetworkingInstanceMapper
 
@@ -138,22 +140,21 @@ class NetworkingInstanceMapper:
                to the instance. Optional.
            instance_definition: The networking_definition.InstanceDefinition
                of the instance. Optional.
-           interface_info: Dict of interface-related information. If given,
-               this dict must contain a `mac` field with the network interface
+           interfaces_info: A list of dicts of interface-related information. If given,
+               each element must contain a `mac` field with the network interface
                MAC address of the instance.
         """
         self.__instance_name = instance_name
         self.__pools_manager = pools_manager
         self.__host_vars = host_vars
+        self.__options = options
         self.__instance_definition: typing.Union[
             networking_definition.InstanceDefinition, None
         ] = instance_definition
         self.__group_templates: typing.Dict[
             str, networking_definition.GroupTemplateDefinition
         ] = (group_templates or {})
-        self.__interface_info: typing.Optional[typing.Dict[str, typing.Any]] = (
-            interface_info
-        )
+        self.__interfaces_info = interfaces_info or []
         self.__add_instance_reservation(instance_definition, pools_manager)
 
     @property
@@ -195,14 +196,38 @@ class NetworkingInstanceMapper:
         ipv4, ipv6 = self.__map_instance_network_ips(
             net_def.name, group_net_def, instance_net_definition
         )
-        iface_data = self.__map_instance_network_interface_data()
-        device_name = iface_data.get("device", None)
-        interface_name = (
-            f"{device_name}.{net_def.vlan}"
-            if device_name and net_def.vlan
-            else device_name
-        )
-        mtu = net_def.mtu if net_def.mtu is not None else iface_data.get("mtu", None)
+
+        trunk_parent = (instance_net_definition or group_net_def).trunk_parent
+        parent_iface = None
+        iface_data = self.__map_instance_network_interface_data(net_def)
+        if trunk_parent is not None:
+            parent_iface_data = self.__map_instance_network_interface_data(
+                trunk_parent.network
+            )
+            parent_iface = parent_iface_data.get("device", None)
+            interface_name = (
+                (
+                    f"{parent_iface}.{net_def.vlan}"
+                    if net_def.vlan and parent_iface
+                    else None
+                )
+                if not iface_data
+                else iface_data.get("device", None)
+            )
+            mtu = (
+                net_def.mtu
+                or (trunk_parent.network.mtu - 4 if trunk_parent.network.mtu else None)
+                or iface_data.get("mtu", None)
+                or (
+                    parent_iface_data["mtu"] - 4 if "mtu" in parent_iface_data else None
+                )
+            )
+        else:
+            interface_name = iface_data.get("device", None)
+            mtu = (
+                net_def.mtu if net_def.mtu is not None else iface_data.get("mtu", None)
+            )
+
         return networking_env_definitions.MappedInstanceNetwork(
             net_def.name,
             skip_nm=self.__map_instance_net_skip_nm(
@@ -216,18 +241,56 @@ class NetworkingInstanceMapper:
             prefix_length_v6=net_def.ipv6_network.prefixlen if ipv6 else None,
             mtu=int(mtu) if mtu else None,
             vlan_id=net_def.vlan,
-            parent_interface=device_name if net_def.vlan else None,
+            parent_interface=parent_iface,
             interface_name=interface_name,
             mac_addr=self.__map_instance_network_interface_mac(
-                iface_data.get("macaddress", None), net_def.vlan
+                iface_data.get("macaddress", None), net_def
             ),
-            is_trunk_parent=self.__map_instance_net_is_trunk_parent(
-                group_net_def, instance_net_definition
+            is_trunk_parent=self.__map_is_trunk_parent(
+                net_def, group_net_def, instance_net_definition
             ),
-            trunk_parent=self.__map_instance_net_trunk_parent(
-                group_net_def, instance_net_definition
-            ),
+            trunk_parent=trunk_parent.network.name if trunk_parent else None,
         )
+
+    def __map_is_trunk_parent(
+        self,
+        net_def: networking_definition.NetworkDefinition,
+        group_net_def: typing.Optional[
+            networking_definition.GroupTemplateNetworkDefinition
+        ],
+        instance_net_definition: typing.Optional[
+            networking_definition.InstanceNetworkDefinition
+        ],
+    ) -> typing.Optional[bool]:
+        instance_group_net_def = instance_net_definition or group_net_def
+        trunk_parent = instance_group_net_def.trunk_parent
+        if instance_group_net_def.is_trunk_parent:
+            return True
+        elif trunk_parent is not None:
+            # It's part of the trunk, but is not the parent
+            return False
+
+        for group_name, group_template in self.__group_templates.items():
+            if any(
+                (
+                    gt_net.trunk_parent
+                    and gt_net.trunk_parent.network.name == net_def.name
+                    for gt_net in group_template.networks.values()
+                )
+            ):
+                return True
+
+        if self.__instance_definition and any(
+            (
+                gt_net.trunk_parent and gt_net.trunk_parent.network.name == net_def.name
+                for gt_net in self.__instance_definition.networks.values()
+                if gt_net != self.__instance_definition
+            )
+        ):
+            return True
+        # The interface has nothing related to a trunk (nothing points to it),
+        # so do not set this trunk-related property
+        return None
 
     def __map_instance_net_skip_nm(
         self,
@@ -257,87 +320,65 @@ class NetworkingInstanceMapper:
             )
         return skip_nm
 
-    def __map_instance_net_is_trunk_parent(
-        self,
-        group_net_def: typing.Optional[
-            networking_definition.GroupTemplateNetworkDefinition
-        ],
-        instance_net_definition: typing.Optional[
-            networking_definition.InstanceNetworkDefinition
-        ],
-    ):
-        is_trunk_parent = (
-            instance_net_definition.is_trunk_parent
-            if instance_net_definition
-            and instance_net_definition.is_trunk_parent is not None
-            else (
-                group_net_def.is_trunk_parent
-                if group_net_def and group_net_def.is_trunk_parent is not None
-                else None
-            )
-        )
-
-        return is_trunk_parent
-
-    def __map_instance_net_trunk_parent(
-        self,
-        group_net_def: typing.Optional[
-            networking_definition.GroupTemplateNetworkDefinition
-        ],
-        instance_net_definition: typing.Optional[
-            networking_definition.InstanceNetworkDefinition
-        ],
-    ):
-        trunk_parent = (
-            instance_net_definition.trunk_parent
-            if instance_net_definition
-            and instance_net_definition.trunk_parent is not None
-            else (
-                group_net_def.trunk_parent
-                if group_net_def and group_net_def.trunk_parent is not None
-                else None
-            )
-        )
-        return trunk_parent
-
     @staticmethod
     def __map_instance_network_interface_mac(
-        main_iface_mac: typing.Optional[str], vlan_id: typing.Optional[int]
+        interface_mac: typing.Optional[str],
+        net_def: networking_definition.NetworkDefinition,
     ) -> typing.Optional[str]:
-        if not vlan_id:
-            return main_iface_mac
-        if main_iface_mac:
-            random_inst = random.Random()
-            random_inst.seed(a=f"{main_iface_mac}{vlan_id}")
-            mac_bytes = [
-                0x52,
-                0x54,
-                0x00,
-                random_inst.randint(0x00, 0x7F),
-                random_inst.randint(0x00, 0xFF),
-                random_inst.randint(0x00, 0xFF),
-            ]
+        if interface_mac:
+            return interface_mac
+        random_inst = random.Random()
+        random_inst.seed(a=net_def.name)
+        mac_bytes = [
+            0x52,
+            0x54,
+            0x00,
+            random_inst.randint(0x00, 0x7F),
+            random_inst.randint(0x00, 0xFF),
+            random_inst.randint(0x00, 0xFF),
+        ]
 
-            return ":".join(map(lambda x: "%02x" % x, mac_bytes))
-        return None
+        return ":".join(map(lambda x: "%02x" % x, mac_bytes))
 
     def __map_instance_network_interface_data(
-        self,
+        self, net_def: networking_definition.NetworkDefinition
     ) -> typing.Optional[typing.Dict[str, typing.Any]]:
-        if self.__interface_info is None or self.__host_vars is None:
-            return {}
-        elif "mac" not in self.__interface_info:
-            raise exceptions.NetworkMappingError(
-                f"interface information for {self.__instance_name} instance "
-                "does not contain mac address"
+        interfaces_info_mac = None
+        for iface_info in self.__interfaces_info:
+            interfaces_info_net_name = iface_info.get("network", None)
+            if not interfaces_info_net_name:
+                raise exceptions.NetworkMappingError(
+                    f"interface information for {self.__instance_name} instance "
+                    "does not contain `network` field"
+                )
+            if interfaces_info_net_name == net_def.name or (
+                net_def.name
+                in (self.__options.interfaces_info_translations or {}).get(
+                    interfaces_info_net_name, []
+                )
+            ):
+                if "mac" not in iface_info:
+                    raise exceptions.NetworkMappingError(
+                        f"interface information for {self.__instance_name} instance and {interfaces_info_net_name} "
+                        "network does not contain `mac` field"
+                    )
+                interfaces_info_mac = iface_info["mac"]
+                break
+
+        interface_data = {}
+        if interfaces_info_mac:
+            interface_data = (
+                self.__map_instance_network_interface_ansible_data(interfaces_info_mac)
+                or {}
             )
-        ansible_interfaces = self.__host_vars.get("ansible_interfaces", None)
-        if not ansible_interfaces:
-            raise exceptions.NetworkMappingError(
-                f"Cannot determine network interface for {self.__instance_name}. "
-                "Ensure ansible_interfaces is an available fact for the host"
-            )
-        instance_mac = self.__interface_info["mac"].lower()
+            if "macaddress" not in interface_data:
+                interface_data["macaddress"] = interfaces_info_mac.lower()
+        return interface_data
+
+    def __map_instance_network_interface_ansible_data(
+        self, interfaces_info_mac: typing.Optional[str]
+    ) -> typing.Optional[typing.Dict[str, typing.Any]]:
+        ansible_interfaces = self.__host_vars.get("ansible_interfaces", [])
         for iface_name in ansible_interfaces:
             # Ansible internally replaces `-` and `:` by _ to create safe facts names
             iface_fact_name = f"ansible_{iface_name}".replace("-", "_").replace(
@@ -350,11 +391,9 @@ class NetworkingInstanceMapper:
                     f"ansible_interfaces is present but {iface_fact_name} it's not."
                 )
             mac = ansible_iface_data.get("macaddress", None)
-            if mac and mac.lower() == instance_mac:
+            if mac and mac.lower() == interfaces_info_mac.lower():
                 return ansible_iface_data
-        raise exceptions.NetworkMappingError(
-            f"Ansible instance with the given MAC, {instance_mac} was not found"
-        )
+        return None
 
     def __map_instance_network_ips(
         self,
@@ -489,15 +528,7 @@ class NetworkingInstanceMapper:
                 during the mapping process.
         """
         instance_nets = self.__map_instance_networks()
-        hostname = (
-            self.__host_vars.get("ansible_hostname", None) if self.__host_vars else None
-        )
-        if self.__host_vars is not None and not hostname:
-            raise exceptions.NetworkMappingError(
-                f"Cannot determine hostname for {self.__instance_name}. "
-                "Ensure ansible_hostname is an available fact for the host"
-            )
-
+        hostname = self.__host_vars.get("ansible_hostname", None)
         return networking_env_definitions.MappedInstance(
             self.__instance_name,
             instance_nets,
@@ -709,8 +740,10 @@ class NetworkingDefinitionMapper:
 
         return self.__safe_encode_to_primitives(routers)
 
-    def map_partial(
-        self, network_definition_raw: typing.Dict[str, typing.Any]
+    def map(
+        self,
+        network_definition_raw: typing.Dict[str, typing.Any],
+        interfaces_info: typing.Dict[str, typing.Any] = None,
     ) -> typing.Dict[str, typing.Any]:
         """
         Parses, validates and maps a Networking Definition into a partially complete
@@ -721,6 +754,8 @@ class NetworkingDefinitionMapper:
 
         Args:
             network_definition_raw: The Networking Definition to map.
+            interfaces_info: Dict containing the MAC addresses of each instance.
+             Optional.
 
         Returns: The Networking Environment Definition as a dictionary.
         Raises:
@@ -729,46 +764,12 @@ class NetworkingDefinitionMapper:
             exceptions.NetworkMappingError: If any inconsistency is found
                 during the mapping process.
         """
-        net_definition = self.__parse_validate_net_definition(network_definition_raw)
-        return self.__safe_encode_to_primitives(self.__map(net_definition))
-
-    def map_complete(
-        self,
-        network_definition_raw: typing.Dict[str, typing.Any],
-        interfaces_info: typing.Dict[str, typing.Any],
-    ) -> typing.Dict[str, typing.Any]:
-        """
-        Parses, validates and maps a Networking Definition into a complete
-        networking_env_definitions.NetworkingEnvironmentDefinition.
-
-        The resulting mapping is a dictionary that only contains primitive types.
-
-        Args:
-            network_definition_raw: The Networking Definition to map.
-            interfaces_info: Dict containing the MAC addresses of each instance.
-
-        Returns: The Networking Environment Definition as a dictionary.
-        Raises:
-            exceptions.NetworkMappingValidationError:
-                If network_definition_raw or interfaces_info are not provided,
-                 or they are not a dictionary.
-            exceptions.NetworkMappingError: If any inconsistency is found
-                during the mapping process.
-        """
-        if not isinstance(interfaces_info, dict):
+        if interfaces_info is not None and not isinstance(interfaces_info, dict):
             raise exceptions.NetworkMappingValidationError(
-                "interfaces_info is a mandatory dict"
+                "interfaces_info must be a list of dicts"
             )
-        net_definition = self.__parse_validate_net_definition(network_definition_raw)
-        return self.__safe_encode_to_primitives(
-            self.__map(net_definition, interfaces_info=interfaces_info)
-        )
 
-    def __map(
-        self,
-        net_definition: networking_definition.NetworkingDefinition,
-        interfaces_info: typing.Optional[typing.Dict[str, typing.Any]] = None,
-    ) -> networking_env_definitions.NetworkingEnvironmentDefinition:
+        net_definition = self.__parse_validate_net_definition(network_definition_raw)
         inst_groups_of_interest = self.__create_instances_dict(net_definition)
         pools_manager = ip_pools.IPPoolsManager(net_definition.group_templates)
         instance_mappers = self.__build_instances_net_mappers(
@@ -785,9 +786,10 @@ class NetworkingDefinitionMapper:
 
         routers = self.__routers_mapper.map_routers(net_definition.routers)
 
-        return networking_env_definitions.NetworkingEnvironmentDefinition(
+        net_def_env = networking_env_definitions.NetworkingEnvironmentDefinition(
             networks, instances, routers
         )
+        return self.__safe_encode_to_primitives(net_def_env)
 
     @staticmethod
     def __parse_validate_net_definition(
@@ -824,7 +826,9 @@ class NetworkingDefinitionMapper:
         instance_groups: typing.Dict[str, typing.List[str]],
         net_definition: networking_definition.NetworkingDefinition,
         pools_manager: ip_pools.IPPoolsManager,
-        interfaces_info: typing.Optional[typing.Dict[str, typing.Any]] = None,
+        interfaces_info: typing.Optional[
+            typing.Dict[str, typing.List[typing.Dict[str, typing.Any]]]
+        ] = None,
     ) -> typing.List[NetworkingInstanceMapper]:
         instance_nets_mappers: typing.List[NetworkingInstanceMapper] = []
         for instance_name, instance_groups in instance_groups.items():
@@ -845,18 +849,24 @@ class NetworkingDefinitionMapper:
                     f"{instance_name} instance is not part of the Ansible inventory"
                 )
 
-            instance_interface_info = (
+            instance_interfaces_info = (
                 interfaces_info[instance_name] if interfaces_info else None
             )
-
+            if instance_interfaces_info is not None and not isinstance(
+                instance_interfaces_info, list
+            ):
+                raise exceptions.NetworkMappingError(
+                    f"interfaces_info for {instance_name} instance must be a list of dicts"
+                )
             instance_nets_mappers.append(
                 NetworkingInstanceMapper(
                     instance_name,
                     pools_manager,
-                    self.__host_vars.get(instance_name, None),
+                    self.__options,
+                    self.__host_vars.get(instance_name, {}),
                     instance_definition=instance_definition,
                     group_templates=groups_template_definitions,
-                    interface_info=instance_interface_info,
+                    interfaces_info=instance_interfaces_info,
                 )
             )
 

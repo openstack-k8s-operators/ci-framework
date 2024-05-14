@@ -5,11 +5,10 @@ networking details of a given environment.
 
 
 ## Parameters
-* `cifmw_networking_definition`: The Networking Definition as a dictionary.
-* `cifmw_networking_mapper_ifaces_info`: The interface information dictionary that holds low-level info for full maps.
-* `cifmw_networking_mapper_network_name`: The network name to filter `cifmw_networking_mapper_ifaces_info` interfaces.
-* `cifmw_networking_mapper_assert_env_load`: Ensures that calling the Networking Environment Definition ends with a valid one loaded. Defaults to `true`.
-
+* `cifmw_networking_definition`: (Dict) The Networking Definition as a dictionary.
+* `cifmw_networking_mapper_ifaces_info`: (Dict) The interface information dictionary that holds low-level info for full maps.
+* `cifmw_networking_mapper_assert_env_load`:(Boolean) Ensures that calling the Networking Environment Definition ends with a valid one loaded. Defaults to `true`.
+* `cifmw_networking_mapper_interfaces_info_translations`: (Dict) Optional dictionary of lists that allows `cifmw_networking_mapper_ifaces_info` use different network names than the Networking Definition networks.
 
 ## Networking Definition patching
 This role allows to use a base Networking Definition, given by `cifmw_networking_definition` and patch it
@@ -32,9 +31,8 @@ The content of the `cifmw_networking_definition` will reflect those patches.
     to create the entire output with all the details for all the involved networks and instances based on the input
     Networking Definition and the Interfaces Information dict, that contains all the details to wire up instances
     interfaces to networks.
-- Interfaces Information: An input to the mapper that enables full maps by providing the mac address of each instance
-  interface for each infrastructure network. The mapper will filter the interface list of each instance based
-  on the `cifmw_networking_mapper_network_name`parameter.
+- Interfaces Information: An input to the mapper, required for full maps, that enables that allows matching interfaces
+    and mac addresses for all the instances.
 
 ## Examples
 ```
@@ -168,7 +166,6 @@ The content of the `cifmw_networking_definition` will reflect those patches.
           network: test-network
         - mac: aa:45:3e:f9:00:c0
           network: test-network-2
-    cifmw_networking_mapper_network_name: "test-network"
   ansible.builtin.include_role:
     name: networking_mapper
 ```
