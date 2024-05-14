@@ -44,6 +44,7 @@ are shared among multiple roles:
 - `cifmw_architecture_scenario`: (String) The selected VA scenario to deploy.
 - `cifmw_architecture_wait_condition`: (Dict) Structure defining custom wait_conditions for the automation.
 - `cifmw_architecture_user_kustomize.*`: (Dict) Structures defining user provided kustomization for automation. All these variables are combined together.
+- `cifmw_architecture_user_kustomize_base_dir`: (String) Path where to lock for kustomization patches.
 - `cifmw_ceph_target`: (String) The Ansible inventory group where ceph is deployed. Defaults to `computes`.
 - `cifmw_run_tests`: (Bool) Specifies whether tests should be executed.
   Defaults to false.

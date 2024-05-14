@@ -1,0 +1,39 @@
+---
+- name: Generate cifmw_architecture_user_base64_kustomize vars from tree
+  when:
+    - cifmw_architecture_user_kustomize_base_dir is defined
+  block:
+    - name: Find kustomize patches in the base dirrectory
+      ansible.builtin.find:
+        paths: "{{ cifmw_architecture_user_kustomize_base_dir }}"
+        patterns: "*.yml,*.yaml"
+        recurse: true
+      register: _cifmw_kustomize_deploy_yaml_patches_find
+      delegate_to: localhost
+
+    - name: Fetch the content of the kustomize patches
+      ansible.builtin.slurp:
+        path: "{{ item.path }}"
+      register: _cifmw_kustomize_deploy_yaml_patches_slurp
+      loop: "{{ _cifmw_kustomize_deploy_yaml_patches_find.files | default([]) }}"
+      delegate_to: localhost
+      loop_control:
+        label: "{{ item.path | ansible.builtin.relpath(cifmw_architecture_user_kustomize_base_dir) }}"
+
+    - name: Generate the base64 patches
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+      loop: >-
+        {% set generated_vars = {} -%}
+        {% for slurp_out in _cifmw_kustomize_deploy_yaml_patches_slurp.results | default([])            -%}
+        {%   set parts = slurp_out.source | dirname |
+                    ansible.builtin.relpath(cifmw_architecture_user_kustomize_base_dir) | split('/')    -%}
+        {%   if parts | length == 2                                                                     -%}
+        {%     set var_name = ('cifmw_architecture_user_base64_kustomize_99_local_gen_'
+                                + parts[0] + '_' + parts[1]) | regex_replace('[^a-zA-Z\d_]', '_')       -%}
+        {%     set _ = generated_vars.update({var_name: {parts[0]: {parts[1]: slurp_out.content }}})    -%}
+        {%   endif                                                                                      -%}
+        {% endfor                                                                                       -%}
+        {{ generated_vars | dict2items }}
+      loop_control:
+        label: "{{ item.key }}"
