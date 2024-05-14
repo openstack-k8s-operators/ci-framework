@@ -244,14 +244,14 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     )
     test_net_1 = networking_definition.NetworkingDefinition(raw_definition_1)
     assert test_net_1
-    assert len(test_net_1.networks) == 3
+    assert len(test_net_1.networks) == 4
     assert len(test_net_1.group_templates) == 3
     assert len(test_net_1.instances) == 1
 
     # Check that the expected networks are in
     assert all(
         net_name in test_net_1.networks
-        for net_name in ("network-1", "network-2", "network-3")
+        for net_name in ("network-1", "network-2", "network-3", "network-4")
     )
     assert "group-1" in test_net_1.group_templates
     assert "instance-1" in test_net_1.instances
@@ -307,6 +307,18 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     assert len(net3_def.netconfig_config.ranges_ipv6) == 1
     assert len(net3_def.metallb_config.ranges_ipv6) == 1
 
+    # Simple basic checks of network-4
+    net4_def = test_net_1.networks["network-4"]
+    net4_ip_netv6 = ipaddress.ip_network("fd98:6d1a:86e7:d5e5::/64")
+    assert net4_def.name == "network-4"
+    assert net4_def.ipv6_network == net4_ip_netv6
+    assert not net4_def.ipv4_network
+    assert not net4_def.mtu
+    assert net4_def.vlan == 22
+    assert not net4_def.metallb_config
+    assert not net4_def.netconfig_config
+    assert not net4_def.multus_config
+
     # Simple basic checks of the group templates
     group1_def = test_net_1.group_templates["group-1"]
     assert group1_def.group_name == "group-1"
@@ -324,9 +336,12 @@ def test_networking_definition_load_networking_definition_all_tools_ipv6_only_ok
     assert not group1_net2_def.ipv4_range
 
     group3_def = test_net_1.group_templates["group-3"]
-    group1_net3_def = group3_def.networks["network-3"]
-    assert group1_net3_def.ipv6_range
-    assert not group1_net3_def.ipv4_range
+    group3_net3_def = group3_def.networks["network-3"]
+    group3_net4_def = group3_def.networks["network-3"]
+    assert group3_net3_def.ipv6_range
+    assert not group3_net3_def.ipv4_range
+    assert group3_net4_def.ipv6_range
+    assert not group3_net4_def.ipv4_range
 
     # Simple basic checks of the explicit instance
     instance1_def = test_net_1.instances["instance-1"]

@@ -23,6 +23,7 @@ INSTANCE_1_NAME = "instance-1"
 INSTANCE_2_NAME = "instance-2"
 INSTANCE_3_NAME = "instance-3"
 INSTANCE_1_MACADDR = "27:b9:47:74:b3:02"
+INSTANCE_1_ALTERNATE_MACADDR = "27:b9:47:74:b3:01"
 INSTANCE_1_LO_IFACE_DATA = {
     "device": "lo",
     "macaddress": "27:b9:47:74:b3:00",
@@ -30,7 +31,7 @@ INSTANCE_1_LO_IFACE_DATA = {
 }
 INSTANCE_1_ETH0_IFACE_DATA = {
     "device": "eth0",
-    "macaddress": "27:b9:47:74:b3:01",
+    "macaddress": INSTANCE_1_ALTERNATE_MACADDR,
     "mtu": 1500,
 }
 INSTANCE_1_ETH1_IFACE_DATA = {
@@ -48,6 +49,7 @@ INSTANCE_1_OVS_SYSTEM_IFACE_DATA = {
     "mtu": 1500,
 }
 INSTANCE_2_MACADDR = "a1:69:da:21:aa:03"
+INSTANCE_2_ALTERNATE_MACADDR = "a1:69:da:21:aa:01"
 INSTANCE_2_LO_IFACE_DATA = {
     "device": "lo",
     "macaddress": "a1:69:da:21:aa:00",
@@ -55,7 +57,7 @@ INSTANCE_2_LO_IFACE_DATA = {
 }
 INSTANCE_2_ETH0_IFACE_DATA = {
     "device": "eth0",
-    "macaddress": "a1:69:da:21:aa:01",
+    "macaddress": INSTANCE_2_ALTERNATE_MACADDR,
     "mtu": 1500,
 }
 INSTANCE_2_ETH1_IFACE_DATA = {
@@ -74,6 +76,7 @@ INSTANCE_2_OVS_SYSTEM_IFACE_DATA = {
     "mtu": 1500,
 }
 INSTANCE_3_MACADDR = "bf:99:4b:3f:5e:01"
+INSTANCE_3_ALTERNATE_MACADDR = "bf:99:4b:3f:5e:02"
 INSTANCE_3_LO_IFACE_DATA = {
     "device": "lo",
     "macaddress": "bf:99:4b:3f:5e:00",
@@ -86,7 +89,7 @@ INSTANCE_3_ETH0_IFACE_DATA = {
 }
 INSTANCE_3_ETH1_IFACE_DATA = {
     "device": "eth1",
-    "macaddress": "bf:99:4b:3f:5e:02",
+    "macaddress": INSTANCE_3_ALTERNATE_MACADDR,
 }
 INSTANCE_3_ETH2_IFACE_DATA = {
     "device": "eth2",
@@ -156,16 +159,26 @@ TEST_HOSTVARS = {
     },
 }
 TEST_IFACES_INFO_MAC_FIELD = "mac"
+TEST_IFACES_INFO_NETWORK_FIELD = "network"
 TEST_IFACES_INFO = {
-    INSTANCE_1_NAME: {
-        TEST_IFACES_INFO_MAC_FIELD: INSTANCE_1_MACADDR,
-    },
-    INSTANCE_2_NAME: {
-        TEST_IFACES_INFO_MAC_FIELD: INSTANCE_2_MACADDR,
-    },
-    INSTANCE_3_NAME: {
-        TEST_IFACES_INFO_MAC_FIELD: INSTANCE_3_MACADDR,
-    },
+    INSTANCE_1_NAME: [
+        {
+            TEST_IFACES_INFO_MAC_FIELD: INSTANCE_1_MACADDR,
+            TEST_IFACES_INFO_NETWORK_FIELD: NETWORK_1_NAME,
+        },
+    ],
+    INSTANCE_2_NAME: [
+        {
+            TEST_IFACES_INFO_MAC_FIELD: INSTANCE_2_MACADDR,
+            TEST_IFACES_INFO_NETWORK_FIELD: NETWORK_1_NAME,
+        },
+    ],
+    INSTANCE_3_NAME: [
+        {
+            TEST_IFACES_INFO_MAC_FIELD: INSTANCE_3_MACADDR,
+            TEST_IFACES_INFO_NETWORK_FIELD: NETWORK_1_NAME,
+        },
+    ],
 }
 
 
@@ -431,3 +444,14 @@ def get_test_file_json_content(file_name: str) -> typing.Dict[str, typing.Any]:
     file_path = get_test_file_path(file_name)
     with open(file_path, "r") as file:
         return json.load(file)
+
+
+def patch_interfaces_info_dicts(
+    ifaces_info_1: typing.Dict[str, typing.List[typing.Dict]],
+    ifaces_info_2: typing.Dict[str, typing.List[typing.Dict]],
+) -> typing.Dict[str, typing.List[typing.Dict]]:
+    no = []
+    return dict(
+        (k, ifaces_info_1.get(k, no) + ifaces_info_2.get(k, no))
+        for k in set(ifaces_info_1).union(ifaces_info_2)
+    )
