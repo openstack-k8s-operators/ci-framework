@@ -192,17 +192,25 @@
              path_join | realpath
           }}
       block:
+        # We have to use plain `kustomize build`: lookup would
+        # be executed locally, on the ansible-controller. In CI,
+        # that would be the zuul-executor, and we don't manage them,
+        # leading to a risk to either NOT have kustomize, or an old,
+        # deprecated version.
         - name: "Build kustomized content for {{ stage.path }}"
+          register: _kustomize_output
+          environment:
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command:
+            chdir: "{{ _chdir }}"
+            cmd: kustomize build
+
+        - name: Output kustomize build in final file
           ansible.builtin.copy:
+            backup: true
             dest: "{{ _output }}"
+            content: "{{ _kustomize_output.stdout }}"
             mode: "0644"
-            content: >-
-              {{
-                lookup(
-                  'kubernetes.core.kustomize',
-                  dir=_chdir
-                )
-              }}
 
         - name: "Store kustomized content in artifacts for {{ stage.path }}"
           ansible.builtin.copy:

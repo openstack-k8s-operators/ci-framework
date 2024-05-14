@@ -21,9 +21,12 @@
     - ./resources/vars.yml
   tasks:
     - name: Load networking environment definition
-      ansible.builtin.include_role:
-        name: networking_mapper
-        tasks_from: load_env_definition.yml
+      vars:
+        _file: >-
+          {{ lookup('file', 'files/networking-environment-definition.yml') }}
+      ansible.builtin.set_fact:
+        cifmw_networking_env_definition: >-
+          {{ _file | from_yaml }}
 
     - name: Check requirements
       ansible.builtin.import_role:
@@ -39,12 +42,9 @@
              'architecture/automation/vars',
              'default.yaml') | path_join
           }}
-        _file: "{{ lookup('file', _automation) }}"
+        _file: "{{ lookup('file', _automation) | from_yaml }}"
       ansible.builtin.set_fact:
-        cifmw_deploy_architecture_steps: >-
-          {{
-            _file | from_yaml
-          }}
+        cifmw_deploy_architecture_steps: "{{ _file.vas.hci }}"
         cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
           {{ lookup('file', '~/.ssh/authorized_keys', rstrip=False) }}
         cifmw_ci_gen_kustomize_values_ssh_private_key: >-
@@ -60,7 +60,7 @@
       ansible.builtin.include_role:
         name: "kustomize_deploy"
         tasks_from: execute_step.yml
-      loop: "{{ cifmw_deploy_architecture_steps.vas.hci.stages }}"
+      loop: "{{ cifmw_deploy_architecture_steps.stages }}"
       loop_control:
         label: "{{ stage.path }}"
         loop_var: "stage"
@@ -78,7 +78,7 @@
           ansible.builtin.include_role:
             name: "kustomize_deploy"
             tasks_from: execute_step.yml
-          loop: "{{ cifmw_deploy_architecture_steps.vas.hci.stages }}"
+          loop: "{{ cifmw_deploy_architecture_steps.stages }}"
           loop_control:
             label: "{{ stage.path }}"
             loop_var: "stage"
