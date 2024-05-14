@@ -292,8 +292,8 @@ def test_group_template_definition_parse_trunk_parent_ok():
     net_b = list(networks_definitions.values())[1]
     group_template_definition_raw = {
         "networks": {
-            net_a.name: {"trunk_parent": net_b.name},
-            net_b.name: {"is_trunk_parent": True},
+            net_a.name: {"trunk-parent": net_b.name},
+            net_b.name: {"is-trunk-parent": True},
         },
     }
 
@@ -311,8 +311,11 @@ def test_group_template_definition_parse_trunk_parent_ok():
     # Ensure nets were parsed
     assert net_a.name in group_template_def.networks
     assert net_b.name in group_template_def.networks
-    assert group_template_def.networks[net_a.name].trunk_parent == net_b.name
-    assert group_template_def.networks[net_b.name].is_trunk_parent is True
+    trunk_parent = group_template_def.networks[net_a.name].trunk_parent
+    assert isinstance(
+        trunk_parent, networking_definition.GroupTemplateNetworkDefinition
+    )
+    assert trunk_parent.network.name == net_b.name
 
 
 def test_group_template_definition_parse_trunk_parent_fail():
@@ -322,8 +325,8 @@ def test_group_template_definition_parse_trunk_parent_fail():
     net_b = list(networks_definitions.values())[1]
     group_template_definition_raw = {
         "networks": {
-            net_a.name: {"is_trunk_parent": True},
-            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+            net_a.name: {"is-trunk-parent": True},
+            net_b.name: {"trunk-parent": "does-not-exist-parent"},
         },
     }
 
@@ -345,7 +348,7 @@ def test_group_template_definition_parse_no_trunk_parent_fail():
     group_template_definition_raw = {
         "networks": {
             net_a.name: {},
-            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+            net_b.name: {"trunk-parent": "does-not-exist-parent"},
         },
     }
 
@@ -386,4 +389,3 @@ def test_group_template_definition_parse_trunk_parent_no_trunks_ok():
     assert net_a.name in group_template_def.networks
     assert net_b.name in group_template_def.networks
     assert group_template_def.networks[net_a.name].trunk_parent is None
-    assert group_template_def.networks[net_b.name].is_trunk_parent is None

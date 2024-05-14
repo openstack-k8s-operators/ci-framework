@@ -306,8 +306,8 @@ def test_instance_definition_parse_trunk_parent_ok():
     net_b = list(networks_definitions.values())[1]
     instance_definition_raw = {
         "networks": {
-            net_a.name: {"trunk_parent": net_b.name},
-            net_b.name: {"is_trunk_parent": True},
+            net_a.name: {"trunk-parent": net_b.name},
+            net_b.name: {"is-trunk-parent": True},
         },
     }
 
@@ -323,8 +323,9 @@ def test_instance_definition_parse_trunk_parent_ok():
     # Ensure nets were parsed
     assert net_a.name in instance_def.networks
     assert net_b.name in instance_def.networks
-    assert instance_def.networks[net_a.name].trunk_parent == net_b.name
-    assert instance_def.networks[net_b.name].is_trunk_parent is True
+    trunk_parent = instance_def.networks[net_a.name].trunk_parent
+    assert isinstance(trunk_parent, networking_definition.InstanceNetworkDefinition)
+    assert trunk_parent.network.name == net_b.name
 
 
 def test_instance_definition_parse_trunk_parent_fail():
@@ -334,8 +335,8 @@ def test_instance_definition_parse_trunk_parent_fail():
     net_b = list(networks_definitions.values())[1]
     instance_definition_raw = {
         "networks": {
-            net_a.name: {"is_trunk_parent": True},
-            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+            net_a.name: {"is-trunk-parent": True},
+            net_b.name: {"trunk-parent": "does-not-exist-parent"},
         },
     }
 
@@ -357,7 +358,7 @@ def test_instance_definition_parse_no_trunk_parent_fail():
     instance_definition_raw = {
         "networks": {
             net_a.name: {},
-            net_b.name: {"trunk_parent": "does-not-exist-parent"},
+            net_b.name: {"trunk-parent": "does-not-exist-parent"},
         },
     }
 
@@ -396,4 +397,3 @@ def test_instance_definition_parse_trunk_parent_no_trunks():
     assert net_a.name in instance_def.networks
     assert net_b.name in instance_def.networks
     assert instance_def.networks[net_a.name].trunk_parent is None
-    assert instance_def.networks[net_b.name].is_trunk_parent is None

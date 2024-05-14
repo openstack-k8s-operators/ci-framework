@@ -1608,10 +1608,10 @@ class GroupTemplateNetworkDefinition:
         skip_nm_configuration: Indicates if the instances of the
             group should skip configuring Network Manager for the
             given network.
-        is_trunk_parent: indicates wheater the instance nic for
-            this network is parent for trunked vlans.
-        trunk_parent: idicates which instance network is vlan
-            parent for this network.
+        is_trunk_parent: indicates whether the instance nic for
+            this network is a parent of the trunked VLANs.
+        trunk_parent: if the network is a trunk in the target instances,
+            it points to the GroupTemplateNetworkDefinition of that network.
     """
 
     network: NetworkDefinition
@@ -1620,7 +1620,7 @@ class GroupTemplateNetworkDefinition:
     ipv4_range: HostNetworkRange = None
     skip_nm_configuration: bool = None
     is_trunk_parent: bool = None
-    trunk_parent: str = None
+    trunk_parent: GroupTemplateNetworkDefinition = None
 
     def __hash__(self) -> int:
         return hash(
@@ -1653,7 +1653,7 @@ class GroupTemplateDefinition:
             # 'network-template' is an optional field that can hold
             # the base configuration for each network. If given, each
             # declared network content will use the variables defined
-            # there as a base that can be overriden by each network
+            # there as a base that can be overridden by each network
             # content
             network-template:   # Optional template
 
@@ -1685,8 +1685,8 @@ class GroupTemplateDefinition:
     __FIELD_NETWORK_RANGE = "range"
     __FIELD_NETWORK_RANGE_IPV4 = "range-v4"
     __FIELD_NETWORK_RANGE_IPV6 = "range-v6"
-    __FIELD_IS_TRUNK_PARENT = "is_trunk_parent"
-    __FIELD_TRUNK_PARENT = "trunk_parent"
+    __FIELD_IS_TRUNK_PARENT = "is-trunk-parent"
+    __FIELD_TRUNK_PARENT = "trunk-parent"
 
     def __init__(
         self,
@@ -1710,7 +1710,6 @@ class GroupTemplateDefinition:
         if not group_name:
             raise ValueError("group_name is a mandatory argument")
         self.__group_name = group_name
-        self.__trunk_parents = set()
 
         self.__skip_nm_configuration: typing.Optional[bool] = None
         self.__groups_networks_definitions = {}
@@ -1764,25 +1763,31 @@ class GroupTemplateDefinition:
                 or {}
             )
 
-            # Process trunk parents to populate self.__trunk_parents
-            for network_name, network_data in networks.items():
-                if network_data.get(self.__FIELD_IS_TRUNK_PARENT):
-                    self.__parse_raw_net(
-                        network_name,
-                        network_data,
-                        network_template_raw,
-                        network_definitions,
-                    )
+            # Firstly, process networks that won't be trunk parents
+            trunk_parents = {
+                net_name: net_data
+                for net_name, net_data in networks.items()
+                if net_data is not None and self.__FIELD_TRUNK_PARENT not in net_data
+            }
+            for network_name, network_data in trunk_parents.items():
+                self.__parse_raw_net(
+                    network_name,
+                    network_data,
+                    network_template_raw,
+                    network_definitions,
+                )
 
-            # Process non trunk parents
-            for network_name, network_data in networks.items():
-                if not network_data.get(self.__FIELD_IS_TRUNK_PARENT):
-                    self.__parse_raw_net(
-                        network_name,
-                        network_data,
-                        network_template_raw,
-                        network_definitions,
-                    )
+            # Process networks that are part of a trunk
+            child_nets = dict(networks)
+            map(child_nets.pop, trunk_parents)
+            for network_name, network_data in child_nets.items():
+                self.__parse_raw_net(
+                    network_name,
+                    network_data,
+                    network_template_raw,
+                    network_definitions,
+                    trunk_parents=set(trunk_parents.keys()),
+                )
 
     def __parse_raw_net(
         self,
@@ -1790,6 +1795,7 @@ class GroupTemplateDefinition:
         network_data: typing.Dict[str, typing.Any],
         network_template_raw: typing.Dict[str, typing.Any],
         network_definitions: typing.Dict[str, NetworkDefinition],
+        trunk_parents: typing.Set[str] = None,
     ):
         network_definition = network_definitions.get(network_name, None)
         if not network_definition:
@@ -1799,7 +1805,7 @@ class GroupTemplateDefinition:
                 invalid_value=network_name,
             )
 
-        templated_net_data = {**network_template_raw, **network_data}
+        templated_net_data = {**network_template_raw, **(network_data or {})}
         ipv4_network_range, ipv6_network_range = self.__parse_raw_net_ranges(
             templated_net_data, network_definition
         )
@@ -1809,24 +1815,27 @@ class GroupTemplateDefinition:
             if self.__FIELD_NETWORK_SKIP_NM in templated_net_data
             else None
         )
-
         is_trunk_parent = _validate_parse_field_type(
             self.__FIELD_IS_TRUNK_PARENT,
             templated_net_data,
             bool,
-            parent_name=self.group_name,
+            parent_name=self.__group_name,
             parent_type=self.__OBJECT_TYPE_NAME,
             mandatory=False,
         )
-        if is_trunk_parent:
-            self.__trunk_parents.add(network_name)
 
-        trunk_parent = _validate_parse_trunk_parent_field(
+        trunk_parent_str = _validate_parse_trunk_parent_field(
             self.__FIELD_TRUNK_PARENT,
             templated_net_data,
             self.group_name,
             self.__OBJECT_TYPE_NAME,
-            self.__trunk_parents,
+            trunk_parents,
+        )
+
+        trunk_parent = (
+            self.__groups_networks_definitions[trunk_parent_str]
+            if trunk_parent_str
+            else None
         )
 
         self.__groups_networks_definitions[network_name] = (
@@ -1915,7 +1924,7 @@ class InstanceNetworkDefinition:
     ipv6: ipaddress.IPv6Address = None
     skip_nm_configuration: bool = None
     is_trunk_parent: bool = None
-    trunk_parent: str = None
+    trunk_parent: InstanceNetworkDefinition = None
 
     def __hash__(self) -> int:
         return hash(
@@ -1965,8 +1974,8 @@ class InstanceDefinition:
     __FIELD_NETWORKS = "networks"
     __FIELD_NETWORKS_IP = "ip"
     __FIELD_NETWORK_SKIP_NM = "skip-nm-configuration"
-    __FIELD_IS_TRUNK_PARENT = "is_trunk_parent"
-    __FIELD_TRUNK_PARENT = "trunk_parent"
+    __FIELD_IS_TRUNK_PARENT = "is-trunk-parent"
+    __FIELD_TRUNK_PARENT = "trunk-parent"
 
     def __init__(
         self,
@@ -1993,7 +2002,6 @@ class InstanceDefinition:
         self.__name = name
         self.__skip_nm_configuration: typing.Optional[bool] = None
         self.__instances_network_definitions = {}
-        self.__trunk_parents: typing.Set = set()
         self.__parse_raw(raw_definition, network_definitions)
 
     @property
@@ -2029,29 +2037,36 @@ class InstanceDefinition:
                 field=self.__FIELD_NETWORKS,
             )
 
-        # Process trunk parents to populate self.__trunk_parents
-        for network_name, network_data in networks.items():
-            if network_data.get(self.__FIELD_IS_TRUNK_PARENT):
-                self.__parse_raw_net(
-                    network_name,
-                    network_data,
-                    network_definitions,
-                )
+        # Firstly, process networks that won't be trunk parents
+        trunk_parents = {
+            net_name: net_data
+            for net_name, net_data in networks.items()
+            if net_data is not None and self.__FIELD_TRUNK_PARENT not in net_data
+        }
+        for network_name, network_data in trunk_parents.items():
+            self.__parse_raw_net(
+                network_name,
+                network_data,
+                network_definitions,
+            )
 
-        # Process non trunk parents
-        for network_name, network_data in networks.items():
-            if not network_data.get(self.__FIELD_IS_TRUNK_PARENT):
-                self.__parse_raw_net(
-                    network_name,
-                    network_data,
-                    network_definitions,
-                )
+        # Process networks that are part of a trunk
+        child_nets = dict(networks)
+        map(child_nets.pop, trunk_parents)
+        for network_name, network_data in child_nets.items():
+            self.__parse_raw_net(
+                network_name,
+                network_data,
+                network_definitions,
+                trunk_parents=set(trunk_parents.keys()),
+            )
 
     def __parse_raw_net(
         self,
         network_name: str,
         network_data: typing.Dict[str, typing.Any],
         network_definitions: typing.Dict[str, NetworkDefinition],
+        trunk_parents: typing.Set[str] = None,
     ):
         network_definition = network_definitions.get(network_name, None)
         if not network_definition:
@@ -2080,20 +2095,26 @@ class InstanceDefinition:
             self.__FIELD_IS_TRUNK_PARENT,
             network_data,
             bool,
-            parent_name=self.name,
             parent_type=self.__OBJECT_TYPE_NAME,
+            parent_name=self.__name,
             mandatory=False,
         )
-        if is_trunk_parent:
-            self.__trunk_parents.add(network_name)
 
-        trunk_parent = _validate_parse_trunk_parent_field(
-            self.__FIELD_TRUNK_PARENT,
-            network_data,
-            self.name,
-            self.__OBJECT_TYPE_NAME,
-            self.__trunk_parents,
-        )
+        trunk_parent = None
+        if trunk_parents:
+            trunk_parent_str = _validate_parse_trunk_parent_field(
+                self.__FIELD_TRUNK_PARENT,
+                network_data,
+                self.name,
+                self.__OBJECT_TYPE_NAME,
+                trunk_parents,
+            )
+
+            trunk_parent = (
+                self.__instances_network_definitions[trunk_parent_str]
+                if trunk_parent_str
+                else None
+            )
 
         self.__instances_network_definitions[network_name] = InstanceNetworkDefinition(
             network_definition,

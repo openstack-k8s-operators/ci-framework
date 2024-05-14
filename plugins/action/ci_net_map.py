@@ -34,15 +34,8 @@ options:
     - Dict that contains the list of MAC addresses of each instance to be mapped.
     - Each dict entry is a list of dicts with at least a `mac` field.
     - Each item in the list is an interface in a given infrastructure network.
-    - If not passed a partial map is done.
+    - It's required for full maps.
     type: iterable
-    required: false
-  network_name:
-    description:
-    - Required if interfaces_info is given.
-    - Represents the name of the physical network that accommodates the OSP networks.
-    - Filters out the interfaces_info interfaces by selecting only the proper one.
-    type: str
     required: false
   search_domain_base:
     description:
@@ -247,8 +240,8 @@ complete_map:
     type: bool
 """
 
-from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
+from ansible.plugins.action import ActionBase
 
 from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
     ansible_encoding,
@@ -260,26 +253,6 @@ from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
 
 
 class ActionModule(ActionBase):
-    @staticmethod
-    def __build_interfaces_info_dict(
-        ifaces_info_raw: typing.Dict[str, typing.Any], net_name: str
-    ) -> typing.Dict[str, typing.Any]:
-        ifaces_info_dict = {}
-        for instance_name, ifaces_list in ifaces_info_raw.items():
-            iface_data = next(
-                (
-                    iface_content
-                    for iface_content in ifaces_list
-                    if "network" in iface_content
-                    and iface_content["network"] == net_name
-                ),
-                None,
-            )
-            if instance_name not in ifaces_info_dict and iface_data:
-                ifaces_info_dict[instance_name] = iface_data
-
-        return ifaces_info_dict
-
     def run(self, tmp=None, task_vars=None):
         if task_vars is None:
             task_vars = dict()
@@ -292,18 +265,6 @@ class ActionModule(ActionBase):
         if not networking_definition:
             raise AnsibleActionFail("networking_definition is a mandatory argument")
 
-        interfaces_info_dict = None
-        is_complete_map = "interfaces_info" in task_args
-        network_name = task_args.get("network_name", None)
-        if is_complete_map and not network_name:
-            raise AnsibleActionFail(
-                "network_name is a mandatory " "argument if interfaces_info is given"
-            )
-        elif is_complete_map:
-            interfaces_info_dict = self.__build_interfaces_info_dict(
-                task_args["interfaces_info"], network_name
-            )
-
         mapper = networking_mapper.NetworkingDefinitionMapper(
             dict(task_vars["hostvars"]),
             task_vars["groups"],
@@ -311,14 +272,12 @@ class ActionModule(ActionBase):
         )
 
         try:
-            mapping_result = (
-                mapper.map_complete(networking_definition, interfaces_info_dict)
-                if is_complete_map
-                else mapper.map_partial(networking_definition)
+            mapping_result = mapper.map(
+                networking_definition,
+                interfaces_info=task_args.get("interfaces_info", None),
             )
             result["failed"] = False
             result["networking_env_definition"] = mapping_result
-            result["complete_map"] = is_complete_map
         except exceptions.NetworkMappingError as run_exception:
             result = {**result, **(run_exception.to_raw()), "failed": True}
 
