@@ -324,20 +324,25 @@ class NetworkingInstanceMapper:
     def __map_instance_network_interface_data(
         self,
     ) -> typing.Optional[typing.Dict[str, typing.Any]]:
-        if self.__interface_info is None or self.__host_vars is None:
+        if self.__interface_info is None:
             return {}
-        elif "mac" not in self.__interface_info:
+        interfaces_info_mac = self.__interface_info.get("mac", None)
+        if not interfaces_info_mac:
             raise exceptions.NetworkMappingError(
                 f"interface information for {self.__instance_name} instance "
                 "does not contain mac address"
             )
-        ansible_interfaces = self.__host_vars.get("ansible_interfaces", None)
-        if not ansible_interfaces:
-            raise exceptions.NetworkMappingError(
-                f"Cannot determine network interface for {self.__instance_name}. "
-                "Ensure ansible_interfaces is an available fact for the host"
-            )
-        instance_mac = self.__interface_info["mac"].lower()
+        interface_data = self.__map_instance_network_interface_ansible_data(
+            interfaces_info_mac
+        )
+        if interfaces_info_mac and "macaddress" not in interface_data:
+            interface_data["macaddress"] = interfaces_info_mac.lower()
+        return interface_data
+
+    def __map_instance_network_interface_ansible_data(
+        self, interfaces_info_mac: typing.Optional[str]
+    ) -> typing.Dict[str, typing.Any]:
+        ansible_interfaces = self.__host_vars.get("ansible_interfaces", [])
         for iface_name in ansible_interfaces:
             # Ansible internally replaces `-` and `:` by _ to create safe facts names
             iface_fact_name = f"ansible_{iface_name}".replace("-", "_").replace(
@@ -350,11 +355,9 @@ class NetworkingInstanceMapper:
                     f"ansible_interfaces is present but {iface_fact_name} it's not."
                 )
             mac = ansible_iface_data.get("macaddress", None)
-            if mac and mac.lower() == instance_mac:
+            if mac and mac.lower() == interfaces_info_mac.lower():
                 return ansible_iface_data
-        raise exceptions.NetworkMappingError(
-            f"Ansible instance with the given MAC, {instance_mac} was not found"
-        )
+        return {}
 
     def __map_instance_network_ips(
         self,
@@ -489,15 +492,7 @@ class NetworkingInstanceMapper:
                 during the mapping process.
         """
         instance_nets = self.__map_instance_networks()
-        hostname = (
-            self.__host_vars.get("ansible_hostname", None) if self.__host_vars else None
-        )
-        if self.__host_vars is not None and not hostname:
-            raise exceptions.NetworkMappingError(
-                f"Cannot determine hostname for {self.__instance_name}. "
-                "Ensure ansible_hostname is an available fact for the host"
-            )
-
+        hostname = self.__host_vars.get("ansible_hostname", None)
         return networking_env_definitions.MappedInstance(
             self.__instance_name,
             instance_nets,
@@ -710,7 +705,9 @@ class NetworkingDefinitionMapper:
         return self.__safe_encode_to_primitives(routers)
 
     def map_partial(
-        self, network_definition_raw: typing.Dict[str, typing.Any]
+        self,
+        network_definition_raw: typing.Dict[str, typing.Any],
+        interfaces_info: typing.Dict[str, typing.Any] = None,
     ) -> typing.Dict[str, typing.Any]:
         """
         Parses, validates and maps a Networking Definition into a partially complete
@@ -721,6 +718,8 @@ class NetworkingDefinitionMapper:
 
         Args:
             network_definition_raw: The Networking Definition to map.
+            interfaces_info: Dict containing the MAC addresses of each instance.
+             Optional.
 
         Returns: The Networking Environment Definition as a dictionary.
         Raises:
@@ -730,7 +729,9 @@ class NetworkingDefinitionMapper:
                 during the mapping process.
         """
         net_definition = self.__parse_validate_net_definition(network_definition_raw)
-        return self.__safe_encode_to_primitives(self.__map(net_definition))
+        return self.__safe_encode_to_primitives(
+            self.__map(net_definition, interfaces_info=interfaces_info)
+        )
 
     def map_complete(
         self,
@@ -853,7 +854,7 @@ class NetworkingDefinitionMapper:
                 NetworkingInstanceMapper(
                     instance_name,
                     pools_manager,
-                    self.__host_vars.get(instance_name, None),
+                    self.__host_vars.get(instance_name, {}),
                     instance_definition=instance_definition,
                     group_templates=groups_template_definitions,
                     interface_info=instance_interface_info,

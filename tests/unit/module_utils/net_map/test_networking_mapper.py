@@ -195,39 +195,58 @@ def test_networking_mapper_full_map_invalid_facts_fail():
         )
     assert "ansible_eth0" in str(exc_info.value)
 
-    # Ensure that ansible_interfaces exists
-    with pytest.raises(exceptions.NetworkMappingError) as exc_info:
-        test_hostvars = copy.deepcopy(net_map_stub_data.TEST_HOSTVARS)
-        test_hostvars[net_map_stub_data.INSTANCE_2_NAME].pop(
-            net_map_stub_data.ANSIBLE_HOSTVARS_INTERFACES
-        )
-        mapper = networking_mapper.NetworkingDefinitionMapper(
-            test_hostvars, net_map_stub_data.TEST_GROUPS
-        )
-        mapper.map_complete(
-            net_map_stub_data.get_test_file_yaml_content(
-                "networking-definition-valid-all-tools-dual-stack.yml"
-            ),
-            net_map_stub_data.TEST_IFACES_INFO,
-        )
-    assert "ansible_interfaces" in str(exc_info.value)
 
-    # Ensure that ansible_hostname exists
-    with pytest.raises(exceptions.NetworkMappingError) as exc_info:
-        test_hostvars = copy.deepcopy(net_map_stub_data.TEST_HOSTVARS)
-        test_hostvars[net_map_stub_data.INSTANCE_1_NAME].pop(
-            net_map_stub_data.ANSIBLE_HOSTVARS_HOSTNAME
-        )
-        mapper = networking_mapper.NetworkingDefinitionMapper(
-            test_hostvars, net_map_stub_data.TEST_GROUPS
-        )
-        mapper.map_complete(
-            net_map_stub_data.get_test_file_yaml_content(
-                "networking-definition-valid-all-tools-dual-stack.yml"
-            ),
-            net_map_stub_data.TEST_IFACES_INFO,
-        )
-    assert "ansible_hostname" in str(exc_info.value)
+def test_networking_mapper_full_map_missing_ansible_interfaces_ok():
+    test_hostvars = copy.deepcopy(net_map_stub_data.TEST_HOSTVARS)
+    test_hostvars[net_map_stub_data.INSTANCE_2_NAME].pop(
+        net_map_stub_data.ANSIBLE_HOSTVARS_INTERFACES
+    )
+    mapper = networking_mapper.NetworkingDefinitionMapper(
+        test_hostvars, net_map_stub_data.TEST_GROUPS
+    )
+    network_env = mapper.map_complete(
+        net_map_stub_data.get_test_file_yaml_content(
+            "networking-definition-valid-all-tools-dual-stack.yml"
+        ),
+        net_map_stub_data.TEST_IFACES_INFO,
+    )
+    assert net_map_stub_data.INSTANCE_2_NAME in network_env["instances"]
+    instance_2_nets = network_env["instances"][net_map_stub_data.INSTANCE_2_NAME][
+        "networks"
+    ]
+    network_1 = instance_2_nets.get("network-1", None)
+    network_3 = instance_2_nets.get("network-3", None)
+    assert network_1
+    assert network_3
+
+    network_1_mac = network_1.get("mac_addr", None)
+    assert (
+        net_map_stub_data.TEST_IFACES_INFO[net_map_stub_data.INSTANCE_2_NAME][
+            net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
+        ]
+        == network_1_mac
+    )
+    assert "interface_name" not in network_1
+    assert "interface_name" not in network_3
+    assert "mac_addr" in network_3
+
+
+def test_networking_mapper_full_map_missing_ansible_hostname_ok():
+    test_hostvars = copy.deepcopy(net_map_stub_data.TEST_HOSTVARS)
+    test_hostvars[net_map_stub_data.INSTANCE_1_NAME].pop(
+        net_map_stub_data.ANSIBLE_HOSTVARS_HOSTNAME
+    )
+    mapper = networking_mapper.NetworkingDefinitionMapper(
+        test_hostvars, net_map_stub_data.TEST_GROUPS
+    )
+    network_env = mapper.map_complete(
+        net_map_stub_data.get_test_file_yaml_content(
+            "networking-definition-valid-all-tools-dual-stack.yml"
+        ),
+        net_map_stub_data.TEST_IFACES_INFO,
+    )
+    assert net_map_stub_data.INSTANCE_1_NAME in network_env["instances"]
+    assert "hostname" not in network_env["instances"][net_map_stub_data.INSTANCE_1_NAME]
 
 
 def test_networking_mapper_full_map_invalid_ifaces_info_fail():
@@ -248,23 +267,6 @@ def test_networking_mapper_full_map_invalid_ifaces_info_fail():
         )
     assert "does not contain mac address" in str(exc_info.value)
 
-    # Ensure that the ansible instance can be located by MAC
-    with pytest.raises(exceptions.NetworkMappingError) as exc_info:
-        mapper = networking_mapper.NetworkingDefinitionMapper(
-            net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
-        )
-        ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
-        ifaces_info[net_map_stub_data.INSTANCE_1_NAME][
-            net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
-        ] = "ab:cd:de:f0:12:34"
-        mapper.map_complete(
-            net_map_stub_data.get_test_file_yaml_content(
-                "networking-definition-valid-all-tools-dual-stack.yml"
-            ),
-            ifaces_info,
-        )
-    assert "not found" in str(exc_info.value)
-
     # Ensure that the all instances are present in ifaces_info
     with pytest.raises(exceptions.NetworkMappingError) as exc_info:
         mapper = networking_mapper.NetworkingDefinitionMapper(
@@ -279,6 +281,36 @@ def test_networking_mapper_full_map_invalid_ifaces_info_fail():
             ifaces_info,
         )
     assert "does not contain information for instance-1" in str(exc_info.value)
+
+
+def test_networking_mapper_full_map_mac_not_found_ok():
+    # As the mapper works in best-effort mode, if the mac is
+    # not found, the map will succeed fetching the mac from
+    # the interfaces-info but not mapping ansible_facts
+    # fields like the interface_name
+
+    mapper = networking_mapper.NetworkingDefinitionMapper(
+        net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
+    )
+    ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
+    iface_info_mac = "ab:cd:de:f0:12:34"
+    ifaces_info[net_map_stub_data.INSTANCE_1_NAME][
+        net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
+    ] = iface_info_mac
+    network_env = mapper.map_complete(
+        net_map_stub_data.get_test_file_yaml_content(
+            "networking-definition-valid-all-tools-dual-stack.yml"
+        ),
+        ifaces_info,
+    )
+    assert net_map_stub_data.INSTANCE_1_NAME in network_env["instances"]
+    instance_1_nets = network_env["instances"][net_map_stub_data.INSTANCE_1_NAME][
+        "networks"
+    ]
+    network_1 = instance_1_nets.get("network-1", None)
+    assert network_1
+    assert iface_info_mac == network_1.get("mac_addr", None)
+    assert "interface_name" not in network_1
 
 
 def test_networking_mapper_search_domain_override_ok():
