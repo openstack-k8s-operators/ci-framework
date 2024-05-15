@@ -39,28 +39,36 @@
       - _network_exists.stat.exists
     quiet: true
     msg: >-
-      You must create the network first, calling
+      You must create {{ cifmw_dnsmasq_host_network }} network first, calling
       dnsmasq/manage_network.yml task.
+
+- name: Compute entry
+  ansible.builtin.set_fact:
+    _host_entry: |
+      {% if cifmw_dnsmasq_host_ipv4 is defined and cifmw_dnsmasq_host_ipv4 | length > 0       -%}
+      {% set data = [cifmw_dnsmasq_host_mac]                                                  -%}
+      {% set _ = data.append(cifmw_dnsmasq_host_ipv4)                                         -%}
+      {% set _ = data.append(cifmw_dnsmasq_host_name) if
+                 cifmw_dnsmasq_host_name is defined and cifmw_dnsmasq_host_name | length > 0  -%}
+      dhcp-host={{ data | join(',') }}
+      {% endif -%}
+      {% if cifmw_dnsmasq_host_ipv6 is defined and cifmw_dnsmasq_host_ipv6 | length > 0       -%}
+      {% set data = [cifmw_dnsmasq_host_mac]                                                  -%}
+      {% set _ = data.append('['~cifmw_dnsmasq_host_ipv6~']')                                 -%}
+      {% set _ = data.append(cifmw_dnsmasq_host_name) if
+                 cifmw_dnsmasq_host_name is defined and cifmw_dnsmasq_host_name | length > 0  -%}
+      dhcp-host={{ data | join(',') }}
+      {% endif -%}
+
+- name: Debug _host_entry
+  ansible.builtin.debug:
+    var: _host_entry
 
 - name: Manage host entry
   become: true
   notify: Restart dnsmasq
   ansible.builtin.blockinfile:
-    block: |
-      {% if cifmw_dnsmasq_host_ipv4 is defined                -%}
-      {% set data = [cifmw_dnsmasq_host_mac]                  -%}
-      {% set _ = data.append(cifmw_dnsmasq_host_ipv4)         -%}
-      {% set _ = data.append(cifmw_dnsmasq_host_name) if
-                 cifmw_dnsmasq_host_name is defined           -%}
-      dhcp-host={{ data | join(',') }}
-      {% endif -%}
-      {% if cifmw_dnsmasq_host_ipv6 is defined                -%}
-      {% set data = [cifmw_dnsmasq_host_mac]                  -%}
-      {% set _ = data.append('['~cifmw_dnsmasq_host_ipv6~']') -%}
-      {% set _ = data.append(cifmw_dnsmasq_host_name) if
-                 cifmw_dnsmasq_host_name is defined           -%}
-      dhcp-host={{ data | join(',') }}
-      {% endif -%}
+    block: "{{ _host_entry }}"
     dest: "{{ cifmw_dnsmasq_basedir }}/{{ cifmw_dnsmasq_host_network }}-hosts.conf"
     create: true
     mode: "0644"
