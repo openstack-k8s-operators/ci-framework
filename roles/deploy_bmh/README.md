@@ -25,6 +25,7 @@ The resulting CR will contain, for each node, the following objects:
 * `cifmw_deploy_bmh_patch_nmstate`: (*dict*) Dictionary to combine with each of generated BMH nmstate Secret CRs. Defaults to `{}`
 * `cifmw_deploy_bmh_node_patch_nmstate`: (*dict*) Dictionary with an individual BMH nmstate Secret CR patch per node. Defaults to `{}`
 * `cifmw_deploy_bmh_root_device_hint_field`: (*string*) The default field to use in the BMH `rootDeviceHints` when a node has `root_device_hint` populated. Defaults to `deviceName`
+* `cifmw_deploy_bmh_redfish_bmc_protocol`: (*string*) The RedFish BMC protocol you would like to use, options are `redfish` or `redfish-virtualmedia`. Defaults to `redfish-virtualmedia`
 
 ## Examples
 
