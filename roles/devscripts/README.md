@@ -23,7 +23,11 @@ networks.
 * `cifmw_devscripts_artifacts_dir` (str) path to the directory to store the
   role artifacts.
 * `cifmw_devscripts_config_overrides` (dict) key/value pairs to be used for
-  overriding the default configuration. Refer
+  overriding the default configuration. Refer to
+  [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more
+  information.
+* `cifmw_devscripts_config_overrides_patch.*`: (dict) key/value pair to be used
+  for overriding the default configuration. Refer to
   [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more
   information.
 * `cifmw_devscripts_dry_run` (bool) If enabled, the workflow is evaluated.
