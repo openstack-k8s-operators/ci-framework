@@ -55,7 +55,10 @@ either rely on [molecule](./02_molecule.md) or, maybe,
 
 When a PR is opened or reopened on the CI-Framework repo the Github bot will enable the draft status.
 Once your patch is passing CI and you would be happy with it merging, click the "Ready for review" button,
-this will trigger the review ready workflow
+this will trigger the review ready workflow.
+
+If you have a small patch you would like to skip the auto-draft workflow, you can prefix your git commit title
+with `nit:`
 
 ### Review ready automation
 
