@@ -14,17 +14,33 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
 - name: Gather the configurations to be passed to dev-scripts.
   tags:
     - always
+  vars:
+    devscripts_config_patches: >-
+      {{
+        hostvars[inventory_hostname] |
+        dict2items |
+        selectattr("key", "match",
+                   "^cifmw_devscripts_config_overrides_patch.*") |
+        sort(attribute='key') |
+        map(attribute='value') |
+        list
+      }}
   ansible.builtin.set_fact:
+    cacheable: true
     cifmw_devscripts_config: >-
       {{
-        cifmw_devscripts_config_defaults |
-        combine(cifmw_devscripts_config_overrides, recursive=true)
+        cifmw_devscripts_config | default({}) |
+        combine(item, recursive=true)
       }}
-    cacheable: true
+  loop: >-
+    {{
+      [cifmw_devscripts_config_defaults] +
+      [cifmw_devscripts_config_overrides] +
+      devscripts_config_patches
+    }}
 
 - name: Check and prepare the environment
   tags:
