@@ -1,0 +1,40 @@
+---
+- name: List VMs
+  register: _list_vms
+  community.libvirt.virt:
+    command: list_vms
+
+- name: Deploy nat64-appliance only if it does not already exist
+  when: "'nat64-appliance' not in _list_vms.list_vms"
+  block:
+    # TODO(hjensas): Building takes a bit of time (~5 minutes)
+    # We could host the image somewhere and download it instead.
+    - name: Build nat64 appliance image
+      vars:
+        cifmw_nat64_appliance_run_dib_as_root: true
+      ansible.builtin.include_role:
+        name: nat64_appliance
+
+    - name: Fix permissions on nat64_appliance dir - because we ran dib as root
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/nat64_appliance"
+        state: directory
+        recurse: true
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+
+    - name: Crate SSH keypair for nat64-appliance
+      register: _nat64_key
+      community.crypto.openssh_keypair:
+        comment: "nat64-access-key"
+        path: "{{ (ansible_user_dir, '.ssh/id_nat64') | path_join }}"
+        type: "ecdsa"
+
+    - name: "Deploy the nat64 appliance and networks"
+      vars:
+        cifmw_nat64_appliance_ssh_pub_keys:
+          - "{{ _nat64_key.public_key }}"
+      ansible.builtin.include_role:
+        name: nat64_appliance
+        tasks_from: deploy.yml
