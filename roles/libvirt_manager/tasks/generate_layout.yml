@@ -1,0 +1,26 @@
+---
+- name: Chose right parameter for layout definition
+  ansible.builtin.set_fact:
+    _cifmw_libvirt_manager_layout: >-
+      {{ cifmw_libvirt_manager_configuration_gen |
+         default(cifmw_libvirt_manager_configuration) }}
+
+- name: Patch the layout if needed
+  vars:
+    _layout_patches: >-
+      {{
+        hostvars[inventory_hostname] |
+        dict2items |
+        selectattr("key", "match",
+                   "^cifmw_libvirt_manager_configuration_patch.*") |
+        sort(attribute='key')
+      }}
+  ansible.builtin.set_fact:
+    _cifmw_libvirt_manager_layout: >-
+      {{
+        _cifmw_libvirt_manager_layout |
+        combine(item.value, recursive=True)
+      }}
+  loop: "{{ _layout_patches }}"
+  loop_control:
+    label: "{{ item.key }}"

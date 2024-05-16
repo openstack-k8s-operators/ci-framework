@@ -1,25 +1,8 @@
 ---
-- name: Chose right parameter for layout definition
-  ansible.builtin.set_fact:
-    cacheable: true
-    _layout: >-
-      {{ cifmw_libvirt_manager_configuration_gen |
-         default(cifmw_libvirt_manager_configuration) }}
-
-- name: Patch the layout if needed
-  vars:
-    _layout_patches: >-
-      {{
-        hostvars[inventory_hostname] |
-        dict2items |
-        selectattr("key", "match", "^cifmw_libvirt_manager_configuration_patch.*") |
-        sort(attribute='key')
-      }}
-  ansible.builtin.set_fact:
-    _layout: "{{ _layout | combine(item.value, recursive=True) }}"
-  loop: "{{ _layout_patches }}"
-  loop_control:
-    label: "{{ item.key }}"
+- name: Import layout generator if needed
+  when:
+    - _cifmw_libvirt_manager_layout is not defined
+  ansible.builtin.include_tasks: generate_layout.yml
 
 # Deploy VBMC only on the hypervisor running OpenShift services,
 # being OCP cluster or single CRC.
@@ -28,14 +11,14 @@
     - bootstrap
     - bootstrap_layout
   when:
-    - (_layout.vms.crc.target is defined and
-       _layout.vms.crc.target == inventory_hostname) or
-      (_layout.vms.crc is defined and
-       _layout.vms.crc.target is undefined) or
-      (_layout.vms.ocp.target is defined and
-       _layout.vms.ocp.target == inventory_hostname) or
-      (_layout.vms.ocp is defined and
-       _layout.vms.ocp.target is undefined)
+    - (_cifmw_libvirt_manager_layout.vms.crc.target is defined and
+       _cifmw_libvirt_manager_layout.vms.crc.target == inventory_hostname) or
+      (_cifmw_libvirt_manager_layout.vms.crc is defined and
+       _cifmw_libvirt_manager_layout.vms.crc.target is undefined) or
+      (_cifmw_libvirt_manager_layout.vms.ocp.target is defined and
+       _cifmw_libvirt_manager_layout.vms.ocp.target == inventory_hostname) or
+      (_cifmw_libvirt_manager_layout.vms.ocp is defined and
+       _cifmw_libvirt_manager_layout.vms.ocp.target is undefined)
   block:
     - name: Deploy virtualbmc
       ansible.builtin.include_role:
@@ -70,7 +53,7 @@
 
 - name: Manage networks if needed
   when:
-    - _layout.networks is defined
+    - _cifmw_libvirt_manager_layout.networks is defined
   ansible.builtin.import_tasks: create_networks.yml
 
 - name: Ensure storage pool is present.
@@ -80,7 +63,7 @@
     action: "create"
     _extra_disks: >-
       {{
-        _layout.vms |
+        _cifmw_libvirt_manager_layout.vms |
         dict2items |
         selectattr('value.extra_disks_num', 'defined') |
         items2dict
@@ -95,7 +78,7 @@
     image_data: "{{ item.value }}"
   ansible.builtin.include_tasks:
     file: get_image.yml
-  loop: "{{ _layout.vms | dict2items }}"
+  loop: "{{ _cifmw_libvirt_manager_layout.vms | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
 
@@ -133,14 +116,14 @@
 
 - name: Prepare the static IP address for controller.
   when:
-    - _layout.vms.controller.ip_address is defined
+    - _cifmw_libvirt_manager_layout.vms.controller.ip_address is defined
   vars:
     _ip_address: >-
       {{
-        _layout.vms.controller.ip_address.address
+        _cifmw_libvirt_manager_layout.vms.controller.ip_address.address
       }}
-    _ip_gw: "{{ _layout.vms.controller.ip_address.gw }}"
-    _ip_dns: "{{ _layout.vms.controller.ip_address.dns }}"
+    _ip_gw: "{{ _cifmw_libvirt_manager_layout.vms.controller.ip_address.gw }}"
+    _ip_dns: "{{ _cifmw_libvirt_manager_layout.vms.controller.ip_address.dns }}"
   ansible.builtin.template:
     src: templates/static_ip.j2
     dest: >-
@@ -181,7 +164,7 @@
       --truncate /etc/machine-id
       | tee -a {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log
     creates: "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log"
-  loop: "{{ _layout.vms | dict2items }}"
+  loop: "{{ _cifmw_libvirt_manager_layout.vms | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
 
@@ -220,7 +203,7 @@
     file: create_vms.yml
   loop: >-
     {{
-      _layout.vms | dictsort(reverse=true) |
+      _cifmw_libvirt_manager_layout.vms | dictsort(reverse=true) |
       community.general.dict | dict2items
     }}
   loop_control:
@@ -342,19 +325,19 @@
 
 - name: Ensure we get proper access to CRC
   when:
-    - _layout.vms.crc is defined
-    - (_layout.vms.crc.amount is defined and
-       (_layout.vms.crc.amount | int) > 0) or
-      _layout.vms.crc.amount is undefined
+    - _cifmw_libvirt_manager_layout.vms.crc is defined
+    - (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
+       (_cifmw_libvirt_manager_layout.vms.crc.amount | int) > 0) or
+      _cifmw_libvirt_manager_layout.vms.crc.amount is undefined
     - (
-        _layout.vms.crc.target is defined and
-        _layout.vms.crc.target == inventory_hostname
+        _cifmw_libvirt_manager_layout.vms.crc.target is defined and
+        _cifmw_libvirt_manager_layout.vms.crc.target == inventory_hostname
       ) or
-      _layout.vms.crc.target is undefined
+      _cifmw_libvirt_manager_layout.vms.crc.target is undefined
   vars:
     crc_private_key: >-
       {{
-        (_layout.vms.crc.image_local_dir, "id_ecdsa") |
+        (_cifmw_libvirt_manager_layout.vms.crc.image_local_dir, "id_ecdsa") |
         path_join
       }}
   block:
