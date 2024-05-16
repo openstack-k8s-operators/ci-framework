@@ -22,12 +22,17 @@
     name: discover_latest_image
 
 - name: Load CI job environment
+  tags:
+    - bootstrap_layout
   when:
     - cifmw_job_uri is defined
   ansible.builtin.include_tasks: ci_data.yml
 
 - name: Update libvirt layout
   ansible.builtin.import_role:
+  when:
+    - cifmw_use_libvirt | default(false) | bool
+  ansible.builtin.include_role:
     name: "libvirt_manager"
     tasks_from: "generate_layout.yml"
 
@@ -53,7 +58,7 @@
       cifmw_install_ca_url to download from a url or cifmw_install_ca_bundle_src
       to use a file present on the host.
 
-- name: Set _use_crc before layout update
+- name: Set _use_crc based on actual layout
   ansible.builtin.set_fact:
     _use_crc: >-
       {{
@@ -84,6 +89,21 @@
     apply:
       tags:
         - bootstrap_libvirt
+
+- name: Deploy networks in libvirt
+  when:
+    - cifmw_use_libvirt | default(false) | bool
+  tags:
+    - bootstrap
+    - bootstrap_env
+    - bootstrap_layout
+  ansible.builtin.include_tasks:
+    file: prepare_networking.yml
+    apply:
+      tags:
+        - bootstrap
+        - bootstrap_env
+        - bootstrap_layout
 
 - name: Deploy CRC if needed
   when:
