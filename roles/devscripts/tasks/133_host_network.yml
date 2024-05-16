@@ -56,6 +56,49 @@
         list
       }}
   block:
+    - name: Ensure firewalld is installed
+      ansible.builtin.package:
+        name:
+          - firewalld
+
+    - name: Ensure br_netfilter module is loaded.
+      community.general.modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Ensure IP forwarding is enabled.
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: 1
+        state: present
+
+    - name: Ensure the required parameters are loaded.
+      ansible.posix.sysctl:
+        name: "net.bridge.bridge-nf-call-{{ item }}"
+        value: 0
+        state: present
+      loop:
+        - arptables
+        - iptables
+        - ip6tables
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Ensure firewall service is enabled and started.
+      ansible.builtin.service:
+        name: firewalld
+        enabled: true
+        state: started
+
+    - name: Create the virtual networks.
+      vars:
+        cifmw_libvirt_manager_net_prefix_add: false
+        _layout:
+          networks: "{{ cifmw_libvirt_manager_configuration.networks }}"
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: create_networks.yml
+
     - name: Ensure masquerading for external network
       become: true
       vars:
