@@ -96,6 +96,7 @@ pre_infra_my_nice_hook:
 * `type`: (String) Type of the hook. In this case, set it to `cr`.
 * `source`: (String) Source of the CR. If it's a filename, the CR is expected in `hooks/crs`. It can be an absolute path.
 * `state`: (String) State of the service. Can be `absent | patched | present`. Defaults to `present`.
+* `name`: (String) Describe the hook.
 * `validate_certs`: (Boolean) Whether to validate or not the cluster certificates.
 * `wait_condition`: (Dict) Wait condition for the service.
 * `definition` (Dict) Mapping holding information or configuration of the k8s object.
@@ -109,3 +110,27 @@ Note that the `wait_condition` must match the format used by the
 https://docs.ansible.com/ansible/latest/collections/kubernetes/core/k8s_module.html
 
 OpenShift cluster is accessed using `cifmw_openshift_kubeconfig`.
+
+#### CR Example
+
+```YAML
+pre_stage_2_run:
+  - type: cr
+    name: test
+    state: present
+    source: 'test.yml'
+```
+
+where `test.yml` will be a file into `hooks/crs`
+
+```YAML
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: subscription-manager
+  namespace: openstack
+data:
+  username: changeme
+  password: changeme
+```
