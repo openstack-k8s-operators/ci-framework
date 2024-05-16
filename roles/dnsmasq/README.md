@@ -23,6 +23,7 @@ supported in libvirt).
 * `cifmw_dnsmasq_network_definition`: (Dict) Mapping representing the network definition.
 * `cifmw_dnsmasq_network_definition.ranges`: (List[mapping]) List of ranges associated to the network.
 * `cifmw_dnsmasq_network_listen_dns`: (List) List of IP addresses to listen to for DNS queries.
+* `cifmw_dnsmasq_network_dns_entries`: (List[mapping]) List of fixed addresses associated to the network
 
 #### Ranges mapping
 
@@ -34,6 +35,11 @@ supported in libvirt).
 * `ttl`: (String) Subnet TTL. Defaults to `1h`.
 * `options`: (List) List of options associated to the network.
 * `options_force`: (List) List of forced options associated to the network.
+
+#### Entries mapping
+
+* `fqdn`: (String) Fully qualified name.
+* `address`: (String) IP address associated to the name.
 
 #### Examples
 
