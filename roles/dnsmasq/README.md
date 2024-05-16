@@ -22,6 +22,7 @@ supported in libvirt).
 * `cifmw_dnsmasq_network_state`: (String) Network status. Must be either `present` or `absent`.
 * `cifmw_dnsmasq_network_definition`: (Dict) Mapping representing the network definition.
 * `cifmw_dnsmasq_network_definition.ranges`: (List[mapping]) List of ranges associated to the network.
+* `cifmw_dnsmasq_network_listen_dns`: (List) List of IP addresses to listen to for DNS queries.
 
 #### Ranges mapping
 
@@ -41,6 +42,10 @@ supported in libvirt).
       vars:
         cifmw_dnsmasq_network_name: starwars
         cifmw_dnsmasq_network_state: present
+        cifmw_dnsmasq_network_listen_dns:
+          - 192.168.199.9
+          - ff99:abcd::9
+          - ''  # empty string is supported as "no entry"
         cifmw_dnsmasq_network_definition:
           ranges:
             - label: ian
