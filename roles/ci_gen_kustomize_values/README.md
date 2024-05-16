@@ -50,10 +50,6 @@ Optional parameters:
 
 * `cifmw_ci_gen_kustomize_values_edpm_net_template_b64`: (String) The base64 content of `edpm_network_config_template`.
 
-### Required parameters only when baremetal compute nodes are used.
-
-* `cifmw_ci_gen_kustomize_values_ctlplane_interface`: (String) Used to override default controlplane interface for OSP compute nodes.
-
 ## Adding a new template
 
 The template must have a leading comment staging its source. For example, if your template is located in
