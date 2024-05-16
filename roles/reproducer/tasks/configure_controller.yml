@@ -14,10 +14,10 @@
 - name: Configure controller-0
   when:
     - (
-        _layout.vms.controller.target is defined and
-        _layout.vms.controller.target == inventory_hostname
+        _cifmw_libvirt_manager_layout.vms.controller.target is defined and
+        _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
       ) or
-      _layout.vms.controller.target is undefined
+      _cifmw_libvirt_manager_layout.vms.controller.target is undefined
   delegate_to: controller-0
   delegate_facts: false
   block:
@@ -124,7 +124,10 @@
               }}
             _uefi: >-
               {% set _type = _host | regex_replace('-[0-9]+$', '') -%}
-              {{ _layout.vms[_type].uefi | default(false) | bool }}
+              {{
+                _cifmw_libvirt_manager_layout.vms[_type].uefi |
+                default(false) | bool
+              }}
             _boot_mode: "{{ _uefi | ternary('UEFI', 'legacy') }}"
             ## TODO: add sushy driver address once we get sushy in
             ## TODO: create new parameter to allow chosing which connection
@@ -209,7 +212,7 @@
         - hostvars[host]['ansible_host'] is defined
       vars:
         _vm_type: "{{ host | regex_replace('\\-[0-9]*', '') }}"
-        _vm_data: "{{ _layout['vms'][_vm_type] }}"
+        _vm_data: "{{ _cifmw_libvirt_manager_layout.vms[_vm_type] }}"
         _proxy_user: >-
           {{
             (hostvars[_vm_data.target]['ansible_user'] |
@@ -234,7 +237,7 @@
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
           {% if _vm_data.target is defined and
-             _vm_data.target != _layout.vms.controller.target %}
+             _vm_data.target != _cifmw_libvirt_manager_layout.vms.controller.target %}
             IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
             ProxyJump {{ _proxy_user }}@{{ _proxy_host }}
           {% elif host is match('^ocp.*') %}
@@ -263,7 +266,7 @@
         dest: "/home/zuul/.kube/config"
         content: >-
           {{
-            (_layout.vms.ocp is defined) |
+            (_cifmw_libvirt_manager_layout.vms.ocp is defined) |
             ternary(_devscripts_kubeconfig.content, _crc_kubeconfig.content) |
             b64decode
           }}
@@ -432,7 +435,7 @@
         cifmw_networking_mapper_ifaces_info: >-
           {{ _nic_info.content | b64decode | from_yaml }}
         cifmw_networking_mapper_network_name: >-
-          {{ _layout.vms.controller.nets.1 }}
+          {{ _cifmw_libvirt_manager_layout.vms.controller.nets.1 }}
         cifmw_networking_mapper_basedir: "/home/zuul/ci-framework-data"
       ansible.builtin.import_role:
         name: networking_mapper
@@ -455,10 +458,10 @@
 
     - name: Inject CRC related content if needed
       when:
-        - _layout.vms.crc is defined
-        - (_layout.vms.crc.amount is defined and
-           (_layout.vms.crc.amount | int ) > 0) or
-          _layout.vms.crc.amount is undefined
+        - _cifmw_libvirt_manager_layout.vms.crc is defined
+        - (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
+           (_cifmw_libvirt_manager_layout.vms.crc.amount | int ) > 0) or
+          _cifmw_libvirt_manager_layout.vms.crc.amount is undefined
       block:
         - name: Inject CRC ssh key
           ansible.builtin.copy:
