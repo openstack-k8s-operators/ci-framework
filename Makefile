@@ -15,6 +15,8 @@ MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 TEST_ALL_ROLES ?= ${TEST_ALL_ROLES:-no}
 # Log output location
 LOG_DIR ?= /tmp
+# Specific parameter for architecture_test
+ANSIBLE_OPTS ?= ''
 
 # target vars for generic operator install info 1: target name , 2: operator name
 define vars
@@ -96,25 +98,23 @@ check_k8s_snippets_comment: ## Check template snippets in ci_gen_kustomize_value
 
 ##@ Architecture tests
 .PHONY: architecture_test
-architecture_test: setup_tests architecture_test_nodeps ## Runs architecture-test with dependencies install
+architecture_test: setup_tests architecture_test_nodeps ## Run architecture-test with dependency install. Refer to run_ctx_architecture_test for more parameters/information.
 
 .PHONY: architecture_test_nodeps
 architecture_test_nodeps: export PATH=/tmp/bin:/usr/bin:/usr/sbin:/bin:/sbin:/usr/local/bin:/usr/local/sbin
-architecture_test_nodeps:
+architecture_test_nodeps: ## Run architecture-test without any dependency install. run_ctx_architecture_test for more parameters/information
 	$(call check-var-defined,SCENARIO_NAME)
 	$(call check-var-defined,ARCH_REPO)
 	$(call check-var-defined,NET_ENV_FILE)
 	cp -r ${ARCH_REPO} /tmp/local-arch-repo;
-	ansible-playbook -i localhost, -c local \
-		/install_yamls/devsetup/download_tools.yaml \
-		--tags kubectl,kustomize;
 	ansible-playbook -i localhost, -c local \
 		ci/playbooks/validate-architecture.yml \
 		-e cifmw_zuul_target_host=localhost \
 		-e ansible_user_dir=/tmp \
 		-e cifmw_architecture_repo=/tmp/local-arch-repo \
 		-e cifmw_architecture_scenario=${SCENARIO_NAME} \
-		-e cifmw_networking_mapper_networking_env_def_path=${NET_ENV_FILE}
+		-e cifmw_networking_mapper_networking_env_def_path=${NET_ENV_FILE} \
+		${ANSIBLE_OPTS}
 
 ##@ Ansible-test testing
 .PHONY: ansible_test
@@ -169,12 +169,14 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ;
 
 .PHONY: run_ctx_architecture_test
-run_ctx_architecture_test: ## Run architecture_test in a container
+run_ctx_architecture_test: export _DIR="${HOME}/ci-framework-data/validate-${SCENARIO_NAME}"
+run_ctx_architecture_test: ## Run architecture_test in a container. You can pass any ansible-playbook options using ANSIBLE_OPTS. Mandatory options are SCENARIO_NAME (such as hci), ARCH_REPO (architecture repository path) and NET_ENV_VILE (usually ./ci/playbooks/files/networking-env-definition.yml). Since this is running in container, be sure to prefix the paths with either "./" or "../" for relative paths.
 	$(call check-var-defined,SCENARIO_NAME)
 	$(call check-var-defined,ARCH_REPO)
-	$(call check-var-defined,INSTALL_YAMLS_REPO)
 	$(call check-var-defined,NET_ENV_FILE)
 	@$(MAKE) ci_ctx
+	@mkdir -p ${_DIR};
+	podman unshare chown 1000:1000 ${_DIR};
 	podman run --rm --security-opt label=disable -v .:/opt/sources \
 		-e HOME=/tmp \
 		-e ANSIBLE_LOCAL_TMP=/tmp \
@@ -184,8 +186,9 @@ run_ctx_architecture_test: ## Run architecture_test in a container
 		-e NET_ENV_FILE=/net-env-file.yml \
 		-v ${ARCH_REPO}:/architecture:ro \
 		-v ${NET_ENV_FILE}:/net-env-file.yml:ro \
-		-v ${INSTALL_YAMLS_REPO}:/install_yamls:ro \
-		${CI_CTX_NAME} bash -c "make architecture_test_nodeps" ;
+		-v ${_DIR}:/tmp/ci-framework-data:rw \
+		${CI_CTX_NAME} bash -c \
+		"make architecture_test_nodeps ANSIBLE_OPTS=\"${ANSIBLE_OPTS}\""; \
 
 .PHONY: enable-git-hooks
 enable-git-hooks:
