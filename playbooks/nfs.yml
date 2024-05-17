@@ -26,6 +26,15 @@
     nftables_path: /etc/nftables
     nftables_conf: /etc/sysconfig/nftables.conf
   tasks:
+    - name: Set custom cifmw PATH reusable fact
+      tags:
+        - always
+      when:
+        - cifmw_path is not defined
+      ansible.builtin.set_fact:
+        cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+        cacheable: true
+
     - name: Install required packages
       ansible.builtin.package:
         name:
@@ -57,18 +66,17 @@
       loop: "{{ cifmw_nfs_shares }}"
 
     - name: Set nfs network vars
+      delegate_to: controller
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
       vars:
         _nfs_network_name: "{{ cifmw_nfs_network | default('storage') }}"
-        _nfs_host: "{{ groups[cifmw_nfs_target | default('computes')][0] | default('') }}"
-      ansible.builtin.set_fact:
-        cifmw_nfs_network_range: >-
-          {{
-            crc_ci_bootstrap_networking.networks[_nfs_network_name].range
-          }}
-        cifmw_nfs_ip: >-
-          {{
-            crc_ci_bootstrap_networking.instances[_nfs_host].networks[_nfs_network_name].ip
-          }}
+        _nfs_host: "{{ [groups[cifmw_nfs_target | default('computes')][0], ansible_domain] | join('.') | default('') }}"
+        _ipset_namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}"
+      ansible.builtin.command:
+        cmd: oc get ipset {{ _nfs_host }} -n {{ _ipset_namespace }} -o jsonpath='{.status.reservations[?(@.network=="{{ _nfs_network_name }}")]}'
+      register: cifmw_nfs_network_out
 
     - name: Store nfs network vars
       delegate_to: controller
@@ -77,8 +85,8 @@
         content: >-
           {{
             {
-            'cifmw_nfs_ip': cifmw_nfs_ip,
-            'cifmw_nfs_network_range': cifmw_nfs_network_range
+            'cifmw_nfs_ip': cifmw_nfs_network_out.stdout | from_json | json_query('address'),
+            'cifmw_nfs_network_range': cifmw_nfs_network_out.stdout | from_json | json_query('cidr')
             } | to_nice_yaml
           }}
 
@@ -115,7 +123,7 @@
         path: /etc/nfs.conf
         section: nfsd
         option: host
-        value: "{{ cifmw_nfs_ip }}"
+        value: "{{ cifmw_nfs_network_out.stdout | from_json | json_query('address') }}"
         backup: true
 
     - name: Enable and restart nfs-server service
@@ -127,7 +135,7 @@
     - name: Add shares to /etc/exports
       ansible.builtin.lineinfile:
         path: /etc/exports
-        line: "/data/{{ item }} {{ cifmw_nfs_network_range }}(rw,sync,no_root_squash)"
+        line: "/data/{{ item }} {{ cifmw_nfs_network_out.stdout | from_json | json_query('cidr') }}(rw,sync,no_root_squash)"
       loop: "{{ cifmw_nfs_shares }}"
       register: _export_shares
 
