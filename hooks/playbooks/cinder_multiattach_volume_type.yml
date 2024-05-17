@@ -5,16 +5,27 @@
   tasks:
     - name: Set the multiattach volume type name
       ansible.builtin.set_fact:
-        cifmw_volume_multiattach_type: "{{ cifmw_volume_multiattach_type|default('multiattach') }}"
+        cifmw_volume_multiattach_type: >-
+          {{
+            cifmw_volume_multiattach_type | default('multiattach')
+          }}
 
     - name: Set a multiattach volume type and create it if needed
+      vars:
+        _namespace: >-
+          {{
+            cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack')
+          }}
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       ansible.builtin.shell: |
-        oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} rsh openstackclient \
-          openstack volume type show {{ cifmw_volume_multiattach_type }} &>/dev/null || \
-            oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} rsh openstackclient \
-              openstack volume type create {{ cifmw_volume_multiattach_type }}
-        oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} rsh openstackclient \
-          openstack volume type set --property multiattach="<is> True" {{ cifmw_volume_multiattach_type }}
+        set -xe -o pipefail
+        oc project {{ _namespace }}
+        oc rsh openstackclient \
+            openstack volume type show {{ cifmw_volume_multiattach_type }} &>/dev/null || \
+            oc rsh openstackclient \
+            openstack volume type create {{ cifmw_volume_multiattach_type }}
+        oc rsh openstackclient \
+            openstack volume type set --property multiattach="<is> True" \
+            {{ cifmw_volume_multiattach_type }}
