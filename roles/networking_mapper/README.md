@@ -9,6 +9,8 @@ networking details of a given environment.
 * `cifmw_networking_mapper_ifaces_info`: (Dict) The interface information dictionary that holds low-level info for full maps.
 * `cifmw_networking_mapper_assert_env_load`:(Boolean) Ensures that calling the Networking Environment Definition ends with a valid one loaded. Defaults to `true`.
 * `cifmw_networking_mapper_interfaces_info_translations`: (Dict) Optional dictionary of lists that allows `cifmw_networking_mapper_ifaces_info` use different network names than the Networking Definition networks.
+* `cifmw_networking_mapper_gather_facts`: Instruct networking_mapper to gather networking facts. Defaults to `true`. Advanced usage only!
+
 
 ## Networking Definition patching
 This role allows to use a base Networking Definition, given by `cifmw_networking_definition` and patch it

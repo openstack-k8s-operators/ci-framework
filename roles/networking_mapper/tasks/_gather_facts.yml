@@ -1,0 +1,79 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Gather needed networking facts
+  vars:
+    _net_def_instances_filtered: >-
+      {{
+        (
+          _cifmw_networking_mapper_definition.instances | default({})
+        ).keys() |
+        select("in", hostvars.keys() | list) |
+        list
+      }}
+    _net_def_groups_filtered: >-
+      {{
+        (
+          _cifmw_networking_mapper_definition['group-templates'] | default({})
+        ).keys() |
+        select("in", groups.keys() | list) |
+        list
+      }}
+    _net_def_groups_instances: >-
+      {% set _instances = [] -%}
+      {% for group_name in _net_def_groups_filtered -%}
+      {%   set _ = _instances.extend(groups[group_name] | list) -%}
+      {% endfor -%}
+      {% set _instances = _instances | unique -%}
+      {{ _instances }}
+    _networking_mapper_instance_names: >-
+      {{
+        _net_def_groups_instances + _net_def_instances_filtered
+      }}
+  block:
+    - name: Gather the facts
+      vars:
+        _instance_vars: >-
+          {{
+            hostvars[item] | default({})
+          }}
+      when: "'ansible_host' in _instance_vars"
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+          - platform
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ _networking_mapper_instance_names }}"
+
+    - name: Save instances refreshed facts for troubleshooting purposes
+      ansible.builtin.copy:
+        dest: >-
+          {{
+            [
+              cifmw_networking_mapper_basedir,
+              'artifacts',
+              'networking-mapper-instances-facts.yml'
+            ] | path_join
+          }}
+        content: >-
+          {{
+            dict(hostvars) |
+            dict2items |
+            selectattr('key', 'in', _networking_mapper_instance_names) |
+            items2dict |
+            to_nice_yaml
+          }}
