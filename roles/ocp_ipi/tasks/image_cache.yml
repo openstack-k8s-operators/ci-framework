@@ -1,0 +1,82 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install podman
+  ansible.builtin.include_role:
+    name: podman
+
+- name: Make image cache directory
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/rhcos_image_cache"
+    state: directory
+    owner: "{{ cifmw_ocp_ipi_user }}"
+    group: "{{ cifmw_ocp_ipi_user }}"
+    mode: '0755'
+    setype: httpd_sys_content_t
+
+- name: Set selinux fcontext on image cache directory
+  become: true
+  community.general.sefcontext:
+    target: "{{ ansible_user_dir }}/rhcos_image_cache(/.*)?"
+    setype: httpd_sys_content_t
+    state: present
+    reload: true
+
+- name: CoreOS print-stream-json
+  register: _coreos_print_stream_json
+  ansible.builtin.command: /usr/local/bin/openshift-baremetal-install coreos print-stream-json
+
+- name: Download the coreos image
+  vars:
+    _image_url: |-
+      {{ (_coreos_print_stream_json.stdout | from_json).architectures[cifmw_ocp_ipi_ocp_release_arch].artifacts.qemu.formats["qcow2.gz"].disk.location }}
+  ansible.builtin.get_url:
+    url: "{{ _image_url }}"
+    dest: "{{ ansible_user_dir }}/rhcos_image_cache/{{ _image_url | ansible.builtin.basename }}"
+
+- name: Pull the ubi9/httpd-24 container image
+  containers.podman.podman_image:
+    name: registry.access.redhat.com/ubi9/httpd-24
+    state: present
+
+- name: Create and start the image cache container
+  containers.podman.podman_container:
+    name: rhcos_image_cache
+    image: registry.access.redhat.com/ubi9/httpd-24
+    state: started
+    ports: "8080:8080/tcp"
+    volumes:
+      - "{{ ansible_user_dir }}/rhcos_image_cache:/var/www/html"
+
+- name: Set cifmw_ocp_ipi_bootstap_so_image_url fact
+  vars:
+    _image_url: |-
+      {{ (_coreos_print_stream_json.stdout | from_json).architectures[cifmw_ocp_ipi_ocp_release_arch].artifacts.qemu.formats["qcow2.gz"].disk.location }}
+    _uncompressed_sha256: |-
+      {{ (_coreos_print_stream_json.stdout | from_json).architectures[cifmw_ocp_ipi_ocp_release_arch].artifacts.qemu.formats["qcow2.gz"].disk["uncompressed-sha256"] }}
+  ansible.builtin.set_fact:
+    cifmw_ocp_ipi_bootstap_so_image_url: |-
+      http://{{ cifmw_ocp_ipi_baremetal_ip_address | ansible.utils.ipwrap }}:8080/{{ _image_url | ansible.builtin.basename }}?sha256={{ _uncompressed_sha256 }}
+
+- name: Debug cifmw_ocp_ipi_bootstap_so_image_url fact
+  ansible.builtin.debug:
+    msg: "{{ cifmw_ocp_ipi_bootstap_so_image_url }}"
+
+- name: Write the Bootstap OS image URL to file
+  ansible.builtin.copy:
+    content: "{{ cifmw_ocp_ipi_bootstap_so_image_url }}"
+    dest: "{{ ansible_user_dir }}/bootstrap_os_image_url"
+    mode: '0644'

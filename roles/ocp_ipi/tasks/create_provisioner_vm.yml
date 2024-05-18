@@ -1,0 +1,179 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure images and workload directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ cifmw_ocp_ipi_workload_dir }}"
+    - "{{ cifmw_ocp_ipi_images_dir }}"
+
+- name: Generate SSH keys
+  tags:
+    - bootstrap
+  community.crypto.openssh_keypair:
+    path: >-
+      {{ (ansible_user_dir,
+         '.ssh/id_' + cifmw_ocp_ipi_user) | path_join
+      }}
+    type: "ecdsa"
+  register: cifmw_ocp_ipi_user_ssh_key
+
+- name: Disover image URL
+  ansible.builtin.include_role:
+    name: discover_latest_image
+
+# TODO(hjensas): Re-work this, we should download the image to a cache once.
+- name: Check if base image exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_ocp_ipi_images_dir }}/{{ cifmw_ocp_ipi_config.provisioner_host }}-base.qcow2"
+    get_checksum: false
+  register: disk_file_name_status
+
+- name: Download latest image
+  when: not disk_file_name_status.stat.exists
+  register: download_base_img
+  ansible.builtin.get_url:
+    url: "{{ cifmw_discovered_image_url }}"
+    dest: "{{ cifmw_ocp_ipi_images_dir }}/{{ cifmw_ocp_ipi_config.provisioner_host }}-base.qcow2"
+    checksum: "sha256:{{ cifmw_discovered_hash }}"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_gid }}"
+    mode: '0644'
+  until:
+    - download_base_img.status_code is defined
+    - download_base_img.status_code == 200
+  retries: 30
+  delay: 5
+
+- name: Create VM overlay for IPI provisioner
+  ansible.builtin.command:
+    chdir: "{{ cifmw_ocp_ipi_workload_dir }}"
+    creates: "{{ cifmw_ocp_ipi_config.provisioner_host }}.qcow2"
+    cmd: >-
+      qemu-img create
+      -o backing_file={{ cifmw_ocp_ipi_images_dir }}/{{ cifmw_ocp_ipi_config.provisioner_host }}-base.qcow2,backing_fmt=qcow2
+      -f qcow2
+      {{ cifmw_ocp_ipi_config.provisioner_host }}.qcow2
+      100G
+
+- name: Ensure owner, group and permissions on the overlay
+  when: not disk_file_name_status.stat.exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_ocp_ipi_workload_dir }}/{{ cifmw_ocp_ipi_config.provisioner_host }}.qcow2"
+    owner: "{{ ansible_user_id }}"
+    group: qemu
+    mode: '0664'
+    state: file
+
+# TODO(hjensas): Should peresist, only generate if not present.
+- name: Set MAC address facts
+  ansible.builtin.set_fact:
+    cifmw_ocp_ipi_management_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
+    cifmw_ocp_ipi_baremetal_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
+    cifmw_ocp_ipi_provisioning_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
+
+# TODO(hjensas): Should persist, only generate if not present.
+- name: Generate IPI provisioner node UUID
+  ansible.builtin.set_fact:
+    cifmw_ocp_ipi_provisioner_uuid: "{{ 99999999 | random | to_uuid | lower }}"
+
+- name: Create the config-drive ISO for the IPI provisioner node
+  vars:
+    cifmw_config_drive_iso_image: "{{ cifmw_ocp_ipi_workload_dir }}/{{ cifmw_ocp_ipi_config.provisioner_host }}.iso"
+    cifmw_config_drive_uuid: "{{ cifmw_ocp_ipi_provisioner_uuid }}"
+    cifmw_config_drive_name: "{{ cifmw_ocp_ipi_config.provisioner_host }}"
+    cifmw_config_drive_hostname: "{{ cifmw_ocp_ipi_config.provisioner_host }}"
+    cifmw_config_drive_userdata:
+      users:
+        - name: "{{ cifmw_ocp_ipi_user }}"
+          ssh_authorized_keys: "{{ [cifmw_ocp_ipi_user_ssh_key.public_key] + cifmw_ocp_ipi_ssh_pub_keys }}"
+          sudo: "ALL=(ALL) NOPASSWD:ALL"
+          lock_passwd: false
+          plain_text_passwd: fooBar
+    # TODO(hjensas): Configure bridges here when https://issues.redhat.com/browse/RHEL-38927 is fixed.
+    cifmw_config_drive_networkconfig:
+      network:
+        version: 2
+        ethernets:
+          management:
+            match:
+              macaddress: "{{ cifmw_ocp_ipi_management_mac_address }}"
+            set-name: mgmt0
+            addresses:
+              - "{{ cifmw_ocp_ipi_management_ip_address }}/{{ cifmw_ocp_ipi_management_prefix }}"
+            routes: "{{ cifmw_ocp_ipi_management_routes }}"
+            nameservers:
+              addresses: "{{ cifmw_ocp_ipi_dns_servers }}"
+          baremetal:
+            match:
+              macaddress: "{{ cifmw_ocp_ipi_baremetal_mac_address }}"
+          provisioning:
+            match:
+              macaddress: "{{ cifmw_ocp_ipi_provisioning_mac_address }}"
+  ansible.builtin.include_role:
+    name: config_drive
+
+# TODO(hjensas): Check if VM exists, if it does skip ...
+- name: Define IPI provisioner VM
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('template', 'domain.xml.j2') }}"
+    uri: "{{ cifmw_ocp_ipi_libvirt_uri }}"
+
+- name: Start IPI provisioner VM
+  community.libvirt.virt:
+    state: running
+    name: "{{ cifmw_ocp_ipi_config.provisioner_host }}"
+    uri: "{{ cifmw_ocp_ipi_libvirt_uri }}"
+
+- name: Add IPI provisioner node to dynamic inventory
+  ansible.builtin.add_host:
+    name: provisioner
+    ansible_host: "{{ cifmw_ocp_ipi_management_ip_address }}"
+    ansible_ssh_user: "{{ cifmw_ocp_ipi_user }}"
+
+# TODO(hjensas): Re-factor ssh_jumper to support a list of jumper_config's
+- name: Add ssh-jumper on localhost for provisioner
+  vars:
+    cifmw_ssh_jumper_config:
+      target: localhost
+      ssh_dir: "{{ lookup('env', 'HOME') }}/.ssh"
+      hostname: "{{ cifmw_ocp_ipi_management_ip_address }}"
+      user: kni
+      proxy_host: "{{ ansible_host | default(inventory_hostname) }}"
+      proxy_user: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+      patterns:
+        - provisioner
+        - "provisioner.{{ inventory_hostname }}"
+        - "{{ cifmw_ocp_ipi_management_ip_address }}"
+  ansible.builtin.include_role:
+    name: ssh_jumper
+
+- name: Add ssh-jumper for provisioner
+  vars:
+    cifmw_ssh_jumper_config:
+      hostname: "{{ cifmw_ocp_ipi_management_ip_address }}"
+      ssh_dir: "{{ ansible_user_dir }}/.ssh"
+      user: kni
+      patterns:
+        - provisioner
+        - "provisioner.{{ inventory_hostname }}"
+        - "{{ cifmw_ocp_ipi_management_ip_address }}"
+  ansible.builtin.include_role:
+    name: ssh_jumper

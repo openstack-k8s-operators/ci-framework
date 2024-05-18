@@ -1,0 +1,62 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Slurp pull-secret
+  when: not cifmw_ocp_ipi_install_config_raw_yaml
+  register: _pull_secret
+  ansible.builtin.slurp:
+    path: "{{ cifmw_ocp_ipi_basedir }}/secrets/pull_secret.json"
+
+- name: Slurp bootstap OS Image URL
+  when: not cifmw_ocp_ipi_install_config_raw_yaml
+  register: _botstrap_os_image_url
+  ansible.builtin.slurp:
+    path: "{{ ansible_user_dir }}/bootstrap_os_image_url"
+
+- name: Generate SSH keys for OCP IPI
+  when: not cifmw_ocp_ipi_install_config_raw_yaml
+  community.crypto.openssh_keypair:
+    path: "{{ ansible_user_dir }}/id_ocp_ipi"
+    type: "ecdsa"
+  register: _id_ocp_ipi_ssh_key
+
+- name: Template install-config.yaml
+  when: not cifmw_ocp_ipi_install_config_raw_yaml
+  ansible.builtin.template:
+    src: "install-config.yaml.j2"
+    dest: "{{ ansible_user_dir }}/clusterconfigs/install-config.yaml"
+    mode: '0644'
+
+- name: Write install-config.yaml from raw input
+  when: cifmw_ocp_ipi_install_config_raw_yaml
+  ansible.builtin.copy:
+    dest: "{{ ansible_user_dir }}/clusterconfigs/install-config.yaml"
+    content: "{{ cifmw_ocp_ipi_install_config_raw_yaml | to_nice_yaml }}"
+    mode: '0644'
+
+- name: Make a backup of install-config.yaml
+  ansible.builtin.copy:
+    src: "{{ ansible_user_dir }}/clusterconfigs/install-config.yaml"
+    dest: "{{ ansible_user_dir }}/install-config.yaml_orig"
+    remote_src: true
+
+- name: Creating the OpenShift Container Platform manifests
+  ansible.builtin.command: |
+    /usr/local/bin/openshift-baremetal-install --dir /home/{{ cifmw_ocp_ipi_user }}/clusterconfigs create manifests
+
+- name: Create the OpenShift Container Platform cluster
+  ansible.builtin.command: |
+    /usr/local/bin/openshift-baremetal-install --dir /home/{{ cifmw_ocp_ipi_user }}/clusterconfigs --log-level debug create cluster
