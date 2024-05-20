@@ -30,10 +30,14 @@ with a message.
   Defaults to `[]`.
 * `cifmw_ci_gen_kustomize_values_userdata`: (Dict) Data structure you want to combine in the generated output.
   Defaults to `{}`.
+* `cifmw_ci_gen_kustomize_values_userdata_b64`: (List) Base64 encoded list of data to combine in the generated output.
+  Defaults to `[]`.
 * `ci_gen_kustomize_fetch_ocp_state`: (Boolean) If true it enables generating CI templates based on the OCP state. Defaults to `true`.
 
 ### Specific parameters for edpm-values
-This configMap needs some more parameters in order to properly override the `architecture` provided one. Those parameters aren't set by default, and are mandatory for `edpm-values`.
+This configMap needs some more parameters in order to properly override the `architecture` provided one.
+
+These parameters aren't set by default, and are mandatory for `edpm-values`.
 
 * `cifmw_ci_gen_kustomize_values_ssh_authorizedkeys`: (String) Block of SSH authorized_keys to inject on the deployed nodes.
 * `cifmw_ci_gen_kustomize_values_ssh_private_key`: (String) SSH private key to allow dataplane access on the computes.
@@ -42,8 +46,9 @@ This configMap needs some more parameters in order to properly override the `arc
 * `cifmw_ci_gen_kustomize_values_migration_pub_key`: (String) SSH public key associated to `cifmw_ci_gen_kustomize_values_migration_priv_key`.
 Note that all of the SSH keys should be in `ecdsa` format to comply with FIPS directives.
 
-### Required parameters only when baremetal compute nodes are used.
-* `cifmw_ci_gen_kustomize_values_ctlplane_interface`: (String) Used to override default controlplane interface for OSP compute nodes.
+Optional parameters:
+
+* `cifmw_ci_gen_kustomize_values_edpm_net_template_b64`: (String) The base64 content of `edpm_network_config_template`.
 
 ## Adding a new template
 
@@ -90,6 +95,10 @@ directly in `ci-framework-data/ci_k8s_snippets/TYPE/02_ci_data.yaml`.
       data:
         node_0:
           name: foo_bar
+    cifmw_ci_gen_kustomize_values_userdata_b64:
+      data:
+        node_1:
+          name: Zm9vX2Jhcgo=
   ansible.builtin.import_role:
     name: ci_gen_kustomize_values
 ```

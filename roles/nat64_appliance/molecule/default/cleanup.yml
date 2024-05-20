@@ -1,0 +1,38 @@
+- name: Cleanup
+  hosts: instance
+  vars:
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+  tasks:
+    - name: "Destroy the test-node"
+      community.libvirt.virt:
+        command: destroy
+        name: test-node
+        uri: 'qemu:///system'
+
+    - name: "Undefine the test-node"
+      community.libvirt.virt:
+        command: undefine
+        name: test-node
+        force: true
+        uri: 'qemu:///system'
+
+    - name: Destroy the test network
+      register: net_destroy
+      community.libvirt.virt_net:
+        command: destroy
+        name: br-mol
+        uri: 'qemu:///system'
+      failed_when:
+        - net_destroy.rc is defined
+        - net_destroy.rc > 1
+
+    - name: Undefine the test network
+      community.libvirt.virt_net:
+        command: undefine
+        name: br-mol
+        uri: 'qemu:///system'
+
+    - name: "Cleanup the nat64 appliance and networks"
+      ansible.builtin.include_role:
+        name: nat64_appliance
+        tasks_from: cleanup.yml

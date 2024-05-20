@@ -107,13 +107,41 @@
     src: "{{ _tmpl_check_path | first }}"
     mode: "0644"
 
+- name: Generate the base64 CI patches
+  ansible.builtin.set_fact:
+    _b64_patches: >-
+      {{
+       ({} if index == 0 else _b64_patches) |
+        combine(item | b64decode | from_yaml, recursive=True)
+      }}
+  loop: "{{ cifmw_ci_gen_kustomize_values_userdata_b64 }}"
+  loop_control:
+    index_var: index
+    label: "base64 path {{ index }}"
+
+- name: Push base64 CI patches
+  ansible.builtin.copy:
+    backup: true
+    dest: >-
+      {{
+        (snippet_datadir,
+         '03_user_data_b64.yaml') | path_join
+      }}
+    content: >-
+      {{
+        _b64_patches |
+        default({}) |
+        to_nice_yaml
+      }}
+    mode: "0644"
+
 - name: Push user provided dataset
   ansible.builtin.copy:
     backup: true
     dest: >-
       {{
         (snippet_datadir,
-         '03_user_data.yaml') | path_join
+         '04_user_data.yaml') | path_join
       }}
     content: >-
       {{

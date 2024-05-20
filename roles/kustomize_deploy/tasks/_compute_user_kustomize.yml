@@ -5,7 +5,7 @@
       {{
         hostvars[inventory_hostname] |
         dict2items |
-        selectattr("key", "match", "^cifmw_architecture_user_kustomize.+") |
+        selectattr("key", "match", "^cifmw_architecture_user_kustomize_(?!base_dir).*") |
         sort(attribute='key')
       }}
   ansible.builtin.set_fact:
@@ -27,3 +27,23 @@
     }}
   loop_control:
     label: "{{ item.key }}"
+
+- name: Set the final cifmw_architecture_user_kustomize_base64 based on its patches
+  vars:
+    _b64_kustomize_user_patches: >-
+      {{
+        (
+          hostvars[inventory_hostname] |
+          dict2items |
+          selectattr("key", "match", "^cifmw_architecture_user_base64_kustomize.+") |
+          sort(attribute='key') |
+          map(attribute='value') |
+          list
+        ) + [cifmw_architecture_user_base64_kustomize | default({})]
+      }}
+  ansible.builtin.set_fact:
+    _cifmw_kustomize_deploy_user_base64_kustomize: >-
+      {{
+        _b64_kustomize_user_patches |
+        ci_kustomize_deploy_combine_base64_patch_dict
+      }}

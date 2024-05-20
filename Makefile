@@ -94,6 +94,28 @@ check_zuul_files: role_molecule ## Regenerate zuul files and check if they have 
 check_k8s_snippets_comment: ## Check template snippets in ci_gen_kustomize_values to ensure proper source is set
 	./scripts/check_k8s_snippets_comment.sh 2>&1 | ansi2txt | tee $(LOG_DIR)/check_k8s_snippets_comment.log
 
+##@ Architecture tests
+.PHONY: architecture_test
+architecture_test: setup_tests architecture_test_nodeps ## Runs architecture-test with dependencies install
+
+.PHONY: architecture_test_nodeps
+architecture_test_nodeps: export PATH=/tmp/bin:/usr/bin:/usr/sbin:/bin:/sbin:/usr/local/bin:/usr/local/sbin
+architecture_test_nodeps:
+	$(call check-var-defined,SCENARIO_NAME)
+	$(call check-var-defined,ARCH_REPO)
+	$(call check-var-defined,NET_ENV_FILE)
+	cp -r ${ARCH_REPO} /tmp/local-arch-repo;
+	ansible-playbook -i localhost, -c local \
+		/install_yamls/devsetup/download_tools.yaml \
+		--tags kubectl,kustomize;
+	ansible-playbook -i localhost, -c local \
+		ci/playbooks/validate-architecture.yml \
+		-e cifmw_zuul_target_host=localhost \
+		-e ansible_user_dir=/tmp \
+		-e cifmw_architecture_repo=/tmp/local-arch-repo \
+		-e cifmw_architecture_scenario=${SCENARIO_NAME} \
+		-e cifmw_networking_mapper_networking_env_def_path=${NET_ENV_FILE}
+
 ##@ Ansible-test testing
 .PHONY: ansible_test
 ansible_test: setup_tests ansible_test_nodeps ## Runs ansible-test with dependencies install
@@ -145,6 +167,25 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
 		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ;
+
+.PHONY: run_ctx_architecture_test
+run_ctx_architecture_test: ## Run architecture_test in a container
+	$(call check-var-defined,SCENARIO_NAME)
+	$(call check-var-defined,ARCH_REPO)
+	$(call check-var-defined,INSTALL_YAMLS_REPO)
+	$(call check-var-defined,NET_ENV_FILE)
+	@$(MAKE) ci_ctx
+	podman run --rm --security-opt label=disable -v .:/opt/sources \
+		-e HOME=/tmp \
+		-e ANSIBLE_LOCAL_TMP=/tmp \
+		-e ANSIBLE_REMOTE_TMP=/tmp \
+		-e SCENARIO_NAME=${SCENARIO_NAME} \
+		-e ARCH_REPO=/architecture \
+		-e NET_ENV_FILE=/net-env-file.yml \
+		-v ${ARCH_REPO}:/architecture:ro \
+		-v ${NET_ENV_FILE}:/net-env-file.yml:ro \
+		-v ${INSTALL_YAMLS_REPO}:/install_yamls:ro \
+		${CI_CTX_NAME} bash -c "make architecture_test_nodeps" ;
 
 .PHONY: enable-git-hooks
 enable-git-hooks:
