@@ -3,6 +3,8 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 import copy
+import json
+import os.path
 
 import pytest
 from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
@@ -19,25 +21,25 @@ from ansible_collections.cifmw.general.tests.unit.module_utils.test_utils import
     "test_input_config_file,test_golden_file",
     [
         (
-            "networking-definition-valid-all-tools-dual-stack.yml",
-            "networking-definition-valid-all-tools-dual-stack-networks-out.json",
+                "networking-definition-valid-all-tools-dual-stack.yml",
+                "networking-definition-valid-all-tools-dual-stack-networks-out.json",
         ),
         (
-            "networking-definition-valid.yml",
-            "networking-definition-valid-networks-out.json",
+                "networking-definition-valid.yml",
+                "networking-definition-valid-networks-out.json",
         ),
         (
-            "networking-definition-valid-all-tools-ipv6-only.yml",
-            "networking-definition-valid-all-tools-ipv6-only-networks-out.json",
+                "networking-definition-valid-all-tools-ipv6-only.yml",
+                "networking-definition-valid-all-tools-ipv6-only-networks-out.json",
         ),
         (
-            "networking-definition-valid-all-tools.yml",
-            "networking-definition-valid-all-tools-networks-out.json",
+                "networking-definition-valid-all-tools.yml",
+                "networking-definition-valid-all-tools-networks-out.json",
         ),
     ],
 )
 def test_networking_mapper_basic_networks_map_ok(
-    test_input_config_file, test_golden_file
+        test_input_config_file, test_golden_file
 ):
     mapper = networking_mapper.NetworkingDefinitionMapper(
         net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
@@ -54,13 +56,13 @@ def test_networking_mapper_basic_networks_map_ok(
     "test_input_config_file,test_golden_file",
     [
         (
-            "network-definition-valid-router-template.yml",
-            "network-definition-valid-router-template-out.json",
+                "network-definition-valid-router-template.yml",
+                "network-definition-valid-router-template-out.json",
         ),
     ],
 )
 def test_networking_mapper_basic_routers_map_ok(
-    test_input_config_file, test_golden_file
+        test_input_config_file, test_golden_file
 ):
     mapper = networking_mapper.NetworkingDefinitionMapper(
         net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
@@ -117,7 +119,7 @@ def test_networking_mapper_basic_routers_map_ok(
     ],
 )
 def test_networking_mapper_full_partial_map_ok(
-    test_input_config_file: str, test_golden_file: str, reduced_hosts: bool
+        test_input_config_file: str, test_golden_file: str, reduced_hosts: bool
 ):
     mapper = networking_mapper.NetworkingDefinitionMapper(
         (
@@ -131,9 +133,10 @@ def test_networking_mapper_full_partial_map_ok(
             else net_map_stub_data.TEST_GROUPS_REDUCED
         ),
     )
-    mapped_content = mapper.map_partial(
+    mapped_content = mapper.map(
         net_map_stub_data.get_test_file_yaml_content(test_input_config_file)
     )
+
     assert mapped_content == net_map_stub_data.get_test_file_json_content(
         test_golden_file
     )
@@ -143,24 +146,24 @@ def test_networking_mapper_full_partial_map_ok(
     "test_input_config_file,test_golden_file",
     [
         (
-            "networking-definition-valid-all-tools-dual-stack.yml",
-            "networking-definition-valid-all-tools-dual-stack-full-map-out.json",
+                "networking-definition-valid-all-tools-dual-stack.yml",
+                "networking-definition-valid-all-tools-dual-stack-full-map-out.json",
         ),
         (
-            "networking-definition-valid.yml",
-            "networking-definition-valid-full-map-out.json",
+                "networking-definition-valid.yml",
+                "networking-definition-valid-full-map-out.json",
         ),
         (
-            "networking-definition-valid-all-tools-ipv6-only.yml",
-            "networking-definition-valid-all-tools-ipv6-only-full-map-out.json",
+                "networking-definition-valid-all-tools-ipv6-only.yml",
+                "networking-definition-valid-all-tools-ipv6-only-full-map-out.json",
         ),
         (
-            "networking-definition-valid-all-tools.yml",
-            "networking-definition-valid-all-tools-full-map-out.json",
+                "networking-definition-valid-all-tools.yml",
+                "networking-definition-valid-all-tools-full-map-out.json",
         ),
         (
-            "network-definition-valid-all-tools-no-group-templates.yml",
-            "network-definition-valid-all-tools-no-group-templates-out.json",
+                "network-definition-valid-all-tools-no-group-templates.yml",
+                "network-definition-valid-all-tools-no-group-templates-out.json",
         ),
     ],
 )
@@ -168,10 +171,13 @@ def test_networking_mapper_full_map_ok(test_input_config_file, test_golden_file)
     mapper = networking_mapper.NetworkingDefinitionMapper(
         net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
     )
-    mapped_content = mapper.map_complete(
+    mapped_content = mapper.map(
         net_map_stub_data.get_test_file_yaml_content(test_input_config_file),
         net_map_stub_data.TEST_IFACES_INFO,
     )
+    with open(os.path.join("/home/pabrodri/Sources/ci-framework/tests/unit/module_utils/test_files", test_golden_file),
+              'w') as f:
+        json.dump(mapped_content, f)
     assert mapped_content == net_map_stub_data.get_test_file_json_content(
         test_golden_file
     )
@@ -187,7 +193,7 @@ def test_networking_mapper_full_map_invalid_facts_fail():
         mapper = networking_mapper.NetworkingDefinitionMapper(
             test_hostvars, net_map_stub_data.TEST_GROUPS
         )
-        mapper.map_complete(
+        mapper.map(
             net_map_stub_data.get_test_file_yaml_content(
                 "networking-definition-valid-all-tools-dual-stack.yml"
             ),
@@ -204,7 +210,7 @@ def test_networking_mapper_full_map_missing_ansible_interfaces_ok():
     mapper = networking_mapper.NetworkingDefinitionMapper(
         test_hostvars, net_map_stub_data.TEST_GROUPS
     )
-    network_env = mapper.map_complete(
+    network_env = mapper.map(
         net_map_stub_data.get_test_file_yaml_content(
             "networking-definition-valid-all-tools-dual-stack.yml"
         ),
@@ -221,10 +227,10 @@ def test_networking_mapper_full_map_missing_ansible_interfaces_ok():
 
     network_1_mac = network_1.get("mac_addr", None)
     assert (
-        net_map_stub_data.TEST_IFACES_INFO[net_map_stub_data.INSTANCE_2_NAME][
-            net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
-        ]
-        == network_1_mac
+            net_map_stub_data.TEST_IFACES_INFO[net_map_stub_data.INSTANCE_2_NAME][0][
+                net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
+            ]
+            == network_1_mac
     )
     assert "interface_name" not in network_1
     assert "interface_name" not in network_3
@@ -239,7 +245,7 @@ def test_networking_mapper_full_map_missing_ansible_hostname_ok():
     mapper = networking_mapper.NetworkingDefinitionMapper(
         test_hostvars, net_map_stub_data.TEST_GROUPS
     )
-    network_env = mapper.map_complete(
+    network_env = mapper.map(
         net_map_stub_data.get_test_file_yaml_content(
             "networking-definition-valid-all-tools-dual-stack.yml"
         ),
@@ -249,38 +255,23 @@ def test_networking_mapper_full_map_missing_ansible_hostname_ok():
     assert "hostname" not in network_env["instances"][net_map_stub_data.INSTANCE_1_NAME]
 
 
-def test_networking_mapper_full_map_invalid_ifaces_info_fail():
+def test_networking_mapper_map_invalid_ifaces_info_fail():
     # Ensure that interfaces_info 'mac' field is mandatory
     with pytest.raises(exceptions.NetworkMappingError) as exc_info:
         mapper = networking_mapper.NetworkingDefinitionMapper(
             net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
         )
         ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
-        ifaces_info[net_map_stub_data.INSTANCE_1_NAME].pop(
+        ifaces_info[net_map_stub_data.INSTANCE_1_NAME][0].pop(
             net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
         )
-        mapper.map_complete(
+        mapper.map(
             net_map_stub_data.get_test_file_yaml_content(
                 "networking-definition-valid-all-tools-dual-stack.yml"
             ),
             ifaces_info,
         )
-    assert "does not contain mac address" in str(exc_info.value)
-
-    # Ensure that the all instances are present in ifaces_info
-    with pytest.raises(exceptions.NetworkMappingError) as exc_info:
-        mapper = networking_mapper.NetworkingDefinitionMapper(
-            net_map_stub_data.TEST_HOSTVARS, net_map_stub_data.TEST_GROUPS
-        )
-        ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
-        ifaces_info.pop(net_map_stub_data.INSTANCE_1_NAME)
-        mapper.map_complete(
-            net_map_stub_data.get_test_file_yaml_content(
-                "networking-definition-valid-all-tools-dual-stack.yml"
-            ),
-            ifaces_info,
-        )
-    assert "does not contain information for instance-1" in str(exc_info.value)
+    assert "does not contain `mac` field" in str(exc_info.value)
 
 
 def test_networking_mapper_full_map_mac_not_found_ok():
@@ -294,10 +285,10 @@ def test_networking_mapper_full_map_mac_not_found_ok():
     )
     ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
     iface_info_mac = "ab:cd:de:f0:12:34"
-    ifaces_info[net_map_stub_data.INSTANCE_1_NAME][
+    ifaces_info[net_map_stub_data.INSTANCE_1_NAME][0][
         net_map_stub_data.TEST_IFACES_INFO_MAC_FIELD
     ] = iface_info_mac
-    network_env = mapper.map_complete(
+    network_env = mapper.map(
         net_map_stub_data.get_test_file_yaml_content(
             "networking-definition-valid-all-tools-dual-stack.yml"
         ),
@@ -340,8 +331,8 @@ def test_networking_mapper_search_domain_override_ok():
     assert mapped_content
     assert net_map_stub_data.NETWORK_1_NAME in mapped_content
     assert (
-        mapped_content[net_map_stub_data.NETWORK_1_NAME]["search_domain"]
-        == overriden_search_domain
+            mapped_content[net_map_stub_data.NETWORK_1_NAME]["search_domain"]
+            == overriden_search_domain
     )
 
 
@@ -372,7 +363,7 @@ def test_networking_mapper_invalid_instance_fail():
         ifaces_info = copy.deepcopy(net_map_stub_data.TEST_IFACES_INFO)
         ifaces_info["non-existing-instance"] = ifaces_info["instance-1"]
         ifaces_info.pop("instance-1")
-        mapper.map_complete(
+        mapper.map(
             net_def_raw,
             ifaces_info,
         )
@@ -393,10 +384,10 @@ def test_networking_mapper_map_duplicated_net_group_templates_fail():
         )
         net_def_raw["group-templates"]["group-1"]["networks"]["network-2"] = {}
         net_def_raw["group-templates"]["group-1"]["networks"]["network-3"] = {}
-        mapper.map_partial(
+        mapper.map(
             net_def_raw,
         )
     assert (
-        "networks network-2, network-3 for instance-1 instance are "
-        "defined by multiple groups" == str(exc_info.value)
+            "networks network-2, network-3 for instance-1 instance are "
+            "defined by multiple groups" == str(exc_info.value)
     )

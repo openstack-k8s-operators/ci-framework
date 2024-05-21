@@ -156,25 +156,35 @@ TEST_HOSTVARS = {
     },
 }
 TEST_IFACES_INFO_MAC_FIELD = "mac"
+TEST_IFACES_INFO_NETWORK_FIELD = "network"
 TEST_IFACES_INFO = {
-    INSTANCE_1_NAME: {
-        TEST_IFACES_INFO_MAC_FIELD: INSTANCE_1_MACADDR,
-    },
-    INSTANCE_2_NAME: {
-        TEST_IFACES_INFO_MAC_FIELD: INSTANCE_2_MACADDR,
-    },
-    INSTANCE_3_NAME: {
-        TEST_IFACES_INFO_MAC_FIELD: INSTANCE_3_MACADDR,
-    },
+    INSTANCE_1_NAME: [
+        {
+            TEST_IFACES_INFO_MAC_FIELD: INSTANCE_1_MACADDR,
+            TEST_IFACES_INFO_NETWORK_FIELD: NETWORK_1_NAME,
+        },
+    ],
+    INSTANCE_2_NAME: [
+        {
+            TEST_IFACES_INFO_MAC_FIELD: INSTANCE_2_MACADDR,
+            TEST_IFACES_INFO_NETWORK_FIELD: NETWORK_1_NAME,
+        },
+    ],
+    INSTANCE_3_NAME: [
+        {
+            TEST_IFACES_INFO_MAC_FIELD: INSTANCE_3_MACADDR,
+            TEST_IFACES_INFO_NETWORK_FIELD: NETWORK_1_NAME,
+        },
+    ],
 }
 
 
 def build_valid_network_definition_raw(
-    name: str,
-    net_raw,
-    add_multus: bool = False,
-    add_netconfig: bool = False,
-    add_metallb: bool = False,
+        name: str,
+        net_raw,
+        add_multus: bool = False,
+        add_netconfig: bool = False,
+        add_metallb: bool = False,
 ) -> typing.Dict[str, typing.Any]:
     if add_multus or add_netconfig or add_metallb:
         net_raw["tools"] = {}
@@ -197,11 +207,11 @@ def build_valid_network_definition_raw(
 
 
 def build_valid_network_definition(
-    name: str,
-    net_raw,
-    add_multus: bool = False,
-    add_netconfig: bool = False,
-    add_metallb: bool = False,
+        name: str,
+        net_raw,
+        add_multus: bool = False,
+        add_netconfig: bool = False,
+        add_metallb: bool = False,
 ) -> networking_definition.NetworkDefinition:
     return networking_definition.NetworkDefinition(
         name,
@@ -216,12 +226,12 @@ def build_valid_network_definition(
 
 
 def build_valid_network_definition_set_raw(
-    add_multus: bool = False,
-    add_netconfig: bool = False,
-    add_metallb: bool = False,
-    use_ipv4: bool = True,
-    use_ipv6: bool = False,
-    mixed_ip_versions: bool = False,
+        add_multus: bool = False,
+        add_netconfig: bool = False,
+        add_metallb: bool = False,
+        use_ipv4: bool = True,
+        use_ipv6: bool = False,
+        mixed_ip_versions: bool = False,
 ) -> typing.Dict[str, typing.Any]:
     net_1_config = {"vlan": "122", "mtu": "9000"}
     if use_ipv4 and not use_ipv6:
@@ -281,12 +291,12 @@ def build_valid_network_definition_set_raw(
 
 
 def build_valid_network_definition_set(
-    add_multus: bool = False,
-    add_netconfig: bool = False,
-    add_metallb: bool = False,
-    use_ipv4: bool = True,
-    use_ipv6: bool = False,
-    mixed_ip_versions: bool = False,
+        add_multus: bool = False,
+        add_netconfig: bool = False,
+        add_metallb: bool = False,
+        use_ipv4: bool = True,
+        use_ipv6: bool = False,
+        mixed_ip_versions: bool = False,
 ) -> typing.Dict[str, networking_definition.NetworkDefinition]:
     return {
         net_name: networking_definition.NetworkDefinition(net_name, net_config)
@@ -302,9 +312,9 @@ def build_valid_network_definition_set(
 
 
 def build_valid_network_definition_and_templates_set(
-    use_ipv4: bool = True,
-    use_ipv6: bool = False,
-    mixed_ip_versions: bool = False,
+        use_ipv4: bool = True,
+        use_ipv6: bool = False,
+        mixed_ip_versions: bool = False,
 ):
     networks_definitions = build_valid_network_definition_set(
         use_ipv4=use_ipv4, use_ipv6=use_ipv6, mixed_ip_versions=mixed_ip_versions
