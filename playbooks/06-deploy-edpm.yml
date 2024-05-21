@@ -35,6 +35,68 @@
     step: post_ctlplane_deploy
   ansible.builtin.import_playbook: ./hooks.yml
 
+- name: Create virtual baremetal VMs
+  hosts: "{{ cifmw_sushy_emulator_hypervisor_target | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
+    - name: Setup and create virtual baremetal VMs
+      when: cifmw_edpm_deploy_baremetal | default('false') | bool
+      block:
+        - name: Load parameters files
+          ansible.builtin.include_vars:
+            dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+        - name: Ensure libvirt is present/configured
+          ansible.builtin.import_role:
+            name: libvirt_manager
+
+        - name: Create virtual baremetal
+          ansible.builtin.include_role:
+            name: libvirt_manager
+            tasks_from: deploy_layout
+
+        - name: "Copy artifacts to {{ cifmw_target_host | default('localhost') }}"
+          ansible.posix.synchronize:
+            src: "{{ cifmw_basedir }}/artifacts/"
+            dest: "{{ cifmw_basedir }}/artifacts/"
+            mode: pull
+          delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+
+- name: Deploy and configure sushy-emulator
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Load parameters files
+      ansible.builtin.include_vars:
+        dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+    - name: Deploy and configure sushy-emulator
+      when: cifmw_edpm_deploy_baremetal | default('false') | bool
+      block:
+        - name: Deploy and configure sushy-emulator
+          ansible.builtin.include_role:
+            name: sushy_emulator
+
+        - name: Generate baremetal-info fact
+          ansible.builtin.include_role:
+            name: reproducer
+            tasks_from: generate_bm_info.yml
+
+        - name: Verify connection to baremetal VMs via Sushy Emulator
+          ansible.builtin.include_role:
+            name: sushy_emulator
+            tasks_from: verify.yml
+
+        - name: Deploy Metal3 BMHs
+          ansible.builtin.include_role:
+            name: deploy_bmh
+
 - name: EDPM deployment on virtual baremetal
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false

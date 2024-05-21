@@ -25,26 +25,34 @@
 
 - name: Set sushy url for ocp installation
   ansible.builtin.set_fact:
-    sushy_url: "http://sushy-emulator.{{ _ingress_domain.stdout }}"
+    _sushy_url: "http://sushy-emulator.{{ _ingress_domain.stdout }}"
   when: cifmw_sushy_emulator_install_type == 'ocp'
 
-- name: Base64 encode ssh private key
+- name: Create ssh key for Sushy Emulator
+  register: _sushy_emulator_key
+  community.crypto.openssh_keypair:
+    path: "{{ cifmw_sushy_emulator_sshkey_path }}"
+    type: "{{ cifmw_sushy_emulator_sshkey_type }}"
+    size: "{{ cifmw_sushy_emulator_sshkey_size }}"
+    regenerate: full_idempotence
+
+- name: Slurp private ssh key for later use
   ansible.builtin.slurp:
     src: "{{ cifmw_sushy_emulator_sshkey_path }}"
-  register: _cifmw_sushy_emulator_private_key_b64
-  no_log: true
+  register: _sushy_emulator_private_key
 
-- name: Base64 encode ssh public key
-  ansible.builtin.slurp:
-    src: "{{ cifmw_sushy_emulator_sshkey_path }}.pub"
-  register: _cifmw_sushy_emulator_public_key_b64
-  no_log: true
+- name: Allow Sushy Emulator key
+  ansible.posix.authorized_key:
+    user: "{{ cifmw_sushy_emulator_libvirt_user }}"
+    key: "{{ _sushy_emulator_key.public_key }}"
+    state: present
+  delegate_to: "{{ cifmw_sushy_emulator_hypervisor_target }}"
 
 - name: Run ssh-keyscan
   ansible.builtin.shell:
     cmd: |
       set -o pipefail
-      ssh-keyscan -H {{ hostvars[cifmw_baremetal_hypervisor_target].ansible_host }} 2>/dev/null | base64 -w 0
+      ssh-keyscan -H {{ cifmw_sushy_emulator_hypervisor_target_connection_ip | default(hostvars[cifmw_sushy_emulator_hypervisor_target].ansible_host) }} 2>/dev/null | base64 -w 0
   register: _cifmw_sushy_emulator_ssh_known_hosts_b64
 
 - name: Write known hosts for later use
@@ -53,24 +61,41 @@
     dest: "{{ cifmw_sushy_emulator_resource_directory }}/known_hosts"
     mode: '0644'
 
-- name: Get details for Libvirt driver
-  when: cifmw_sushy_emulator_driver == 'libvirt'
+- name: Load cifmw_libvirt_manager_uuids fact from file
+  vars:
+    _uuid_file: "{{ cifmw_sushy_emulator_basedir }}/artifacts/libvirt-uuids.yml"
+  when:
+    - cifmw_libvirt_manager_uuids is not defined
   block:
-    - name: Set vars
-      ansible.builtin.set_fact:
-        _libvirt_uri: "qemu+ssh://{{ cifmw_sushy_emulator_libvirt_user }}@{{ hostvars[cifmw_baremetal_hypervisor_target].ansible_host }}/system"
+    - name: "Slurp content of: {{ _uuid_file }}"
+      ansible.builtin.slurp:
+        src: "{{ _uuid_file }}"
+      register: _libvirt_uuids_file
 
-    # todo(Lewis): Once changes are made to the libvirt_manager role, the baremetal-info.yml can be consumed to gather required info
-    - name: Get Libvirt instance UUIDs
-      ansible.builtin.shell:
-        cmd: |
-          set -o pipefail
-          virsh --connect={{ _libvirt_uri }} list --all --uuid --name | grep {{ cifmw_sushy_emulator_instance_node_name_prefix }} | cut -d' ' -f1
-      register: _virsh_list_uuid
-
-    - name: Set instance_uuid variable
+    - name: "Set cifmw_libvirt_manager_uuids fact from {{ _uuid_file }}"
+      vars:
+        _yaml: "{{ _libvirt_uuids_file.content | b64decode | from_yaml }}"
       ansible.builtin.set_fact:
-        _cifmw_sushy_emulator_instances: "{{ _virsh_list_uuid.stdout_lines | regex_replace('\n(?!.*\n)', ', ')}}"
+        cifmw_libvirt_manager_uuids: "{{ _yaml.libvirt_uuid }}"
+
+- name: Set fact related to Libvirt driver
+  when:
+    - cifmw_sushy_emulator_driver == 'libvirt'
+  block:
+    - name: Generate list of filtered VMs
+      vars:
+        _matching_vms: >-
+          {% set matching_vms = [] -%}
+          {% for host, uuid in cifmw_libvirt_manager_uuids.items() -%}
+          {%   if host | regex_search(cifmw_sushy_emulator_vm_prefix_filter | default('') + '.*') -%}
+          {%     set _ = matching_vms.append(uuid) -%}
+          {%   endif -%}
+          {% endfor -%}
+          {{ matching_vms }}
+      ansible.builtin.set_fact:
+        _cifmw_sushy_emulator_instances: "{{ _matching_vms | regex_replace('\n(?!.*\n)', ', ')}}"
+      when:
+        - _matching_vms | length > 0
 
 # todo(Lewis): The OpenStack driver is currently untested waiting for changes being implemented upstream by sbaker.
 - name: Gather details for Openstack driver
@@ -79,13 +104,12 @@
   block:
     - name: Get Openstack instance UUIDs
       ansible.builtin.command:
-        cmd: "openstack --os-cloud={{ cifmw_sushy_emulator_driver_openstack_cloud }} server list --name {{ cifmw_sushy_emulator_instance_node_name_prefix }}.* -f json -c ID | jq -c [.[].ID])"
+        cmd: "openstack --os-cloud={{ cifmw_sushy_emulator_driver_openstack_cloud }} server list --name {{ cifmw_sushy_emulator_vm_prefix_filter }}.* -f json -c ID | jq -c [.[].ID])"
       register: _openstack_server_list_uuid
 
     - name: Set instance_uuid variable for openstack driver
       ansible.builtin.set_fact:
         _cifmw_sushy_emulator_instances: "{{ _openstack_server_list_uuid }}"
-        _libvirt_uri: None
 
     - name: Base64 encode openstack clouds.yaml file
       ansible.builtin.slurp:

@@ -20,20 +20,68 @@
   vars:
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
     cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
-    cifmw_baremetal_hypervisor_target: instance
-    cifmw_sushy_emulator_sshkey_path: "{{ ansible_user_dir }}/.ssh/id_rsa"
+    cifmw_sushy_emulator_hypervisor_target: controller-0
+    cifmw_sushy_emulator_hypervisor_target_connection_ip: "{{ hostvars[cifmw_sushy_emulator_hypervisor_target].ansible_host }}"
+    cifmw_libvirt_manager_configuration:
+      vms:
+        compute:
+          amount: 2
+          disk_file_name: "blank"
+          disksize: 50
+          memory: 8
+          cpus: 4
+          nets:
+            - public
+            - default
+
   tasks:
-    - name: Add instance anisble_host
+    - name: Add the crc host dynamically
       ansible.builtin.add_host:
-        name: "{{ cifmw_baremetal_hypervisor_target }}"
-        ansible_host: "{{ hostvars[cifmw_baremetal_hypervisor_target]['ansible_default_ipv4']['address'] }}"
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
+    - name: Add ansible_host entry to "{{ cifmw_sushy_emulator_hypervisor_target }}"
+      ansible.builtin.add_host:
+        name: "{{ cifmw_sushy_emulator_hypervisor_target }}"
+        ansible_host: "{{ hostvars['instance']['ansible_default_ipv4']['address'] }}"
+
+    - name: "Add host key to {{ cifmw_sushy_emulator_hypervisor_target }}"
+      ansible.builtin.shell:
+        cmd: ssh-keyscan {{ hostvars[cifmw_sushy_emulator_hypervisor_target].ansible_host }} >> ~/.ssh/known_hosts
+
+    - name: Setup and create virtual baremetal
+      block:
+        - name: Ensure libvirt is present/configured
+          ansible.builtin.import_role:
+            name: libvirt_manager
+
+        - name: Create virtual baremetal VMs
+          ansible.builtin.include_role:
+            name: libvirt_manager
+            tasks_from: deploy_layout
+
+        - name: Generate baremetal-info fact
+          ansible.builtin.include_role:
+            name: reproducer
+            tasks_from: generate_bm_info.yml
 
     - name: Run Sushy Emulator role against OCP
       ansible.builtin.include_role:
         name: sushy_emulator
+
+    - name: Verify connection to baremetal VMs via Sushy Emulator
+      ansible.builtin.include_role:
+        name: sushy_emulator
+        tasks_from: verify.yml
 
     - name: Run Sushy Emulator role against podman
       vars:
         cifmw_sushy_emulator_install_type: "podman"
       ansible.builtin.include_role:
         name: sushy_emulator
+
+    - name: Verify connection to baremetal VMs via Sushy Emulator
+      ansible.builtin.include_role:
+        name: sushy_emulator
+        tasks_from: verify.yml

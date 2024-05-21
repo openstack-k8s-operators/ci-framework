@@ -17,19 +17,6 @@
 
 - name: Prepare
   hosts: all
-  vars:
-    cifmw_baremetal_hypervisor_target: instance
-    cifmw_libvirt_manager_configuration:
-      vms:
-        compute:
-          amount: 2
-          disk_file_name: "blank"
-          disksize: 50
-          memory: 8
-          cpus: 4
-          nets:
-            - public
-            - default
   roles:
     - role: test_deps
   tasks:
@@ -42,33 +29,3 @@
       ansible.builtin.lineinfile:
         path: /etc/hosts
         line: "192.168.130.11 crc"
-
-    - name: Add the crc host dynamically
-      ansible.builtin.add_host:
-        name: crc
-        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
-        ansible_ssh_user: core
-
-    - name: Add instance anisble_host
-      ansible.builtin.add_host:
-        name: instance
-        ansible_host: "{{ hostvars[cifmw_baremetal_hypervisor_target]['ansible_default_ipv4']['address'] }}"
-
-    - name: "Add host key to {{ cifmw_baremetal_hypervisor_target }}"
-      ansible.builtin.shell:
-        cmd: ssh-keyscan {{ hostvars[cifmw_baremetal_hypervisor_target].ansible_host }} >> ~/.ssh/known_hosts
-
-    - name: "Add SSH key to authorized_keys"
-      ansible.builtin.shell:
-        cmd: 'cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys'
-
-    - name: Setup and create virtual baremetal
-      block:
-        - name: Ensure libvirt is present/configured
-          ansible.builtin.import_role:
-            name: libvirt_manager
-
-        - name: Create virtual baremetal VMs
-          ansible.builtin.include_role:
-            name: libvirt_manager
-            tasks_from: deploy_layout
