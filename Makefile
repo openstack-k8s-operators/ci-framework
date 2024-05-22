@@ -16,7 +16,7 @@ TEST_ALL_ROLES ?= ${TEST_ALL_ROLES:-no}
 # Log output location
 LOG_DIR ?= /tmp
 # Specific parameter for architecture_test
-ANSIBLE_OPTS ?= ''
+ANSIBLE_OPTS ?=
 
 # target vars for generic operator install info 1: target name , 2: operator name
 define vars
