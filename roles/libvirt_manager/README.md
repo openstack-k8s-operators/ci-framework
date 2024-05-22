@@ -29,6 +29,8 @@ Used for checking if:
 * `cifmw_libvirt_manager_apply_virtproxy_patch` (Boolean) Apply patch virtproxy patch for improved libvirt stability. This is set to `true` by default.
 * `cifmw_libvirt_manager_net_prefix_add` (Boolean) Adds `cifmw-` prefix to the network resources managed by this role. By default, it is set to `true`.
 * `cifmw_libvirt_manager_pub_net`: (String) Network name playing the "public" interface. Defaults to `public`.
+* `cifmw_libvirt_manager_vm_separator`: (Char) Separator to use between VM name and VM index. Defaults to `-`.
+* `cifmw_libvirt_manager_vm_prefix`: (String) Prefix for VM name. Defaults to `cifmw-`.
 * `cifmw_libvirt_manager_vm_net_ip_set`: (Dict) Allow to extend the existing mapping for host family to IP mapping. Defaults to `{}`.
 * `cifmw_libvirt_manager_fixed_networks`: (List) Network names you don't want to prefix with `cifmw-`. It will be concatenated with cifmw_libvirt_manager_fixed_networks_defaults. Defaults to`[]`.
 * `cifmw_libvirt_manager_reproducer_key_type`: (String) Type of ssh key that will be injected into the controller VMs. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
