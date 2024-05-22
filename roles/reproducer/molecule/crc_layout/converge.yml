@@ -16,7 +16,7 @@
 
 
 - name: Converge
-  hosts: all
+  hosts: instance
   gather_facts: true
   vars:
     cifmw_manage_secrets_reproducer_secrets:
@@ -98,142 +98,134 @@
           </network>
 
   tasks:
-    - name: Load networking definition from scenario file
-      ansible.builtin.include_vars:
-        file: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/reproducers/networking-definition.yml"
-
-    - name: Run reproducer
-      ansible.builtin.import_role:
-        name: reproducer
-
-    - name: Validate content on the controller-0 node
-      delegate_to: controller-0
+    - name: Use block to ensure we gather logs
       block:
-        - name: Ensure we have appropriate credentials for OpenShift accesses
-          register: _kubeconfig
-          ansible.builtin.stat:
-            path: "{{ ansible_user_dir }}/.kube/config"
+        - name: Load networking definition from scenario file
+          ansible.builtin.include_vars:
+            file: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/reproducers/networking-definition.yml"
 
-        - name: Ensure we have needed inventory files
-          register: _inventory_files
-          ansible.builtin.find:
-            paths: "{{ ansible_user_dir }}/reproducer-inventory/"
-            patterns:
-              - "*-group.yml"
+        - name: Run reproducer
+          ansible.builtin.import_role:
+            name: reproducer
 
-        - name: Ensure we have CRC ssh key
-          register: _crc_key
-          ansible.builtin.stat:
-            path: "{{ ansible_user_dir }}/.ssh/crc_key"
-
-        - name: Ensure we have the MAC mapping file
-          register: _mac_mapping
-          ansible.builtin.stat:
-            path: "{{ ansible_user_dir }}/ci-framework-data/parameters/interfaces-info.yml"
-
-        - name: Load crc inventory
-          register: _crc_inv
-          ansible.builtin.slurp:
-            src: "{{ ansible_user_dir }}/reproducer-inventory/crc-group.yml"
-
-        - name: Load compute inventory
-          register: _compute_inv
-          ansible.builtin.slurp:
-            src: "{{ ansible_user_dir }}/reproducer-inventory/compute-group.yml"
-
-        - name: Ensure we can ping compute-0 on osp_trunk net
-          register: _cmp0_ping
-          failed_when: false
-          vars:
-            _inv: >-
-              {{
-                _compute_inv.content | b64decode | from_yaml
-              }}
-            _ip: >-
-              {{ _inv.computes.hosts['compute-0'].ansible_host }}
-          ansible.builtin.command:
-            cmd: "ping -c1 -w1 {{ _ip }}"
-
-        - name: Ensure we can ping crc-0 on osp_trunk net
-          register: _crc_ping
-          failed_when: false
-          vars:
-            _inv: >-
-              {{
-                _crc_inv.content | b64decode | from_yaml
-              }}
-            _ip: >-
-              {{ _inv.ocps.hosts['crc-0'].ansible_host }}
-          ansible.builtin.command:
-            cmd: "ping -c1 -w1 {{ _ip }}"
-
-        - name: Check secret files
+        - name: Validate content on the controller-0 node
+          delegate_to: controller-0
           block:
-            - name: Check default location secret file
-              register: _default_secret
+            - name: Ensure we have appropriate credentials for OpenShift accesses
+              register: _kubeconfig
               ansible.builtin.stat:
-                path: "{{ ansible_user_dir }}/ci-framework-data/secrets/default.txt"
-              failed_when: not _default_secret.stat.exists
+                path: "{{ ansible_user_dir }}/.kube/config"
 
-            - name: Check non-default location secret
-              register: _default_secret
+            - name: Ensure we have needed inventory files
+              register: _inventory_files
+              ansible.builtin.find:
+                paths: "{{ ansible_user_dir }}/reproducer-inventory/"
+                patterns:
+                  - "*-group.yml"
+
+            - name: Ensure we have CRC ssh key
+              register: _crc_key
               ansible.builtin.stat:
-                path: "{{ ansible_user_dir }}/ipmi-things"
-              failed_when: not _default_secret.stat.exists
+                path: "{{ ansible_user_dir }}/.ssh/crc_key"
 
-    - name: Gather logs from nested controller-0
-      vars:
-        _log_dest: "{{ ansible_user_dir }}/ci-framework-data/logs/controller-0"
-      block:
-        - name: Create log directory
-          ansible.builtin.file:
-            path: "{{ _log_dest }}"
-            state: directory
-            mode: "0755"
+            - name: Ensure we have the MAC mapping file
+              register: _mac_mapping
+              ansible.builtin.stat:
+                path: "{{ ansible_user_dir }}/ci-framework-data/parameters/interfaces-info.yml"
 
-        - name: Sync logs from controller-0
-          ansible.builtin.shell:  # noqa: command-instead-of-module
-            cmd: |-
-              rsync -r zuul@controller-0:"*.log" {{ _log_dest }};
-              rsync -r zuul@controller-0:ci-framework-data/logs {{ _log_dest }};
+            - name: Load crc inventory
+              register: _crc_inv
+              ansible.builtin.slurp:
+                src: "{{ ansible_user_dir }}/reproducer-inventory/crc-group.yml"
 
-    - name: Assert all of the tests
-      vars:
-        _inventory_content: >-
-          {{
-            _inventory_files.files |
-            map(attribute='path') |
-            map('basename') | sort
-          }}
-        _expected_files: >-
-          {{
-            ['all-group.yml',
-             'compute-group.yml',
-             'controller-group.yml',
-             'crc-group.yml'] | sort
-          }}
-      ansible.builtin.assert:
-        quiet: true
-        that:
-          - _kubeconfig.stat.exists | bool
-          - _crc_key.stat.exists | bool
-          - _mac_mapping.stat.exists | bool
-          - _inventory_files.matched == 4
-          - _inventory_content == _expected_files
-          - _crc_ping.rc == 0
-          - _cmp0_ping.rc == 0
+            - name: Load compute inventory
+              register: _compute_inv
+              ansible.builtin.slurp:
+                src: "{{ ansible_user_dir }}/reproducer-inventory/compute-group.yml"
 
-    - name: Gather data from controller-0
-      failed_when: false
-      ansible.builtin.shell:
-        cmd: >-
-          mkdir -p /home/zuul/ci-framework-data/controller-0;
-          rsync -a controller-0:/home/zuul/ci-framework-data/artifacts
-            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
-          rsync -a controller-0:/home/zuul/ci-framework-data/logs
-            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
-          rsync -a controller-0:/home/zuul/ci-framework-data/parameters
-            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
+            - name: Ensure we can ping compute-0 on osp_trunk net
+              register: _cmp0_ping
+              failed_when: false
+              vars:
+                _inv: >-
+                  {{
+                    _compute_inv.content | b64decode | from_yaml
+                  }}
+                _ip: >-
+                  {{ _inv.computes.hosts['compute-0'].ansible_host }}
+              ansible.builtin.command:
+                cmd: "ping -c1 -w1 {{ _ip }}"
+
+            - name: Ensure we can ping crc-0 on osp_trunk net
+              register: _crc_ping
+              failed_when: false
+              vars:
+                _inv: >-
+                  {{
+                    _crc_inv.content | b64decode | from_yaml
+                  }}
+                _ip: >-
+                  {{ _inv.ocps.hosts['crc-0'].ansible_host }}
+              ansible.builtin.command:
+                cmd: "ping -c1 -w1 {{ _ip }}"
+
+            - name: Check secret files
+              block:
+                - name: Check default location secret file
+                  register: _default_secret
+                  ansible.builtin.stat:
+                    path: "{{ ansible_user_dir }}/ci-framework-data/secrets/default.txt"
+                  failed_when: not _default_secret.stat.exists
+
+                - name: Check non-default location secret
+                  register: _default_secret
+                  ansible.builtin.stat:
+                    path: "{{ ansible_user_dir }}/ipmi-things"
+                  failed_when: not _default_secret.stat.exists
+
+        - name: Assert all of the tests
+          vars:
+            _inventory_content: >-
+              {{
+                _inventory_files.files |
+                map(attribute='path') |
+                map('basename') | sort
+              }}
+            _expected_files: >-
+              {{
+                ['all-group.yml',
+                 'compute-group.yml',
+                 'controller-group.yml',
+                 'crc-group.yml'] | sort
+              }}
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _kubeconfig.stat.exists | bool
+              - _crc_key.stat.exists | bool
+              - _mac_mapping.stat.exists | bool
+              - _inventory_files.matched == 4
+              - _inventory_content == _expected_files
+              - _crc_ping.rc == 0
+              - _cmp0_ping.rc == 0
+
+      always:
+        - name: Gather logs from nested controller-0
+          vars:
+            _log_dest: "{{ ansible_user_dir }}/ci-framework-data/logs/controller-0"
+          block:
+            - name: Create log directory
+              ansible.builtin.file:
+                path: "{{ _log_dest }}"
+                state: directory
+                mode: "0755"
+
+            - name: Sync logs from controller-0
+              ansible.builtin.shell:  # noqa: command-instead-of-module
+                cmd: |-
+                  rsync -r zuul@controller-0:"*.log" {{ _log_dest }};
+                  rsync -r zuul@controller-0:ci-framework-data {{ _log_dest }};
+
 
 #  TODO: Add some more files from the reproducer itself, especially
 #  network related content and add related checks here.
