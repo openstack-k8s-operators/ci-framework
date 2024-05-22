@@ -29,6 +29,7 @@
       loop:
         - parameters
         - artifacts
+
     - name: Install custom CA if needed
       ansible.builtin.import_role:
         name: install_ca
@@ -107,56 +108,33 @@
         dest: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
         content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
 
-    # Here, we update the existing cifmw_virtualbmc_known_hosts fact
-    # to inject networking information such as provisioning MAC (if any),
-    # and fixed Boot mode
-    - name: Generate IPMI information
+    # Deploy Sushy Emulator on the Ansible controller,
+    - name: Deploy Sushy Emulator service container
+      tags:
+        - bootstrap
+        - bootstrap_layout
+      when: cifmw_use_sushy_emulator | default(true) | bool
       block:
-        - name: Convert VBMC list into a dict for better usage
+        - name: Deploy Sushy Emulator
           vars:
-            keys: "{{ item.keys() | difference(['Domain name']) }}"
-            vals: "{{ keys | map('extract', item) | list }}"
-            value: "{{ dict(keys | map('lower') | zip(vals)) }}"
-            _host: "{{ item['Domain name'] | regex_replace('^cifmw-', '') }}"
-            _nics: >-
-              {{
-                cifmw_libvirt_manager_mac_map[_host]
-              }}
-            _uefi: >-
-              {% set _type = _host | regex_replace('-[0-9]+$', '') -%}
-              {{
-                _cifmw_libvirt_manager_layout.vms[_type].uefi |
-                default(false) | bool
-              }}
-            _boot_mode: "{{ _uefi | ternary('UEFI', 'legacy') }}"
-            ## TODO: add sushy driver address once we get sushy in
-            ## TODO: create new parameter to allow chosing which connection
-            #        to expose in the generated file
-            _connections:
-              ipmi: "ipmi://{{ value.address }}:{{ value.port }}"
-          ansible.builtin.set_fact:
-            _ipmi_dict: >-
-              {{
-                _ipmi_dict | default({}) |
-                combine({_host: value}, recursive=true) |
-                combine({_host: {
-                                 'boot_mode': _boot_mode,
-                                 'nics': _nics,
-                                 'connection': _connections['ipmi']
-                                }
-                        }, recursive=true)
-              }}
-            cacheable: false
-          loop: "{{ cifmw_virtualbmc_known_hosts }}"
+            cifmw_sushy_emulator_hypervisor_target: "{{ cifmw_target_host | default('localhost') }}"
+            cifmw_sushy_emulator_install_type: podman
+            cifmw_sushy_emulator_hypervisor_target_connection_ip: "{{ network_bridge_info['cifmw-public'] }}"
+          ansible.builtin.include_role:
+            name: sushy_emulator
 
-        - name: Output IPMI data in a file
-          vars:
-            _content:
-              cifmw_baremetal_hosts: "{{ _ipmi_dict }}"
-          ansible.builtin.copy:
-            dest: "{{ _ctl_reproducer_basedir }}/parameters/baremetal-info.yml"
-            content: "{{ _content | to_nice_yaml }}"
-            mode: "0644"
+        - name: Let the project know we have Sushy Emulator available
+          ansible.builtin.set_fact:
+            _sushy_emulator_available: true
+
+    - name: Generate baremetal-info fact
+      ansible.builtin.import_tasks: generate_bm_info.yml
+
+    - name: Verify connection to baremetal VMs via Sushy Emulator
+      when: _sushy_emulator_available
+      ansible.builtin.include_role:
+        name: sushy_emulator
+        tasks_from: verify.yml
 
     - name: Inject other Hypervisor SSH keys
       when:
