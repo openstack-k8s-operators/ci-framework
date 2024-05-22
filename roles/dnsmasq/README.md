@@ -22,7 +22,12 @@ supported in libvirt).
 * `cifmw_dnsmasq_network_state`: (String) Network status. Must be either `present` or `absent`.
 * `cifmw_dnsmasq_network_definition`: (Dict) Mapping representing the network definition.
 * `cifmw_dnsmasq_network_definition.ranges`: (List[mapping]) List of ranges associated to the network.
-* `cifmw_dnsmasq_network_listen_dns`: (List) List of IP addresses to listen to for DNS queries.
+* `cifmw_dnsmasq_forwarders`: (List) List of upstream DNS servers used as forwarders. Defaults to `[]`
+* `cifmw_dnsmasq_interfaces`: (List) List of interfaces on which dnsmasq should be enabled. Defaults to `[]`.
+* `cifmw_dnsmasq_listen_addresses`: (List) List of IP addresses on which dnsmasq should be enabled. Defaults to `[]`.
+* `cifmw_dnsmasq_enable_dns`: (Bool) Toggle to enable DNS features of dnsmasq. Defaults to `false`.
+* `cifmw_dnsmasq_addresses`: (List) Specify a list of IP addresses to return for any host in the given domains. Defaults to `[]`.
+* `cifmw_dnsmasq_domainname`: (String) DNS domain name used for the DHCP server. Defaults to `''`.
 
 #### Ranges mapping
 
