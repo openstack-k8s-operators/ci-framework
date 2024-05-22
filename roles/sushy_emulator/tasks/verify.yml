@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Load baremetal hosts from libvirt_manager_bm_info_data fact
+  when: libvirt_manager_bm_info_data is defined
+  ansible.builtin.set_fact:
+    cifmw_baremetal_hosts: "{{ libvirt_manager_bm_info_data }}"
+
+- name: Load cifmw_baremetal_hosts fact from file
+  vars:
+    cifmw_parameters_file: "{{ cifmw_sushy_emulator_basedir }}/parameters/baremetal-info.yml"
+  when:
+    - libvirt_manager_bm_info_data is not defined
+  block:
+    - name: "Slurp content of: {{ cifmw_parameters_file }}"
+      ansible.builtin.slurp:
+        src: "{{ cifmw_parameters_file }}"
+      register: cifmw_baremetal_hosts_file
+
+    - name: "Set cifmw_baremetal_hosts fact from {{ cifmw_parameters_file }}"
+      vars:
+        _yaml: "{{ cifmw_baremetal_hosts_file.content | b64decode | from_yaml }}"
+      ansible.builtin.set_fact:
+        cifmw_baremetal_hosts: "{{ _yaml.cifmw_baremetal_hosts }}"
+
+- name: Test Sushy Emulator and connection to hypervisor libvirt socket
+  ansible.builtin.uri:
+    url: "{{ _sushy_url}}/redfish/v1/Managers"
+    return_content: true
+    user: "{{ cifmw_sushy_emulator_redfish_username }}"
+    password: "{{ cifmw_sushy_emulator_redfish_password }}"
+  retries: 5
+  delay: 5
+  register: _sushy_emulator_content
+
+- name: Verify connection to baremetal VMs via Sushy Emulator
+  when:
+    - _cifmw_sushy_emulator_instances | length > 0
+  ansible.builtin.uri:
+    url: "{{ _sushy_url}}/redfish/v1/Systems/{{item}}"
+    return_content: true
+    user: "{{ cifmw_sushy_emulator_redfish_username }}"
+    password: "{{ cifmw_sushy_emulator_redfish_password }}"
+  retries: 5
+  delay: 5
+  register: _sushy_emulator_content_system
+  loop: "{{ _cifmw_sushy_emulator_instances }}"
+
+- name: Verify baremetal VM power status
+  when: _sushy_emulator_content_system != 'All items skipped'
+  ansible.builtin.assert:
+    that:
+      - item.json.PowerState is defined
+  loop: "{{ _sushy_emulator_content_system.results }}"

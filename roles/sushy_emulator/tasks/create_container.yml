@@ -14,6 +14,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Install podman and configure session linger
+  ansible.builtin.import_role:
+    name: podman
+
 - name: Pull Sushy Emulator container image
   containers.podman.podman_image:
     name: "{{ cifmw_sushy_emulator_image }}"
@@ -27,15 +31,19 @@
     name: "{{ cifmw_sushy_emulator_container_name }}"
     network: host
     state: started
+    force_restart: true
     env:
       SUSHY_TOOLS_CONFIG: '/etc/sushy-emulator/config.conf'
     volumes:
+      - "{{ dest_dir }}/config.conf:/etc/sushy-emulator/config.conf:ro,Z"
+      - "{{ dest_dir }}/.htpasswd:/etc/sushy-emulator/.htpasswd:ro,Z"
       - "{{ dest_dir }}/known_hosts:/root/.ssh/known_hosts:ro,Z"
       - "{{ cifmw_sushy_emulator_sshkey_path }}:/root/.ssh/id_rsa:ro,Z"
       - "{{ cifmw_sushy_emulator_sshkey_path }}.pub:/root/.ssh/id_rsa.pub:ro,Z"
-      - "{{ dest_dir }}/config.conf:/etc/sushy-emulator/config.conf:ro,Z"
-      - "{{ dest_dir }}/.htpasswd:/etc/sushy-emulator/.htpasswd:ro,Z"
 
-- name: Set sushy url for podman installation
+# We only support deploying Sushy Emulator Podman container on controller-0
+- name: Set Sushy Emulator URL for Podman installation
+  vars:
+    _ip_address: "{{ hostvars['controller-0']['ansible_host'] }}"
   ansible.builtin.set_fact:
-    sushy_url: "http://localhost:8000"
+    _sushy_url: "http://{{ _ip_address }}:8000"

@@ -32,6 +32,9 @@ are shared among multiple roles:
 - `cifmw_use_devscripts`: (Bool) toggle OpenShift deploying using devscripts role.
 - `cifmw_openshift_crio_stats`: (Bool) toggle collecting cri-o stats in CRC deployment.
 - `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
+- `cifmw_use_vbmc`: (Bool) Toggle VirtualBMC usage. Defaults to `false`.
+- `cifmw_use_sushy_emulator`: (Bool) Toggle Sushy Emulator usage. Defaults to `true`.
+- `cifmw_sushy_redfish_bmc_protocol`: (String) The RedFish BMC protocol you would like to use with Sushy Emulator, options are `redfish` or `redfish-virtualmedia`. Defaults to `redfish-virtualmedia`
 - `cifmw_config_nmstate`: (Bool) toggle NMstate networking deployment. Default to false.
 - `cifmw_config_bmh`: (Bool) toggle Metal3 BareMetalHost CRs deployment. Default to false.
 - `cifmw_config_certmanager`: (Bool) toggle cert-manager deployment. Default to false.

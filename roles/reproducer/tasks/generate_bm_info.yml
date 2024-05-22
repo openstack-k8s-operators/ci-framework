@@ -1,0 +1,118 @@
+---
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ cifmw_reproducer_controller_basedir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - parameters
+    - artifacts
+
+- name: Convert VBMC list into a dict for better usage
+  when:
+    - cifmw_use_vbmc | default(false) | bool
+    - cifmw_virtualbmc_known_hosts is defined
+  vars:
+    keys: "{{ item.keys() | difference(['Domain name']) }}"
+    vals: "{{ keys | map('extract', item) | list }}"
+    value: "{{ dict(keys | map('lower') | zip(vals)) }}"
+    _host: "{{ item['Domain name'] | regex_replace('^cifmw-', '') }}"
+  ansible.builtin.set_fact:
+    _vbmc_info_dict: >-
+      {{
+        _vbmc_info_dict | default({}) |
+        combine({_host: value}, recursive=true)
+      }}
+    cacheable: false
+  loop: "{{ cifmw_virtualbmc_known_hosts }}"
+
+- name: Check if baremetal-info.yml exists
+  register: _stat_baremetal_info_file
+  ansible.builtin.stat:
+    path: "{{ cifmw_reproducer_controller_basedir }}/parameters/baremetal-info.yml"
+
+- name: Slurp current baremetal-info file into _oringal_cifmw_baremetal_hosts var
+  when: _stat_baremetal_info_file.stat.exists
+  block:
+    - name: Get content of baremetal-info file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_reproducer_controller_basedir }}/parameters/baremetal-info.yml"
+      register: _baremetal_info_file
+
+    - name: Interpret remote file content as yaml
+      vars:
+        _yaml: "{{ _baremetal_info_file.content | b64decode | from_yaml }}"
+      ansible.builtin.set_fact:
+        _oringal_cifmw_baremetal_hosts: "{{ _yaml.cifmw_baremetal_hosts }}"
+
+- name: Load cifmw_libvirt_manager_mac_map fact from file
+  vars:
+    _file: "{{ cifmw_reproducer_controller_basedir }}/artifacts/interfaces-info.yml"
+  when:
+    - cifmw_libvirt_manager_mac_map is not defined
+  block:
+    - name: "Slurp content of: {{ _file }}"
+      ansible.builtin.slurp:
+        src: "{{ _file }}"
+      register: _slurped_file
+
+    - name: "Set cifmw_libvirt_manager_mac_map fact from {{ _file }}"
+      vars:
+        _yaml: "{{ _slurped_file.content | b64decode | from_yaml }}"
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_mac_map: "{{ _yaml }}"
+
+
+# In this task we combine information from _cifmw_libvirt_manager_layout, cifmw_libvirt_manager_mac_map
+# and cifmw_libvirt_manager_uuids to create the libvirt_manager_bm_info_data fact.
+# to create the `baremetal-info.yml` file which is used as a source of truth for
+# for baremetal nodes. If `baremetal-info.yml` already exists we combine
+# `_oringal_cifmw_baremetal_hosts` with the updated hosts and override
+# `baremetal-info.yml`
+- name: Generate libvirt_manager_bm_info_data fact
+  when: item.key is match('cifmw-')
+  vars:
+    _host: "{{ item.key | replace('cifmw-', '') }}"
+    _uefi: >-
+      {% set _type = _host | regex_replace('-[0-9]+$', '') -%}
+      {{ _cifmw_libvirt_manager_layout.vms[_type].uefi | default(false) | bool }}
+    _data: |
+      "{{ _host }}":
+        boot_mode: "{{ _uefi | ternary('UEFI', 'legacy') }}"
+        uuid: "{{ item.value }}"
+      {% if cifmw_use_vbmc | default(false) | bool %}
+        address: "{{ _vbmc_info_dict[_host].address }}"
+        connection: "ipmi://{{ _vbmc_info_dict[_host].address }}:{{ _vbmc_info_dict[_host].port }}"
+        password: "{{ _vbmc_info_dict[_host].password }}"
+        port: {{ _vbmc_info_dict[_host].port | int }}
+        username: "{{ _vbmc_info_dict[_host].username }}"
+      {% elif cifmw_use_sushy_emulator | default(true) | bool %}
+      {% if item.value in _cifmw_sushy_emulator_instances | default([]) %}
+        connection: "{{ cifmw_sushy_redfish_bmc_protocol | default('redfish-virtualmedia') ~ '+' ~ _sushy_url }}/redfish/v1/Systems/{{ item.value }}"
+        username: "{{ cifmw_redfish_username | default('admin') }}"
+        password: "{{ cifmw_redfish_password | default('password') }}"
+      {% endif %}
+      {% endif %}
+    _with_nics: >-
+      {{
+        _data | from_yaml |
+        combine({_host: {'nics': cifmw_libvirt_manager_mac_map[_host]}},
+                recursive=true)
+      }}
+  ansible.builtin.set_fact:
+    libvirt_manager_bm_info_data: >-
+      {{
+        libvirt_manager_bm_info_data | default({}) |
+        combine((_with_nics | from_yaml), recursive=true) |
+        combine((_oringal_cifmw_baremetal_hosts | default({}) | from_yaml), recursive=true)
+      }}
+  loop: "{{ cifmw_libvirt_manager_uuids | dict2items }}"
+
+- name: Output baremetal info file
+  vars:
+    _content:
+      cifmw_baremetal_hosts: "{{ libvirt_manager_bm_info_data }}"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_reproducer_controller_basedir }}/parameters/baremetal-info.yml"
+    content: "{{ _content | to_nice_yaml }}"
+    mode: "0644"
