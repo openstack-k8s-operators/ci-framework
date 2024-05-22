@@ -1,0 +1,130 @@
+---
+# Automation section. Most of those parameters will be passed to the
+# controller-0 as-is and be consumed by the `deploy-va.sh` script.
+# Please note, all paths are on the controller-0, meaning managed by the
+# Framework. Please do not edit them!
+_arch_repo: "/home/zuul/src/github.com/openstack-k8s-operators/architecture"
+cifmw_architecture_scenario: pidone
+cifmw_arch_automation_file: pidone.yaml
+
+# HERE if you want to overload kustomization, you can uncomment this parameter
+# and push the data structure you want to apply.
+# cifmw_architecture_user_kustomize:
+#   stage_0:
+#     'network-values':
+#       data:
+#         starwars: Obiwan
+
+# HERE, if you want to stop the deployment loop at any stage, you can uncomment
+# the following parameter and update the value to match the stage you want to
+# reach. Known stages are:
+#   pre_kustomize_stage_INDEX
+#   pre_apply_stage_INDEX
+#   post_apply_stage_INDEX
+#
+# cifmw_deploy_architecture_stopper:
+
+cifmw_libvirt_manager_configuration:
+  networks:
+    osp_trunk: |
+      <network>
+        <name>osp_trunk</name>
+        <forward mode='nat'/>
+        <bridge name='osp_trunk' stp='on' delay='0'/>
+        <ip family='ipv4'
+        address='{{ cifmw_networking_definition.networks.ctlplane.network |
+                    ansible.utils.nthhost(1) }}'
+        prefix='{{ cifmw_networking_definition.networks.ctlplane.network |
+                   ansible.utils.ipaddr('prefix') }}'>
+        </ip>
+      </network>
+  vms:
+    ocp:
+      amount: 3
+      admin_user: core
+      image_local_dir: "/home/dev-scripts/pool"
+      disk_file_name: "ocp_master"
+      disksize: "105"
+      xml_paths:
+        - /home/dev-scripts/ocp_master_0.xml
+        - /home/dev-scripts/ocp_master_1.xml
+        - /home/dev-scripts/ocp_master_2.xml
+      nets:
+        - osp_trunk
+    ocp_worker:
+      amount: 4
+      admin_user: core
+      image_local_dir: "/home/dev-scripts/pool"
+      disk_file_name: "ocp_worker"
+      disksize: "105"
+      xml_paths:
+        - /home/dev-scripts/ocp_worker_0.xml
+        - /home/dev-scripts/ocp_worker_1.xml
+        - /home/dev-scripts/ocp_worker_2.xml
+        - /home/dev-scripts/ocp_worker_3.xml
+      nets:
+        - osp_trunk
+    compute:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      nets:
+        - ocpbm
+        - osp_trunk
+    controller:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+
+
+## devscript support for OCP deploy
+cifmw_devscripts_config_overrides:
+  worker_memory: 16384
+  worker_disk: 100
+  worker_vcpu: 10
+  num_extra_workers: 0
+  num_workers: 4
+  fips_mode: "{{ cifmw_fips_enabled | default(false) | bool }}"
+
+  # this needs to be overridden otherwise there won't be enough
+  # subnets to assign to all the masters and workers
+  cluster_subnet_v4: "192.168.32.0/19"
+
+# Note: with that extra_network_names "osp_trunk", we instruct
+# devscripts role to create a new network, and associate it to
+# the OCP nodes. This one is a "private network", and will hold
+# the VLANs used for network isolation.
+
+# Please create a custom env file to provide:
+# cifmw_devscripts_ci_token:
+# cifmw_devscripts_pull_secret:
+#
+# cifmw_install_yamls_defaults:
+#  NAMESPACE: openstack
+#
+
+cifmw_test_operator_tolerations:
+  - key: "testOperator"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "testOperator"
+    value: "true"
+    effect: "NoExecute"
+cifmw_test_operator_node_selector:
+  kubernetes.io/hostname: worker-3
