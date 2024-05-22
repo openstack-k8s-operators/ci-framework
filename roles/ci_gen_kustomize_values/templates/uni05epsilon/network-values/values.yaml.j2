@@ -1,5 +1,5 @@
 ---
-# source: uni07eta/network-values/values.yaml.j2
+# source: uni05epsilon/network-values/values.yaml.j2
 {% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
 {% set ns = namespace(interfaces={},
                       ocp_index=0,
@@ -29,23 +29,21 @@ data:
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
 {%  if network.tools is defined and network.tools.keys() | length > 0 %}
+    subnets:
 {%    for tool in network.tools.keys() %}
 {%      if tool is match('.*lb$') %}
 {%        set _ = ns.lb_tools.update({tool: []}) %}
 {%      endif %}
 {%    endfor %}
-{%    if network.tools.netconfig is defined  %}
-    subnets:
-      - name: subnet1
+      - allocationRanges:
+{%    for range in network.tools.netconfig[_ipv.ipvX_ranges] %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%    endfor %}
         cidr: {{ network[_ipv.network_vX] }}
         gateway: {{ omit if network[_ipv.gw_vX] is not defined else network[_ipv.gw_vX] }}
+        name: subnet1
         vlan: {{ omit if network.vlan_id is not defined else network.vlan_id }}
-        allocationRanges:
-{%    for range in network.tools.netconfig[_ipv.ipvX_ranges] %}
-          - end: {{ range.end }}
-            start: {{ range.start }}
-{%    endfor %}
-{%  endif %}
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
 {%      for tool in ns.lb_tools.keys() %}
@@ -64,35 +62,33 @@ data:
     mtu: {{ network.mtu | default(1500) }}
 {%  if network.vlan_id is defined  %}
     vlan: {{ network.vlan_id }}
-    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
-    base_iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
-{%  elif network.network_name != "ironic" %}
-    iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
-{% else %}
-    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
+{%    if ns.interfaces[network.network_name] is defined %}
+    iface: {{ network.network_name }}
+    base_iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
+{%  else %}
+{%    if ns.interfaces[network.network_name] is defined %}
+    iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
 {%  endif %}
-{%  if network.tools.multus is defined and network.network_name == "ctlplane" %}
+{%  if network.tools.multus is defined %}
     net-attach-def: |
       {
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
-        "type": "macvlan",
-        "master": "ospbr",
-        "ipam": {
-          "type": "whereabouts",
-          "range": "{{ network[_ipv.network_vX] }}",
-          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
-          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
-        }
-      }
-{%  endif %}
-{%  if network.tools.multus is defined and network.network_name == "octavia" %}
-    net-attach-def: |
-      {
-        "cniVersion": "0.3.1",
-        "name": "octavia",
+{%  if network.network_name == "octavia" %}
         "type": "bridge",
         "bridge": "octbr",
+{%  else %}
+        "type": "macvlan",
+{%  if network.vlan_id is defined%}
+        "master": "{{ network.network_name }}",
+{%  elif network.network_name == "ctlplane" %}
+        "master": "ospbr",
+{%  else %}
+        "master": "{{ ns.interfaces[network.network_name] }}",
+{%  endif %}
+{%  endif %}
         "ipam": {
           "type": "whereabouts",
           "range": "{{ network[_ipv.network_vX] }}",
@@ -111,37 +107,8 @@ data:
         }
       }
 {%  endif %}
-{%  if network.tools.multus is defined and network.network_name == "ironic" %}
-    net-attach-def: |
-      {
-        "cniVersion": "0.3.1",
-        "name": "ironic",
-        "type": "bridge",
-        "bridge": "ironic",
-        "ipam": {
-          "type": "whereabouts",
-          "range": "{{ network[_ipv.network_vX] }}",
-          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
-          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
-        }
-      }
-{%  endif %}
-{%  if network.tools.multus is defined and network.network_name not in ["ctlplane", "octavia", "ironic"] %}
-    net-attach-def: |
-      {
-        "cniVersion": "0.3.1",
-        "name": "{{ network.network_name }}",
-        "type": "macvlan",
-        "master": "{{ network.network_name if network.vlan_id is defined else ns.interfaces[network.network_name] }}",
-        "ipam": {
-          "type": "whereabouts",
-          "range": "{{ network[_ipv.network_vX] }}",
-          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
-          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
-        }
-      }
-{%  endif %}
 {% endfor %}
+
   dns-resolver:
     config:
       server:
@@ -157,15 +124,18 @@ data:
           - {{ nameserver }}
 {% endfor %}
 
+  routes:
+    config: []
+
 # Hardcoding the last IP bit since we don't have support for endpoint_annotations in the networking_mapper output
   rabbitmq:
     endpoint_annotations:
       metallb.universe.tf/address-pool: internalapi
-      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX] | ansible.utils.ipmath(85) }}
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX]  | ansible.utils.ipmath(85) }}
   rabbitmq-cell1:
     endpoint_annotations:
       metallb.universe.tf/address-pool: internalapi
-      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX] | ansible.utils.ipmath(86) }}
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX]  | ansible.utils.ipmath(86) }}
 
   lbServiceType: LoadBalancer
   storageClass: {{ cifmw_ci_gen_kustomize_values_storage_class }}
