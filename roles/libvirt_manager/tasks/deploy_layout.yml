@@ -54,10 +54,10 @@
     - workload
     - volumes
 
-- name: Manage networks if needed
+- name: Generate networking data
   when:
-    - _cifmw_libvirt_manager_layout.networks is defined
-  ansible.builtin.import_tasks: create_networks.yml
+    - cifmw_libvirt_manager_mac_map is undefined
+  ansible.builtin.include_tasks: generate_networking_data.yml
 
 - name: Ensure storage pool is present.
   when:
@@ -224,21 +224,6 @@
     command: list_vms
     uri: "qemu:///system"
   register: _vms
-
-- name: Gather the networking information of running virtual machines.
-  when: "domain_name.startswith('cifmw')"
-  ansible.builtin.include_tasks: gather_vm_networks.yml
-  loop: "{{ _vms.list_vms }}"
-  loop_control:
-    label: "{{ domain_name }}"
-    loop_var: domain_name
-
-# The destination is intentional and does not match with other references.
-- name: Dump MAC mapping
-  when: cifmw_libvirt_manager_mac_map is defined
-  ansible.builtin.copy:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/interfaces-info.yml"
-    content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
 
 - name: Extract VM UUIDs from libvirt
   block:
