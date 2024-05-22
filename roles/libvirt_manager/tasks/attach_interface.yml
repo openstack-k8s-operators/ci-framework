@@ -60,8 +60,6 @@
 
 - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
   vars:
-    _lm_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
-    # add prefix if needed/wanted
     _net_name: >-
       {{
         (cifmw_libvirt_manager_net_prefix_add | bool) |
@@ -80,6 +78,22 @@
         selectattr('source.' + _type, 'defined') |
         selectattr('source.' + _type, 'equalto', _local_bridge_name)
       }}
+    _clean_vm: "{{ vm_name | replace('cifmw-', '') }}"
+    _act_name: >-
+      {{
+        (_clean_vm is match('^ocp_master.*')) |
+        ternary(_clean_vm | replace('ocp_master', 'ocp'), _clean_vm)
+      }}
+    _lm_mac_address: >-
+      {% if cifmw_libvirt_manager_mac_map[_act_name] is defined -%}
+      {{
+        cifmw_libvirt_manager_mac_map[_act_name] |
+        selectattr('network', 'equalto', network.name) |
+        map(attribute='mac') | first
+      }}
+      {% else -%}
+      {{  '52:54:00' | community.general.random_mac }}
+      {% endif -%}
   when:
     - _attached_bridges | length == 0
   ansible.builtin.command:
