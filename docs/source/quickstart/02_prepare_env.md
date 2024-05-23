@@ -50,6 +50,10 @@ Later, we may not need to do this, if we can get rid of the hard-coded subnets c
 
 ### Multiple hypervisor
 
+~~~{warning}
+This feature isn't tested nor used by the CI Framework team.
+~~~
+
 In case you have multiple hypervisor, you may provide the following inventory
 
 ```{code-block} YAML
