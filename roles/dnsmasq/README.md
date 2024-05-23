@@ -16,7 +16,7 @@ supported in libvirt).
 * `cifmw_dnsmasq_basedir`: (String) Configuration directory location. Defaults to `/etc/cifmw-dnsmasq.d`.
 * `cifmw_dnsmasq_dns_config_file`: (String) DNS related settings configuration file path. Defaults to `{{ cifmw_dnsmasq_basedir }}/dns.conf`.
 * `cifmw_dnsmasq_listener_config_file`: (String) listener related settings configuration file path. Defaults to `{{ cifmw_dnsmasq_basedir }}/listener.conf`.
-* `cifmw_dnsmasq_global_options`: (Dict) Global options for dnsmasq. Defaults to `{}`.
+* `cifmw_dnsmasq_raw_config`: (String) Raw configure options for dnsmasq. Should be passed as a (multiline) string. Defaults to `""`.
 
 ### New network parameters
 
