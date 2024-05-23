@@ -14,7 +14,7 @@ Required to installed required packages.
 
 ## Parameters
 
-* `cifmw_sushy_emulator_basedir`: (String) Base directory. Defaults to `{{ ansible_user_dir ~ '/ci-framework-data' }}`
+* `cifmw_sushy_emulator_basedir`: (String) Base directory. Defaults to `cifmw_basedir`, which defaults to `{{ ansible_user_dir ~ '/ci-framework-data' }}`
 * `cifmw_sushy_emulator_container_name`: (String) Name of Podman container created. Defaults to `cifmw-sushy_emulator`
 * `cifmw_sushy_emulator_driver`: (String) Select between `openstack` and `libvirt` sushy emulator driver. Defaults to `libvirt`
 * `cifmw_sushy_emulator_driver_openstack_client_config_file`: (String) Path to OpenStack config file, used by OpenStack Sushi Emulator driver. Defaults to `/etc/openstack/clouds.yaml`
