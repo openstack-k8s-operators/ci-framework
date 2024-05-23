@@ -27,7 +27,7 @@ supported in libvirt).
 * `cifmw_dnsmasq_listen_addresses`: (List) List of IP addresses on which dnsmasq should be enabled. Defaults to `[]`.
 * `cifmw_dnsmasq_enable_dns`: (Bool) Toggle to enable DNS features of dnsmasq. Defaults to `false`.
 * `cifmw_dnsmasq_addresses`: (List) Specify a list of IP addresses to return for any host in the given domains. Defaults to `[]`.
-* `cifmw_dnsmasq_domainname`: (String) DNS domain name used for the DHCP server. Defaults to `''`.
+* `cifmw_dnsmasq_domain_name`: (String) DNS domain name used for the DHCP server. Defaults to `''`.
 
 #### Ranges mapping
 
