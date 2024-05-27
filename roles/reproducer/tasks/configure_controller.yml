@@ -116,34 +116,6 @@
         dest: "{{ _ctl_reproducer_basedir }}/parameters/interfaces-info.yml"
         content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
 
-    # Deploy Sushy Emulator on the Ansible controller,
-    - name: Deploy Sushy Emulator service container
-      tags:
-        - bootstrap
-        - bootstrap_layout
-      when: cifmw_use_sushy_emulator | default(true) | bool
-      block:
-        - name: Deploy Sushy Emulator
-          vars:
-            cifmw_sushy_emulator_hypervisor_target: "{{ cifmw_target_host | default('localhost') }}"
-            cifmw_sushy_emulator_install_type: podman
-            cifmw_sushy_emulator_hypervisor_target_connection_ip: "{{ network_bridge_info['cifmw-public'] }}"
-          ansible.builtin.include_role:
-            name: sushy_emulator
-
-        - name: Let the project know we have Sushy Emulator available
-          ansible.builtin.set_fact:
-            _sushy_emulator_available: true
-
-    - name: Generate baremetal-info fact
-      ansible.builtin.import_tasks: generate_bm_info.yml
-
-    - name: Verify connection to baremetal VMs via Sushy Emulator
-      when: _sushy_emulator_available
-      ansible.builtin.include_role:
-        name: sushy_emulator
-        tasks_from: verify.yml
-
     - name: Inject other Hypervisor SSH keys
       when:
         - hostvars[host]['priv_ssh_key'] is defined
@@ -325,6 +297,34 @@
           until: _async_status.finished
           retries: 100
           delay: 5
+
+    # Deploy Sushy Emulator on the Ansible controller,
+    - name: Deploy Sushy Emulator service container
+      tags:
+        - bootstrap
+        - bootstrap_layout
+      when: cifmw_use_sushy_emulator | default(true) | bool
+      block:
+        - name: Deploy Sushy Emulator
+          vars:
+            cifmw_sushy_emulator_hypervisor_target: "{{ cifmw_target_host | default('localhost') }}"
+            cifmw_sushy_emulator_install_type: podman
+            cifmw_sushy_emulator_hypervisor_target_connection_ip: "{{ network_bridge_info['cifmw-public'] }}"
+          ansible.builtin.include_role:
+            name: sushy_emulator
+
+        - name: Let the project know we have Sushy Emulator available
+          ansible.builtin.set_fact:
+            _sushy_emulator_available: true
+
+    - name: Generate baremetal-info fact
+      ansible.builtin.import_tasks: generate_bm_info.yml
+
+    - name: Verify connection to baremetal VMs via Sushy Emulator
+      when: _sushy_emulator_available
+      ansible.builtin.include_role:
+        name: sushy_emulator
+        tasks_from: verify.yml
 
     - name: Install ansible dependencies
       ansible.builtin.pip:
