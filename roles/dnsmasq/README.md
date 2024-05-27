@@ -14,7 +14,11 @@ supported in libvirt).
 ## Common Parameters
 
 * `cifmw_dnsmasq_basedir`: (String) Configuration directory location. Defaults to `/etc/cifmw-dnsmasq.d`.
-* `cifmw_dnsmasq_global_options`: (Dict) Global options for dnsmasq. Defaults to `{}`.
+* `cifmw_dnsmasq_enable_dns`: (Bool) Toggle to enable DNS features of dnsmasq. Defaults to `false`.
+* `cifmw_dnsmasq_exclude_lo`: (Bool) Toggle to disable binding on loopback interface to avoid conflicts. Defaults to `false`.
+* `cifmw_dnsmasq_dns_config_file`: (String) DNS related settings configuration file path. Defaults to `{{ cifmw_dnsmasq_basedir }}/dns.conf`.
+* `cifmw_dnsmasq_listener_config_file`: (String) listener related settings configuration file path. Defaults to `{{ cifmw_dnsmasq_basedir }}/listener.conf`.
+* `cifmw_dnsmasq_raw_config`: (String) Raw configure options for dnsmasq. Should be passed as a (multiline) string. Defaults to `""`.
 
 ### New network parameters
 
@@ -22,11 +26,15 @@ supported in libvirt).
 * `cifmw_dnsmasq_network_state`: (String) Network status. Must be either `present` or `absent`.
 * `cifmw_dnsmasq_network_definition`: (Dict) Mapping representing the network definition.
 * `cifmw_dnsmasq_network_definition.ranges`: (List[mapping]) List of ranges associated to the network.
-* `cifmw_dnsmasq_network_listen_dns`: (List) List of IP addresses to listen to for DNS queries.
+* `cifmw_dnsmasq_forwarders`: (List) List of upstream DNS servers used as forwarders. Defaults to `[]`
+* `cifmw_dnsmasq_interfaces`: (List) List of interfaces on which dnsmasq should be enabled. Defaults to `[]`.
+* `cifmw_dnsmasq_listen_addresses`: (List) List of IP addresses on which dnsmasq should be enabled. Defaults to `[]`.
+* `cifmw_dnsmasq_addresses`: (List) Specify a list of IP addresses to return for any host in the given domains. Defaults to `[]`.
 
 #### Ranges mapping
 
 * `label`: (String) Network label ("tag" in dnsmasq manual).
+* `domain`: (String) domain name associated to the dhcp range.
 * `start_v4`: (String) IPv4 starting IP.
 * `start_v6`: (String) IPv6 starting IP.
 * `prefix_length_v4`: (Int) IPv4 prefix length. Defaults to `24`.

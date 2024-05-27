@@ -18,9 +18,16 @@
 - name: Converge
   hosts: all
   vars:
-    cifmw_dnsmasq_global_options:
-      dhcp-authoritative:
-      log-dhcp:
+    cifmw_dnsmasq_enable_dns: true
+    cifmw_dnsmasq_interfaces:
+      - mol-test-1
+      - mol-test-2
+    cifmw_dnsmasq_listen_addresses:
+      - "192.168.253.9"
+      - "192.168.254.9"
+    cifmw_dnsmasq_raw_config: |-
+      dhcp-authoritative
+      log-dhcp
   roles:
     - role: "dnsmasq"
   tasks:
@@ -33,6 +40,7 @@
             - label: ian
               start_v4: 192.168.254.10
               start_v6: "2345:0425:2CA1::0567:5673:23b5"
+              domain: "starwars.lan"
               options:
                 - "3,192.168.254.1"
                 - "option6:dns-server,[2345:0425:2CA1::0567:5673:0001]"
@@ -44,12 +52,13 @@
       vars:
         cifmw_dnsmasq_network_name: startrek
         cifmw_dnsmasq_network_state: present
-        cifmw_dnsmasq_network_listen_dns:
+        cifmw_dnsmasq_listen_addresses:
           - "192.168.253.1"
           - "2345:0426:2CA1::0567:5673:23b0"
         cifmw_dnsmasq_network_definition:
           ranges:
             - label: ian
+              domain: "startrek.lan"
               start_v4: 192.168.253.10
               prefix_length_v4: 26
               start_v6: "2345:0426:2CA1::0567:5673:23b5"
@@ -99,19 +108,9 @@
              'ci-framework-data',
              'artifacts') | path_join
           }}
-        fname: "{{ item | basename }}"
-      ansible.builtin.copy:
-        remote_src: true
+      ansible.posix.synchronize:
         src: "{{ item }}"
-        dest: "{{ dest_dir }}/{{ fname }}"
+        dest: "{{ dest_dir }}"
       loop:
         - /etc/cifmw-dnsmasq.conf
-        - /etc/cifmw-dnsmasq.d/starwars.conf
-        - /etc/cifmw-dnsmasq.d/starwars-hosts.conf
-        - /etc/cifmw-dnsmasq.d/startrek.conf
-        - /etc/cifmw-dnsmasq.d/startrek-hosts.conf
-
-    - name: Cleanup dnsmasq
-      ansible.builtin.import_role:
-        name: "dnsmasq"
-        tasks_from: "cleanup.yml"
+        - /etc/cifmw-dnsmasq.d/

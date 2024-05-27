@@ -1,20 +1,26 @@
 # Managed by ci-framework/dnsmasq
-{% if cifmw_dnsmasq_network_listen_dns is defined and cifmw_dnsmasq_network_listen_dns | length > 0 %}
-{%   for listener in cifmw_dnsmasq_network_listen_dns if listener | length > 0                      %}
-listen-address={{ listener }}
-{%   endfor                                                                                         %}
-{% endif                                                                                            %}
-{% for range in cifmw_dnsmasq_network_definition['ranges']                                          %}
-{%   if range.start_v4 is defined and range.start_v4 | length > 0                                   %}
-dhcp-range=set:{{ range.label }},{{ range.start_v4 }},static,{{ (range.start_v4 + "/" + range.prefix_length_v4 | default(24) | string) |  ansible.utils.ipaddr('netmask') }},{{ range.ttl | default('1h') }}
+
+{% for range in cifmw_dnsmasq_network_definition['ranges']                                         -%}
+{%   if range.start_v4 is defined and range.start_v4 | length > 0                                  -%}
+dhcp-range=set:{{ range.label }},{{ range.start_v4 }},static,{{ (range.start_v4 + "/" + range.prefix_length_v4 | default(24) | string) | ansible.utils.ipaddr('netmask') }},{{ range.ttl | default('1h') }}
+{%      if range.domain is defined and range.domain | length > 0                                   -%}
+{%          set range_v4_allowed = (range.start_v4 ~ "/" ~ range.prefix_length_v4 | default('24')) |
+                                    ansible.utils.ipaddr('range_usable') | replace("-",",")         %}
+domain={{ range.domain }},{{ range_v4_allowed }},local
+{%      endif                                                                                       %}
 {%   endif                                                                                          %}
-{%   if range.start_v6 is defined and range.start_v6 | length > 0                                   %}
+{%   if range.start_v6 is defined and range.start_v6 | length > 0                                  -%}
 dhcp-range=set:{{ range.label }},{{ range.start_v6 }},static,{{ range.prefix_length_v6 | default('64') }},{{ range.ttl | default('1h') }}
+{%      if range.domain is defined and range.domain | length > 0                                   -%}
+{%          set range_v6_allowed = (range.start_v6 ~ "/" ~ range.prefix_length_v6 | default('64')) |
+                                    ansible.utils.ipaddr('range_usable') | replace("-",",")         %}
+domain={{ range.domain }},{{ range_v6_allowed }},local
+{%      endif                                                                                       %}
 {%   endif                                                                                          %}
-{%   for option in range['options'] | default([])                                                   %}
+{%   for option in range['options'] | default([])                                                  -%}
 dhcp-option=tag:{{ range.label }},{{ option }}
 {%   endfor                                                                                         %}
-{%   for option in range['options_force'] | default([])                                             %}
+{%   for option in range['options_force'] | default([])                                            -%}
 dhcp-option-force=tag:{{ range.label }},{{ option }}
 {%   endfor                                                                                         %}
 {% endfor                                                                                           %}
