@@ -100,6 +100,16 @@
                 replace: >-
                   {{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}
 
+            # Note(Lewis): Only needed for CRC => 2.32.0-4.14.8
+            - name: Configure dnsmasq listen-address to listen on both br-ex and ci-private-network
+              when:
+                - not _dnsmasq.stat.exists
+              become: true
+              ansible.builtin.lineinfile:
+                path: "{{ _dnsmasq_config }}"
+                insertafter: '^listen-address='
+                line: "listen-address={{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}"
+
     - name: Restart dnsmasq service if used
       become: true
       when:
@@ -196,6 +206,11 @@
       ansible.builtin.set_fact:
         persistent_ssh_key: "{{ pub_key_slurp['content'] | b64decode }}"
 
+    - name: Load network parameters
+      register: _cifmw_multinode_customizations_crc_net_env_slurp
+      ansible.builtin.slurp:
+        src: "/etc/ci/env/networking-info.yml"
+
     - name: Check if cloud-init is overriding NM settings
       become: true
       ansible.builtin.stat:
@@ -223,13 +238,26 @@
       ansible.builtin.command:
         cmd: "nmcli -g general.connection device show eth0"
 
-    - name: Add the deployment DNS in the controller resolv.conf
+    - name: Prepend CRC DNS server in the controllers default Network Manager connection configuation
       vars:
-        dns_servers_string: "192.168.122.10 {{ ansible_facts['dns']['nameservers'][0:1] | join(' ') }}"
+        _decoded_net_env: >-
+          {{
+            _cifmw_multinode_customizations_crc_net_env_slurp['content'] |
+            b64decode | from_yaml
+          }}
+        _crc_default_net_ip: >-
+          {{
+            _decoded_net_env.crc_ci_bootstrap_networks_out.crc.default.ip |
+            ansible.utils.ipaddr('address')
+          }}
+        dns_servers_string: >-
+          {{
+           ( _crc_default_net_ip, ansible_facts['dns']['nameservers'][0:1] | join(' ') ) | list
+          }}
       become: true
       ansible.builtin.shell:
         cmd: |-
-          nmcli con mod '{{ controller_default_connection_out.stdout | trim }}' ipv4.dns '{{ dns_servers_string }}' ipv4.route-metric 100;
+          nmcli con mod '{{ controller_default_connection_out.stdout | trim }}' ipv4.dns '{{ dns_servers_string | join(' ') }}' ipv4.route-metric 100;
           nmcli con up '{{ controller_default_connection_out.stdout | trim }}';
 
 - name: "Ensure persistent SSH access"
