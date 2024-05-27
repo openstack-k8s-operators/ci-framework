@@ -81,6 +81,92 @@
   loop_control:
     label: "{{ item.name }}"
 
+
+## Ensure we get dnsmasq DHCP service for all created networks
+# Refreshing network facts will ensure we get the new interfaces.
+# They (usually?) have the same name as the network itself.
+- name: Refresh networking facts on host
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all,!min'
+      - network
+
+- name: Build needed network/dnsmasq related content
+  vars:
+    _name: "{{ item | replace('-', '_') }}"
+    _no_prefix_name: "{{ _name | regex_replace('cifmw[-_]','') }}"
+    _ipv6: >-
+      {{
+        (ansible_facts[_name].ipv6 is defined) |
+        ternary(ansible_facts[_name].ipv6 |
+                selectattr('scope', 'equalto', 'global') | first, {})
+      }}
+    _dns_options: |-
+      {% if ansible_facts[_name].ipv4 is defined -%}
+      - "option:dns-server,{{ ansible_facts[_name].ipv4.address }}"
+      {% endif -%}
+      {% if ansible_facts[_name].ipv6 is defined -%}
+      - "option6:dns-server,[{{ _ipv6.address }}]"
+      {% endif -%}
+    _dns_listener:
+      - "{{ ansible_facts[_name].ipv4.address | default('') }}"
+      - "{{ _ipv6.address | default('') }}"
+    _local_net_info:
+      - name: "{{ _no_prefix_name }}"
+        original_name: "{{ item }}"
+        ranges:
+          - label: "{{ _no_prefix_name }}"
+            start_v4: >-
+              {%- if ansible_facts[_name].ipv4 is defined -%}
+              {{ ansible_facts[_name].ipv4.address | ansible.utils.ipmath(1) }}
+              {%- endif -%}
+            prefix_length_v4: >-
+              {%- if ansible_facts[_name].ipv4 is defined -%}
+              {{ ansible_facts[_name].ipv4.prefix }}
+              {%- endif -%}
+            start_v6: >-
+              {%- if ansible_facts[_name].ipv6 is defined -%}
+              {{ _ipv6.address | ansible.utils.ipmath(1) }}
+              {%- endif -%}
+            prefix_length_v6: >-
+              {%- if ansible_facts[_name].ipv6 is defined -%}
+              {{ _ipv6.prefix }}
+              {%- endif -%}
+            options: "{{ _dns_options | from_yaml }}"
+  ansible.builtin.set_fact:
+    _network_data: "{{ _network_data | default([]) + _local_net_info }}"
+    _dns_listeners: >-
+      {{ (_dns_listeners | default([])) + [item] }}
+  loop: "{{ (networks | map(attribute='name') | flatten) }}"
+
+- name: Deploy dnsmasq
+  vars:
+    cifmw_dnsmasq_enable_dns: true
+    cifmw_dnsmasq_interfaces: "{{ _dns_listeners }}"
+    cifmw_dnsmasq_exclude_lo: true
+  ansible.builtin.import_role:
+    name: dnsmasq
+
+- name: Create dnsmasq networks
+  when:
+    - item.original_name not in _no_dnsmasq
+  vars:
+    _no_dnsmasq: >-
+      {{
+        cifmw_libvirt_manager_no_dnsmasq_nets_defaults +
+        cifmw_libvirt_manager_no_dnsmasq_nets
+      }}
+    cifmw_dnsmasq_network_name: "{{ item.name }}"
+    cifmw_dnsmasq_network_state: present
+    cifmw_dnsmasq_network_definition: "{{ item }}"
+    cifmw_dnsmasq_network_listen_addresses: "{{ _dns_address[item.name] }}"
+  ansible.builtin.include_role:
+    name: dnsmasq
+    tasks_from: manage_network.yml
+  loop: "{{ _network_data }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 - name: Gather the status of firewall service.
   become: true
   ansible.builtin.service:

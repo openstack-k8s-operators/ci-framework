@@ -139,47 +139,52 @@
           --pool oooq_pool
       loop: "{{ ansible_libvirt_pools['oooq_pool'].volumes | default([]) }}"
 
-    - name: Get temporary key status
-      register: _tmp_key
-      ansible.builtin.stat:
+- name: Get temporary key status
+  register: _tmp_key
+  ansible.builtin.stat:
+    path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
+
+- name: Remove temporary ssh key from authorized_keys
+  when:
+    - _tmp_key.stat.exists
+  block:
+    - name: Get public key
+      register: _pub_key
+      ansible.builtin.slurp:
         path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
 
-    - name: Remove temporary ssh key from authorized_keys
-      when:
-        - _tmp_key.stat.exists
-      block:
-        - name: Get public key
-          register: _pub_key
-          ansible.builtin.slurp:
-            path: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key.pub"
-
-        - name: Remove public key
-          ansible.posix.authorized_key:
-            user: "{{ ansible_user_id }}"
-            key: "{{ _pub_key['content'] | b64decode }}"
-            state: absent
-
-        - name: Remove keypair
-          ansible.builtin.file:
-            state: absent
-            path: "{{ ansible_user_dir }}/.ssh/{{ item }}"
-          loop:
-            - cifmw_reproducer_key.pub
-            - cifmw_reproducer_key
-
-    - name: Remove data directories and files
-      ansible.builtin.file:
-        path: "{{ cifmw_libvirt_manager_basedir }}/{{ item }}"
+    - name: Remove public key
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user_id }}"
+        key: "{{ _pub_key['content'] | b64decode }}"
         state: absent
-      loop:
-        - workload
-        - images
-        - volumes
-        - artifacts/interfaces-info.yml
-        - artifacts/libvirt-uuids.yml
-        - artifacts/virtual-nodes.yml
 
-    - name: Clean virtualBMC
-      ansible.builtin.import_role:
-        name: virtualbmc
-        tasks_from: cleanup.yml
+    - name: Remove keypair
+      ansible.builtin.file:
+        state: absent
+        path: "{{ ansible_user_dir }}/.ssh/{{ item }}"
+      loop:
+        - cifmw_reproducer_key.pub
+        - cifmw_reproducer_key
+
+- name: Remove data directories and files
+  ansible.builtin.file:
+    path: "{{ cifmw_libvirt_manager_basedir }}/{{ item }}"
+    state: absent
+  loop:
+    - workload
+    - images
+    - volumes
+    - artifacts/interfaces-info.yml
+    - artifacts/libvirt-uuids.yml
+    - artifacts/virtual-nodes.yml
+
+- name: Clean virtualBMC
+  ansible.builtin.import_role:
+    name: virtualbmc
+    tasks_from: cleanup.yml
+
+- name: Clean dnsmasq
+  ansible.builtin.import_role:
+    name: dnsmasq
+    tasks_from: cleanup.yml
