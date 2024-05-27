@@ -49,6 +49,9 @@ networks.
 * `cifmw_devscripts_external_net` (dict) Key/value pair containing information
   about the network infrastructure.
   Refer [section](#supported-keys-in-cifmw_devscripts_external_net).
+* `cifmw_devscripts_cinder_volume_pvs` (list) a list of physical disks to be
+  used for creating cinder-volumes volume-group. By default, the list contains
+  `/dev/vda`.
 
 ### Secrets management
 
