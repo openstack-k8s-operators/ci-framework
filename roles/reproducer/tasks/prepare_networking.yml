@@ -1,4 +1,22 @@
 ---
+- name: Ensure we get latest OCP config
+  ansible.builtin.include_role:
+    name: "devscripts"
+    tasks_from: "build_config.yml"
+
+- name: Ensure NetworkManager is configured to use dnsmasq
+  become: true
+  notify: Restart NetworkManager
+  ansible.builtin.copy:
+    dest: "{{ cifmw_reproducer_nm_dnsmasq }}"
+    mode: "0644"
+    content: |
+      [main]
+      dns=dnsmasq
+
+- name: Flush handlers for NetworkManager restart
+  ansible.builtin.meta: flush_handlers
+
 - name: Ensure no default networks exists
   vars:
     net_name: "{{ item }}"
@@ -52,3 +70,23 @@
   ansible.builtin.include_role:
     name: libvirt_manager
     tasks_from: generate_networking_data.yml
+
+- name: Delegate our domains to our own instance
+  become: true
+  notify: Restart NetworkManager
+  vars:
+    _ip_4: >-
+      {{ _libvirt_manager_networking.networks.ctlplane.gw_v4 | default('') }}
+    _ip_6: >-
+      {{ _libvirt_manager_networking.networks.ctlplane.gw_v6 | default('') }}
+    _domain: "{{ cifmw_devscripts_config.base_domain }}"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_reproducer_nm_delegation }}"
+    mode: "0644"
+    content: |
+      # Managed by ci-framework/reproducer
+      server=/{{ _domain }}/127.0.0.2
+      server=/{{ _domain }}/::2
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

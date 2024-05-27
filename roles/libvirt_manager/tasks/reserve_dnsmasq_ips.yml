@@ -1,0 +1,27 @@
+---
+# Reserve IPs in dnsmasq service, based on:
+# - networking_mapper output (provides IPs and MAC)
+# - networks configured on the host (_network_data fact built
+#   in the create_networks.yml tasks)
+
+- name: Loop on host IPs
+  when:
+    - host_data.value.networks[_cleaned_netname] is defined
+  vars:
+    _net_name: >-
+      {{ (net.name is match '.*osp_trunk$') | ternary('ctlplane', net.name) }}
+    _cleaned_netname: "{{ _net_name | replace('cifmw_', '') }}"
+    _net_data: "{{ host_data.value.networks[_cleaned_netname] }}"
+    cifmw_dnsmasq_host_network: "{{ net.name }}"
+    cifmw_dnsmasq_host_name: "{{ host_data.key }}"
+    cifmw_dnsmasq_host_state: 'present'
+    cifmw_dnsmasq_host_mac: "{{ _net_data.mac_addr }}"
+    cifmw_dnsmasq_host_ipv4: "{{ _net_data.ip_v4 | default('') }}"
+    cifmw_dnsmasq_host_ipv6: "{{ _net_data.ip_v6 | default('') }}"
+  ansible.builtin.include_role:
+    name: "dnsmasq"
+    tasks_from: "manage_host.yml"
+  loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
+  loop_control:
+    label: "{{ host_data.key }} - {{ net.name }}"
+    loop_var: "host_data"

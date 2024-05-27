@@ -29,7 +29,7 @@
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
     _networks:
       public:
-        range: "192.168.100.0/24"
+        range: "192.168.101.0/24"
       osp_trunk:
         default: true
         range: "192.168.140.0/24"
@@ -80,11 +80,8 @@
             <forward mode='nat'/>
             <bridge name='public' stp='on' delay='0'/>
             <mac address='52:54:00:6a:f2:dc'/>
+            <dns enable="no"/>
             <ip family='ipv4' address='{{ _networks.public.range | ansible.utils.nthhost(1) }}' prefix='24'>
-              <dhcp>
-                <range start='{{ _networks.public.range | ansible.utils.nthhost(10) }}'
-                end='{{ _networks.public.range | ansible.utils.nthhost(100) }}'/>
-              </dhcp>
             </ip>
           </network>
         osp_trunk: |-
@@ -93,6 +90,7 @@
             <forward mode='nat'/>
             <bridge name='osp_trunk' stp='on' delay='0'/>
             <mac address='52:54:00:fd:be:d0'/>
+            <dns enable="no"/>
             <ip family='ipv4' address='{{ _networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
             </ip>
           </network>
@@ -102,7 +100,7 @@
       block:
         - name: Load networking definition from scenario file
           ansible.builtin.include_vars:
-            file: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/reproducers/networking-definition.yml"
+            file: "./vars/networking-definition.yml"
 
         - name: Run reproducer
           ansible.builtin.import_role:
@@ -210,6 +208,37 @@
               - _cmp0_ping.rc == 0
 
       always:
+        - name: Copy all dnsmasq generated content
+          vars:
+            _log_dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/dnsmasq"
+          block:
+            - name: Create dnsmasq dir
+              ansible.builtin.file:
+                path: "{{ _log_dest }}"
+                state: directory
+                mode: "0755"
+
+            - name: Get journalctl in a file
+              become: true
+              register: _dnsmasq_journal
+              ansible.builtin.command:
+                cmd: journalctl -u cifmw-dnsmasq.service
+
+            - name: Dump journalctl output
+              become: true
+              ansible.builtin.copy:
+                dest: "{{ _log_dest }}/journalctl.log"
+                content: "{{ _dnsmasq_journal.stdout }}"
+                mode: "0644"
+
+            - name: Copy all dnsmasq config
+              ansible.posix.synchronize:
+                src: "{{ item }}"
+                dest: "{{ _log_dest}}"
+              loop:
+                - /etc/cifmw-dnsmasq.conf
+                - /etc/cifmw-dnsmasq.d/
+
         - name: Gather logs from nested controller-0
           vars:
             _log_dest: "{{ ansible_user_dir }}/ci-framework-data/logs/controller-0"
@@ -221,11 +250,8 @@
                 mode: "0755"
 
             - name: Sync logs from controller-0
+              failed_when: false
               ansible.builtin.shell:  # noqa: command-instead-of-module
                 cmd: |-
                   rsync -r zuul@controller-0:"*.log" {{ _log_dest }};
                   rsync -r zuul@controller-0:ci-framework-data {{ _log_dest }};
-
-
-#  TODO: Add some more files from the reproducer itself, especially
-#  network related content and add related checks here.
