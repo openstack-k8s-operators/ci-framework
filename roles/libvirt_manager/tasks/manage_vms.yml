@@ -54,22 +54,20 @@
     - inventory_hostname != 'localhost'
     - inventory_hostname != 'instance'  # needed for molecule
     - _need_start | bool
-  delegate_to: localhost
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
-    proxy_hostname: "{{ ansible_host | default(inventory_hostname) }}"
-  ansible.builtin.blockinfile:
-    create: true
-    path: "{{ lookup('env', 'HOME') }}/.ssh/config"
-    marker: "## {mark} {{ vm_ip.nic.host }} {{ inventory_hostname }}"
-    mode: "0600"
-    block: |-
-      Host {{ vm_ip.nic.host }} {{ vm_ip.nic.host }}.{{ inventory_hostname }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
-        ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ proxy_hostname }}
-        Hostname {{ extracted_ip }}
-        User {{ 'core' if vm_ip.nic.host is match('^(crc|ocp).*') else 'zuul' }}
-        StrictHostKeyChecking no
-        UserKnownHostsFile /dev/null
+    cifmw_ssh_jumper_config:
+      target: localhost
+      ssh_dir: "{{ lookup('env', 'HOME') }}/.ssh"
+      hostname: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+      user: "{{ 'core' if vm_ip.nic.host is match('^(crc|ocp).*') else 'zuul' }}"
+      proxy_host: "{{ ansible_host | default(inventory_hostname) }}"
+      proxy_user: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+      patterns:
+        - "{{ vm_ip.nic.host }}"
+        - "{{ vm_ip.nic.host }}.{{ inventory_hostname }}"
+        - "cifmw-{{ vm_ip.nic.host }}"
+  ansible.builtin.include_role:
+    name: ssh_jumper
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
@@ -79,25 +77,22 @@
   when:
     - _need_start | bool
   vars:
-    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
-    identity_file: >-
-      {{
-        cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type is match('^ocp.*') else
-        ansible_user_dir ~ '/.crc/machines/crc/id_ecdsa' if vm_type == 'crc' else
-        ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
-      }}
-  ansible.builtin.blockinfile:
-    create: true
-    path: "{{ ansible_user_dir }}/.ssh/config"
-    marker: "## {mark} {{ vm_ip.nic.host }}"
-    mode: "0600"
-    block: |-
-      Host {{ vm_ip.nic.host }} {{ vm_ip.nic.host }}.{{ inventory_hostname }} cifmw-{{ vm_ip.nic.host }} {{ extracted_ip }}
-        Hostname {{ extracted_ip }}
-        User {{ 'core' if vm_ip.nic.host is match('^(crc|ocp)') else 'zuul' }}
-        IdentityFile {{ identity_file }}
-        StrictHostKeyChecking no
-        UserKnownHostsFile /dev/null
+    cifmw_ssh_jumper_config:
+      ssh_dir: "{{ ansible_user_dir }}/.ssh"
+      hostname: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
+      user: "{{ 'core' if vm_ip.nic.host is match('^(crc|ocp).*') else 'zuul' }}"
+      identity_file: >-
+        {{
+          cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type is match('^ocp.*') else
+          ansible_user_dir ~ '/.crc/machines/crc/id_ecdsa' if vm_type == 'crc' else
+          ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
+        }}
+      patterns:
+        - "{{ vm_ip.nic.host }}"
+        - "{{ vm_ip.nic.host }}.{{ inventory_hostname }}"
+        - "cifmw-{{ vm_ip.nic.host }}"
+  ansible.builtin.include_role:
+    name: ssh_jumper
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
