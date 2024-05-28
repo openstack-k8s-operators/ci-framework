@@ -70,11 +70,31 @@
   become: true
   when:
     - _act == 'install'
-  ansible.builtin.systemd_service:
-    name: cifmw-dnsmasq.service
-    state: started
-    enabled: true
-    daemon-reload: true
+  block:
+    - name: Enable and start service
+      ansible.builtin.systemd_service:
+        name: cifmw-dnsmasq.service
+        state: started
+        enabled: true
+        daemon-reload: true
+  rescue:
+    - name: Get journalctl in a file
+      become: true
+      register: _dnsmasq_journal
+      ansible.builtin.command:
+        cmd: journalctl -u cifmw-dnsmasq.service
+
+    - name: Dump journalctl output
+      become: true
+      ansible.builtin.copy:
+        dest: "{{ cifmw_dnsmasq_basedir }}/startup-failure.log"
+        content: "{{ _dnsmasq_journal.stdout }}"
+        mode: "0644"
+
+    - name: Fail for good
+      ansible.builtin.fail:
+        msg: >-
+          Caught failure, check {{ cifmw_dnsmasq_basedir }}/startup-failure.log
 
 - name: Stop service
   become: true
