@@ -69,6 +69,94 @@ supported in libvirt).
         tasks_from: manage_network.yml
 ```
 
+### Host record parameters
+
+* `cifmw_dnsmasq_host_record`: (List[mapping]) List of host records to add.
+
+#### Host record mapping
+
+* `state`: (String) Host record status. Must be either `present` or `absent`.
+* `ips`: (List[string]) List of IP addresses for the host record.
+* `names`: (List[string]) List of names for the host record.
+
+#### Examples
+
+```yaml
+- name: Add host-records
+  vars:
+    cifmw_dnsmasq_host_record:
+      - state: present
+        ips:
+          - 192.0.2.3
+          - '2001:db8::3'
+        names:
+          - enterprise.staralliance.startrek.lan
+      - state: present
+        ips:
+          - 192.0.2.4
+          - '2001:db8::4'
+        names:
+          - voyager.staralliance.startrek.lan
+  ansible.builtin.include_role:
+    name: dnsmasq
+    tasks_from: manage_host_record.yml
+```
+
+### New forwarder parameters
+
+* `cifmw_dnsmasq_forwarder`: (List[mapping]) List of forwarders, server address and domains the forwarder should used for.
+
+#### Forwarder mapping
+
+* `state`: (String) Forwarder status. Must be either `present` or `absent`.
+* `server`: (String) IP address of the dns server to forward lookups to.
+* `domains`: (List[string]) List of domains to use this server for.
+
+#### Examples
+
+```yaml
+- name: Add forwarder
+  vars:
+    cifmw_dnsmasq_forwarder:
+      - state: present
+        server: 192.0.2.10
+        domains:
+         - theborg.startrek.lab
+         - staralliance.startrek.lab
+  ansible.builtin.include_role:
+    name: dnsmasq
+    tasks_from: manage_forwarder.yml
+```
+
+### New address parameters
+
+* `cifmw_dnsmasq_address`: (List[mapping]) List for address to return for any host in the given domains.
+
+#### Address mapping
+
+* `state`: (String) Address status. Must be either `present` or `absent`.
+* `ipaddr`: (String) IP address to return for hosts in the given domains.
+* `domains`: (List[string]) List of domains.
+
+#### Examples
+
+```yaml
+    - name: Add addresses
+      vars:
+        cifmw_dnsmasq_address:
+          - state: present
+            ipaddr: 192.0.2.20
+            domains:
+              - apps.ocp.theborg.startrek.lab
+          - state: present
+            ipaddr: 192.0.2.30
+            domains:
+              - apps.ocp.staralliance.startrek.lab
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_address.yml
+```
+
 ### New host parameters
 
 * `cifmw_dnsmasq_host_network`: (String) Existing network name.

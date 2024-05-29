@@ -1,0 +1,30 @@
+- name: Assert we have needed forwarder data
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_dnsmasq_forwarder is defined
+      - (cifmw_dnsmasq_forwarder | type_debug) == "list"
+
+- name: Assert each forwarder element have needed data
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - item.state is defined
+      - item.state in ['present', 'absent']
+      - item.server is defined
+      - item.domains is defined
+      - (item.domains | type_debug) == "list"
+  loop: "{{ cifmw_dnsmasq_forwarder }}"
+
+- name: Add/Remove forwarder
+  become: true
+  notify: Restart dnsmasq
+  ansible.builtin.lineinfile:
+    create: true
+    path: "{{ cifmw_dnsmasq_basedir }}/forwarders.conf"
+    mode: '0644'
+    line: >-
+      server={{ ([''] + item.domains + [item.server]) | join('/') }}
+    state: "{{ item.state }}"
+    validate: "/usr/sbin/dnsmasq -C %s --test"
+  loop: "{{ cifmw_dnsmasq_forwarder }}"

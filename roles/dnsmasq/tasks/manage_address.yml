@@ -1,0 +1,30 @@
+- name: Assert we have needed address data
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_dnsmasq_address is defined
+      - (cifmw_dnsmasq_address | type_debug) == "list"
+
+- name: Assert each address element have needed data
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - item.state is defined
+      - item.state in ['present', 'absent']
+      - item.ipaddr is undefined or (item.ipaddr is defined and (item.ipaddr | ansible.utils.ipaddr))
+      - item.domains is defined
+      - (item.domains | type_debug) == "list"
+  loop: "{{ cifmw_dnsmasq_address }}"
+
+- name: Add/Remove address
+  become: true
+  notify: Restart dnsmasq
+  ansible.builtin.lineinfile:
+    create: true
+    path: "{{ cifmw_dnsmasq_basedir }}/addresses.conf"
+    mode: '0644'
+    line: >-
+      address={{ ([''] + item.domains | default([]) + [item.ipaddr | default('')]) | join('/') }}
+    state: "{{ item.state }}"
+    validate: "/usr/sbin/dnsmasq -C %s --test"
+  loop: "{{ cifmw_dnsmasq_address }}"
