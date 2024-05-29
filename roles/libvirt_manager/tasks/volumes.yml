@@ -19,17 +19,80 @@
 #   - number of volumes
 #   - volume size
 
-
-- name: Create volume in the storage pool.
-  ansible.builtin.command:
-    cmd: >-
-      virsh -c qemu:///system
-      vol-create-as
-      --pool {{ cifmw_libvirt_manager_storage_pool }}
-      --name {{ vol_prefix }}-vol-{{ vol_id }}
-      --capacity {{ vol_size }}
-      --format {{ vol_format | default('qcow2') }}
+- name: Check if we have a source candidate
+  register: _src_overlay
+  vars:
+    _vol_name: >-
+      {{
+        ['base-',
+         vol_prefix, '-vol-',vol_id] | join('')
+      }}
+  ansible.builtin.stat:
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+    path: >-
+      {{
+        [cifmw_libvirt_manager_ocp_pool_dir, _vol_name] | path_join
+      }}
   loop: "{{ range(0, vol_num | int) }}"
   loop_control:
     index_var: vol_id
     label: "{{ vol_prefix }}-vol-{{ vol_id }}"
+
+- name: Refresh all pools before trying to create volumes
+  when:
+    - "item.value.status == 'running'"
+  community.libvirt.virt_pool:
+    command: refresh
+    name: "{{ item.key }}"
+  loop: "{{ ansible_libvirt_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Manage volume creation
+  vars:
+    _pool_dir: >-
+      {{
+        (_src_overlay.results[vol_id].stat.exists) |
+        ternary(cifmw_libvirt_manager_ocp_pool_dir,
+                cifmw_libvirt_manager_pool_dir)
+      }}
+    _pool: >-
+      {{
+        (_src_overlay.results[vol_id].stat.exists) |
+        ternary(cifmw_libvirt_manager_ocp_pool,
+                cifmw_libvirt_manager_storage_pool)
+      }}
+  block:
+    - name: Create volume in the storage pool
+      register: _create_vol
+      ansible.builtin.command:
+        creates: "{{ _pool_dir }}/{{ vol_prefix }}-vol-{{ vol_id }}"
+        cmd: >-
+          virsh -c qemu:///system
+          vol-create-as
+          --pool {{ _pool }}
+          --name {{ vol_prefix }}-vol-{{ vol_id }}
+          {% if _src_overlay.results[vol_id].stat.exists -%}
+          --backing-vol base-{{ vol_prefix }}-vol-{{ vol_id }}
+          --backing-vol-format qcow2
+          {% endif %}
+          --capacity {{ vol_size }}
+          --format {{ vol_format | default('qcow2') }}
+      loop: "{{ range(0, vol_num | int) }}"
+      loop_control:
+        index_var: vol_id
+        label: "{{ vol_prefix }}-vol-{{ vol_id }}"
+
+    - name: Create XML attachment files
+      vars:
+        _suffix: 'abcdefghijklmnopqrstuvwxyz'
+      ansible.builtin.template:
+        dest: "{{ _pool_dir }}/{{ vol_prefix }}-vol-{{ vol_id }}.xml"
+        src: "attach-volume.xml.j2"
+        mode: "0644"
+      loop: "{{ range(0, vol_num | int) }}"
+      loop_control:
+        index_var: vol_id
+        label: "{{ vol_prefix }}-vol-{{ vol_id }}"

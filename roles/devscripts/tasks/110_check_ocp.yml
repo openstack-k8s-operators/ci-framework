@@ -15,7 +15,7 @@
 # under the License.
 
 
-- name: Build configuration if needed
+- name: Build configuration
   when:
     - cifmw_devscripts_config is undefined
   tags:
@@ -40,16 +40,36 @@
 - name: Check for pre-existences of OpenShift cluster.
   ansible.builtin.find:
     file_type: "file"
-    path: "{{ cifmw_devscripts_config.working_dir }}"
-    patterns: "{{ cifmw_devscripts_config.cluster_name }}_*.xml"
-  register: overlay_results
+    path: "{{ cifmw_devscripts_data_dir }}/images"
+    patterns: "{{ cifmw_devscripts_config.cluster_name }}_*.qcow2"
+  register: _overlay_results
+
+- name: Get cluster status
+  register: _deployed_cluster
+  ansible.builtin.stat:
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+    path: >-
+      {{
+        [cifmw_devscripts_repo_dir,
+        'ocp',
+         cifmw_devscripts_config.cluster_name] | path_join
+      }}
 
 - name: Verify the node definition match with expected count.
-  when: >-
-    (
-      cifmw_devscripts_config.num_masters | int +
-      cifmw_devscripts_config.num_workers | int
-    ) == overlay_results.matched
+  vars:
+    _cluster_members: >-
+      {{
+        cifmw_devscripts_config.num_masters | int +
+        cifmw_devscripts_config.num_workers | int
+      }}
+  when:
+    - _deployed_cluster.stat.exists | bool
+    - >-
+      (cifmw_devscripts_config.num_masters | int +
+       cifmw_devscripts_config.num_workers | int)
+       == _overlay_results.matched
   ansible.builtin.set_fact:
     cifmw_devscripts_ocp_exists: true
 
@@ -80,4 +100,6 @@
   ansible.builtin.include_tasks: 112_verify_golden_image.yml
 
 - name: Set the facts related to OpenShift ingress and api addresses.
+  when:
+    - cifmw_devscripts_ocp_exists
   ansible.builtin.include_tasks: get_ocp_vips.yml

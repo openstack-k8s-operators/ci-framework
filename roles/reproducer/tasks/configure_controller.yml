@@ -39,6 +39,20 @@
         - parameters
         - artifacts
 
+    - name: Tweak dnf configuration
+      become: true
+      community.general.ini_file:
+        no_extra_spaces: true
+        option: "{{ config.option }}"
+        path: "/etc/dnf/dnf.conf"
+        section: "{{ config.section | default('main') }}"
+        state: "{{ config.state | default(omit) }}"
+        value: "{{ config.value | default(omit) }}"
+      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
+      loop_control:
+        label: "{{ config.option }}"
+        loop_var: 'config'
+
     - name: Install custom CA if needed
       ansible.builtin.import_role:
         name: install_ca
@@ -58,20 +72,6 @@
               cat /etc/pki/ca-trust/source/anchors/* >
               /etc/pki/ca-trust/source/anchors/rh.crt
             creates: "/etc/pki/ca-trust/source/anchors/rh.crt"
-
-    - name: Tweak dnf configuration
-      become: true
-      community.general.ini_file:
-        no_extra_spaces: true
-        option: "{{ config.option }}"
-        path: "/etc/dnf/dnf.conf"
-        section: "{{ config.section | default('main') }}"
-        state: "{{ config.state | default(omit) }}"
-        value: "{{ config.value | default(omit) }}"
-      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
-      loop_control:
-        label: "{{ config.option }}"
-        loop_var: 'config'
 
     - name: Install some tools
       become: true
@@ -336,6 +336,9 @@
         tasks_from: verify.yml
 
     - name: Install ansible dependencies
+      register: _async_dep_install
+      async: 600  # 10 minutes should be more than enough
+      poll: 0
       ansible.builtin.pip:
         requirements: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/common-requirements.txt
 
@@ -419,6 +422,7 @@
     - name: Wait for OCP nodes to be ready
       when:
         - groups.ocps is defined
+        - groups.ocps | length > 0
       delegate_to: "{{ item }}"
       ansible.builtin.wait_for_connection:
         sleep: 2
@@ -479,3 +483,10 @@
               default-route-openshift-image-registry.apps-crc.testing
               downloads-openshift-console.apps-crc.testing
               oauth-openshift.apps-crc.testing
+
+    - name: Ensure we have all dependencies installed
+      ansible.builtin.async_status:
+        jid: "{{ _async_dep_install.ansible_job_id }}"
+      register: _sync_dep_install_result
+      until: _sync_dep_install_result.finished
+      retries: 20

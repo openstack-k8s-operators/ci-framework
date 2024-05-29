@@ -1,10 +1,9 @@
 ---
 - name: "(localhost) Inject ssh jumpers for {{ vm_type }}"
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
     - inventory_hostname != 'localhost'
     - inventory_hostname != 'instance'  # needed for molecule
-    - _need_start | bool
   delegate_to: localhost
   vars:
     extracted_ip: >-
@@ -32,8 +31,7 @@
 
 - name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm_type }}"  # noqa: name[template]
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
-    - _need_start | bool
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
     extracted_ip: >-
       {{
@@ -65,7 +63,7 @@
 
 - name: Inject nodes in the ansible inventory
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
   delegate_to: localhost
   vars:
     vm_name: "{{ vm_ip.key }}"
@@ -85,7 +83,7 @@
 
 - name: "Wait for SSH on VMs type {{ vm_type }}"
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
     extracted_ip: >-
       {{
@@ -102,8 +100,7 @@
 
 - name: "Configure ssh access on type {{ vm_type }}"
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
-    - _need_start | bool
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
     _user: >-
       {{
@@ -126,9 +123,8 @@
 
 - name: "Configure VMs type {{ vm_type }}"
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
     - vm_type is not match('^(crc|ocp).*$')
-    - _need_start | bool
   delegate_to: "{{ vm_ip.key }}.{{ inventory_hostname }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.shell:
@@ -148,11 +144,26 @@
     loop_var: "vm_ip"
     label: "{{ vm_ip.key }}"
 
+# TODO: consider https://docs.fedoraproject.org/en-US/fedora-coreos/storage/#_sizing_the_root_partition
+- name: Ensure we grow volume for OCP cluster members
+  when:
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
+    - vm_ip.key is match('^ocp.*')
+  vars:
+    _root_part: "{{ vm_data.value.root_part_id | default('1') }}"
+  ansible.builtin.shell:
+    cmd: >-
+      ssh core@{{ vm_ip.key }}.{{ inventory_hostname }}
+      "sudo growpart /dev/sda 4; sudo xfs_growfs /;"
+  loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
+  loop_control:
+    loop_var: "vm_ip"
+    label: "{{ vm_ip.key }}"
+
 - name: "Inject private key on hosts {{ vm_type }}"
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
     - vm_type is match('^controller.*$')
-    - _need_start | bool
   delegate_to: "{{ vm_ip.key }}.{{ inventory_hostname }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
@@ -168,9 +179,8 @@
 
 - name: "Inject public key on hosts {{ vm_type }}"
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
     - vm_type is match('^controller.*$')
-    - _need_start | bool
   delegate_to: "{{ vm_ip.key }}.{{ inventory_hostname }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
@@ -187,7 +197,7 @@
 - name: Update inventory to consume correct user
   delegate_to: localhost
   when:
-    - vm_ip.key is match(vm_type ~ '.*')
+    - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
     extracted_ip: >-
       {{

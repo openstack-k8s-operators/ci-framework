@@ -101,6 +101,7 @@
         path: "{{ _sshkey }}"
         type: "{{ cifmw_libvirt_manager_reproducer_key_type }}"
         size: "{{ cifmw_libvirt_manager_reproducer_key_size }}"
+        comment: cifmw_reproducer_key
 
     - name: Slurp public key for later use
       register: pub_ssh_key
@@ -165,7 +166,7 @@
       --root-password "password:{{ item.value.password | default('fooBar') }}"
       --ssh-inject {{ _admin_user }}:file:{{ ansible_user_dir }}/.ssh/authorized_keys
       --truncate /etc/machine-id
-      | tee -a {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log
+      | tee {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log
     creates: "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log"
   loop: "{{ _cifmw_libvirt_manager_layout.vms | dict2items }}"
   loop_control:
@@ -214,7 +215,39 @@
     loop_var: vm_data
     index_var: family_id
 
+- name: Create VBMC entity
+  when:
+    - _vbmc_available is defined
+    - _vbmc_available | bool
+  vars:
+    cifmw_virtualbmc_machine: "cifmw-{{ item.key }}"
+    cifmw_virtualbmc_ipmi_port: >-
+      {{
+        cifmw_virtualbmc_ipmi_base_port + index
+      }}
+    cifmw_virtualbmc_action: "add"
+    _ipmi_host: >-
+      {%- if _cifmw_libvirt_manager_layout.vms.crc.target is defined -%}
+      {{_cifmw_libvirt_manager_layout_layout.vms.crc.target }}
+      {%- elif _cifmw_libvirt_manager_layout.vms.ocp.target is defined -%}
+      {{ _cifmw_libvirt_manager_layout.vms.ocp.target }}
+      {%- else -%}
+      {{ inventory_hostname }}
+      {%- endif -%}
+    cifmw_virtualbmc_ipmi_address: >-
+      {{ hostvars[_ipmi_host].ansible_default_ipv4.address }}
+  ansible.builtin.include_role:
+    name: virtualbmc
+    tasks_from: manage_host
+  loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.key }}"
+
 - name: Create group inventories
+  when:
+    - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
+    - _cifmw_libvirt_manager_layout.vms[item].amount | default(1) | int > 0
   vars:
     hosts: >-
       {{
