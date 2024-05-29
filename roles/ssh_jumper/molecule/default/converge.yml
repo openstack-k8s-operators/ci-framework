@@ -1,0 +1,134 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Converge
+  hosts: instance
+  vars:
+    cifmw_basedir: "/opt/basedir"
+  tasks:
+    - name: Crate SSH keypair
+      register: _test_key
+      community.crypto.openssh_keypair:
+        comment: "test-key"
+        path: "{{ (cifmw_basedir, 'ssh/id_test') | path_join }}"
+        type: "ecdsa"
+
+    - name: Add SSH jumper entries
+      vars:
+        cifmw_ssh_jumper_config:
+          - ssh_dir: "{{ cifmw_basedir }}/ssh"
+            hostname: '192.168.250.10'
+            proxy_host: "proxy.example.com"
+            proxy_user: cloud-user
+            patterns:
+              - test
+              - test.node
+          - hostname: minimal.example.com
+            ssh_dir: "{{ cifmw_basedir }}/ssh"
+          - target: instance
+            ssh_dir: "{{ cifmw_basedir }}/ssh"
+            hostname: '192.168.250.11'
+            identity_file: "{{ _test_key.filename }}"
+            patterns:
+              - test
+              - test.node
+      ansible.builtin.include_role:
+        name: ssh_jumper
+
+    - name: Slurp ssh/config
+      register: ssh_config
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/ssh/config"
+
+    - name: Slurp ssh/cifw_ssh_config.d/minimal.example.com.conf
+      register: cifmw_minimal_example_com
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/ssh/cifw_ssh_config.d/instance/minimal.example.com.conf"
+
+    - name: Slurp ssh/cifw_ssh_config.d/192.168.250.10.conf
+      register: cifw_ssh_config_d_192_168_250_10
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/ssh/cifw_ssh_config.d/instance/192.168.250.10-via-proxy.example.com.conf"
+
+    - name: Slurp ssh/cifw_ssh_config.d/192.168.250.11.conf
+      register: cifw_ssh_config_d_192_168_250_11
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/ssh/cifw_ssh_config.d/instance/192.168.250.11.conf"
+
+    - name: Assert Include in ssh_config
+      vars:
+        _ref: |
+          Include cifw_ssh_config.d/instance/*.conf
+        _res: "{{ ssh_config['content'] | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - _ref == _res
+
+    - name: Assert SSH host - minimal config
+      vars:
+        _ref: |
+          Host minimal.example.com
+              Hostname minimal.example.com
+              User zuul
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+        _res: "{{ cifmw_minimal_example_com['content'] | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - _ref == _res
+        fail_msg: |
+          Expected:
+          {{ _ref }}
+          Actual:
+          {{ _res }}
+
+    - name: Assert cifmw-192.168.250.10.conf
+      vars:
+        _ref: |
+          Host test test.node 192.168.250.10
+              Hostname 192.168.250.10
+              ProxyJump cloud-user@proxy.example.com
+              User zuul
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+        _res: "{{ cifw_ssh_config_d_192_168_250_10['content'] | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - _ref == _res
+        fail_msg: |
+          Expected:
+          {{ _ref }}
+          Actual:
+          {{ _res }}
+
+    - name: Assert cifmw-192.168.250.11.conf
+      vars:
+        _ref: |
+          Host test test.node 192.168.250.11
+              Hostname 192.168.250.11
+              User zuul
+              IdentityFile /opt/basedir/ssh/id_test
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+        _res: "{{ cifw_ssh_config_d_192_168_250_11['content'] | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - _ref == _res
+        fail_msg: |
+          Expected:
+          {{ _ref }}
+          Actual:
+          {{ _res }}

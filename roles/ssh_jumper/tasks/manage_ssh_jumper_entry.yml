@@ -1,0 +1,55 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Make sure ~/.ssh/cifw_ssh_config.d directory exists
+  delegate_to: "{{ _config.target | default(cifmw_ssh_jumper_defaults.target) }}"
+  vars:
+    _ssh_dir: "{{ _config.ssh_dir | default(cifmw_ssh_jumper_defaults.ssh_dir) }}"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ _ssh_dir | default((ansible_user_dir, '/.ssh') | path_join) }}/cifw_ssh_config.d"
+    - "{{ _ssh_dir | default((ansible_user_dir, '/.ssh') | path_join) }}/cifw_ssh_config.d/{{ inventory_hostname }}"
+
+- name: Include ~/.ssh/cifw_ssh_config.d/inventory_hostname/*.conf
+  delegate_to: "{{ _config.target | default(cifmw_ssh_jumper_defaults.target) }}"
+  vars:
+    _ssh_dir: "{{ _config.ssh_dir | default(cifmw_ssh_jumper_defaults.ssh_dir) }}"
+  ansible.builtin.lineinfile:
+    insertbefore: BOF
+    create: true
+    state: present
+    path: "{{ _ssh_dir | default((ansible_user_dir, '/.ssh') | path_join) }}/config"
+    mode: '0600'
+    line: 'Include cifw_ssh_config.d/{{ inventory_hostname }}/*.conf'
+
+- name: "Inject ssh jumpers for {{ _config.hostname }}"
+  delegate_to: "{{ _config.target | default(cifmw_ssh_jumper_defaults.target) }}"
+  vars:
+    _ssh_dir: "{{ _config.ssh_dir | default(cifmw_ssh_jumper_defaults.ssh_dir) }}"
+    _dir: "{{ _ssh_dir }}/cifw_ssh_config.d/{{ inventory_hostname }}"
+    _filename: >-
+      {%- if _config.proxy_host is defined and _config.proxy_host is not none -%}
+      {{ _config.hostname }}-via-{{ _config.proxy_host }}.conf
+      {%- else -%}
+      {{ _config.hostname }}.conf
+      {%- endif -%}
+  ansible.builtin.template:
+    src: ssh_host.conf.j2
+    dest: "{{ (_dir, _filename) | path_join }}"
+    mode: '0600'
