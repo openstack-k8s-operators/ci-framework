@@ -31,11 +31,37 @@
 
 - name: Expose common data for future usage
   vars:
-    _original_content: "{{ _original.content | b64decode | from_yaml }}"
+    _raw_manifests: "{{ _original.content | b64decode | from_yaml_all }}"
+    _raw_config_maps: >-
+      {{
+         _raw_manifests |
+         selectattr('kind', 'defined') |
+         selectattr('kind', 'equalto', 'ConfigMap')
+      }}
+    _target_config_map: >-
+      {{
+         (
+          _raw_config_maps |
+          selectattr('metadata.annotations', 'defined') |
+          selectattr('metadata.name', 'equalto', cifmw_ci_gen_kustomize_values_name) |
+          first | default({})
+         ) if cifmw_ci_gen_kustomize_values_name is defined and cifmw_ci_gen_kustomize_values_name != ""
+         else {}
+      }}
+    _local_config_query: >-
+          [?(metadata.annotations."config.kubernetes.io/local-config")=='true']
+    _config_map_content: >-
+      {{
+        _target_config_map |
+        default(
+            _raw_config_maps | default([]) |
+            json_query(_local_config_query) | first | default({})
+          , true)
+      }}
     _datatype: >-
       {{
         cifmw_ci_gen_kustomize_values_name |
-        default(_original_content.metadata.name, true)
+        default(_config_map_content.metadata.name, true)
       }}
     _dest_dir: >-
       {{
@@ -46,7 +72,17 @@
   ansible.builtin.set_fact:
     values_datatype: "{{ _datatype }}"
     snippet_datadir: "{{ _dest_dir }}"
-    original_content: "{{ _original_content }}"
+    original_content: "{{ _config_map_content }}"
+    _cifmw_gen_kustomize_values_extra_manifests: >-
+      {{
+        _raw_manifests | reject('equalto', _config_map_content)
+      }}
+    _cifmw_gen_kustomize_values_base_cm_content: >-
+      {{
+        _config_map_content |
+        ansible.utils.remove_keys(target=['^nodes?(_[0-9]+)?$'],
+                                  matching_parameter='regex')
+      }}
     cacheable: false
 
 - name: Ensure we get the needed data depending on the values type
@@ -61,23 +97,6 @@
     path: "{{ snippet_datadir }}"
     state: directory
     mode: "0755"
-
-- name: Copy original values.yaml
-  ansible.builtin.copy:
-    backup: true
-    content: >-
-      {{
-        original_content |
-        ansible.utils.remove_keys(target=['^nodes?(_[0-9]+)?$'],
-                                  matching_parameter='regex') |
-        to_nice_yaml
-      }}
-    dest: >-
-      {{
-        (snippet_datadir,
-         '01_original.yaml') | path_join
-      }}
-    mode: "0644"
 
 - name: Generate CI snippet
   when:
@@ -148,5 +167,18 @@
         cifmw_ci_gen_kustomize_values_userdata |
         default({}) |
         to_nice_yaml
+      }}
+    mode: "0644"
+
+- name: Copy the base values.yaml
+  ansible.builtin.copy:
+    backup: true
+    content: "{{ _cifmw_gen_kustomize_values_base_cm_content |to_nice_yaml }}"
+    dest: >-
+      {{
+        (
+          snippet_datadir,
+          cifmw_ci_gen_kustomize_values_original_cm_content_file_name
+        ) | path_join
       }}
     mode: "0644"
