@@ -1,0 +1,109 @@
+{% set _mem = _cifmw_libvirt_manager_layout.vms.ocp.memory |
+              default( (cifmw_devscripts_config.master_memory * 0.001) | int ) -%}
+{% set _cpu = _cifmw_libvirt_manager_layout.vms.ocp.cpus |
+              default(cifmw_devscripts_config.master_vcpu) -%}
+{% set _prefix = cifmw_devscripts_config.cluster_name -%}
+{% set _fixed_net = cifmw_libvirt_manager_fixed_networks_defaults + cifmw_libvirt_manager_fixed_networks -%}
+<domain type="kvm">
+    <name>{{ _prefix }}_master_{{ vm_id }}</name>
+    <memory unit="GB">{{ _mem  }}</memory>
+    <vcpu placement="static">{{ _cpu }}</vcpu>
+    <os firmware="efi">
+        <type arch="x86_64" machine="q35">hvm</type>
+        <firmware>
+            <feature enabled="no" name="secure-boot"/>
+        </firmware>
+        <boot dev='hd'/>
+        <bootmenu enable='{{ _cifmw_libvirt_manager_layout.vms.ocp.bootmenu_enable | default('no') }}'/>
+    </os>
+    <features>
+        <acpi/>
+        <apic/>
+        <pae/>
+    </features>
+    <cpu mode="host-passthrough" check="none" migratable="on"/>
+    <clock offset="utc"/>
+    <on_poweroff>destroy</on_poweroff>
+    <on_reboot>restart</on_reboot>
+    <on_crash>restart</on_crash>
+    <devices>
+        <emulator>/usr/libexec/qemu-kvm</emulator>
+        <disk type="volume" device="disk">
+            <driver name="qemu" type="qcow2" cache="unsafe"/>
+            <source pool="oooq_pool" volume="{{ _prefix }}_master_{{ vm_id }}.qcow2"/>
+            <target dev="sda" bus="scsi"/>
+        </disk>
+        <controller type="scsi" index="0" model="virtio-scsi">
+            <address type="pci" domain="0x0000" bus="0x03" slot="0x00" function="0x0"/>
+        </controller>
+        <controller type="usb" index="0" model="qemu-xhci">
+            <address type="pci" domain="0x0000" bus="0x04" slot="0x00" function="0x0"/>
+        </controller>
+        <controller type="sata" index="0">
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x1f" function="0x2"/>
+        </controller>
+        <controller type="pci" index="0" model="pcie-root"/>
+        <controller type="pci" index="1" model="pcie-root-port">
+            <model name="pcie-root-port"/>
+            <target chassis="1" port="0x10"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x0" multifunction="on"/>
+        </controller>
+        <controller type="pci" index="2" model="pcie-root-port">
+            <model name="pcie-root-port"/>
+            <target chassis="2" port="0x11"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x1"/>
+        </controller>
+        <controller type="pci" index="3" model="pcie-root-port">
+            <model name="pcie-root-port"/>
+            <target chassis="3" port="0x12"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x2"/>
+        </controller>
+        <controller type="pci" index="4" model="pcie-root-port">
+            <model name="pcie-root-port"/>
+            <target chassis="4" port="0x13"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x3"/>
+        </controller>
+        <controller type="pci" index="5" model="pcie-root-port">
+            <model name="pcie-root-port"/>
+            <target chassis="5" port="0x14"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x4"/>
+        </controller>
+        <controller type="pci" index="6" model="pcie-root-port">
+            <model name="pcie-root-port"/>
+            <target chassis="6" port="0x15"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x5"/>
+        </controller>
+{% for network in cifmw_libvirt_manager_mac_map['ocp-' ~ vm_id] %}
+        <interface type="bridge">
+            <mac address="{{ network.mac }}"/>
+            <source bridge="{{ (network.network in _fixed_net) | ternary(network.network, 'cifmw-' ~ network.network) }}"/>
+            <model type="virtio"/>
+            <address type="pci" />
+        </interface>
+{% endfor %}
+        <serial type="pty">
+            <log file="/var/log/libvirt/qemu/{{ _prefix }}_master_{{ vm_id }}-serial0.log" append="on"/>
+            <target type="isa-serial" port="0">
+                <model name="isa-serial"/>
+            </target>
+        </serial>
+        <console type="pty">
+            <log file="/var/log/libvirt/qemu/{{ _prefix }}_master_{{ vm_id }}-serial0.log" append="on"/>
+            <target type="serial" port="0"/>
+        </console>
+        <input type="mouse" bus="ps2"/>
+        <input type="keyboard" bus="ps2"/>
+        <graphics type="vnc" port="-1" autoport="yes">
+            <listen type="address"/>
+        </graphics>
+        <audio id="1" type="none"/>
+        <video>
+            <model type="cirrus" vram="16384" heads="1" primary="yes"/>
+            <address type="pci" domain="0x0000" bus="0x00" slot="0x01" function="0x0"/>
+        </video>
+        <watchdog model="itco" action="reset"/>
+        <memballoon model="virtio">
+            <address type="pci" domain="0x0000" bus="0x05" slot="0x00" function="0x0"/>
+        </memballoon>
+    </devices>
+</domain>

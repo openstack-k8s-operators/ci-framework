@@ -1,0 +1,66 @@
+---
+## Use a dedicated port, this instance will be removed
+# once OCP cluster is deployed.
+- name: Ensure VBMC is present
+  vars:
+    cifmw_virtualbmc_daemon_port: 51881
+  ansible.builtin.import_role:
+    name: "virtualbmc"
+
+- name: Manage virtual resources
+  vars:
+    cifmw_libvirt_manager_storage_pool: "oooq_pool"
+    action: "create"
+    cifmw_libvirt_manager_pool_dir: "/home/dev-scripts/pool"
+  block:
+    - name: Create storage pool directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_libvirt_manager_pool_dir }}"
+        state: directory
+        owner: "{{ ansible_user_id }}"
+
+    - name: Create pool in libvirt
+      ansible.builtin.import_tasks: "storage_pool.yml"
+
+    - name: Craft layout and pass it to create_vms.yml
+      vars:
+        cifmw_libvirt_manager_vm_template: "ocp_domain.xml.j2"
+        cifmw_libvirt_manager_vm_prefix: ''
+        cifmw_libvirt_manager_vm_separator: '_'
+        vm_type: 'ocp_master'
+        _ocp_layout:
+          vms:
+            ocp_master:
+              disksize: "{{ _cifmw_libvirt_manager_layout.vms.ocp.disksize }}"
+              amount: "{{ _cifmw_libvirt_manager_layout.vms.ocp.amount }}"
+              disk_file_name: blank
+              nets: "{{ _cifmw_libvirt_manager_layout.vms.ocp.nets }}"
+              image_local_dir: "{{ cifmw_libvirt_manager_pool_dir }}"
+      ansible.builtin.include_role:
+        name: "libvirt_manager"
+        tasks_from: "create_vms.yml"
+      loop: "{{ _ocp_layout.vms | dict2items }}"
+      loop_control:
+        label: "{{ vm_data.key }}"
+        loop_var: vm_data
+        index_var: family_id
+
+- name: Create VBMC entities for OCP
+  vars:
+    cifmw_virtualbmc_machine: >-
+      {{ cifmw_devscripts_config.cluster_name }}_master_{{ index }}
+    cifmw_virtualbmc_ipmi_port: "{{ 51881 + index }}"
+    cifmw_virtualbmc_action: "add"
+    cifmw_virtualbmc_ipmi_address: >-
+      {{ hostvars[inventory_hostname].ansible_default_ipv4.address }}
+  ansible.builtin.include_role:
+    name: "virtualbmc"
+    tasks_from: "manage_host.yml"
+  loop: >-
+    {% set _range = range(0, _cifmw_libvirt_manager_layout.vms.ocp.amount) -%}
+    {% set _vms = ['ocp'] | product(_range) | map('join', '-') -%}
+    {{ _vms  }}
+  loop_control:
+    index_var: index
+    label: "{{ item }}"

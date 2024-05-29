@@ -1,6 +1,251 @@
 ---
-- name: Run devscripts role
-  vars:
-    cifmw_use_reproducer: true
+- name: Ensure we have up-to-date devscripts config
   ansible.builtin.import_role:
-    name: devscripts
+    name: "devscripts"
+    tasks_from: "build_config.yml"
+
+- name: Check if devscript cluster exists
+  ansible.builtin.import_role:
+    name: "devscripts"
+    tasks_from: "110_check_ocp.yml"
+
+- name: Push OCP related DNS entries
+  become: true
+  notify: "Restart dnsmasq"
+  vars:
+    _cluster: "{{ cifmw_devscripts_config.cluster_name }}"
+    _domain: "{{ cifmw_devscripts_config.base_domain }}"
+    _pub_net_data: >-
+      {{
+        _libvirt_manager_networking.networks[cifmw_libvirt_manager_pub_net]
+      }}
+    _api_addr: >-
+      {% if _pub_net_data.network_v4 is defined -%}
+      {{
+        _pub_net_data.network_v4 | ansible.utils.nthhost(2)
+      }}
+      {% endif -%}
+      {% if _pub_net_data.network_v6 is defined -%}
+      {{
+        _pub_net_data.network_v6 | ansible.utils.nthhost(2)
+      }}
+      {% endif -%}
+    _apps_addr: >-
+      {% if _pub_net_data.network_v4 is defined -%}
+      {{
+        _pub_net_data.network_v4 | ansible.utils.nthhost(3)
+      }}
+      {% endif -%}
+      {% if _pub_net_data.network_v6 is defined -%}
+      {{
+        _pub_net_data.network_v6 | ansible.utils.nthhost(3)
+      }}
+      {% endif -%}
+    _ocppr_net_v4: >-
+      {{
+        cifmw_ci_nmstate_instance_config[inventory_hostname]['interfaces'] |
+        selectattr('name', 'match', _cluster ~ 'pr') |
+        map(attribute='ipv4.address', default={})
+      }}
+    _pxe_addr_v4: >-
+      {{
+        _ocppr_net_v4[0].ip | ansible.utils.ipmath(2)
+      }}
+    _ocppr_net_v6: >-
+      {{
+        cifmw_ci_nmstate_instance_config[inventory_hostname]['interfaces'] |
+        selectattr('name', 'match', _cluster ~ 'pr') |
+        map(attribute='ipv6.address', default={})
+      }}
+    _pxe_addr_v6: >-
+      {{
+        (_ocppr_net_v6[0].ip | ansible.utils.ipmath(2)) | default('')
+      }}
+  ansible.builtin.copy:
+    dest: "/etc/cifmw-dnsmasq.d/ocp_dns.conf"
+    mode: "0644"
+    content: |
+      local=/{{ _cluster }}.{{ _domain }}/
+      domain={{ _cluster }}.{{ _domain }}
+      address=/api.{{ _cluster }}.{{ _domain }}/{{ _api_addr }}
+      address=/.apps.{{ _cluster }}.{{ _domain }}/{{ _apps_addr }}
+      address=/pxe.{{ _cluster }}.{{ _domain }}/{{ _pxe_addr_v4 }}/
+      {% if _pxe_addr_v6 | length > 0 %}
+      address=/pxe.{{ _cluster }}.{{ _domain }}/{{ _pxe_addr_v6 }}/
+      {% endif %}
+      localise-queries
+    validate: "/usr/sbin/dnsmasq -C %s --test"
+
+- name: Configure NetworkManager
+  become: true
+  notify: Restart NetworkManager
+  ansible.builtin.copy:
+    dest: >-
+      /etc/NetworkManager/conf.d/{{ cifmw_reproducer_networkmanager_config }}
+    mode: "0644"
+    content: |
+      [main]
+      rc-manager=none
+      dns=none
+    validate: "NetworkManager --print-config %s"
+
+- name: Ensure services are reloaded
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure we use dnsmasq as resolver
+  become: true
+  vars:
+    _cluster: "{{ cifmw_devscripts_config['cluster_name'] }}"
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      search {{ _cluster }}.openstack.lab
+      nameserver {{ _libvirt_manager_networking.networks.ctlplane.gw_v4 }}
+
+- name: Bootstrap devscript using baremetal provisioning
+  when:
+    - not cifmw_devscripts_ocp_exists | bool
+  vars:
+    _bm_ironic_file: >-
+      {{
+        [cifmw_reproducer_basedir,
+         'artifacts', 'baremetal-ironic.json'] | path_join
+      }}
+    _cluster: "{{ cifmw_devscripts_config['cluster_name'] }}"
+  block:
+    - name: Create blank images for OCP cluster
+      ansible.builtin.import_role:
+        name: "libvirt_manager"
+        tasks_from: "ocp_layout.yml"
+
+    - name: Refresh VBMC data
+      ansible.builtin.import_role:
+        name: "virtualbmc"
+        tasks_from: "list_hosts.yml"
+
+    - name: Generate baremetal content fact
+      vars:
+        _hypervisor_ip4: >-
+          {{ hostvars[inventory_hostname].ansible_default_ipv4.address }}
+        _vm_data: "{{ _cifmw_libvirt_manager_layout.vms.ocp }}"
+        _mac: >-
+          {{
+            cifmw_libvirt_manager_mac_map[item] |
+            selectattr('network', 'equalto', cifmw_reproducer_provision_net) |
+            map(attribute='mac') | first
+          }}
+        _matcher: >-
+          {{ cifmw_devscripts_config.cluster_name }}_master_{{ vm_id }}
+        _ipmi_port: >-
+          {{
+            cifmw_virtualbmc_known_hosts |
+            selectattr('Domain name', 'match', _matcher) |
+            map(attribute='Port') | first
+          }}
+        _pxe_host: "pxe.{{ _cluster }}.{{ _domain }}"
+        _node:
+          name: "openshift-master-{{ vm_id  }}"
+          driver: "ipmi"
+          resource_class: "baremetal"
+          driver_info:
+            username: "admin"
+            password: "password"
+            address: "ipmi://{{ _hypervisor_ip4 }}:{{ _ipmi_port }}"
+            deploy_kernel: >-
+              {{ _pxe_host }}/images/ironic-python-agent.kernel
+            deploy_ramdisk: >-
+              {{ _pxe_host }}/images/ironic-python-agent.initramfs
+            disable_certificate_verification: false
+          ports:
+            - address: "{{ _mac }}"
+              pxe_enabled: true
+          properties:
+            local_gb: "{{ (_vm_data.disksize | default(105) | int) - 5}}"
+            cpu_arch: "x86_64"
+            boot_mode: "UEFI"
+      ansible.builtin.set_fact:
+        _ironic_bm_data: >-
+          {{
+            (_ironic_bm_data | default([])) + [_node]
+          }}
+      loop: >-
+        {{ cifmw_libvirt_manager_all_vms | select('match', 'ocp-[0-9]+') }}
+      loop_control:
+        index_var: vm_id
+        label: "{{ item }}"
+
+    - name: Output baremetal content in file
+      vars:
+        _content:
+          nodes: "{{ _ironic_bm_data }}"
+      ansible.builtin.copy:
+        content: "{{ _content | to_nice_json }}"
+        dest: "{{ _bm_ironic_file }}"
+        mode: "0644"
+
+    - name: Group devscripts last actions before deployment
+      vars:
+        _pub_net_data: >-
+          {{
+            _libvirt_manager_networking.networks[cifmw_libvirt_manager_pub_net]
+          }}
+      block:
+        - name: Generate patched overrides for devscripts
+          vars:
+            _bootstrap_mac: "52:54:ab:83:31:87"
+          ansible.builtin.set_fact:
+            cifmw_devscripts_config_overrides_patch_01_baremetal:
+              external_bootstrap_mac: "{{ _bootstrap_mac }}"
+              manage_br_bridge: 'n'
+              nodes_platform: 'baremetal'
+              nodes_file: "{{ _bm_ironic_file }}"
+
+        - name: Inject boostrap VM mac and fixed IP
+          vars:
+            cifmw_dnsmasq_host_network: "{{ cifmw_libvirt_manager_pub_net }}"
+            cifmw_dnsmasq_host_state: present
+            cifmw_dnsmasq_host_mac: >-
+              {{
+                cifmw_devscripts_config_overrides_patch_01_baremetal.external_bootstrap_mac
+              }}
+            cifmw_dnsmasq_host_name: "ocp-boostrap"
+            cifmw_dnsmasq_host_ipv4: >-
+              {{
+                _pub_net_data.network_v4 | ansible.utils.nthhost(4)
+              }}
+          ansible.builtin.include_role:
+            name: "dnsmasq"
+            tasks_from: "manage_host.yml"
+
+    - name: Ensure devscripts_override patch is in
+      ansible.builtin.import_role:
+        name: "devscripts"
+        tasks_from: "build_config.yml"
+
+    - name: Ensure dnsmasq is reloaded
+      ansible.builtin.meta: flush_handlers
+
+    - name: Allow libvirt zone on the temporary VBMC port
+      become: true
+      ansible.posix.firewalld:
+        port: "51881-51890/udp"
+        zone: libvirt
+        state: enabled
+
+    - name: Run devscripts role
+      vars:
+        cifmw_use_reproducer: true
+      ansible.builtin.include_role:
+        name: devscripts
+
+    - name: Remove temporary virtualbmc instance
+      ansible.builtin.import_role:
+        name: "virtualbmc"
+        tasks_from: "cleanup.yml"
+
+    - name: Remove temporary VBMC port from libvirt zone
+      become: true
+      ansible.posix.firewalld:
+        port: "51881-51890/udp"
+        zone: libvirt
+        state: disabled

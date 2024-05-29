@@ -56,9 +56,43 @@
         enabled: true
         state: started
 
+# Since ci_nmstate relies on the inventory_hostname to find its
+# configuration, we have to bend ansible a bit:
+# it does NOT want to get any jinja2 in a dict *key*, meaning we
+# can't provide a nice parameter from within the networking-definition.yml
+# environment file using the `cifmw_target_host`.
+# We have, instead, to build the structure as a plain string, where it gets
+# the proper interpretation, and convert that string into YAML.
+# Of course, if anyone provides their own config, we won't override it.
+# As a matter of fact, `set_fact` doesn't override user-provided parameters
+# anyway.
+- name: Set cifmw_ci_nmstate_instance_config if needed
+  when:
+    - cifmw_ci_nmstate_instance_config is undefined
+  vars:
+    _content: |-
+      {{ cifmw_target_host | default('localhost') }}:
+        interfaces:
+          - name: ocppr
+            type: linux-bridge
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 172.22.0.1
+                  prefix-length: 24
+  ansible.builtin.set_fact:
+    cifmw_ci_nmstate_instance_config: "{{ _content | from_yaml }}"
+
+- name: Ensure the required network configurations are applied
+  ansible.builtin.include_role:
+    name: ci_nmstate
+
 - name: Create the virtual networks
   when:
     - cifmw_libvirt_manager_mac_map is undefined
+  vars:
+    cifmw_dnsmasq_forwarders: "{{ cifmw_reproducer_dns_servers }}"
   ansible.builtin.include_role:
     name: libvirt_manager
     tasks_from: generate_networking_data.yml

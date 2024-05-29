@@ -20,6 +20,8 @@ Used for checking if:
 * `cifmw_libvirt_manager_images_url`: (String) Location basedir for the image URI. Defaults to `https://cloud.centos.org/centos/9-stream/x86_64/images`.
 * `cifmw_libvirt_manager_configuration`: (Dict) Structure describing the libvirt layout (networking and VMs).
 * `cifmw_libvirt_manager_vm_template`: (String) Template name to use to define the virtual machines. Defaults to `domain.xml.j2`. Advanced use only.
+* `cifmw_libvirt_manager_vm_separator`: (Char) Separator character between VM and its index. Defaults to `-`. Advanced use onlyg
+gcifmw_libvirt_manager_vm_prefix`: (String) VM name prefix. Defaults to `cifmw-`. Advanced use only.
 * `cifmw_libvirt_manager_crc_pool`: (String) CRC pool machine location. Defaults to `cifmw_crc_pool` which defaults to `~/.crc/machines/crc`.
 * `cifmw_libvirt_manager_pool_dir`: (String) Pool directory. Defaults to `cifmw_libvirt_manager_basedir/volumes`.Advanced use only.
 * `cifmw_libvirt_manager_installyamls`: (String) install_yamls repository location. Defaults to `cifmw_installyamls_repos` which defaults to `../..`

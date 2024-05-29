@@ -99,12 +99,33 @@
         uri: "qemu:///system"
 
     - name: Filter out target nets
+      vars:
+        _all_fixed: >-
+          {{
+            cifmw_libvirt_manager_fixed_networks_defaults +
+            cifmw_libvirt_manager_fixed_networks
+          }}
+        _cifmw_nets: >-
+          {{ nets_list.list_nets | select('match', '^cifmw-.*$') }}
+        _fixed_nets: >-
+          {{
+            nets_list.list_nets | community.general.lists_intersect(_all_fixed)
+          }}
       ansible.builtin.set_fact:
-        cleanup_nets: "{{ nets_list.list_nets | select('match', '^cifmw-.*$') }}"
+        cleanup_nets: "{{ _cifmw_nets + _fixed_nets }}"
 
     - name: Expose cleanup list
       ansible.builtin.debug:
         var: cleanup_nets
+
+    - name: Remove dnsmasq network bits
+      vars:
+        cifmw_dnsmasq_network_name: "{{ item }}"
+        cifmw_dnsmasq_network_state: absent
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_network.yml
+      loop: "{{ cleanup_nets }}"
 
     - name: Destroy networks
       register: net_destroy
@@ -122,6 +143,13 @@
         command: undefine
         name: "{{ item }}"
         uri: "qemu:///system"
+      loop: "{{ cleanup_nets }}"
+
+    - name: Ensure no trace of networks lays in nmcli
+      become: true
+      community.general.nmcli:
+        conn_name: "{{ item }}"
+        state: absent
       loop: "{{ cleanup_nets }}"
 
     - name: Remove cifmw storage pool

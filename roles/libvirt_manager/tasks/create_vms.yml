@@ -21,7 +21,8 @@
   block:
     - name: "Create VM overlay for {{ vm_type }}"
       vars:
-        _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        _vm_img: >-
+          {{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}.qcow2
       register: _create_overlays
       ansible.builtin.command:
         cmd: >-
@@ -32,7 +33,7 @@
           -f qcow2
           "{{ _vm_img }}"
           "{{ vm_data.value.disksize|default ('40') }}G"
-        creates: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        creates: "{{ _vm_img }}"
         chdir: "{{ _chdir }}"
       loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
       loop_control:
@@ -42,7 +43,8 @@
     - name: "Ensure file ownership and rights for {{ vm_type }}"
       become: true
       vars:
-        _vm_img: "{{ vm_type }}-{{ vm_id }}.qcow2"
+        _vm_img: >-
+          {{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}.qcow2
       ansible.builtin.file:
         path: "{{ (_chdir, _vm_img) | path_join }}"
         group: "qemu"
@@ -73,7 +75,7 @@
         - vm_data.value.extra_disks_num is defined
         - vm_data.value.extra_disks_num | int != 0
       vars:
-        vol_prefix: "cifmw-{{ vm_type }}-{{ vm_id }}"
+        vol_prefix: "{{ cifmw_libvirt_manager_vm_prefix }}{{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}"
         vol_num: "{{ vm_data.value.extra_disks_num }}"
         vol_size: "{{ vm_data.value.extra_disks_size }}"
       ansible.builtin.include_tasks: volumes.yml
@@ -83,7 +85,7 @@
         label: "{{ vm_type }}-{{ vm_id }}"
         loop_var: vms_id
 
-    - name: "Define VMs with default template for type {{ vm_type }}"
+    - name: "Define VMs for type {{ vm_type }}"
       community.libvirt.virt:
         command: define
         xml: "{{ lookup('template', cifmw_libvirt_manager_vm_template) }}"
@@ -100,7 +102,8 @@
       not cifmw_libvirt_manager_spineleaf_setup or
       'controller' in vm_type
   vars:
-    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    vm_item: >-
+      {{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}
     networks: "{{ vm_data.value.nets }}"
   ansible.builtin.include_tasks: net_to_vms.yml
   loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
@@ -114,43 +117,14 @@
     - cifmw_libvirt_manager_spineleaf_setup
     - "'controller' not in vm_type"
   vars:
-    vm_item: "{{ vm_type }}-{{ vm_id }}"
+    vm_item: >-
+      {{ vm_type }}{{ cifmw_libvirt_manager_vm_separator }}{{ vm_id }}
     networks: "{{ vm_data.value.spineleafnets[vm_id] }}"
   ansible.builtin.include_tasks: net_to_vms.yml
   loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
   loop_control:
     index_var: vm_id
     label: "{{ vm_type }}-{{ vm_id }}"
-
-- name: Create VBMC entity
-  when:
-    - cifmw_use_vbmc | default(false) | bool
-    - _vbmc_available is defined
-    - _vbmc_available | bool
-  vars:
-    cifmw_virtualbmc_machine: "cifmw-{{ vm_type }}-{{ index }}"
-    cifmw_virtualbmc_ipmi_port: >-
-      {{
-        cifmw_virtualbmc_ipmi_base_port + (family_id*10) + index
-      }}
-    cifmw_virtualbmc_action: "add"
-    _ipmi_host: >-
-      {%- if _cifmw_libvirt_manager_layout.vms.crc.target is defined -%}
-      {{ _cifmw_libvirt_manager_layout.vms.crc.target }}
-      {%- elif _cifmw_libvirt_manager_layout.vms.ocp.target is defined -%}
-      {{ _cifmw_libvirt_manager_layout.vms.ocp.target }}
-      {%- else -%}
-      {{ inventory_hostname }}
-      {%- endif -%}
-    cifmw_virtualbmc_ipmi_address: >-
-      {{ hostvars[_ipmi_host].ansible_default_ipv4.address }}
-  ansible.builtin.include_role:
-    name: virtualbmc
-    tasks_from: manage_host
-  loop: "{{ _vm_ports.results }}"
-  loop_control:
-    index_var: index
-    label: "{{ vm_type }}-{{ index }}"
 
 - name: "Start (power-on) {{ vm_type }}"
   when:
