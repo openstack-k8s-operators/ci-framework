@@ -84,15 +84,18 @@
         (_clean_vm is match('^ocp_master.*')) |
         ternary(_clean_vm | replace('ocp_master', 'ocp'), _clean_vm)
       }}
+    _mac_seed: "{{ '52:54:%02i' % vm_item|default(0)|int }}"
     _lm_mac_address: >-
       {% if cifmw_libvirt_manager_mac_map[_act_name] is defined -%}
-      {{
-        cifmw_libvirt_manager_mac_map[_act_name] |
-        selectattr('network', 'equalto', network.name) |
-        map(attribute='mac') | first
-      }}
+      {% set known_mac = cifmw_libvirt_manager_mac_map[_act_name] |
+                         selectattr('network', 'equalto', network.name) |
+                         map(attribute='mac')
+      -%}
+      {% endif -%}
+      {% if known_mac is defined and known_mac | length > 0 -%}
+      {{  known_mac | first }}
       {% else -%}
-      {{  '52:54:00' | community.general.random_mac }}
+      {{  _mac_seed | community.general.random_mac }}
       {% endif -%}
   when:
     - _attached_bridges | length == 0

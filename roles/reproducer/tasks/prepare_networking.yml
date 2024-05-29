@@ -4,6 +4,14 @@
     name: "devscripts"
     tasks_from: "build_config.yml"
 
+# Just ensure we don't have any dangling dnsmasq settings
+# in the NetworkManager - that would prevent the standalone
+# instance to start and attach the exected networks
+- name: Ensure legacy ci_network dnsmasq config are absent
+  ansible.builtin.import_role:
+    name: "ci_network"
+    tasks_from: "cleanup-dns.yml"
+
 - name: Ensure NetworkManager is configured to use dnsmasq
   become: true
   notify: Restart NetworkManager
@@ -35,6 +43,12 @@
         name:
           - firewalld
 
+    - name: Ensure firewalld service is enabled and started
+      ansible.builtin.systemd_service:
+        name: firewalld
+        state: started
+        enabled: true
+
     - name: Ensure br_netfilter module is loaded
       community.general.modprobe:
         name: br_netfilter
@@ -64,6 +78,38 @@
         enabled: true
         state: started
 
+# Since ci_nmstate relies on the inventory_hostname to find its
+# configuration, we have to bend ansible a bit:
+# it does NOT want to get any jinja2 in a dict *key*, meaning we
+# can't provide a nice parameter from within the networking-definition.yml
+# environment file using the `cifmw_target_host`.
+# We have, instead, to build the structure as a plain string, where it gets
+# the proper interpretation, and convert that string into YAML.
+# Of course, if anyone provides their own config, we won't override it.
+# As a matter of fact, `set_fact` doesn't override user-provided parameters
+# anyway.
+- name: Set cifmw_ci_nmstate_instance_config if needed
+  when:
+    - cifmw_ci_nmstate_instance_config is undefined
+  vars:
+    _content: |-
+      {{ cifmw_target_host | default('localhost') }}:
+        interfaces:
+          - name: ocppr
+            type: linux-bridge
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 172.22.0.1
+                  prefix-length: 24
+  ansible.builtin.set_fact:
+    cifmw_ci_nmstate_instance_config: "{{ _content | from_yaml }}"
+
+- name: Ensure the required network configurations are applied
+  ansible.builtin.include_role:
+    name: ci_nmstate
+
 - name: Create the virtual networks
   when:
     - cifmw_libvirt_manager_mac_map is undefined
@@ -75,10 +121,6 @@
   become: true
   notify: Restart NetworkManager
   vars:
-    _ip_4: >-
-      {{ _libvirt_manager_networking.networks.ctlplane.gw_v4 | default('') }}
-    _ip_6: >-
-      {{ _libvirt_manager_networking.networks.ctlplane.gw_v6 | default('') }}
     _domain: "{{ cifmw_devscripts_config.base_domain }}"
   ansible.builtin.copy:
     dest: "{{ cifmw_reproducer_nm_delegation }}"
@@ -86,7 +128,6 @@
     content: |
       # Managed by ci-framework/reproducer
       server=/{{ _domain }}/127.0.0.2
-      server=/{{ _domain }}/::2
 
 - name: Flush handlers
   ansible.builtin.meta: flush_handlers

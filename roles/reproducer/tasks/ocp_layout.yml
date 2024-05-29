@@ -1,0 +1,313 @@
+---
+- name: Import assertions
+  ansible.builtin.import_tasks: ocp_layout_assertions.yml
+
+- name: Push OCP related DNS entries
+  become: true
+  notify:
+    - "Restart dnsmasq"
+    - "Restart NetworkManager"
+  vars:
+    _cluster: "{{ cifmw_devscripts_config.cluster_name }}"
+    _domain: "{{ cifmw_devscripts_config.base_domain }}"
+    _pub_net_data: >-
+      {{
+        _libvirt_manager_networking.networks[cifmw_libvirt_manager_pub_net]
+      }}
+    _api_addr: >-
+      {% set out = [] -%}
+      {% if _pub_net_data.network_v4 is defined -%}
+      {% set _ = out.append(_pub_net_data.network_v4 |
+                            ansible.utils.nthhost(2)) -%}
+      {% endif -%}
+      {% if _pub_net_data.network_v6 is defined -%}
+      {% set _ = out.append(_pub_net_data.network_v6 |
+                            ansible.utils.nthhost(2)) -%}
+      {% endif -%}
+      {{ out }}
+    _apps_addr: >-
+      {% set out = [] -%}
+      {% if _pub_net_data.network_v4 is defined -%}
+      {% set _ = out.append(_pub_net_data.network_v4 |
+                            ansible.utils.nthhost(3)) -%}
+      {% endif -%}
+      {% if _pub_net_data.network_v6 is defined -%}
+      {% set _ = out.append(_pub_net_data.network_v6 |
+                            ansible.utils.nthhost(3)) -%}
+      {% endif -%}
+      {{ out }}
+    _ocppr_net_v4: >-
+      {{
+        cifmw_ci_nmstate_instance_config[inventory_hostname]['interfaces'] |
+        selectattr('name', 'match', _cluster ~ 'pr') |
+        map(attribute='ipv4.address', default={}) | flatten
+      }}
+    _pxe_addr_v4: >-
+      {{
+        (_ocppr_net_v4 | first).get('ip', '')
+      }}
+    _ocppr_net_v6: >-
+      {{
+        cifmw_ci_nmstate_instance_config[inventory_hostname]['interfaces'] |
+        selectattr('name', 'match', _cluster ~ 'pr') |
+        map(attribute='ipv6.address', default={}) | flatten
+      }}
+    _pxe_addr_v6: >-
+      {{
+        (_ocppr_net_v6 | first).get('ip', '')
+      }}
+  ansible.builtin.copy:
+    dest: "/etc/cifmw-dnsmasq.d/ocp_dns.conf"
+    mode: "0644"
+    content: |
+      local=/{{ _cluster }}.{{ _domain }}/
+      domain={{ _cluster }}.{{ _domain }}
+      {% for ip in _api_addr %}
+      address=/api.{{ _cluster }}.{{ _domain }}/{{ ip }}
+      address=/api-int.{{ _cluster }}.{{ _domain }}/{{ ip }}
+      ptr-record={{ ip | ansible.utils.ipaddr('revdns') }},api-int.{{ _cluster }}.{{ _domain }}
+      {% endfor %}
+      {% for ip in _apps_addr %}
+      address=/.apps.{{ _cluster }}.{{ _domain }}/{{ ip }}
+      {% endfor %}
+      {% if _pxe_addr_v4 | length > 0 %}
+      address=/pxe.{{ _cluster }}.{{ _domain }}/{{ _pxe_addr_v4 | ansible.utils.ipmath(1) }}
+      {% endif %}
+      {% if _pxe_addr_v6 | length > 0 %}
+      address=/pxe.{{ _cluster }}.{{ _domain }}/{{ _pxe_addr_v6 | ansible.utils.ipmath(1) }}
+      {% endif %}
+      localise-queries
+    validate: "/usr/sbin/dnsmasq -C %s --test"
+
+- name: Ensure services are reloaded
+  ansible.builtin.meta: flush_handlers
+
+- name: Generate patched overrides for devscripts
+  vars:
+    _num_workers: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.ocp_worker.amount | default(0)
+      }}
+    _num_masters: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.ocp.amount | default(3)
+      }}
+    _pub_net: >-
+      {{
+        _libvirt_manager_networking['networks'][cifmw_libvirt_manager_pub_net]
+      }}
+  ansible.builtin.set_fact:
+    cifmw_devscripts_config_overrides_patch_01_workers_masters:
+      num_workers: "{{ _num_workers }}"
+      num_masters: "{{ _num_masters }}"
+      external_subnet_v4: >-
+        {{ _pub_net['network_v4'] | default('') }}
+      external_subnet_v6: >-
+        {{ _pub_net['network_v6'] | default('') }}
+
+# We manually order a build:
+# devscripts role includes the config builder
+# if and only if local cifmw_devscripts_config is
+# undefined.
+- name: Build devscripts overrides
+  ansible.builtin.include_role:
+    name: "devscripts"
+    tasks_from: "build_config.yml"
+
+- name: Check if devscript cluster exists
+  ansible.builtin.import_role:
+    name: "devscripts"
+    tasks_from: "110_check_ocp.yml"
+
+- name: Bootstrap devscript using baremetal provisioning
+  when:
+    - not cifmw_devscripts_ocp_exists | bool
+  vars:
+    _bm_ironic_file: >-
+      {{
+        [cifmw_reproducer_basedir,
+         'artifacts', 'baremetal-ironic.json'] | path_join
+      }}
+    _cluster: "{{ cifmw_devscripts_config.cluster_name }}"
+    _domain: "{{ cifmw_devscripts_config.base_domain}}"
+    _pxe_host: "pxe.{{ _cluster }}.{{ _domain }}"
+  block:
+    - name: Create blank images for OCP cluster
+      vars:
+        cifmw_libvirt_manager_vol_prefix: 'base-'
+      ansible.builtin.include_role:
+        name: "libvirt_manager"
+        tasks_from: "ocp_layout.yml"
+
+    - name: Refresh VBMC data
+      ansible.builtin.include_role:
+        name: "virtualbmc"
+        tasks_from: "list_hosts.yml"
+
+    - name: Generate baremetal content fact
+      vars:
+        _hypervisor_ip4: >-
+          {{ hostvars[inventory_hostname].ansible_default_ipv4.address }}
+        _vm_name: "cifmw-{{ item }}"
+        _mac: >-
+          {{
+            cifmw_libvirt_manager_mac_map[item | replace('_master', '')] |
+            selectattr('network', 'equalto', cifmw_reproducer_provision_net) |
+            map(attribute='mac') | first
+          }}
+        _ipmi_port: >-
+          {{
+            cifmw_virtualbmc_known_hosts |
+            selectattr('Domain name', 'match', _vm_name) |
+            map(attribute='Port') | first
+          }}
+        _name: >-
+          {{
+            item |
+            regex_replace('^ocp_master-([0-9]+)$', 'openshift-master-\1') |
+            regex_replace('^ocp_worker-([0-9]+)$', 'openshift-worker-\1')
+          }}
+        _node:
+          name: "{{ _name }}"
+          driver: "ipmi"
+          resource_class: "baremetal"
+          driver_info:
+            username: "admin"
+            password: "password"
+            address: "ipmi://{{ _hypervisor_ip4 }}:{{ _ipmi_port }}"
+            deploy_kernel: >-
+              http://{{ _pxe_host }}/images/ironic-python-agent.kernel
+            deploy_ramdisk: >-
+              http://{{ _pxe_host }}/images/ironic-python-agent.initramfs
+            disable_certificate_verification: false
+          ports:
+            - address: "{{ _mac }}"
+              pxe_enabled: true
+          properties:
+            local_gb: "50"
+            cpu_arch: "x86_64"
+            boot_mode: "UEFI"
+      ansible.builtin.set_fact:
+        _ironic_bm_data: >-
+          {{
+            (_ironic_bm_data | default([])) + [_node]
+          }}
+      loop: "{{ _cifmw_libvirt_manager_ocp_cluster }}"
+      loop_control:
+        index_var: vm_id
+        label: "{{ item }}"
+
+    - name: Output baremetal content in file
+      vars:
+        _content:
+          nodes: "{{ _ironic_bm_data }}"
+      ansible.builtin.copy:
+        content: "{{ _content | to_nice_json }}"
+        dest: "{{ _bm_ironic_file }}"
+        mode: "0644"
+
+    - name: Group devscripts last actions before deployment
+      vars:
+        _pub_net_data: >-
+          {{
+            _libvirt_manager_networking.networks[cifmw_libvirt_manager_pub_net]
+          }}
+        _bootstrap_mac: "52:54:ab:83:31:87"
+      block:
+        - name: Generate patched overrides for devscripts
+          vars:
+            _num_workers: >-
+              {{
+                _cifmw_libvirt_manager_layout.vms.ocp_worker.amount | default(0)
+              }}
+            _num_masters: >-
+              {{
+                _cifmw_libvirt_manager_layout.vms.ocp.amount | default(3)
+              }}
+          ansible.builtin.set_fact:
+            cifmw_devscripts_config_overrides_patch_02_baremetal:
+              cluster_pro_if: "enp5s0"
+              external_bootstrap_mac: "{{ _bootstrap_mac }}"
+              manage_br_bridge: 'n'
+              manage_int_bridge: 'n'
+              nodes_platform: 'baremetal'
+              nodes_file: "{{ _bm_ironic_file }}"
+
+        ## NOTE: there seems to be some not-fancy things happening with
+        # LVM. It doesn't break, but outputs a message on any LVM command
+        # such as:
+        #   Devices file PVID XXX last seen on /dev/vda not found.
+        #   Devices file PVID XXX last seen on /dev/vdb not found.
+        # We can still use LVM and create logical volumes and all.
+        # Apparently we'd be able to deactivate some features of LVMs in
+        # order to correct that non-issue:
+        # https://access.redhat.com/solutions/6889951
+        - name: Set extra disks related parameter
+          when:
+            - _cifmw_libvirt_manager_layout.vms.ocp.extra_disks_num is defined
+            - _cifmw_libvirt_manager_layout.vms.ocp.extra_disks_num | int > 0
+          vars:
+            _disk_suffix: 'abcdefghijklmnopqrstuvwxyz'
+            _amount: >-
+              {{ _cifmw_libvirt_manager_layout.vms.ocp.extra_disks_num | int }}
+            _disks: >-
+              {{
+                range(0, _amount | default(0) | int) | map('extract', _disk_suffix)
+              }}
+          ansible.builtin.set_fact:
+            cifmw_devscripts_config_overrides_patch_03_volumes:
+              vm_extradisks: true
+              vm_extradisks_list: >-
+                {{ ['vd'] | product(_disks) | map('join', '') | join(' ') }}
+
+        - name: Inject bootstrap VM mac and fixed IP
+          vars:
+            cifmw_dnsmasq_host_network: "{{ cifmw_libvirt_manager_pub_net }}"
+            cifmw_dnsmasq_host_state: present
+            cifmw_dnsmasq_host_mac: "{{_bootstrap_mac }}"
+            cifmw_dnsmasq_host_name: "ocp-bootstrap"
+            cifmw_dnsmasq_host_ipv4: >-
+              {{
+                _pub_net_data.network_v4 | ansible.utils.nthhost(4)
+              }}
+          ansible.builtin.include_role:
+            name: "dnsmasq"
+            tasks_from: "manage_host.yml"
+
+    - name: Ensure devscripts_override patch is in
+      ansible.builtin.include_role:
+        name: "devscripts"
+        tasks_from: "build_config.yml"
+
+    - name: Ensure dnsmasq is reloaded
+      ansible.builtin.meta: flush_handlers
+
+    # We set that temporary rule as "permanent" in order to ensure it
+    # persists even if the firewalld service is reloaded during some
+    # devscripts step (upgrade, for instance).
+    - name: Allow libvirt zone on the temporary VBMC port
+      become: true
+      ansible.posix.firewalld:
+        port: "51881-51890/udp"
+        zone: libvirt
+        state: enabled
+        immediate: true
+        permanent: true
+
+    - name: Run devscripts role
+      vars:
+        cifmw_use_reproducer: true
+      ansible.builtin.include_role:
+        name: devscripts
+
+    - name: Remove temporary virtualbmc instance
+      ansible.builtin.include_role:
+        name: "virtualbmc"
+        tasks_from: "cleanup.yml"
+
+    - name: Remove temporary VBMC port from libvirt zone
+      become: true
+      ansible.posix.firewalld:
+        port: "51881-51890/udp"
+        zone: libvirt
+        state: disabled

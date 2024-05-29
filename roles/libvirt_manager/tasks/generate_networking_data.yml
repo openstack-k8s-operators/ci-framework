@@ -62,11 +62,19 @@
 - name: Inject all VMs in the inventory
   vars:
     _vm_type: "{{ item.key | regex_replace('(cifmw\\-)?([a-z]+)\\-[0-9]+', '\\2') }}"
-    _group: "{{ (_vm_type == 'crc') | ternary('ocp', _vm_type) }}"
+    _std_group: "{{ (_vm_type == 'crc') | ternary('ocp', _vm_type) }}"
+    _group: >-
+      {{
+        (cifmw_baremetal_hosts is defined and
+         cifmw_baremetal_hosts[item.key] is defined) |
+        ternary('baremetal', _std_group)
+      }}
   ansible.builtin.add_host:
     name: "{{ item.key }}"
     groups: "{{ _group }}s"
   loop: "{{ cifmw_libvirt_manager_mac_map | dict2items }}"
+  loop_control:
+    label: "Adding {{ item.key }} to {{ _group }}s"
 
 - name: Generate all IPs based on MAC and networks
   vars:
@@ -76,11 +84,38 @@
     cifmw_networking_mapper_gather_facts: false
   ansible.builtin.import_role:
     name: networking_mapper
+# END networking_mapper
 
 - name: Manage networks if needed
   when:
     - _cifmw_libvirt_manager_layout.networks is defined
   ansible.builtin.include_tasks: create_networks.yml
+
+- name: Push debugging files
+  vars:
+    _dirname: >-
+      {{
+        (cifmw_libvirt_manager_basedir, 'artifacts') |
+        ansible.builtin.path_join
+      }}
+  block:
+    - name: Output _network_data
+      ansible.builtin.copy:
+        dest: "{{ _dirname }}/debug_network_data.yml"
+        mode: "0644"
+        content: "{{ _network_data | to_nice_yaml }}"
+
+    - name: Output pub_net
+      ansible.builtin.copy:
+        dest: "{{ _dirname }}/debug_pub_net_value.txt"
+        mode: "0644"
+        content: "{{ cifmw_libvirt_manager_pub_net }}"
+
+    - name: Output _cifmw_libvirt_manager_layout
+      ansible.builtin.copy:
+        dest: "{{ _dirname }}/debug_cifmw_libvirt_manager_layout.yml"
+        mode: "0644"
+        content: "{{ _cifmw_libvirt_manager_layout | to_nice_yaml }}"
 
 - name: Craft patch for cifmw_networking_definition
   vars:
@@ -90,48 +125,93 @@
         _network_data |
         selectattr('name', 'match', _match) | first
       }}
-    _networks: |
-      {{ _lnet_data.name | replace('cifmw_', '') }}:
+    _dataset: |
+      {% set ns = namespace(ip_start=30) %}
+      networks:
+        {{ _lnet_data.name | replace('cifmw_', '') }}:
       {% if _lnet_data.ranges[0].start_v4 is defined and _lnet_data.ranges[0].start_v4 | length > 0                     %}
         {% set net_4 = _lnet_data.ranges[0].start_v4 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v4)    %}
-        network-v4: {{ net_4}}
+          network-v4: {{ net_4}}
       {% endif                                                                                                          %}
       {% if _lnet_data.ranges[0].start_v6 is defined and _lnet_data.ranges[0].start_v6 | length > 0                     %}
-        {% set net_6 = _lnet_data.ranges[0].start_v6 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v6)  %}
-        network-v6: {{ net_6 }}
-      {% endif                                                                                                          %}
-    _gr_templates: |
-      {% for group in (_cifmw_libvirt_manager_layout.vms.keys() | sort) if group != 'controller' and
-                                                                           (_cifmw_libvirt_manager_layout.vms[group].amount | default(1) | int) > 0 %}
-      {% set _gr = (group == 'crc') | ternary('ocp', group)                                                             %}
-        {{ _gr }}s:
+          {% set net_6 = _lnet_data.ranges[0].start_v6 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v6)  %}
+          network-v6: {{ net_6 }}
+      {% endif %}
+      group-templates:
+      {% for group in _cifmw_libvirt_manager_layout.vms.keys() if group != 'controller' and
+          ((_cifmw_libvirt_manager_layout.vms[group].amount is defined and
+            (_cifmw_libvirt_manager_layout.vms[group].amount | int) > 0) or
+          _cifmw_libvirt_manager_layout.vms[group].amount is undefined) %}
+        {{ (group == 'crc') | ternary('ocp', group) }}s:
           networks:
             {{ _lnet_data.name | replace('cifmw_', '') }}:
-      {% if cifmw_networking_definition['group-templates'][_gr ~ 's']['network-template'] is not defined                %}
-              range: {{ cifmw_networking_definition['group-templates'][_gr ~ 's']['networks']['internalapi']['range'] }}
-      {% endif                                                                                                          %}
-      {% endfor                                                                                                         %}
-    _instances: |
+      {% if cifmw_networking_definition['group-templates'][group ~ 's']['network-template'] is undefined %}
+      {%   if net_4 is defined %}
+              range-v4:
+                start: {{  net_4 | ansible.utils.nthhost(ns.ip_start | int ) }}
+                length: {{ _cifmw_libvirt_manager_layout.vms[group].amount | default(1) }}
+      {%   endif %}
+      {%   if net_6 is defined %}
+              range-v6:
+                start: {{  net_6 | ansible.utils.nthhost(ns.ip_start | int) }}
+                length: {{ _cifmw_libvirt_manager_layout.vms[group].amount | default(1) }}
+      {%   endif %}
+      {%   set ns.ip_start = ns.ip_start|int + (_cifmw_libvirt_manager_layout.vms[group].amount | default(1) | int ) + 1 %}
+      {% endif %}
+      {% endfor %}
+      {% if cifmw_baremetal_hosts is defined and cifmw_baremetal_hosts | length > 0 %}
+        baremetals:
+          networks:
+            {{ cifmw_libvirt_manager_pub_net }}:
+      {%   if net_4 is defined and cifmw_networking_definition['group-templates']['baremetals']['network-template'] is undefined %}
+              range-v4:
+                start: {{  net_4 | ansible.utils.nthhost(ns.ip_start) }}
+                length: {{ cifmw_baremetal_hosts | length }}
+      {%   endif %}
+      {%   if net_6 is defined and cifmw_networking_definition['group-templates']['baremetals']['network-template'] is undefined %}
+              range-v6:
+                start: {{  net_6 | ansible.utils.nthhost(ns.ip_start) }}
+                length: {{ cifmw_baremetal_hosts | length }}
+      {%   endif %}
+      {% endif %}
       {% if _cifmw_libvirt_manager_layout.vms.controller is defined %}
-      controller-0:
-        networks:
-          {{ _lnet_data.name | replace('cifmw_', '') }}:
-      {% if _lnet_data.ranges[0].start_v4 is defined and _lnet_data.ranges[0].start_v4 | length > 0 %}
-            ip-v4: "{{ _lnet_data.ranges[0].start_v4 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v4) | ansible.utils.nthhost(9) }}"
+      instances:
+        controller-0:
+          networks:
+            {{ _lnet_data.name | replace('cifmw_', '') }}:
+      {%   if net_4 is defined %}
+              ip-v4: "{{ net_4 | ansible.utils.nthhost(9) }}"
+      {%   endif %}
+      {%   if net_6 is defined %}
+              ip-v6: "{{ net_6 | ansible.utils.nthhost(9) }}"
+      {%   endif %}
       {% endif %}
-      {% if _lnet_data.ranges[0].start_v6 is defined and _lnet_data.ranges[0].start_v6 | length > 0 %}
-            ip-v6: "{{ _lnet_data.ranges[0].start_v6 | ansible.utils.ipsubnet(_lnet_data.ranges[0].prefix_length_v6) | ansible.utils.nthhost(9) }}"
-      {% endif %}
-      {% endif %}
-  ansible.builtin.set_fact:
-    cifmw_networking_mapper_definition_patch_01_libvirt:
-      networks: "{{ _networks | from_yaml }}"
-      'group-templates': "{{ _gr_templates | from_yaml | default({}, true) }}"
-      instances: "{{ _instances | from_yaml | default({}, true) }}"
+  block:
+    - name: Expose _dataset
+      ansible.builtin.debug:
+        msg: "{{ _dataset }}"
 
-- name: Expose built networking_mapper patch
-  ansible.builtin.debug:
-    var: cifmw_networking_mapper_definition_patch_01_libvirt
+    - name: Expose patch for networking_mapper
+      vars:
+        _filtered: >-
+          {{
+            _dataset | from_yaml | dict2items |
+            selectattr('value', '!=', none) | items2dict
+          }}
+      ansible.builtin.set_fact:
+        cifmw_networking_mapper_definition_patch_01_libvirt: >-
+          {{  _filtered }}
+
+- name: Save networking_mapper patch
+  ansible.builtin.copy:
+    dest: >-
+      {{
+        (cifmw_libvirt_manager_basedir, 'artifacts', 'net-map-def-patch.yml') |
+        ansible.builtin.path_join
+      }}
+    mode: "0644"
+    content: >-
+      {{ cifmw_networking_mapper_definition_patch_01_libvirt | to_nice_yaml }}
 
 - name: Re-run networking_mapper with new network
   vars:
@@ -149,7 +229,6 @@
 - name: Unset patch
   ansible.builtin.set_fact:
     cifmw_networking_mapper_definition_patch_01_libvirt: {}
-
 
 # START inject reserved IPs in dnsmasq, based on networking_mapper output
 - name: Reserve IPs on networks

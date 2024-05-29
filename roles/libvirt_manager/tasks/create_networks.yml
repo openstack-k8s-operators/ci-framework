@@ -141,12 +141,20 @@
 
 - name: Deploy dnsmasq
   vars:
+    _no_dnsmasq: >-
+      {{
+        cifmw_libvirt_manager_no_dnsmasq_nets_defaults +
+        cifmw_libvirt_manager_no_dnsmasq_nets
+      }}
     cifmw_dnsmasq_enable_dns: true
-    cifmw_dnsmasq_interfaces: "{{ _dns_listeners }}"
+    cifmw_dnsmasq_interfaces: "{{ _dns_listeners | difference(_no_dnsmasq) }}"
     cifmw_dnsmasq_exclude_lo: true
     cifmw_dnsmasq_listen_addresses:
       - "127.0.0.2"
-      - "::2"
+    cifmw_dnsmasq_raw_config: |
+      {% for nic in _no_dnsmasq %}
+      no-dhcp-interface={{ nic }}
+      {% endfor %}
   ansible.builtin.import_role:
     name: dnsmasq
 
@@ -170,22 +178,26 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Gather the status of firewall service.
+- name: Ensure network is not in public zone
   become: true
-  ansible.builtin.service:
-    name: firewalld
-  register: _fw_info
+  notify: Restart firewalld
+  ansible.builtin.command:
+    cmd: >-
+      firewall-cmd --zone public
+      --remove-interface={{ item.name }}
+      --permanent
+  loop: "{{ networks }}"
+  loop_control:
+    label: "{{ item.name }}"
 
 - name: Ensure network is in libvirt zone
   become: true
-  when:
-    - _fw_info.status.SubState | default('') == "running"
-  ansible.posix.firewalld:
-    zone: libvirt
-    interface: "{{ item.name }}"
-    state: enabled
-    permanent: true
-    immediate: true
+  notify: Restart firewalld
+  ansible.builtin.command:
+    cmd: >-
+      firewall-cmd --zone libvirt
+      --add-interface={{ item.name }}
+      --permanent
   loop: "{{ networks }}"
   loop_control:
     label: "{{ item.name }}"
