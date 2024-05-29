@@ -86,13 +86,26 @@ patches:
       path: /spec/manila/enabled
       value: {{ cifmw_services_manila_enabled | default('false') }}
 
+{% if cifmw_services_manila_enabled | default('false') | bool -%}
+{%   set _manila_backends = [] -%}
+{%   set _manila_protocols = [] -%}
+{%   if cifmw_ceph_daemons_layout.cephfs_enabled | default(true) | bool -%}
+{%      set _ = _manila_backends.append('cephfs') -%}
+{%      set _ = _manila_protocols.append('cephfs') -%}
+{%   endif -%}
+{%   if cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool -%}
+{%      set _ = _manila_backends.append('cephfsnfs') -%}
+{%      set _ = _manila_protocols.append('nfs') -%}
+{# the endif below lacks '-' before '%' intentionally (needed for indentation) #}
+{%   endif %}
     - op: add
       path: /spec/manila/template/customServiceConfig
       value: |
         [DEFAULT]
-        enabled_share_backends=cephfs
-        enabled_share_protocols=cephfs
+        enabled_share_backends={{ _manila_backends|join(',') }}
+        enabled_share_protocols={{ _manila_protocols|join(',') }}
         debug=True
+{%   if 'cephfs' in _manila_backends %}
         [cephfs]
         driver_handles_share_servers=False
         share_backend_name=cephfs
@@ -102,3 +115,15 @@ patches:
         cephfs_cluster_name=ceph
         cephfs_volume_mode=0755
         cephfs_protocol_helper_type=CEPHFS
+{%   endif -%}
+{%   if 'cephfsnfs' in _manila_backends %}
+        [cephfsnfs]
+        driver_handles_share_servers=False
+        share_backend_name=cephfs
+        share_driver=manila.share.drivers.cephfs.driver.CephFSDriver
+        cephfs_auth_id=openstack
+        cephfs_cluster_name=ceph
+        cephfs_nfs_cluster_id=cephfs
+        cephfs_protocol_helper_type=NFS
+{%   endif -%}
+{% endif -%}
