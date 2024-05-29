@@ -171,7 +171,7 @@
     cmd: |-
       test -d /home/zuul && exit 0;
       set -xe -o pipefail;
-      echo "{{ vm_ip.nic.host }}.{{ inventory_hostname }}" | sudo tee /etc/hostname;
+      echo "{{ vm_ip.nic.host }}" | sudo tee /etc/hostname;
       sudo hostname -F /etc/hostname;
       sudo useradd -m -d /home/zuul zuul;
       echo "zuul ALL=(ALL)  NOPASSWD: ALL" | sudo tee /etc/sudoers.d/zuul;
@@ -219,11 +219,14 @@
 
 - name: Update inventory to consume correct user
   delegate_to: localhost
+  vars:
+    extracted_ip: "{{ (vm_ip.stdout.split())[3] | ansible.utils.ipaddr('address') }}"
   ansible.builtin.add_host:
     name: "{{ vm_ip.nic.host }}"
     groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
     ansible_host: "{{ vm_ip.nic.host }}.{{ inventory_hostname }}"
     ansible_ssh_user: "{{ _cifmw_libvirt_manager_layout.vms[vm_type].admin_user | default('zuul') }}"
+    host_ip: "{{ extracted_ip }}"
   loop: "{{ vm_ips.results }}"
   loop_control:
     loop_var: vm_ip
