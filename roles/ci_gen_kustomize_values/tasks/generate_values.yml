@@ -23,7 +23,7 @@
       Please do not call this tasks file without
       calling the generate_snippet.yml first!
 
-- name: Ensure we have content to combine
+- name: List snippets
   vars:
     _dir_name: >-
       {{
@@ -37,20 +37,12 @@
            _dir_name) | path_join
         )
       }}
-  block:
-    - name: List snippets
-      register: _snippets
-      ansible.builtin.find:
-        paths: "{{ _dir_path }}"
-        patterns: "*.yml,*.yaml"
-        recurse: false
-
-    - name: Assert we do have content to combine
-      ansible.builtin.assert:
-        that:
-          - _snippets.files | length > 0
-        msg: >-
-          No file found in {{ _dir_path }}
+  ansible.builtin.find:
+    paths: "{{ _dir_path }}"
+    patterns: "*.yml,*.yaml"
+    excludes: "{{ cifmw_ci_gen_kustomize_values_original_cm_content_file_name }}"
+    recurse: false
+  register: _snippets
 
 - name: Ensure _content is empty
   ansible.builtin.set_fact:
@@ -77,6 +69,7 @@
     _content: >
       {{
         _content |
+        default(_cifmw_gen_kustomize_values_base_cm_content, true) |
         combine(_parsed, recursive=true)
       }}
   loop: "{{ _snippets_content.results }}"
@@ -108,6 +101,8 @@
           }}
         content: >-
           {{
-            _content | to_nice_yaml
+            (
+              [ _content ] + _cifmw_gen_kustomize_values_extra_manifests
+            ) | cifmw.general.to_nice_yaml_all
           }}
         mode: "0644"
