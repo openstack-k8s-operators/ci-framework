@@ -167,7 +167,7 @@
 
     - name: Inject ProxyJump configuration for remote hypervisor VMs
       when:
-        - hostvars[host]['ansible_host'] is defined
+        - hostvars[host]['host_ip'] is defined
       vars:
         _vm_type: "{{ host | regex_replace('\\-[0-9]*', '') }}"
         _vm_data: "{{ _cifmw_libvirt_manager_layout.vms[_vm_type] }}"
@@ -189,8 +189,8 @@
         path: "/home/zuul/.ssh/config"
         marker: "## {mark} {{ host }}"
         block: |-
-          Host {{ host }} {{ _vm_ip }}
-            Hostname {{ _vm_ip }}
+          Host {{ host }} {{ _vm_ip }} {{ hostvars[host]['host_ip'] }}
+            Hostname {{ hostvars[host]['host_ip'] }}
             User {{ _vm_data['admin_user'] | default('zuul') }}
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
@@ -278,6 +278,14 @@
           ansible.builtin.import_role:
             name: manage_secrets
             tasks_from: reproducer.yml
+
+    - name: Inject FQDN in /etc/hosts
+      become: true
+      ansible.builtin.blockinfile:
+        dest: /etc/hosts
+        block: |-
+         127.0.0.2 {{ hostvars['controller-0'].ansible_host }}
+         ::2 {{ hostvars['controller-0'].ansible_host }}
 
     - name: Ensure packages are installed
       become: true
