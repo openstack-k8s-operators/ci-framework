@@ -1,6 +1,8 @@
 ---
 - name: Run light checks in pod
   hosts: all
+  vars:
+    _log_dir: "{{ ansible_user_dir }}/zuul-output/logs"
   tasks:
     - name: Install packages
       become: true
@@ -12,13 +14,13 @@
 
     - name: Ensure zuul-output exists
       ansible.builtin.file:
-        path: "{{ ansible_user_dir }}/zuul-output/logs"
+        path: "{{ _log_dir }}"
         state: directory
         mode: "0755"
 
     - name: Run make targets
       vars:
-        src_dir: >-
+        _src_dir: >-
           {{
             zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir
           }}
@@ -26,28 +28,31 @@
         - name: Install dependencies
           register: _setup
           community.general.make:
-            chdir: "{{ src_dir }}"
+            chdir: "{{ _src_dir }}"
             target: setup_molecule
             params:
               USE_VENV: "no"
+              LOG_DIR: "{{ _log_dir }}"
           retries: 5
           delay: 2
           until: _setup is success
 
         - name: Run check
           community.general.make:
-            chdir: "{{ src_dir }}"
+            chdir: "{{ _src_dir }}"
             target: "{{ run_test }}"
             params:
               USE_VENV: "no"
-              LOG_DIR: "{{ ansible_user_dir }}/zuul-output/logs"
+              LOG_DIR: "{{ _log_dir }}"
       always:
         - name: Expose check log as artifact
           vars:
-            log_name: "{{ run_test | replace('_nodeps', '') }}"
+            _log_name: "{{ run_test | replace('_nodeps', '') }}"
           zuul_return:
             data:
               zuul:
                 artifacts:
-                  - name: "{{ log_name }} logfile"
-                    url: "{{ log_name }}.log"
+                  - name: "{{ _log_name }} logfile"
+                    url: "{{ _log_name }}.log"
+                  - name: "setup_molecule logfile"
+                    url: "setup_molecule.log"

@@ -56,8 +56,9 @@ setup_tests: ## Setup the environment
 	bash scripts/setup_env
 
 .PHONY: setup_molecule
+setup_molecule: export HOME=/root
 setup_molecule: setup_tests ## Setup molecule environment
-	bash scripts/setup_molecule
+	bash scripts/setup_molecule 2>&1 | cat | tee $(LOG_DIR)/setup_molecule.log
 
 ##@ General testing
 .PHONY: tests
@@ -121,7 +122,7 @@ architecture_test_nodeps: ## Run architecture-test without any dependency instal
 ansible_test: setup_tests ansible_test_nodeps ## Runs ansible-test with dependencies install
 
 .PHONY: ansible_test_nodeps
-ansible_test_nodeps: export HOME=/tmp
+ansible_test_nodeps: export HOME=/root
 ansible_test_nodeps: export ANSIBLE_LOCAL_TMP=/tmp
 ansible_test_nodeps: export ANSIBLE_REMOTE_TMP=/tmp
 ansible_test_nodeps: ## Run ansible-test without installing dependencies
@@ -144,7 +145,7 @@ run_ctx_all_tests: run_ctx_pre_commit run_ctx_molecule run_ctx_ansible_test run_
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
 	podman run --rm --security-opt label=disable \
-		-v .:/opt/sources \
+		-v ${PWD}:/opt/sources \
 		-e BASEDIR=$(BASEDIR) \
 		-e HOME=/tmp \
 		--user root \
@@ -153,17 +154,20 @@ run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
 .PHONY: run_ctx_molecule
 run_ctx_molecule: ci_ctx ## Run molecule check in a container
 	podman run --rm \
+		-v ${PWD}:/opt/sources \
 		-e MOLECULE_CONFIG=${MOLECULE_CONFIG} \
 		-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
-		--security-opt label=disable -v .:/opt/sources \
+		--security-opt label=disable \
 		--user root \
 		${CI_CTX_NAME} \
 		bash -c "make molecule_nodeps MOLECULE_CONFIG=${MOLECULE_CONFIG}" ;
 
 .PHONY: run_ctx_ansible_test
 run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
-	podman run --rm --security-opt label=disable -v .:/opt/sources \
+	podman run --rm --security-opt label=disable \
+		-v ${PWD}:/opt/sources \
 		-e HOME=/tmp \
+		-e USE_VENV=no \
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
 		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ;
@@ -177,7 +181,8 @@ run_ctx_architecture_test: ## Run architecture_test in a container. You can pass
 	@$(MAKE) ci_ctx
 	@mkdir -p ${_DIR};
 	podman unshare chown 1000:1000 ${_DIR};
-	podman run --rm --security-opt label=disable -v .:/opt/sources \
+	podman run --rm --security-opt label=disable \
+		-v ${PWD}:/opt/sources \
 		-e HOME=/tmp \
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
