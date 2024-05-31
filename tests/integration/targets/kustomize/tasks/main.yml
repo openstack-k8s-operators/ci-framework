@@ -22,17 +22,41 @@
     - "{{ ci_kustomize_oc_bin_path }}"
     - "{{ ci_kustomize_kustomize_bin_path }}"
 
-- name: Fetch oc from OCP mirror
-  ansible.builtin.unarchive:
-    src: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/stable/openshift-client-linux.tar.gz
-    dest: "{{ ci_kustomize_oc_bin_path }}"
-    remote_src: true
+- name: Fetch kustomize tools
+  vars:
+    _arch: "{{ ansible_architecture | lower }}"
+    _is_arm: "{{ _arch in ['aarch64', 'arm64'] }}"
+    _is_macos: "{{ (ansible_distribution | lower) == 'macosx' }}"
+  block:
+    - name: Fetch oc from OCP mirror
+      vars:
+        _os_string: >-
+          {{
+            _is_macos | ternary('mac', 'linux')
+          }}
+        _arch_string: >-
+          {{
+            _is_arm | ternary('-arm64', '')
+          }}
+      ansible.builtin.unarchive:
+        src: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/stable/openshift-client-{{ _os_string }}{{ _arch_string }}.tar.gz
+        dest: "{{ ci_kustomize_oc_bin_path }}"
+        remote_src: true
 
-- name: Fetch kustomize from sigs Github
-  ansible.builtin.unarchive:
-    src: https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.1.1/kustomize_v5.1.1_linux_amd64.tar.gz
-    dest: "{{ ci_kustomize_kustomize_bin_path }}"
-    remote_src: true
+    - name: Fetch kustomize from sigs Github
+      vars:
+        _os_string: >-
+          {{
+            _is_macos | ternary('darwin', 'linux')
+          }}
+        _arch_string: >-
+          {{
+            'amd64' if _arch == 'x86_64' else (_is_arm | ternary('arm64', _arch))
+          }}
+      ansible.builtin.unarchive:
+        src: https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.2/kustomize_v5.4.2_{{ _os_string }}_{{ _arch_string }}.tar.gz
+        dest: "{{ ci_kustomize_kustomize_bin_path }}"
+        remote_src: true
 
 - name: Recursively find scenario files
   ansible.builtin.find:
