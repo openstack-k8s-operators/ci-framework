@@ -108,7 +108,7 @@ architecture_test_nodeps: ## Run architecture-test without any dependency instal
 	$(call check-var-defined,NET_ENV_FILE)
 	cp -r ${ARCH_REPO} /tmp/local-arch-repo;
 	ansible-playbook -i localhost, -c local \
-		ci/playbooks/validate-architecture.yml \
+		ci/playbooks/architecture/validate-architecture.yml \
 		-e cifmw_zuul_target_host=localhost \
 		-e ansible_user_dir=/tmp \
 		-e cifmw_architecture_repo=/tmp/local-arch-repo \
