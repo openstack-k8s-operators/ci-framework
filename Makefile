@@ -143,30 +143,42 @@ run_ctx_all_tests: run_ctx_pre_commit run_ctx_molecule run_ctx_ansible_test run_
 
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
-	podman run --rm --security-opt label=disable \
-		-v .:/opt/sources \
+	podman run \
+		--rm \
+		--security-opt label=disable \
+		-v ${PWD}:/opt/sources \
+		--user root \
 		-e BASEDIR=$(BASEDIR) \
 		-e HOME=/tmp \
-		--user root \
-		${CI_CTX_NAME} bash -c "make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ;
+		${CI_CTX_NAME} \
+		bash -c \
+		"make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ;
 
 .PHONY: run_ctx_molecule
 run_ctx_molecule: ci_ctx ## Run molecule check in a container
-	podman run --rm \
+	podman run \
+		--rm \
+		--security-opt label=disable \
+		-v ${PWD}:/opt/sources \
+		--user root \
 		-e MOLECULE_CONFIG=${MOLECULE_CONFIG} \
 		-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
-		--security-opt label=disable -v .:/opt/sources \
-		--user root \
 		${CI_CTX_NAME} \
-		bash -c "make molecule_nodeps MOLECULE_CONFIG=${MOLECULE_CONFIG}" ;
+		bash -c \
+		"make molecule_nodeps MOLECULE_CONFIG=${MOLECULE_CONFIG}";
 
 .PHONY: run_ctx_ansible_test
 run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
-	podman run --rm --security-opt label=disable -v .:/opt/sources \
+	podman run \
+		--rm \
+		--security-opt label=disable \
+		-v ${PWD}:/opt/sources \
 		-e HOME=/tmp \
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
-		${CI_CTX_NAME} bash -c "make ansible_test_nodeps" ;
+		${CI_CTX_NAME} \
+		bash -c \
+		"make ansible_test_nodeps";
 
 .PHONY: run_ctx_architecture_test
 run_ctx_architecture_test: export _DIR="${HOME}/ci-framework-data/validate-${SCENARIO_NAME}"
@@ -177,17 +189,21 @@ run_ctx_architecture_test: ## Run architecture_test in a container. You can pass
 	@$(MAKE) ci_ctx
 	@mkdir -p ${_DIR};
 	podman unshare chown 1000:1000 ${_DIR};
-	podman run --rm --security-opt label=disable -v .:/opt/sources \
+	podman run \
+		--rm \
+		--security-opt label=disable \
+		-v ${PWD}:/opt/sources \
+		-v ${ARCH_REPO}:/architecture:ro \
+		-v ${NET_ENV_FILE}:/net-env-file.yml:ro \
+		-v ${_DIR}:/tmp/ci-framework-data:rw \
 		-e HOME=/tmp \
 		-e ANSIBLE_LOCAL_TMP=/tmp \
 		-e ANSIBLE_REMOTE_TMP=/tmp \
 		-e SCENARIO_NAME=${SCENARIO_NAME} \
 		-e ARCH_REPO=/architecture \
 		-e NET_ENV_FILE=/net-env-file.yml \
-		-v ${ARCH_REPO}:/architecture:ro \
-		-v ${NET_ENV_FILE}:/net-env-file.yml:ro \
-		-v ${_DIR}:/tmp/ci-framework-data:rw \
-		${CI_CTX_NAME} bash -c \
+		${CI_CTX_NAME} \
+		bash -c \
 		"make architecture_test_nodeps ANSIBLE_OPTS=\"${ANSIBLE_OPTS}\""; \
 
 .PHONY: enable-git-hooks
