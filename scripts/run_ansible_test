@@ -24,6 +24,7 @@ set -xeuo
 PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
 USE_VENV=${USE_VENV:-yes}
 HOME=${HOME:-/tmp}
+ANSIBLE_GALAXY_RETIRES=5
 
 export HOME=${HOME}
 export ANSIBLE_LOCAL_TMP=${HOME}
@@ -38,7 +39,12 @@ case ${USE_VENV} in
         ;;
 esac
 
-ansible-galaxy collection install --upgrade --force ${PROJECT_DIR}
+n=0
+until [ "$n" -ge "$ANSIBLE_GALAXY_RETIRES" ]; do
+    ansible-galaxy collection install --upgrade --force "${PROJECT_DIR}" && break
+    n=$((n+1))
+    sleep 15
+done
 
 # Create/append the sanity exceptions for the current ansible version
 ansible_version=$(python3 -c "import ansible; print(ansible.__version__)" | sed 's/\.[^.]*$//')
