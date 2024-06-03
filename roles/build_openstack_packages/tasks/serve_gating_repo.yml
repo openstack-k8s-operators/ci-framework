@@ -1,0 +1,35 @@
+---
+- name: Install python-psutil
+  become: true
+  ansible.builtin.package:
+    name: python-psutil
+
+- name: Getting process IDs of the python http server
+  community.general.pids:
+    pattern: "python -m http.server {{ cifmw_bop_gating_port }}"
+  register: _pids_of_python
+
+- name: Printing the process IDs obtained
+  ansible.builtin.debug:
+    msg: "{{ _pids_of_python.pids }}"
+
+- name: Force kill the running process
+  ansible.builtin.command: "kill -9 {{ item }}"
+  loop: "{{ _pids_of_python.pids }}"
+
+- name: Open port 8766 to serve repos
+  become: true
+  ansible.builtin.command: "{{ item }}"
+  with_items:
+    - "nft add table ip filter"
+    - "nft add chain ip filter INPUT { type filter hook input priority 0 \\; }"
+    - "nft insert rule ip filter INPUT tcp dport {{ cifmw_bop_gating_port }} counter accept"
+  changed_when: true
+
+- name: Serve gating repos
+  become: true
+  ansible.builtin.shell:
+    cmd: >-
+      nohup python -m http.server {{ cifmw_bop_gating_port }} 1>{{ cifmw_bop_build_repo_dir }}/pkg_mgr_mirror.log 2>{{ cifmw_bop_build_repo_dir }}/pkg_mgr_mirror_error.log &
+  args:
+    chdir: "{{ cifmw_bop_gating_repo_dest }}"
