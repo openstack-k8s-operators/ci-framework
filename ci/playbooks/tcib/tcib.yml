@@ -34,32 +34,44 @@
       ansible.builtin.include_role:
         name: build_openstack_packages
 
-    - name: Deploy local registry
-      tags:
-        - container_img_build
-      ansible.builtin.include_role:
-        name: registry_deploy
-
-    - name: Set fact for cifmw_build_containers_image_tag var
-      tags:
-        - container_img_build
+    - name: Construct project change list
       ansible.builtin.set_fact:
-        cifmw_build_containers_image_tag: "{{ cifmw_repo_setup_full_hash }}"
+        zuul_change_list: "{{ zuul_change_list | default([]) + [item.project.short_name] }}"
+        cacheable: true
+      with_items: "{{ zuul['items'] }}"
+      when:
+        - zuul is defined
+        - "'change_url' in item"
 
-    - name: Build containers
-      tags:
-        - container_img_build
-      ansible.builtin.include_role:
-        name: build_containers
+    - name: Build containers when needed
+      when: "'os-net-config' not in zuul_change_list"
+      block:
+        - name: Deploy local registry
+          tags:
+            - container_img_build
+          ansible.builtin.include_role:
+            name: registry_deploy
 
-    - name: Get the containers list from container registry
-      ansible.builtin.uri:
-        url: "http://{{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
-        return_content: true
-      register: cp_imgs
+        - name: Set fact for cifmw_build_containers_image_tag var
+          tags:
+            - container_img_build
+          ansible.builtin.set_fact:
+            cifmw_build_containers_image_tag: "{{ cifmw_repo_setup_full_hash }}"
 
-    - name: Add the container list to file
-      ansible.builtin.copy:
-        content: "{{ cp_imgs.content }}"
-        dest: "{{ ansible_user_dir }}/local_registry.log"
-        mode: "0644"
+        - name: Build containers
+          tags:
+            - container_img_build
+          ansible.builtin.include_role:
+            name: build_containers
+
+        - name: Get the containers list from container registry
+          ansible.builtin.uri:
+            url: "http://{{ cifmw_rp_registry_ip }}:{{ cifmw_rp_registry_port }}/v2/_catalog"
+            return_content: true
+          register: cp_imgs
+
+        - name: Add the container list to file
+          ansible.builtin.copy:
+            content: "{{ cp_imgs.content }}"
+            dest: "{{ ansible_user_dir }}/local_registry.log"
+            mode: "0644"

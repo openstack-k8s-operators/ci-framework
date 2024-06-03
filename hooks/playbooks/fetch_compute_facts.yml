@@ -1,12 +1,18 @@
 ---
-- name: Sync repos for controller to compute for periodic jobs
+- name: Sync repos for controller to compute for periodic jobs and gating repo
   hosts: computes
   gather_facts: true
   tasks:
+    - name: Check for gating repo on controller
+      delegate_to: controller
+      ansible.builtin.stat:
+        path: "{{ cifmw_basedir }}/artifacts/repositories/gating.repo"
+      register: _gating_repo
+
     - name: Copy repositories from controller to computes
       when:
         - zuul is defined
-        - "'periodic' in zuul.job"
+        - ("'periodic' in zuul.job") or (_gating_repo.stat.exists)
       become: true
       ansible.builtin.copy:
         dest: "/etc/yum.repos.d/"
