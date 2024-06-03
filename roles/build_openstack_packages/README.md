@@ -20,6 +20,7 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 * `cifmw_bop_openstack_project_path`: (String) The full path of openstack cloned project to be built.
 * `cifmw_bop_gating_repo_dest`: (String) The path of directory to store gating repo file and repo metadata.
   Defaults to `cifmw_bop_build_repo_dir` var.
+* `cifmw_bop_gating_port`: Port number to serve gating repo. Default to `8766`.
 * `cifmw_bop_dlrn_cleanup`: (Boolean) Clean up the DLRN artifacts. Defaults to `False`.
 * `cifmw_bop_branchless_projects`: List of project does not have stable branches.
 * `cifmw_bop_skipped_projects`: List of projects on which DLRN build needs to be skipped.

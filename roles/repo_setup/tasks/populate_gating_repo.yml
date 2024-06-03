@@ -1,0 +1,31 @@
+---
+- name: Check for gating.repo file on content provider
+  ansible.builtin.uri:
+    url: "http://{{ content_provider_registry_ip }}:8766/gating.repo"
+  register: _url_status
+  ignore_errors: true
+
+- name: Construct gating repo
+  when: _url_status.status == 200
+  block:
+    - name: Populate gating repo from content provider ip
+      ansible.builtin.copy:
+        content: |
+          [gating-repo]
+          baseurl=http://{{ content_provider_registry_ip }}:8766/
+          enabled=1
+          gpgcheck=0
+          priority=1
+        dest: "{{ cifmw_repo_setup_output }}/gating.repo"
+
+    - name: Check for DLRN repo at the destination
+      ansible.builtin.stat:
+        path: "{{ cifmw_repo_setup_output }}/delorean.repo"
+      register: _dlrn_repo
+
+    - name: Lower the priority of DLRN repos to allow installation from gating repo
+      when: _dlrn_repo.stat.exists
+      ansible.builtin.replace:
+        path: "{{ cifmw_repo_setup_output }}/delorean.repo"
+        regexp: "priority=1"
+        replace: "priority=20"
