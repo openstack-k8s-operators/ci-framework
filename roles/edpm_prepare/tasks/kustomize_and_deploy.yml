@@ -61,9 +61,9 @@
   ansible.builtin.pause:
     seconds: "{{ cifmw_edpm_prepare_wait_controplane_status_change_sec }}"
 
-- name: Wait for OpenStack controlplane to be deployed
-  vars:
-    cr_name: >-
+- name: Get controlplane name
+  ansible.builtin.set_fact:
+    _ctlplane_name: >-
       {{
         (
           cifmw_edpm_prepare_crs_kustomize_result.result |
@@ -73,12 +73,14 @@
           first
         ).metadata.name
       }}
+
+- name: Wait for OpenStack controlplane to be deployed
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc wait OpenStackControlPlane {{ cr_name }}
+      oc wait OpenStackControlPlane {{ _ctlplane_name }}
       --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
       --for=condition=ready
       --timeout={{ cifmw_edpm_prepare_timeout }}m
