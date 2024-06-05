@@ -25,20 +25,20 @@ data:
     base_if: {{ network.interface_name }}
 {%       endif %}
 {%     endfor %}
-{%     set node_net_orig_content = original_content.data.bgp['net-attach-def']['node' ~ ns.ocp_index] %}
-{%     set node_bgp_net0 = node_net_orig_content.bgpnet0 | from_json %}
+{%     set node_bgp_orig_content = original_content.data.bgp.bgpdefs['node' ~ ns.ocp_index] %}
+{%     set node_bgp_net0 = node_bgp_orig_content.bgpnet0 %}
 {%     if 'worker-3' != hostname %}
-{%       set node_bgp_net1 = node_net_orig_content.bgpnet1 | from_json %}
+{%       set node_bgp_net1 = node_bgp_orig_content.bgpnet1 %}
 {%     endif %}
     bgp_peers:
-      - {{ node_bgp_net0.ipam.range_start }}
+      - {{ node_bgp_net0.bgp_peer }}
 {%     if 'worker-3' != hostname %}
-      - {{ node_bgp_net1.ipam.range_start }}
+      - {{ node_bgp_net1.bgp_peer }}
 {%     endif %}
     bgp_ip:
-      - {{ node_bgp_net0.ipam.range_start | ansible.utils.ipmath(1) }}
+      - {{ node_bgp_net0.bgp_ip }}
 {%     if 'worker-3' != hostname %}
-      - {{ node_bgp_net1.ipam.range_start | ansible.utils.ipmath(1) }}
+      - {{ node_bgp_net1.bgp_ip }}
 {%     endif %}
 {%     set subnet_index = (hostname | split('-'))[-1] | int %}
 {%     set ip_index = 1 if ('master-' in hostname or 'worker-3' == hostname) else 2  %}
@@ -48,8 +48,8 @@ data:
                            ansible.utils.ipmath(ip_index) %}
     loopback_ip: {{ loopback_ip }}
     loopback_ipv6: {{ loopback_ipv6 }}
-{%     if node_net_orig_content.routes | default(false) %}
-    routes: {{ node_net_orig_content.routes }}
+{%     if node_bgp_orig_content.routes | default(false) %}
+    routes: {{ node_bgp_orig_content.routes }}
 {%     endif %}
 {%     set ns.ocp_index = ns.ocp_index+1 %}
 {%   endif %}
