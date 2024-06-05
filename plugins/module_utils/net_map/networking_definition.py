@@ -2056,7 +2056,7 @@ class InstanceDefinition:
         for network_name, network_data in child_nets.items():
             self.__parse_raw_net(
                 network_name,
-                network_data,
+                network_data or {},
                 network_definitions,
                 trunk_parents=set(trunk_parents.keys()),
             )
