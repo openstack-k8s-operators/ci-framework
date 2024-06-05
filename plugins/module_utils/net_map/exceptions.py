@@ -6,9 +6,10 @@ from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
 
 
 class NetworkMappingError(Exception, ansible_encoding.RawConvertibleObject):
-    def __init__(self, message) -> None:
+    def __init__(self, message, **kwargs) -> None:
         super().__init__(message)
         self.message = message
+        self.details = kwargs
 
     def to_raw(self) -> typing.Dict[str, typing.Any]:
         return ansible_encoding.decode_ansible_raw(vars(self))
@@ -22,8 +23,9 @@ class NetworkMappingValidationError(NetworkMappingError):
         invalid_value=None,
         parent_name=None,
         parent_type=None,
+        **kwargs,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, **kwargs)
         self.field = field
         self.invalid_value = invalid_value
         self.parent_name = parent_name
@@ -31,8 +33,8 @@ class NetworkMappingValidationError(NetworkMappingError):
 
 
 class HostNetworkRangeCollisionValidationError(NetworkMappingValidationError):
-    def __init__(self, message, range_1=None, range_2=None) -> None:
-        super().__init__(message)
+    def __init__(self, message, range_1=None, range_2=None, **kwargs) -> None:
+        super().__init__(message, **kwargs)
         self.range_1 = range_1
         self.range_2 = range_2
 
@@ -48,8 +50,9 @@ class NetworkMappingTrunkParentValidationError(NetworkMappingValidationError):
         invalid_value=None,
         parent_name=None,
         parent_type=None,
+        **kwargs,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, **kwargs)
         self.field = field
         self.invalid_value = invalid_value
         self.parent_name = parent_name
