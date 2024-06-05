@@ -64,6 +64,7 @@ are shared among multiple roles:
 - `cifmw_deploy_obs` (Bool) Specifies whether to deploy Cluster Observability operator.
 - `cifmw_openshift_api_ip_address` (String) contains the OpenShift API IP address. Note: it is computed internally and should not be user defined.
 - `cifmw_openshift_ingress_ip_address` (String) contains the OpenShift Ingress IP address. Note: it is computed internally and should not be user defined.
+- `cifmw_nolog`: (Bool) Toggle `no_log` value for selected tasks. Defaults to `true` (hiding those logs by default).
 
 ```{admonition} Words of caution
 :class: danger
