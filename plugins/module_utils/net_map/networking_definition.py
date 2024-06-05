@@ -170,6 +170,7 @@ def _validate_fields_one_of(
     parent_type: str = None,
     alone_field: str = None,
     mandatory: bool = False,
+    **kwargs,
 ) -> bool:
     fields_present = any(
         field_name in raw_definition.keys() for field_name in fields_list
@@ -183,6 +184,7 @@ def _validate_fields_one_of(
             f"at least one of {mandatory_fields} must be provided",
             parent_name=parent_name,
             parent_type=parent_type,
+            **kwargs,
         )
     if alone_field and alone_field in raw_definition:
         rest = [
@@ -198,6 +200,7 @@ def _validate_fields_one_of(
                 invalid_value=raw_definition[alone_field],
                 parent_name=parent_name,
                 parent_type=parent_type,
+                **kwargs,
             )
 
     return True
@@ -2100,6 +2103,7 @@ class GroupTemplateDefinition:
             parent_name=self.__group_name,
             parent_type=self.__OBJECT_TYPE_NAME,
             alone_field=self.__FIELD_NETWORK_RANGE,
+            network_name=network_definition.name,
         )
         if not ranges_present:
             return None, None
