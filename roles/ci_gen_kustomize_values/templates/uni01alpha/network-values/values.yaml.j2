@@ -28,24 +28,22 @@ data:
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
 {%  if network.tools is defined and network.tools.keys() | length > 0 %}
-    subnets:
 {%    for tool in network.tools.keys() %}
 {%      if tool is match('.*lb$') %}
 {%        set _ = ns.lb_tools.update({tool: []}) %}
 {%      endif %}
 {%    endfor %}
-      - allocationRanges:
-{%    for range in network.tools.netconfig.ipv4_ranges %}
-        - end: {{ range.end }}
-          start: {{ range.start }}
-{%    endfor %}
+{%    if network.tools.netconfig is defined  %}
+    subnets:
+      - name: subnet1
         cidr: {{ network.network_v4 }}
-{%      if network.gw_v4 is defined %}
-        gateway: {{ network.gw_v4 }}
-{%      endif %}
-        name: subnet1
-{%  if network.vlan_id is defined  %}
-        vlan: {{ network.vlan_id }}
+        gateway: {{ omit if network.gw_v4 is not defined else network.gw_v4 }}
+        vlan: {{ omit if network.vlan_id is not defined else network.vlan_id }}
+        allocationRanges:
+{%    for range in network.tools.netconfig.ipv4_ranges %}
+          - end: {{ range.end }}
+            start: {{ range.start }}
+{%    endfor %}
 {%  endif %}
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
@@ -65,34 +63,65 @@ data:
     mtu: {{ network.mtu | default(1500) }}
 {%  if network.vlan_id is defined  %}
     vlan: {{ network.vlan_id }}
-{%    if ns.interfaces[network.network_name] is defined %}
-    iface: {{ network.network_name }}
-    base_iface: {{ ns.interfaces[network.network_name] }}
-{%    endif %}
-{%  else %}
-{%    if ns.interfaces[network.network_name] is defined %}
-    iface: {{ ns.interfaces[network.network_name] }}
-{%    endif %}
+    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
+    base_iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
+{%  elif network.network_name != "ironic" %}
+    iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
+{% else %}
+    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
 {%  endif %}
-{%  if network.tools.multus is defined %}
+{%  if network.tools.multus is defined and network.network_name == "ctlplane" %}
     net-attach-def: |
       {
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
-{%  if network.network_name == "octavia" %}
-        "type": "bridge",
-{%  else %}
         "type": "macvlan",
-{%  endif %}
-{%  if network.network_name == "octavia" %}
-        "bridge": "octbr",
-{%  elif network.vlan_id is defined %}
-        "master": "{{ network.network_name }}",
-{%  elif network.network_name == "ctlplane" %}
         "master": "ospbr",
-{%  else %}
-        "master": "{{ ns.interfaces[network.network_name] }}",
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network.network_v4 }}",
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+        }
+      }
 {%  endif %}
+{%  if network.tools.multus is defined and network.network_name == "octavia" %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "octavia",
+        "type": "bridge",
+        "bridge": "octbr",
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network.network_v4 }}",
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+        }
+      }
+{%  endif %}
+{%  if network.tools.multus is defined and network.network_name == "ironic" %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "ironic",
+        "type": "bridge",
+        "bridge": "ironic",
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network.network_v4 }}",
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+        }
+      }
+{%  endif %}
+{%  if network.tools.multus is defined and network.network_name not in ["ctlplane", "octavia", "ironic"] %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "{{ network.network_name }}",
+        "type": "macvlan",
+        "master": "{{ network.network_name if network.vlan_id is defined else ns.interfaces[network.network_name] }}",
         "ipam": {
           "type": "whereabouts",
           "range": "{{ network.network_v4 }}",
@@ -102,7 +131,6 @@ data:
       }
 {%  endif %}
 {% endfor %}
-
   dns-resolver:
     config:
       server:
