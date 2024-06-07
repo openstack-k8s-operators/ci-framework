@@ -14,22 +14,21 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Starting update
+- name: Save current csv for openstack-operator
+  ansible.builtin.shell:
+    cmd: >-
+      oc get csv openstack-operator.v0.0.1 -o yaml -n openstack-operators  > csv.yaml
+
+- name: Get OpenStackVersion
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: OpenStackVersion
+    namespace: openstack-operators
+  register: osv_info
+
+- name: Print return information from OpenStackVersion 
   ansible.builtin.debug:
-    msg: "Hello World from update"
-
-- name: Trigger the ping test
-  when: cifw_update_ping_test | bool
-  block:
-    - name: Create Test instance before update
-      ansible.builtin.include_tasks: create-instance.yml
-    
-    - name: Start ping test
-      ansible.builtin.include_tasks: l3_agent_connectivity_check_start.yml
-
-- name: Run update-csv tasks
-  ansible.builtin.include_tasks: update-csv.yml
-
-- name: Stop the ping test
-  ansible.builtin.include_tasks: l3_agent_connectivity_check_stop.yml
-  when: cifw_update_ping_test | bool
+    var: osv_info
+    verbosity: 2
