@@ -14,6 +14,25 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Hello World
-  ansible.builtin.debug:
-    msg: "Hello World from update"
+- name: Set openstack_update_run Makefile environment variables
+  tags:
+    - always
+  ansible.builtin.set_fact:
+    _make_openstack_update_run_params: |
+      {% if not cifmw_update_openstack_update_run_operators_updated -%}
+      FAKE_UPDATE: true
+      CONTAINERS_NAMESPACE: {{ cifmw_update_openstack_update_run_containers_namespace }}
+      CONTAINERS_TARGET_TAG: {{ cifmw_update_openstack_update_run_containers_target_tag }}
+      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+      {% else -%}
+      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+      {% endif -%}
+
+- name: Run make openstack_update_run
+  vars:
+    make_openstack_update_run_env: "{{ cifmw_install_yamls_environment | combine({'PATH': cifmw_path }) }}"
+    make_openstack_update_run_params: "{{ _make_openstack_update_run_params | from_yaml }}"
+    make_openstack_update_run_dryrun: "{{ cifmw_update_run_dryrun | bool }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_update_run'
