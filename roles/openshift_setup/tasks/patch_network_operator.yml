@@ -1,0 +1,37 @@
+- name: Patch network operator when using OVNKubernetes backend
+  when:
+    - not cifmw_openshift_setup_dry_run
+  block:
+    - name: Gather network.operator info
+      register: _network
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        api_version: "operator.openshift.io/v1"
+        kind: Network
+        name: cluster
+
+    - name: Patch network operator
+      vars:
+        _network_backend: >-
+          {{
+            _network.resources |
+            map(attribute="spec.defaultNetwork.type") |
+            first
+          }}
+      when:
+        - _network_backend == "OVNKubernetes"
+      kubernetes.core.k8s_json_patch:
+        api_version: "operator.openshift.io/v1"
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Network
+        name: cluster
+        persist_config: true
+        patch:
+          - path: "/spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/routingViaHost"
+            value: true
+            op: replace
+          - path: "/spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/ipForwarding"
+            value: "Global"
+            op: replace
