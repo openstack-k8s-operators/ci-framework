@@ -1,0 +1,26 @@
+---
+- name: Create flavor for ironic baremetal nodes
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _namespace: openstack
+    _flavor_name: baremetal
+    _boot_mode: uefi
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Create baremetal flavor
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ _namespace }}
+        oc rsh openstackclient \
+          openstack flavor create {{ _flavor_name }} \
+            --ram 1024 \
+            --vcpus 1 \
+            --disk 15 \
+            --property resources:VCPU=0 \
+            --property resources:MEMORY_MB=0 \
+            --property resources:DISK_GB=0 \
+            --property resources:CUSTOM_BAREMETAL=1 \
+            --property capabilities:boot_mode="{{ _boot_mode }}"

@@ -1,0 +1,31 @@
+---
+- name: Create network for ironic provisioning
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _namespace: openstack
+    _subnet_range: '172.20.1.0/24'
+    _subnet_gateway: '172.20.1.1'
+    _subnet_alloc_pool_start: '172.20.1.100'
+    _subnet_alloc_pool_end: '172.20.1.200'
+    _provider_physical_network: ironic
+    _provider_network_type: flat
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Create baremetal network
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ _namespace }}
+        oc rsh openstackclient \
+          openstack network create provisioning \
+            --share \
+            --provider-physical-network {{ _provider_physical_network }} \
+            --provider-network-type {{ _provider_network_type }}
+        oc rsh openstackclient \
+          openstack subnet create provisioning-subnet \
+            --network provisioning \
+            --subnet-range {{ _subnet_range }} \
+            --gateway {{ _subnet_gateway }} \
+            --allocation-pool start={{ _subnet_alloc_pool_start }},end={{ _subnet_alloc_pool_end }}
