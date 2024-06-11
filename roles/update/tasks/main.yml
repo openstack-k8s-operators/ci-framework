@@ -14,9 +14,58 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Hello World
-  ansible.builtin.debug:
-    msg: "Hello World from update"
+- name: Check Openstack Version deployed version
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get OpenStackVersion
+      --namespace openstack
+      --no-headers
+      -o custom-columns=":status.deployedVersion"
+  changed_when: false
+  register: _openstack_version_deployed_stdout
 
-- name: Run update-csv tasks
-  ansible.builtin.include_tasks: update-csv.yml
+- name: Check Openstack Version available version
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get OpenStackVersion
+      --namespace openstack
+      --no-headers
+      -o custom-columns=":status.availableVersion"
+  changed_when: false
+  register: _openstack_version_available_stdout
+
+- name: Set fact for cifmw_update_openstack_update_run_operators_updated
+  when: _openstack_version_available_stdout != _openstack_version_deployed_stdout
+  ansible.builtin.set_fact:
+    cifmw_update_openstack_update_run_operators_updated: true
+
+- name: Set openstack_update_run Makefile environment variables
+  tags:
+    - always
+  ansible.builtin.set_fact:
+    make_openstack_update_run_env: >-
+      {{
+        cifmw_install_yamls_environment |
+        combine({'PATH': cifmw_path}) |
+      }}
+    make_openstack_update_run_params: |
+      {% if not cifmw_update_openstack_update_run_operators_updated %}
+      FAKE_UPDATE: "true"
+      CONTAINERS_NAMESPACE: {{ cifmw_update_openstack_update_run_containers_namespace }}
+      CONTAINERS_TARGET_TAG: {{ cifmw_update_openstack_update_run_containers_target_tag }}
+      {% endif %}
+      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+
+- name: Run make openstack_update_run
+  vars:
+    make_openstack_update_run_env: "{{ make_openstack_update_run_env | from_yaml }}"
+    make_openstack_update_run_params: "{{ make_openstack_update_run_params | from_yaml }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_update_run'
