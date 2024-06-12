@@ -1,0 +1,81 @@
+# This job tests the functionality of the dataplane-operator to remove a
+# compute node.
+#
+# This job was created to satisfy:
+# https://issues.redhat.com/browse/osprh-5747
+
+# Since jobs use different names for their OpenStackDataPlaneNodeSet's, we need to dynamically
+# determine the name of the currently deployed one
+- name: Determine name of deployed NodeSet
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc get osdpns -n {{ cifmw_validations_namespace }} --no-headers -o custom-columns=":metadata.name"
+  register: deployed_nodeset_name
+
+- name: Verify compute being removed is present before scale down
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack hypervisor list
+  register: hypervisors_before_scale_down
+  failed_when: '"{{ cifmw_validations_edpm_scale_down_hostname }}" not in hypervisors_before_scale_down.stdout'
+
+- name: Disable nova-compute for node being removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service set {{ cifmw_validations_edpm_scale_down_hostname }} nova-compute --disable
+
+- name: Disable ovn and nova-compute containers on node being removed
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail && systemctl stop edpm_ovn_controller && systemctl stop edpm_ovn_metadata_agent && systemctl stop edpm_nova_compute
+  become: true
+  delegate_to: "{{ cifmw_validations_edpm_scale_down_hostname.split('.')[0] }}"
+
+- name: Get ovn controller id of host to be removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack network agent list --host {{ cifmw_validations_edpm_scale_down_hostname }} | grep "OVN Controller agent"  | awk '{print $2}'
+  register: remove_ovn_id
+
+- name: Delete network agent for compute being removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack network agent delete {{ remove_ovn_id.stdout }}
+
+- name: Get compute service id of host to be removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service list --host {{ cifmw_validations_edpm_scale_down_hostname }} | grep "nova-compute"  | awk '{print $2}'
+  register: remove_compute_service_id
+
+- name: Delete compute service
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service delete {{ remove_compute_service_id.stdout }}
+
+- name: Verify compute was removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack hypervisor list
+  register: hypervisors_after_scale_down
+  failed_when: '"{{ cifmw_validations_edpm_scale_down_hostname }}" in hypervisors_after_scale_down.stdout'
+
+- name: Patch nodeset to remove node
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim}}" --type=json --patch '[{ "op": "remove", "path": "/spec/nodes/{{ cifmw_validations_edpm_scale_down_nodename }}" }]'
