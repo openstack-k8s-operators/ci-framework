@@ -38,6 +38,13 @@ name:
 * `type`: (String) Type of the hook. In this case, set it to `playbook`.
 * `extra_vars`: (Dict) Structure listing the extra variables you want to pass down
 
+##### About OpenShift namespaces and install_yamls
+
+Since `install_yamls` might not be initialized, the `run_hook` is exposing two namespace related parameters to the hook playbook:
+
+* `namespace`: it "proxies" `cifmw_install_yamls_defaults['NAMESPACE']` and fallback on `openstack`.
+* `operator_namespace`: it "proxies" `cifmw_install_yamls_defaults['OPERATOR_NAMESPACE']` and fallback on `openstack-operators`.
+
 #### Multiple hooks in a list
 
 * `config_file`: (String) Ansible configuration file. Defaults to `ansible_config_file`.
