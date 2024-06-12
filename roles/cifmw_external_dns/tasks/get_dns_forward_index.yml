@@ -1,0 +1,83 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get current DNS configuration
+  delegate_to: localhost
+  run_once: true
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operator.openshift.io/v1
+    namespace: openshift-dns
+    kind: DNS
+    name: default
+  register: dns_config
+  retries: "{{ cifmw_external_dns_retries }}"
+  delay: "{{ cifmw_external_dns_delay }}"
+  until: dns_config.failed == false
+
+- name: If servers list exists then find index of cifmw_external_dns_name
+  when:
+    - dns_config.resources | length > 0
+    - dns_config.resources[0].spec is defined
+    - dns_config.resources[0].spec.servers is defined
+  block:
+    - name: Find index of the server matching the cifmw_external_dns_name
+      run_once: true
+      ansible.builtin.set_fact:
+        server_index: "{{ item.0 }}"
+      when: item.1.name == cifmw_external_dns_name
+      with_indexed_items: "{{ dns_config.resources[0].spec.servers | default([]) }}"
+      register: server_indices
+
+    - name: Set server index
+      run_once: true
+      when: server_indices is defined
+      ansible.builtin.set_fact:
+        server_index: "{{ server_indices.results | selectattr('ansible_facts.server_index', 'defined') | map(attribute='ansible_facts.server_index') | first | default(-1) }}"
+
+- name: If servers list does not exist then create it as an empty list
+  when:
+    - dns_config.resources | length > 0
+    - dns_config.resources[0].spec is defined
+    - dns_config.resources[0].spec.servers is not defined
+  block:
+    # empty servers list is harmless but needed to add to path '/spec/servers/-' later
+    - name: Patch dns.operator/default openshift-dns to add empty servers list
+      delegate_to: localhost
+      run_once: true
+      kubernetes.core.k8s_json_patch:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: operator.openshift.io/v1
+        namespace: openshift-dns
+        kind: DNS
+        name: default
+        patch:
+          - op: add
+            path: /spec/servers
+            value: []
+      retries: "{{ cifmw_external_dns_retries }}"
+      delay: "{{ cifmw_external_dns_delay }}"
+      register: result
+      until: result.failed == false
+
+    - name: Set server index to -1
+      run_once: true
+      ansible.builtin.set_fact:
+        server_index: -1

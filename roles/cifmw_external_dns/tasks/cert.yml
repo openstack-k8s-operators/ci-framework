@@ -1,0 +1,86 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Put the certificate manifest file in place
+  delegate_to: localhost
+  run_once: true
+  ansible.builtin.template:
+    src: "templates/cert.yml.j2"
+    dest: "{{ cifmw_external_dns_manifests_dir }}/{{ cifmw_external_dns_cert_name }}.yml"
+    mode: "0644"
+    force: true
+
+- name: Create certificate
+  when: not (cifmw_external_dns_check_mode | default (false) | bool)
+  block:
+    - name: Apply k8s manifest file of kind Certficate
+      delegate_to: localhost
+      run_once: true
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        src: "{{ cifmw_external_dns_manifests_dir }}/{{ cifmw_external_dns_cert_name }}.yml"
+        state: present
+      retries: "{{ cifmw_external_dns_retries }}"
+      delay: "{{ cifmw_external_dns_delay }}"
+      register: result
+      until: result.failed == false
+
+    - name: Ask k8s for the new Certficate Secret
+      delegate_to: localhost
+      run_once: true
+      no_log: true
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Secret
+        namespace: "{{ cifmw_external_dns_ns }}"
+        name: "{{ cifmw_external_dns_cert_name }}"
+      register: cert_info
+      retries: "{{ cifmw_external_dns_retries }}"
+      delay: "{{ cifmw_external_dns_delay }}"
+      until: cert_info.failed == false
+
+    - name: Ensure key and certificate directories exist on target host
+      become: true
+      ansible.builtin.file:
+        path: "{{ item | dirname }}"
+        state: directory
+        mode: '0755'
+        seuser: system_u
+        setype: cert_t
+        selevel: s0
+      loop:
+        - "{{ cifmw_external_dns_certificate }}"
+        - "{{ cifmw_external_dns_key }}"
+
+    - name: Populate key and certificate file on target host
+      no_log: true
+      become: true
+      ansible.builtin.copy:
+        dest: "{{ item.path }}"
+        mode: '0644'
+        seuser: unconfined_u
+        setype: cert_t
+        selevel: s0
+        content: "{{ item.content }}"
+      loop:
+        - { path: "{{ cifmw_external_dns_certificate }}",
+            content: "{{ cert_info.resources[0].data['tls.crt'] | b64decode }}" }
+        - { path: "{{ cifmw_external_dns_key }}",
+            content: "{{ cert_info.resources[0].data['tls.key'] | b64decode  }}" }

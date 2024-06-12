@@ -29,18 +29,47 @@
     _hosts: "{{ _hosts|default([]) + [ hostvars[item][ceph_hostname_var] ] }}"
   loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
 
-- name: Get and save TLS certificate for rgw spec if provided
-  when: cifmw_cephadm_certificate | length > 0 and
-        cifmw_cephadm_key | length > 0
+- name: Create certificate and DNS for RGW if certificate paths are set
+  when:
+    - cifmw_cephadm_certificate | length > 0
+    - cifmw_cephadm_key | length > 0
   block:
+    - name: Define cifmw_external_dns_vip_ext
+      ansible.builtin.set_fact:
+        cifmw_external_dns_vip_ext: "{{ cifmw_external_dns_vip_ext | default({}) |
+          combine({ (cifmw_cephadm_vip): 'rgw-external.ceph.local' }) }}"
+
+    - name: Define cifmw_external_dns_vip_int
+      ansible.builtin.set_fact:
+        cifmw_external_dns_vip_int: "{{ cifmw_external_dns_vip_ext | default({}) |
+          combine({ (cifmw_cephadm_vip): 'rgw-internal.ceph.local' }) }}"
+
+    - name: Create DNS domain and certificate
+      ansible.builtin.include_role:
+        name: cifmw_external_dns
+      vars:
+        cifmw_external_dns_domain: ceph.local
+        cifmw_external_dns_labels:
+          component: ceph-storage
+          service: ceph
+        cifmw_external_dns_certificate: "{{ cifmw_cephadm_certificate }}"
+        cifmw_external_dns_key: "{{ cifmw_cephadm_key }}"
+        cifmw_external_dns_certificate_dir: "{{ cifmw_cephadm_certs }}"
+
     - name: Get the certificate content
       register: slurp_cert
       ansible.builtin.slurp:
         src: "{{ cifmw_cephadm_certificate }}"
 
-    - name: Set rgw_frontend_cert for rgw spec
+    - name: Get the key content
+      register: slurp_key
+      ansible.builtin.slurp:
+        src: "{{ cifmw_cephadm_key }}"
+
+    - name: Set rgw_frontend_cert to cert/key concatenation
       ansible.builtin.set_fact:
-        rgw_frontend_cert: "{{ slurp_cert['content'] | b64decode }}"
+        rgw_frontend_cert: "{{ slurp_cert['content'] | b64decode ~
+                               slurp_key['content'] | b64decode }}"
 
 - name: Create a Ceph RGW spec
   ansible.builtin.template:
@@ -61,6 +90,12 @@
   changed_when: false
   become: true
   loop: "{{ lookup('ansible.builtin.dict', cifmw_ceph_rgw_config) }}"
+
+- name: Apply ceph config-key set ssl_option
+  ansible.builtin.command: |
+    {{ cifmw_cephadm_ceph_cli }} config-key set ssl_option {{ cifmw_cephadm_config_key_set_ssl_option }}
+  changed_when: false
+  become: true
 
 - name: Apply spec
   ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch apply --in-file {{ cifmw_cephadm_container_spec }}"
