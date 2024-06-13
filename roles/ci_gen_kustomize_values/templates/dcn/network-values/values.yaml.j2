@@ -24,6 +24,8 @@ data:
 {% endfor %}
 
 {% for network in cifmw_networking_env_definition.networks.values() %}
+{% set dcn1_net = cifmw_networking_env_definition.networks[network.network_name + 'dcn1'] %}
+{% set dcn2_net = cifmw_networking_env_definition.networks[network.network_name + 'dcn2'] %}
 {% set ns.lb_tools = {} %}
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
@@ -34,20 +36,61 @@ data:
 {%        set _ = ns.lb_tools.update({tool: []}) %}
 {%      endif %}
 {%    endfor %}
-{% if network.tools.subnets is defined%}
-{%    for subnet in network.tools.subnets %}
+{% if (dcn1_net is defined) and (dcn2_net is defined) %}
       - allocationRanges:
-        - end: {{ subnet.end }}
-          start: {{ subnet.start }}
-        cidr: {{ subnet.cidr }}
-{%      if subnet.gw_v4 is defined %}
-        gateway: {{ subnet.gateway }}
-{%      endif %}
-        name: {{ subnet.name }}
-{%      if subnet.vlan is defined  %}
-        vlan: {{ subnet.vlan }}
-{%      endif %}
+{%    for range in network.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
 {%    endfor %}
+        cidr: {{ network.network_v4 }}
+{%      if network.gw_v4 is defined %}
+        gateway: {{ network.gw_v4 }}
+{%      endif %}
+        name: subnet1
+{%  if network.vlan_id is defined  %}
+        vlan: {{ network.vlan_id }}
+{%  endif %}
+        routes:
+          - destination: "{{ dcn1_net.network_v4 }}"
+            nexthop: "{{network.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}"
+          - destination: "{{ dcn2_net.network_v4 }}"
+            nexthop: "{{network.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}" 
+      - allocationRanges:
+{%    for range in dcn1_net.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%    endfor %}
+        cidr: {{ dcn1_net.network_v4 }}
+{%      if dcn1_net.gw_v4 is defined %}
+        gateway: {{ dcn1_net.gw_v4 }}
+{%      endif %}
+        name: subnet2
+{%  if dcn1_net.vlan_id is defined  %}
+        vlan: {{ dcn1_net.vlan_id }}
+{%  endif %}
+        routes:
+          - destination: "{{ network.network_v4 }}"
+            nexthop: "{{dcn1_net.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}"
+          - destination: "{{ dcn2_net.network_v4 }}"
+            nexthop: "{{dcn1_net.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}"
+      - allocationRanges:
+{%    for range in dcn2_net.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%    endfor %}
+        cidr: {{ dcn2_net.network_v4 }}
+{%      if dcn2_net.gw_v4 is defined %}
+        gateway: {{ dcn2_net.gw_v4 }}
+{%      endif %}
+        name: subnet3
+{%  if dcn2_net.vlan_id is defined  %}
+        vlan: {{ dcn2_net.vlan_id }}
+{%  endif %}
+        routes:
+          - destination: "{{ network.network_v4 }}"
+            nexthop: "{{dcn2_net.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}"
+          - destination: "{{ dcn1_net.network_v4 }}"
+            nexthop: "{{dcn2_net.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}"
 {% else %}
       - allocationRanges:
 {%    for range in network.tools.netconfig.ipv4_ranges %}
@@ -107,22 +150,16 @@ data:
           "type": "whereabouts",
           "range": "{{ network.network_v4 }}",
           "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-{% if network.tools.routes is defined %}
+{%    if (dcn1_net is defined) and (dcn2_net is defined) %}
           "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
           "routes": [
-{% for route in network.tools.routes %}
-{% if not loop.last %}
-              { "dst": "{{ route.dst }}", "gw": "{{ route.gw }}" },
-{% else %}
-              { "dst": "{{ route.dst }}", "gw": "{{ route.gw }}" }
-{%  endif %}
-{% endfor%}
+              { "dst": "{{ dcn1_net.network_v4 }}", "gw": "{{network.network_v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}" },
+              { "dst": "{{ dcn2_net.network_v4 }}", "gw": "{{ network.network_v4 |  ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address')}}" }
             ]
-          }
-{% else %}
+{%    else %}
           "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+{%    endif %}
         }
-{% endif  %}
       }
 {%  endif %}
 {% endfor %}
@@ -141,9 +178,32 @@ data:
         values:
           - {{ nameserver }}
 {% endfor %}
-
   routes:
-    config: []
+    config: 
+      - destination: 192.168.133.0/24
+        next-hop-address: 192.168.122.1
+        next-hop-interface: ospbr
+      - destination: 192.168.144.0/24
+        next-hop-address: 192.168.122.1
+        next-hop-interface: ospbr
+      - destination: 172.17.10.0/24
+        next-hop-address: 172.17.0.1
+        next-hop-interface: internalapi
+      - destination: 172.18.10.0/24
+        next-hop-address: 172.18.0.1
+        next-hop-interface: storage
+      - destination: 172.19.10.0/24
+        next-hop-address: 172.19.0.1
+        next-hop-interface: tenant
+      - destination: 172.17.20.0/24
+        next-hop-address: 172.17.0.1
+        next-hop-interface: internalapi
+      - destination: 172.18.20.0/24
+        next-hop-address: 172.18.0.1
+        next-hop-interface: storage
+      - destination: 172.19.20.0/24
+        next-hop-address: 172.19.0.1
+        next-hop-interface: tenant
 
 # Hardcoding the last IP bit since we don't have support for endpoint_annotations in the networking_mapper output
   rabbitmq:

@@ -1,0 +1,99 @@
+---
+# source: common/edpm-nodeset-values/values.yaml.j2
+{% set instances_names = []                                                            %}
+{% set _original_nodeset = (original_content.data | default({})).nodeset | default({}) %}
+{% set _original_nodes = _original_nodeset.nodes | default({})                         %}
+{% set _original_services = _original_nodeset['services'] | default([])                %}
+{% set _vm_type = (_original_nodes.keys() | first).split('-')[1]                       %}
+{% for _inst in cifmw_networking_env_definition.instances.keys()                       %}
+{%   if 'compute' in _inst                                                   %}
+{%     set _ = instances_names.append(_inst)                                           %}
+{%   endif                                                                             %}
+{% endfor                                                                              %}
+data:
+  ssh_keys:
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
+    public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      ansibleVars:
+        edpm_fips_mode: "{{ 'enabled' if cifmw_fips_enabled|default(false)|bool else 'check' }}"
+        timesync_ntp_servers:
+          - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+        edpm_network_config_os_net_config_mappings:
+{% for instance in instances_names                                                     %}
+          edpm-{{ instance }}:
+{%   if hostvars[instance] is defined                                                  %}
+            nic1: "{{ hostvars[instance].ansible_default_ipv4.macaddress }}"
+{%   endif                                                                             %}
+{% if 'dcn1' in instance%}
+            nic2: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplanedcn1.mac_addr }}"
+{% elif 'dcn2' in instance %}
+            nic2: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplanedcn2.mac_addr }}"
+{% else %}
+            nic2: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.mac_addr }}"
+{% endif %}
+{% endfor                                                                              %}
+{% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
+        edpm_sshd_allowed_ranges:
+{%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
+          - "{{ range }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+    nodes:
+{% for instance in instances_names                                                     %}
+      edpm-{{ instance }}:
+        ansible:
+{% if 'dcn1' in instance%}
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplanedcn1.ip_v4 }}
+{% elif 'dcn2' in instance %}
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplanedcn2.ip_v4 }}
+{% else %}
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+{% endif %}
+        hostName: {{ instance }}
+        networks:
+{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
+{%          if 'dcn' in net                                                            %}
+{%            set dcn_net = net | replace('dcn1', '') | replace('dcn2', '')            %}
+          - name: {{ dcn_net }}
+{%          else                                                                       %}
+          - name: {{ net }}
+{%      endif                                                                          %}
+{% if 'dcn1' in instance %}
+            subnetName: subnet2
+{% elif 'dcn2' in instance %}
+            subnetName: subnet3
+{% else %}
+            subnetName: subnet1
+{% endif %}
+{%        if 'ctlplane' in net %}
+            defaultRoute: true
+{% if 'dcn1' in instance%}
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplanedcn1.ip_v4 }}
+{% elif 'dcn2' in instance %}
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplanedcn2.ip_v4 }}
+{% else %}
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+{% endif %}
+{%        endif                                                                        %}
+{%      endfor                                                                         %}
+{% endfor                                                                              %}
+{% if ('repo-setup' not in _original_services) and
+      ('repo-setup' in ci_gen_kustomize_edpm_nodeset_predeployed_services)             %}
+    services:
+      - "repo-setup"
+{%   for svc in _original_services                                                     %}
+      - "{{ svc }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+
+{% if 'compute' in _vm_type                                                            %}
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
+{% endif                                                                               %}
