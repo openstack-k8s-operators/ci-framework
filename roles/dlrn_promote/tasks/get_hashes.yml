@@ -1,22 +1,33 @@
 ---
-- name: Make sure delorean.repo exists
-  ansible.builtin.stat:
-    path: "{{ cifmw_dlrn_promote_dlrnrepo_path }}"
-  register: dlrn_file
+- name: Promote hashes for intergation line
+  when: (cifmw_repo_setup_component_name is not defined) or (cifmw_repo_setup_component_name | length == 0)
+  block:
+    - name: Make sure delorean.repo exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_dlrn_promote_dlrnrepo_path }}"
+      register: dlrn_file
 
-- name: Get baseurls from delorean.repo
-  ansible.builtin.slurp:
-    src: "{{ cifmw_dlrn_promote_dlrnrepo_path }}"
-  register: dlrn_data
-  when: dlrn_file.stat.exists
+    - name: Get baseurls from delorean.repo
+      ansible.builtin.slurp:
+        src: "{{ cifmw_dlrn_promote_dlrnrepo_path }}"
+      register: dlrn_data
+      when: dlrn_file.stat.exists
 
-- name: Get urls from baseurls list
-  ansible.builtin.set_fact:
-    _base_urls: "{{ _base_urls | default([]) + [item | split('=') | last] }}"
-  loop: "{{ dlrn_data['content'] | b64decode | regex_findall('baseurl=.*') }}"
+    - name: Get urls from baseurls list
+      ansible.builtin.set_fact:
+        _base_urls: "{{ _base_urls | default([]) + [item | split('=') | last] }}"
+      loop: "{{ dlrn_data['content'] | b64decode | regex_findall('baseurl=.*') }}"
 
-- name: Run promotion for each base component urls
+    - name: Run promotion for each base component urls
+      ansible.builtin.include_tasks: get_hash_from_commit.yaml
+      loop: "{{ _base_urls }}"
+      loop_control:
+        loop_var: "commit_url"
+
+- name: Promote hash for component line
+  when:
+    - cifmw_repo_setup_component_name is defined
+    - cifmw_repo_setup_component_name | length > 0
+  vars:
+    commit_url: "{{ cifmw_repo_setup_dlrn_url }}"
   ansible.builtin.include_tasks: get_hash_from_commit.yaml
-  loop: "{{ _base_urls }}"
-  loop_control:
-    loop_var: "commit_url"
