@@ -30,6 +30,8 @@ networks.
   for overriding the default configuration. Refer to
   [section](#supported-keys-in-cifmw_devscripts_config_overrides) for more
   information.
+* `cifmw_devscripts_installer_timeout`: (int) number of second before deployment timeout.
+  Defaults to 7200, 2 hours.
 * `cifmw_devscripts_dry_run` (bool) If enabled, the workflow is evaluated.
 * `cifmw_devscripts_src_dir` (str) The parent folder of dev-scripts repository.
 * `cifmw_devscripts_remove_libvirt_net_default` (bool) Remove the default
