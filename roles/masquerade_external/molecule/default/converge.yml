@@ -1,0 +1,70 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: instance
+  vars:
+    cifmw_masquerade_external_source_ranges:
+      - '172.16.0.0/24'
+      - '172.17.0.0/24'
+  tasks:
+    - name: Insert rules
+      ansible.builtin.include_role:
+        name: masquerade_external
+
+    - name: Assert rules are present
+      block:
+        - name: List POSTROUTING chain in nat table
+          become: true
+          register: _out
+          ansible.builtin.command: 'iptables -t nat -L POSTROUTING -v'
+        - name: Assert CIFMW-PRT in POSTROUTING chain
+          vars:
+            ref: '\s*CIFMW-PRT\s*all\s*--\s*any\s*any\s*anywhere\s*anywhere'
+          ansible.builtin.assert:
+            that: _out.stdout is regex(ref)
+        - name: List CIFMW-PRT chain in nat table
+          become: true
+          register: _out
+          ansible.builtin.command: 'iptables -t nat -L CIFMW-PRT -v'
+        - name: Assert MASQUERADE rules in CIFMW-PRT chain
+          ansible.builtin.assert:
+            that: _out.stdout is regex(item)
+          loop:
+            - '\s*MASQUERADE\s*all\s*--\s*any\s*.*\s*172.16.0.0/24\s*anywhere'
+            - '\s*MASQUERADE\s*all\s*--\s*any\s*.*\s*172.17.0.0/24\s*anywhere'
+
+    - name: Cleanup rules
+      ansible.builtin.include_role:
+        name: masquerade_external
+        tasks_from: cleanup.yml
+
+    - name: Assert rules where removed
+      block:
+        - name: List POSTROUTING chain in nat table
+          become: true
+          register: _out
+          ansible.builtin.command: 'iptables -t nat -L POSTROUTING'
+        - name: Assert CIFMW-PRT is not in POSTROUTING chain
+          ansible.builtin.assert:
+            that: '"CIFMW-PRT" not in _out.stdout'
+        - name: List CIFMW-PRT chain in nat table - should fail with No chain ...
+          become: true
+          register: _out
+          ansible.builtin.command: 'iptables -t nat -L CIFMW-PRT -v'
+          failed_when:
+            - '"No chain/target/match by that name." not in _out.stderr'
