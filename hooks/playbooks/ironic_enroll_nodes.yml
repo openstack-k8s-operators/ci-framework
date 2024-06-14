@@ -1,0 +1,65 @@
+---
+- name: Enroll nodes in ironic
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _baremetal_info_path: "{{ cifmw_basedir }}/parameters/baremetal-info.yml"
+    _namespace: openstack
+    _ironic_node_name_prefix: ironic-
+    _ironic_network_interface: flat
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Slurp baremetal-info YAML
+      register: _baremetal_info
+      ansible.builtin.slurp:
+        src: "{{ _baremetal_info_path }}"
+
+    - name: Load ironic nodes from baremetal-info
+      ansible.builtin.set_fact:
+        _ironic_node_info: >-
+          {{
+            (_baremetal_info.content | b64decode | from_yaml).cifmw_baremetal_hosts
+            | dict2items
+            | selectattr('key', 'match', _ironic_node_name_prefix )
+          }}
+
+    - name: Set ironic-nodes set_fact
+      vars:
+        _conn: "{{ item.value.connection | urlsplit }}"
+      ansible.builtin.set_fact:
+        ironic_nodes:
+          nodes: >-
+            {{
+              ironic_nodes.nodes | default([]) +
+                [
+                  {
+                    'name': item.key,
+                    'driver': 'redfish',
+                    'driver_info': {
+                      'redfish_address':
+                        (_conn.scheme | split('+') | last) + '://' + _conn.hostname + ':' + (_conn.port | string),
+                      'redfish_system_id': _conn.path,
+                      'redfish_username': item.value.username,
+                      'redfish_password': item.value.password,
+                    },
+                    'ports': [{'address': (item.value.nics | first).mac}],
+                    'network_interface': _ironic_network_interface,
+                  }
+                ]
+            }}
+      loop: "{{ _ironic_node_info }}"
+
+    - name: Dump ironic_nodes to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/parameters/ironic_nodes.yaml"
+        content: "{{ ironic_nodes | to_yaml }}"
+
+    - name: Enroll ironic nodes
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ _namespace }}
+        oc cp {{ cifmw_basedir }}/parameters/ironic_nodes.yaml {{ _namespace }}/openstackclient:/tmp/
+        oc rsh openstackclient \
+          openstack baremetal create /tmp/ironic_nodes.yaml

@@ -45,6 +45,42 @@ cifmw_test_operator_tempest_network_attachments: []
 cifmw_test_operator_tempest_tests_include_override_scenario: false
 cifmw_test_operator_tempest_tests_exclude_override_scenario: false
 cifmw_test_operator_tempest_workflow: []
+
+# Enabling SRBAC by default, in jobs where this does not make sense should be turned off explicitly
+#
+# auth.tempest_roles is set to an empty value because otherwise
+# python-tempestconf sets its value as 'member' and this causes
+# failures to SRBAC reader tests, because it assigns both roles to the user.
+# Beyond that, the roles are defined and assigned in the tests themselves,
+# therefore this parameter isn't needed and should have an empty value
+# by default.
+cifmw_tempest_tempestconf_config_defaults:
+  deployerInput: |
+    [auth]
+    tempest_roles =
+
+    [enforce_scope]
+    nova = true
+    neutron = true
+    glance = true
+    cinder = true
+    keystone = true
+    placement = true
+    manila = true
+
+    [barbican_rbac_scope_verification]
+    enforce_scope = true
+
+    [identity-feature-enabled]
+    enforce_scope = true
+
+    [load_balancer]
+    member_role = load-balancer_member
+    admin_role = load-balancer_admin
+    RBAC_test_type = keystone_default_roles
+    enforce_new_defaults = true
+    enforce_scope = false
+
 # Please refer to https://openstack-k8s-operators.github.io/test-operator/guide.html#executing-tempest-tests
 cifmw_test_operator_tempest_config:
   apiVersion: test.openstack.org/v1beta1
@@ -68,7 +104,7 @@ cifmw_test_operator_tempest_config:
       concurrency: "{{ cifmw_test_operator_concurrency }}"
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
       extraImages: "{{ cifmw_test_operator_tempest_extra_images | default([]) }}"
-    tempestconfRun: "{{ cifmw_tempest_tempestconf_config | default(omit) }}"
+    tempestconfRun: "{{ cifmw_tempest_tempestconf_config_defaults | combine(cifmw_tempest_tempestconf_config | default({})) }}"
     workflow: "{{ cifmw_test_operator_tempest_workflow }}"
 
 # Section 3: tobiko parameters - used when run_test_fw is 'tobiko'

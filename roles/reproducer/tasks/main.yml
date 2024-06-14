@@ -104,6 +104,22 @@
         - bootstrap_env
         - bootstrap_layout
 
+- name: Bootstrap nat64 if needed
+  when:
+    - cifmw_use_libvirt | default(false) | bool
+    - cifmw_use_nat64 | default(false) | bool
+  tags:
+    - bootstrap_nat64
+    - bootstrap_layout
+    - bootstrap_env
+  ansible.builtin.include_tasks:
+    file: nat64_appliance.yml
+    apply:
+      tags:
+        - bootstrap_nat64
+        - bootstrap_layout
+        - bootstrap_env
+
 - name: Deploy CRC if needed
   when:
     - _use_crc | bool
@@ -243,41 +259,11 @@
             - (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
                (_cifmw_libvirt_manager_layout.vms.crc.amount | int ) > 0) or
               _cifmw_libvirt_manager_layout.vms.crc.amount is undefined
-          environment:
-            KUBECONFIG: "/home/zuul/.kube/config"
-            PATH: "{{ cifmw_path }}"
-          block:
-            - name: Gather network.operator info
-              register: _network
-              kubernetes.core.k8s_info:
-                api_version: "operator.openshift.io/v1"
-                kubeconfig: "~/.kube/config"
-                kind: Network
-                name: cluster
-
-            - name: Patch network operator
-              vars:
-                _network_backend: >-
-                  {{
-                    _network.resources |
-                    map(attribute="spec.defaultNetwork.type") |
-                    first
-                  }}
-              when:
-                - _network_backend == "OVNKubernetes"
-              kubernetes.core.k8s_json_patch:
-                api_version: "operator.openshift.io/v1"
-                kubeconfig: "~/.kube/config"
-                kind: Network
-                name: cluster
-                persist_config: true
-                patch:
-                  - path: "/spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/routingViaHost"
-                    value: true
-                    op: replace
-                  - path: "/spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/ipForwarding"
-                    value: "Global"
-                    op: replace
+          vars:
+            cifmw_openshift_kubeconfig: "/home/zuul/.kube/config"
+          ansible.builtin.include_role:
+            name: openshift_setup
+            tasks_from: patch_network_operator.yml
 
     - name: Emulate CI job
       when:

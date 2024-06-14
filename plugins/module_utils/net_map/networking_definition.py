@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 import ipaddress
 import typing
@@ -1805,7 +1806,20 @@ class GroupTemplateDefinition:
                 invalid_value=network_name,
             )
 
-        templated_net_data = {**network_template_raw, **(network_data or {})}
+        original_net_data = network_data or {}
+        networks_template = copy.deepcopy(network_template_raw or {})
+        # In case the network declared a range overrides it entirely
+        # by discarding the one from the template
+        if (
+            self.__FIELD_NETWORK_RANGE in original_net_data
+            or self.__FIELD_NETWORK_RANGE_IPV4 in original_net_data
+            or self.__FIELD_NETWORK_RANGE_IPV6 in original_net_data
+        ):
+            networks_template.pop(self.__FIELD_NETWORK_RANGE, None)
+            networks_template.pop(self.__FIELD_NETWORK_RANGE_IPV4, None)
+            networks_template.pop(self.__FIELD_NETWORK_RANGE_IPV6, None)
+
+        templated_net_data = {**networks_template, **original_net_data}
         ipv4_network_range, ipv6_network_range = self.__parse_raw_net_ranges(
             templated_net_data, network_definition
         )

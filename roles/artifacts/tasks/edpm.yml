@@ -26,17 +26,17 @@
     - name: Slurp zuul inventory file
       ansible.builtin.slurp:
         path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
-      register: _inv
+      register: _cifmw_artifacs_inventory_slurp
 
     - name: Extract Compute from zuul mapping if any
       when:
         - cifmw_edpm_deploy_extra_vars is defined
       vars:
-        _inv_data: "{{ _inv['content'] | b64decode | from_yaml }}"
+        _inv_data: "{{ _cifmw_artifacs_inventory_slurp['content'] | b64decode | from_yaml }}"
         _edpm_vms_data: >-
                       {{ _inv_data['computes']['hosts']
                         if 'computes' in _inv_data
-                        else _inv_data['all']['hosts']
+                        else (_inv_data['all']['hosts'] | default({}))
                        }}
       ansible.builtin.set_fact:
         ssh_key_file: "{{ cifmw_edpm_deploy_extra_vars.SSH_KEY_FILE }}"
@@ -44,8 +44,9 @@
         edpm_vms: >-
               {{
                 _edpm_vms_data | dict2items |
+                selectattr('value.ansible_host', 'defined') |
                 selectattr('key', 'match', '^compute.*$') |
-                map(attribute='value.ansible_host') | default([])
+                map(attribute='value.ansible_host')
               }}
 
 - name: Generate logs on EDPM vms
