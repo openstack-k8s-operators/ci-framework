@@ -281,9 +281,6 @@ BAREMETAL_BRANCH    ?= main
 BMH_NAMESPACE       ?= ${NAMESPACE}
 
 # Dataplane Operator
-DATAPLANE_IMG                                    ?= quay.io/openstack-k8s-operators/dataplane-operator-index:latest
-DATAPLANE_REPO                                   ?= https://github.com/openstack-k8s-operators/dataplane-operator.git
-DATAPLANE_BRANCH                                 ?= main
 OPENSTACK_DATAPLANENODESET                       ?= config/samples/dataplane_v1beta1_openstackdataplanenodeset.yaml
 OPENSTACK_DATAPLANENODESET_BAREMETAL             ?= config/samples/dataplane_v1beta1_openstackdataplanenodeset_baremetal_with_ipam.yaml
 DATAPLANE_NODESET_CR                             ?= ${OPERATOR_BASE_DIR}/dataplane-operator/${OPENSTACK_DATAPLANENODESET}
@@ -301,9 +298,6 @@ DATAPLANE_REGISTRY_URL                           ?=quay.io/podified-antelope-cen
 DATAPLANE_CONTAINER_TAG                          ?=current-podified
 DATAPLANE_OVN_METADATA_AGENT_BIND_HOST           ?=127.0.0.1
 DATAPLANE_SINGLE_NODE                            ?=true
-DATAPLANE_KUTTL_CONF      ?= ${OPERATOR_BASE_DIR}/dataplane-operator/kuttl-test.yaml
-DATAPLANE_KUTTL_DIR       ?= ${OPERATOR_BASE_DIR}/dataplane-operator/tests/kuttl/tests
-DATAPLANE_KUTTL_NAMESPACE ?= dataplane-kuttl-tests
 DATAPLANE_DEFAULT_GW      ?= 192.168.122.1
 
 # Manila

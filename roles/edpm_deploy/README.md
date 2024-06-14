@@ -7,7 +7,6 @@ None
 ## Parameters
 * `cifmw_edpm_deploy_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_edpm_deploy_manifests_dir`: (String) Directory in where install_yamls output manifests will be placed. Defaults to `"{{ cifmw_manifests | default(cifmw_edpm_deploy_basedir ~ '/artifacts/manifests') }}"`.
-* `cifmw_edpm_edploy_dataplane_operator_repo`: (String) Path to Dataplane-operator repo. Defaults to `"{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/dataplane-operator"`.
 * `cifmw_edpm_deploy_os_runner_img`: (String) OpenStack Runner image url. Defaults to `"quay.io/openstack-k8s-operators/openstack-ansibleee-runner:latest"`.
 * `cifmw_edpm_deploy_dataplanenodeset_cr`: (String) Path to OpenStackDataPlaneNodeSet CR. Defaults to `"config/samples/dataplane_v1beta1_openstackdataplanenodeset.yaml"`.
 * `cifmw_edpm_deploy_retries`: (Integer) Number of retries for edpm deploy status. Defaults to `100`.
