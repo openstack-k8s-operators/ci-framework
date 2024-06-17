@@ -30,9 +30,52 @@
         ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
         ansible_ssh_user: core
 
+- name: Create dummy interfaces
+  hosts: crc
+  gather_facts: false
+  tasks:
+    - name: Create dummy interface
+      become: true
+      community.general.nmcli:
+        type: dummy
+        conn_name: dummy_crc_net
+        ip4: "192.168.102.2/24"
+        gw4: "192.168.102.1"
+        state: present
+
+    - name: Create dummy interface
+      become: true
+      community.general.nmcli:
+        type: dummy
+        conn_name: dummy_default
+        ip4: "192.168.101.2/24"
+        gw4: "192.168.101.1"
+        state: present
+
+- name: Create dummy interfaces
+  hosts: instance
+  gather_facts: false
+  tasks:
+    - name: Create dummy interface
+      become: true
+      community.general.nmcli:
+        type: dummy
+        conn_name: dummy_crc_net
+        ip4: "192.168.102.3/24"
+        gw4: "192.168.102.1"
+        state: present
+
+    - name: Create dummy interface
+      become: true
+      community.general.nmcli:
+        type: dummy
+        conn_name: dummy_default
+        ip4: "192.168.101.3/24"
+        gw4: "192.168.101.1"
+        state: present
 
 - name: Get CRC facts
-  hosts: crc
+  hosts: crc, instance
   gather_facts: false
   tasks:
     - name: Fetch crc network facts
@@ -51,59 +94,62 @@
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
     cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
     cifmw_ci_nmstate_namespace: openshift-nmstate
-  tasks:
 
+    dummy_default_gateway: "192.168.101.1"
+    dummy_crc_net_gateway: "192.168.102.1"
+
+  tasks:
     - name: Set common molecule test facts
       ansible.builtin.set_fact:
-        _ci_nmstate_molecule_instance_target_mtu: "{{ (ansible_default_ipv4.mtu - 50) | int }}"
+        _ci_nmstate_molecule_instance_target_mtu: "{{ (hostvars.crc.ansible_dummy_default.mtu - 50) | int }}"
 
     - name: Prepare the Networking Env Definition for ci_nmstate role
       vars:
         cifmw_networking_definition:
           networks:
-            default:
+            dummy_default:
               network: >-
                 {{
-                  ansible_default_ipv4.network +
-                  '/' + hostvars.crc.ansible_default_ipv4.prefix
+                  ansible_dummy_default.ipv4.network +
+                  '/' + hostvars.crc.ansible_dummy_default.ipv4.prefix
                 }}
-              gateway: "{{ ansible_default_ipv4.gateway }}"
+              gateway: "{{ dummy_default_gateway }}"
               dns:
                 - 1.1.1.1
                 - 1.0.0.1
               mtu: "{{ _ci_nmstate_molecule_instance_target_mtu }}" # Set a non-default MTU to test
-            crc-net:
+            dummy_crc_net:
               network: >-
                 {{
-                  hostvars.crc.ansible_default_ipv4.network +
-                  '/' + hostvars.crc.ansible_default_ipv4.prefix
+                  hostvars.crc.ansible_dummy_crc_net.ipv4.network +
+                  '/' + hostvars.crc.ansible_dummy_crc_net.ipv4.prefix
                 }}
-              gateway: "{{ hostvars.crc.ansible_default_ipv4.gateway }}"
+              gateway: "{{ dummy_crc_net_gateway }}"
               dns: "{{ hostvars.crc.ansible_dns.nameservers }}"
             testing:
               network: "172.17.0.0/24"
               gateway: "172.17.0.1"
               vlan: 20
-              mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu | int }}"
+              mtu: "{{ hostvars.crc.ansible_dummy_crc_net.mtu | int }}"
           instances:
             crc:
               networks:
-                crc-net:
-                  ip: "{{ hostvars.crc.ansible_default_ipv4.address }}"
+                dummy_crc_net:
+                  ip: "{{ hostvars.crc.ansible_dummy_crc_net.ipv4.address }}"
                 testing:
                   ip: "172.17.0.5"
-                  trunk-parent: crc-net
+                  trunk-parent: dummy_crc_net
             instance:
               networks:
-                default:
-                  ip: "{{ ansible_default_ipv4.address }}"
+                dummy_default:
+                  ip: "{{ ansible_dummy_default.ipv4.address }}"
         cifmw_networking_mapper_ifaces_info:
           crc:
-            - mac: "{{ hostvars.crc.ansible_default_ipv4.macaddress }}"
-              network: "crc-net"
+            - mac: "{{ hostvars.crc.ansible_dummy_crc_net.ipv4.macaddress }}"
+              network: "dummy_crc_net"
           instance:
-            - mac: "{{ ansible_default_ipv4.macaddress }}"
-              network: "default"
+            - mac: "{{ ansible_dummy_default.ipv4.macaddress }}"
+              network: "dummy_default"
       ansible.builtin.include_role:
         name: "networking_mapper"
 
