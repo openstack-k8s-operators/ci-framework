@@ -64,6 +64,10 @@ cifmw_libvirt_manager_configuration:
       target: (Hypervisor hostname you want to deploy the family on. Optional)
       uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
       bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
+      ip_address: (dict, having static IP address information. Optional)
+        address: (string, IP address to be assigned. Example 192.168.10.20/24.)
+        gw: (string, the default gateway address.)
+        dns: (string, DNS server IP/FQDN to be configured.)
   networks:
     net_name: <XML definition of the network to create>
 ```
