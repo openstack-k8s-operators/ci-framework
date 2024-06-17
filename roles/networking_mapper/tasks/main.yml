@@ -71,6 +71,21 @@
     - cifmw_networking_mapper_gather_facts
   ansible.builtin.include_tasks: _gather_facts.yml
 
+- name: Ensure CI infrastructure dir exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_networking_mapper_infra_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Write the Networking Definition to file
+  become: true
+  ansible.builtin.copy:
+    backup: true
+    dest: "{{ cifmw_networking_mapper_networking_def_path }}"
+    content: "{{ _cifmw_networking_mapper_definition | to_nice_yaml }}"
+    mode: '0644'
+
 - name: Call the networking mapper
   cifmw.general.ci_net_map:
     networking_definition: "{{ _cifmw_networking_mapper_definition }}"
@@ -94,7 +109,7 @@
 
 - name: Set networking mapper facts
   ansible.builtin.set_fact:
-    # Set is as a fact in case it was not
+    # Set it as a fact in case it was not provided
     cifmw_networking_definition: "{{ _cifmw_networking_mapper_definition }}"
     cifmw_networking_env_definition: >-
       {{
@@ -104,21 +119,10 @@
 - name: Write mapping outputs to file
   become: true
   block:
-    - name: Ensure CI infrastructure dir exists
-      ansible.builtin.file:
-        path: "{{ cifmw_networking_mapper_infra_dir }}"
-        state: directory
-        mode: '0755'
-
-    - name: Write the Networking Definition to file
-      ansible.builtin.copy:
-        dest: "{{ cifmw_networking_mapper_networking_def_path }}"
-        content: "{{ _cifmw_networking_mapper_definition | to_nice_yaml }}"
-        mode: '0644'
-
     - name: Write the Networking Environment Definition to file
       when: not _networking_mapper_out.failed
       ansible.builtin.copy:
+        backup: true
         dest: "{{ cifmw_networking_mapper_networking_env_def_path }}"
         content: >-
           {{ _networking_mapper_out.networking_env_definition | to_nice_yaml }}
