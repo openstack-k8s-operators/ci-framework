@@ -54,10 +54,10 @@
     - workload
     - volumes
 
-- name: Manage networks if needed
+- name: Generate networking data
   when:
-    - _cifmw_libvirt_manager_layout.networks is defined
-  ansible.builtin.import_tasks: create_networks.yml
+    - cifmw_libvirt_manager_mac_map is undefined
+  ansible.builtin.include_tasks: generate_networking_data.yml
 
 - name: Ensure storage pool is present.
   when:
@@ -101,6 +101,7 @@
         path: "{{ _sshkey }}"
         type: "{{ cifmw_libvirt_manager_reproducer_key_type }}"
         size: "{{ cifmw_libvirt_manager_reproducer_key_size }}"
+        comment: cifmw_reproducer_key
 
     - name: Slurp public key for later use
       register: pub_ssh_key
@@ -165,7 +166,7 @@
       --root-password "password:{{ item.value.password | default('fooBar') }}"
       --ssh-inject {{ _admin_user }}:file:{{ ansible_user_dir }}/.ssh/authorized_keys
       --truncate /etc/machine-id
-      | tee -a {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log
+      | tee {{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log
     creates: "{{ item.value.image_local_dir }}/{{ item.value.disk_file_name }}.log"
   loop: "{{ _cifmw_libvirt_manager_layout.vms | dict2items }}"
   loop_control:
@@ -214,6 +215,53 @@
     loop_var: vm_data
     index_var: family_id
 
+- name: Create VBMC entity
+  when:
+    - _vbmc_available is defined
+    - _vbmc_available | bool
+  vars:
+    cifmw_virtualbmc_machine: "cifmw-{{ item.key }}"
+    cifmw_virtualbmc_ipmi_port: >-
+      {{
+        cifmw_virtualbmc_ipmi_base_port + index
+      }}
+    cifmw_virtualbmc_action: "add"
+    _ipmi_host: >-
+      {%- if _cifmw_libvirt_manager_layout.vms.crc.target is defined -%}
+      {{_cifmw_libvirt_manager_layout_layout.vms.crc.target }}
+      {%- elif _cifmw_libvirt_manager_layout.vms.ocp.target is defined -%}
+      {{ _cifmw_libvirt_manager_layout.vms.ocp.target }}
+      {%- else -%}
+      {{ inventory_hostname }}
+      {%- endif -%}
+    cifmw_virtualbmc_ipmi_address: >-
+      {{ hostvars[_ipmi_host].ansible_default_ipv4.address }}
+  ansible.builtin.include_role:
+    name: virtualbmc
+    tasks_from: manage_host
+  loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.key }}"
+
+- name: Create group inventories
+  when:
+    - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
+    - _cifmw_libvirt_manager_layout.vms[item].amount | default(1) | int > 0
+  vars:
+    hosts: >-
+      {{
+        _libvirt_manager_networking.instances |
+        dict2items |
+        selectattr('key', 'match', item)
+      }}
+  ansible.builtin.template:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/{{ item }}-group.yml"
+    src: inventory.yml.j2
+  loop: "{{ _cifmw_libvirt_manager_layout.vms.keys() }}"
+  loop_control:
+    label: "{{ item }}"
+
 - name: Create "all" group inventory file
   ansible.builtin.template:
     dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
@@ -224,21 +272,6 @@
     command: list_vms
     uri: "qemu:///system"
   register: _vms
-
-- name: Gather the networking information of running virtual machines.
-  when: "domain_name.startswith('cifmw')"
-  ansible.builtin.include_tasks: gather_vm_networks.yml
-  loop: "{{ _vms.list_vms }}"
-  loop_control:
-    label: "{{ domain_name }}"
-    loop_var: domain_name
-
-# The destination is intentional and does not match with other references.
-- name: Dump MAC mapping
-  when: cifmw_libvirt_manager_mac_map is defined
-  ansible.builtin.copy:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/interfaces-info.yml"
-    content: "{{ cifmw_libvirt_manager_mac_map | to_nice_yaml }}"
 
 - name: Extract VM UUIDs from libvirt
   block:

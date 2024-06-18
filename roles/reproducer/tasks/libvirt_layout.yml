@@ -48,7 +48,7 @@
           rsync -r {{ cifmw_reproducer_basedir }}/reproducer-inventory/
           zuul@controller-0:reproducer-inventory
 
-- name: Run post tasks in devscripts case
+- name: Run post tasks in OCP cluster case
   when:
     - _cifmw_libvirt_manager_layout.vms.ocp is defined
     - (
@@ -57,9 +57,9 @@
       ) or
       _cifmw_libvirt_manager_layout.vms.ocp.target is undefined
   tags:
-    - boostrap
+    - bootstrap
     - bootstrap_layout
-  ansible.builtin.import_tasks: devscripts_post.yml
+  ansible.builtin.import_tasks: ocp_post.yml
 
 # Configure the controller before CRC. This one will run the networking_mapper
 # role, ensuring we have all the needed data on the controller-0. This
@@ -90,8 +90,32 @@
     file: configure_crc.yml
     apply:
       tags:
-        - boostrap
+        - bootstrap
         - bootstrap_layout
+
+- name: Ensure OCP cluster is stable
+  when:
+    - _wait_ocp_cluster is defined
+    - _wait_ocp_cluster | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  vars:
+    _auth_path: >-
+      {{
+        (
+          cifmw_devscripts_repo_dir,
+          'ocp',
+          cifmw_devscripts_config.cluster_name,
+          'auth'
+        ) | ansible.builtin.path_join
+      }}
+    _k8s_config: "{{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}"
+    cifmw_openshift_adm_op: "stable"
+    cifmw_openshift_kubeconfig: >-
+      {{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}
+  ansible.builtin.include_role:
+    name: openshift_adm
 
 # ctlplane network is configured for pre-provisioned edpm nodes.
 # In order to do this, we'll consume the generated networking_mapper
@@ -116,3 +140,25 @@
   loop_control:
     loop_var: compute
     label: "{{ compute.key }}"
+
+- name: Ensure rhos-release is configured
+  become: true
+  when:
+    - cifmw_reproducer_compute_set_repositories | bool
+    - _async_rhos_release.ansible_job_id is defined
+  block:
+    - name: Ensure async flag still exists
+      register: _async_flag
+      ansible.builtin.stat:
+        path: >-
+          /root/.ansible_async/{{ _async_rhos_release.ansible_job_id }}
+
+    - name: Ensure rhos-release task is over
+      when:
+        - _async_flag.stat.exists
+      ansible.builtin.async_status:
+        jid: "{{ _async_rhos_release.ansible_job_id }}"
+      register: _async_result
+      until: _async_result.finished
+      retries: 20
+      delay: 10

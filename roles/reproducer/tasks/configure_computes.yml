@@ -2,18 +2,6 @@
 - name: Configure networking on computes
   delegate_to: "{{ _host }}"
   block:
-    - name: Configure ctlplane interface
-      become: true
-      community.general.nmcli:
-        autoconnect: true
-        conn_name: ctlplane
-        dns4: "{{ _dns4 }}"
-        ifname: "{{ _iface }}"
-        type: ethernet
-        ip4: "{{ _ip4 }}/{{ _prefix }}"
-        never_default4: true
-        state: present
-
     - name: Ensure we can ping controller-0 from ctlplane
       ansible.builtin.command:
         cmd: |
@@ -62,28 +50,7 @@
         gpgcheck: "{{ item.gpgcheck | default(omit) }}"
         enabled: "{{ item.enabled | default(omit) }}"
         priority: "{{ item.priority | default(omit) }}"
+        includepkgs: "{{ item.includepkgs | default(omit) }}"
       loop: "{{ cifmw_reproducer_compute_repos }}"
       loop_control:
         label: "{{ item.name }}"
-
-    - name: Ensure rhos-release is configured
-      become: true
-      when:
-        - cifmw_reproducer_compute_set_repositories | bool
-        - _async_rhos_release.ansible_job_id is defined
-      block:
-        - name: Ensure async flag still exists
-          register: _async_flag
-          ansible.builtin.stat:
-            path: >-
-              /root/.ansible_async/{{ _async_rhos_release.ansible_job_id }}
-
-        - name: Ensure rhos-release task is over
-          when:
-            - _async_flag.stat.exists
-          ansible.builtin.async_status:
-            jid: "{{ _async_rhos_release.ansible_job_id }}"
-          register: _async_result
-          until: _async_result.finished
-          retries: 20
-          delay: 5

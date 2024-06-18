@@ -1,0 +1,81 @@
+---
+# Here, we generate new MAC if and only if we don't have
+# the data in the fact.
+# For the records, the fact is updated if the file exists.
+# That means that re-running the libvirt_manager will only
+# add new data, not change existing ones. Meaning we have
+# mostly "fixed MAC addresses".
+# The bellow code does all the magic.
+- name: Generate/update mapping all nodes
+  vars:
+    _mac_seed: "{{ '52:54:%02i' % vm_id }}"
+    _fixed_mac: "{{ _mac_seed | community.general.random_mac }}"
+    _matcher: >-
+      {{
+        '(cifmw-)?' ~
+        '([a-z0-9]+)-[0-9]+'
+      }}
+    _vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    # We don't generate MAC for spineleafnets - if that one is set
+    # we won't get "nets" entry. Just use an empty list in that case.
+    _nets_list: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms[_vm_type].nets | default([])
+      }}
+    _generated: >-
+      {% set output = [] -%}
+      {% set _macs = [] -%}
+      {% if cifmw_libvirt_manager_mac_map[vm] is defined -%}
+      {%   set _macs = cifmw_libvirt_manager_mac_map[vm] -%}
+      {% endif -%}
+      {% for network in _nets_list -%}
+      {%   if cifmw_libvirt_manager_mac_map |
+              dict2items | selectattr('key', 'equalto', vm) |
+              map(attribute='value') | first | default([]) |
+              items2dict(key_name='network', value_name='mac') |
+              dict2items | map(attribute='key') |
+              select('equalto', network) | length == 0 -%}
+      {%     set _ = _macs.append({'network': network,
+                                   'mac': _fixed_mac }) -%}
+      {%   endif -%}
+      {% endfor -%}
+      {% if _macs | length != 0 -%}
+      {%   set _ = output.append({vm: _macs}) -%}
+      {% endif -%}
+      {{ output }}
+  ansible.builtin.set_fact:
+    cifmw_libvirt_manager_mac_map: >-
+      {{
+        cifmw_libvirt_manager_mac_map |
+        combine(_generated, recursive=true)
+      }}
+  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop_control:
+    index_var: vm_id
+    loop_var: vm
+
+- name: Append baremetal nodes if needed
+  when:
+    - cifmw_baremetal_hosts is defined
+    - cifmw_baremetal_hosts | length > 0
+  vars:
+    _generated: >-
+      {% set output = [] -%}
+      {% for nic in bm.value.nics -%}
+      {%   if nic.network == cifmw_libvirt_manager_pub_net -%}
+      {%     set data = {'mac': nic.mac,
+                         'network': cifmw_libvirt_manager_pub_net} -%}
+      {%     set _ = output.append({bm.key: [data]}) -%}
+      {%   endif -%}
+      {% endfor -%}
+      {{ output }}
+  ansible.builtin.set_fact:
+    cifmw_libvirt_manager_mac_map: >-
+      {{
+        cifmw_libvirt_manager_mac_map |
+        combine(_generated, recursive=true)
+      }}
+  loop: "{{ cifmw_baremetal_hosts | dict2items }}"
+  loop_control:
+    loop_var: bm
+    label: "{{ bm.key }}"

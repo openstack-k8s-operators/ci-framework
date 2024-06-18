@@ -16,7 +16,7 @@
 
 
 - name: Converge
-  hosts: all
+  hosts: instance
   gather_facts: true
   vars:
     cifmw_manage_secrets_reproducer_secrets:
@@ -29,7 +29,7 @@
     cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
     _networks:
       public:
-        range: "192.168.100.0/24"
+        range: "192.168.101.0/24"
       osp_trunk:
         default: true
         range: "192.168.140.0/24"
@@ -80,11 +80,8 @@
             <forward mode='nat'/>
             <bridge name='public' stp='on' delay='0'/>
             <mac address='52:54:00:6a:f2:dc'/>
+            <dns enable="no"/>
             <ip family='ipv4' address='{{ _networks.public.range | ansible.utils.nthhost(1) }}' prefix='24'>
-              <dhcp>
-                <range start='{{ _networks.public.range | ansible.utils.nthhost(10) }}'
-                end='{{ _networks.public.range | ansible.utils.nthhost(100) }}'/>
-              </dhcp>
             </ip>
           </network>
         osp_trunk: |-
@@ -93,147 +90,168 @@
             <forward mode='nat'/>
             <bridge name='osp_trunk' stp='on' delay='0'/>
             <mac address='52:54:00:fd:be:d0'/>
+            <dns enable="no"/>
             <ip family='ipv4' address='{{ _networks.osp_trunk.range | ansible.utils.nthhost(1) }}' prefix='24'>
             </ip>
           </network>
 
   tasks:
-    - name: Load networking definition from scenario file
-      ansible.builtin.include_vars:
-        file: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/reproducers/networking-definition.yml"
-
-    - name: Run reproducer
-      ansible.builtin.import_role:
-        name: reproducer
-
-    - name: Validate content on the controller-0 node
-      delegate_to: controller-0
+    - name: Use block to ensure we gather logs
       block:
-        - name: Ensure we have appropriate credentials for OpenShift accesses
-          register: _kubeconfig
-          ansible.builtin.stat:
-            path: "{{ ansible_user_dir }}/.kube/config"
+        - name: Load networking definition from scenario file
+          ansible.builtin.include_vars:
+            file: "./vars/networking-definition.yml"
 
-        - name: Ensure we have needed inventory files
-          register: _inventory_files
-          ansible.builtin.find:
-            paths: "{{ ansible_user_dir }}/reproducer-inventory/"
-            patterns:
-              - "*-group.yml"
+        - name: Run reproducer
+          ansible.builtin.import_role:
+            name: reproducer
 
-        - name: Ensure we have CRC ssh key
-          register: _crc_key
-          ansible.builtin.stat:
-            path: "{{ ansible_user_dir }}/.ssh/crc_key"
-
-        - name: Ensure we have the MAC mapping file
-          register: _mac_mapping
-          ansible.builtin.stat:
-            path: "{{ ansible_user_dir }}/ci-framework-data/parameters/interfaces-info.yml"
-
-        - name: Load crc inventory
-          register: _crc_inv
-          ansible.builtin.slurp:
-            src: "{{ ansible_user_dir }}/reproducer-inventory/crc-group.yml"
-
-        - name: Load compute inventory
-          register: _compute_inv
-          ansible.builtin.slurp:
-            src: "{{ ansible_user_dir }}/reproducer-inventory/compute-group.yml"
-
-        - name: Ensure we can ping compute-0 on osp_trunk net
-          register: _cmp0_ping
-          failed_when: false
-          vars:
-            _inv: >-
-              {{
-                _compute_inv.content | b64decode | from_yaml
-              }}
-            _ip: >-
-              {{ _inv.computes.hosts['compute-0'].ansible_host }}
-          ansible.builtin.command:
-            cmd: "ping -c1 -w1 {{ _ip }}"
-
-        - name: Ensure we can ping crc-0 on osp_trunk net
-          register: _crc_ping
-          failed_when: false
-          vars:
-            _inv: >-
-              {{
-                _crc_inv.content | b64decode | from_yaml
-              }}
-            _ip: >-
-              {{ _inv.ocps.hosts['crc-0'].ansible_host }}
-          ansible.builtin.command:
-            cmd: "ping -c1 -w1 {{ _ip }}"
-
-        - name: Check secret files
+        - name: Validate content on the controller-0 node
+          delegate_to: controller-0
           block:
-            - name: Check default location secret file
-              register: _default_secret
+            - name: Ensure we have appropriate credentials for OpenShift accesses
+              register: _kubeconfig
               ansible.builtin.stat:
-                path: "{{ ansible_user_dir }}/ci-framework-data/secrets/default.txt"
-              failed_when: not _default_secret.stat.exists
+                path: "{{ ansible_user_dir }}/.kube/config"
 
-            - name: Check non-default location secret
-              register: _default_secret
+            - name: Ensure we have needed inventory files
+              register: _inventory_files
+              ansible.builtin.find:
+                paths: "{{ ansible_user_dir }}/reproducer-inventory/"
+                patterns:
+                  - "*-group.yml"
+
+            - name: Ensure we have CRC ssh key
+              register: _crc_key
               ansible.builtin.stat:
-                path: "{{ ansible_user_dir }}/ipmi-things"
-              failed_when: not _default_secret.stat.exists
+                path: "{{ ansible_user_dir }}/.ssh/crc_key"
 
-    - name: Gather logs from nested controller-0
-      vars:
-        _log_dest: "{{ ansible_user_dir }}/ci-framework-data/logs/controller-0"
-      block:
-        - name: Create log directory
-          ansible.builtin.file:
-            path: "{{ _log_dest }}"
-            state: directory
-            mode: "0755"
+            - name: Ensure we have the MAC mapping file
+              register: _mac_mapping
+              ansible.builtin.stat:
+                path: "{{ ansible_user_dir }}/ci-framework-data/parameters/interfaces-info.yml"
 
-        - name: Sync logs from controller-0
-          ansible.builtin.shell:  # noqa: command-instead-of-module
-            cmd: |-
-              rsync -r zuul@controller-0:"*.log" {{ _log_dest }};
-              rsync -r zuul@controller-0:ci-framework-data/logs {{ _log_dest }};
+            - name: Load crc inventory
+              register: _crc_inv
+              ansible.builtin.slurp:
+                src: "{{ ansible_user_dir }}/reproducer-inventory/crc-group.yml"
 
-    - name: Assert all of the tests
-      vars:
-        _inventory_content: >-
-          {{
-            _inventory_files.files |
-            map(attribute='path') |
-            map('basename') | sort
-          }}
-        _expected_files: >-
-          {{
-            ['all-group.yml',
-             'compute-group.yml',
-             'controller-group.yml',
-             'crc-group.yml'] | sort
-          }}
-      ansible.builtin.assert:
-        quiet: true
-        that:
-          - _kubeconfig.stat.exists | bool
-          - _crc_key.stat.exists | bool
-          - _mac_mapping.stat.exists | bool
-          - _inventory_files.matched == 4
-          - _inventory_content == _expected_files
-          - _crc_ping.rc == 0
-          - _cmp0_ping.rc == 0
+            - name: Load compute inventory
+              register: _compute_inv
+              ansible.builtin.slurp:
+                src: "{{ ansible_user_dir }}/reproducer-inventory/compute-group.yml"
 
-    - name: Gather data from controller-0
-      failed_when: false
-      ansible.builtin.shell:
-        cmd: >-
-          mkdir -p /home/zuul/ci-framework-data/controller-0;
-          rsync -a controller-0:/home/zuul/ci-framework-data/artifacts
-            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
-          rsync -a controller-0:/home/zuul/ci-framework-data/logs
-            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
-          rsync -a controller-0:/home/zuul/ci-framework-data/parameters
-            {{ ansible_user_dir }}/ci-framework-data/controller-0/;
+            - name: Ensure we can ping compute-0 on osp_trunk net
+              register: _cmp0_ping
+              failed_when: false
+              vars:
+                _inv: >-
+                  {{
+                    _compute_inv.content | b64decode | from_yaml
+                  }}
+                _ip: >-
+                  {{ _inv.computes.hosts['compute-0'].ansible_host }}
+              ansible.builtin.command:
+                cmd: "ping -c1 -w1 {{ _ip }}"
 
-#  TODO: Add some more files from the reproducer itself, especially
-#  network related content and add related checks here.
+            - name: Ensure we can ping crc-0 on osp_trunk net
+              register: _crc_ping
+              failed_when: false
+              vars:
+                _inv: >-
+                  {{
+                    _crc_inv.content | b64decode | from_yaml
+                  }}
+                _ip: >-
+                  {{ _inv.ocps.hosts['crc-0'].ansible_host }}
+              ansible.builtin.command:
+                cmd: "ping -c1 -w1 {{ _ip }}"
+
+            - name: Check secret files
+              block:
+                - name: Check default location secret file
+                  register: _default_secret
+                  ansible.builtin.stat:
+                    path: "{{ ansible_user_dir }}/ci-framework-data/secrets/default.txt"
+                  failed_when: not _default_secret.stat.exists
+
+                - name: Check non-default location secret
+                  register: _default_secret
+                  ansible.builtin.stat:
+                    path: "{{ ansible_user_dir }}/ipmi-things"
+                  failed_when: not _default_secret.stat.exists
+
+        - name: Assert all of the tests
+          vars:
+            _inventory_content: >-
+              {{
+                _inventory_files.files |
+                map(attribute='path') |
+                map('basename') | sort
+              }}
+            _expected_files: >-
+              {{
+                ['all-group.yml',
+                 'compute-group.yml',
+                 'controller-group.yml',
+                 'crc-group.yml'] | sort
+              }}
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _kubeconfig.stat.exists | bool
+              - _crc_key.stat.exists | bool
+              - _mac_mapping.stat.exists | bool
+              - _inventory_files.matched == 4
+              - _inventory_content == _expected_files
+              - _crc_ping.rc == 0
+              - _cmp0_ping.rc == 0
+
+      always:
+        - name: Copy all dnsmasq generated content
+          vars:
+            _log_dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/dnsmasq"
+          block:
+            - name: Create dnsmasq dir
+              ansible.builtin.file:
+                path: "{{ _log_dest }}"
+                state: directory
+                mode: "0755"
+
+            - name: Get journalctl in a file
+              become: true
+              register: _dnsmasq_journal
+              ansible.builtin.command:
+                cmd: journalctl -u cifmw-dnsmasq.service
+
+            - name: Dump journalctl output
+              become: true
+              ansible.builtin.copy:
+                dest: "{{ _log_dest }}/journalctl.log"
+                content: "{{ _dnsmasq_journal.stdout }}"
+                mode: "0644"
+
+            - name: Copy all dnsmasq config
+              ansible.posix.synchronize:
+                src: "{{ item }}"
+                dest: "{{ _log_dest}}"
+              loop:
+                - /etc/cifmw-dnsmasq.conf
+                - /etc/cifmw-dnsmasq.d/
+
+        - name: Gather logs from nested controller-0
+          vars:
+            _log_dest: "{{ ansible_user_dir }}/ci-framework-data/logs/controller-0"
+          block:
+            - name: Create log directory
+              ansible.builtin.file:
+                path: "{{ _log_dest }}"
+                state: directory
+                mode: "0755"
+
+            - name: Sync logs from controller-0
+              failed_when: false
+              ansible.builtin.shell:  # noqa: command-instead-of-module
+                cmd: |-
+                  rsync -r zuul@controller-0:"*.log" {{ _log_dest }};
+                  rsync -r zuul@controller-0:ci-framework-data {{ _log_dest }};
