@@ -2,6 +2,6 @@
 Role to run update
 
 ## Parameters
-* `param_1`: this is an example
+* ``cifmw_update_extras`: (hash) Hold job variable that get set when running the update playbook.
 
 ## Examples
