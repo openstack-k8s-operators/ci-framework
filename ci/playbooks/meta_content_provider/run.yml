@@ -1,0 +1,55 @@
+---
+- name: "Run ci/playbooks/meta_content_provider/run.yml"
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: true
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Deploy Meta content provider
+      environment:
+        ANSIBLE_CONFIG: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg"
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook ci/playbooks/meta_content_provider/meta_content_provider.yml
+          -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          -e @scenarios/centos-9/base.yml
+          -e @scenarios/centos-9/meta_content_provider.yml
+          -e "cifmw_rp_registry_ip={{ cifmw_rp_registry_ip }}"
+          -e "cifmw_rp_registry_port=5001"
+          {%- if cifmw_extras is defined %}
+          {%-   for extra_vars in cifmw_extras %}
+          -e "{{   extra_vars }}"
+          {%-   endfor %}
+          {%- endif %}
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+
+    - name: Include inner ansible vars file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_artifacts_basedir }}/artifacts/ansible-vars.yml"
+      register: _inner_ansible
+
+    - name: Return data for dependent job
+      vars:
+        _inner_ansible_vars: "{{ _inner_ansible.content | b64decode | from_yaml }}"
+        _dlrn_md5: "{{ _inner_ansible_vars.cifmw_repo_setup_full_hash }}"
+        _tcib_registry: >-
+          {%- if _inner_ansible_vars.content_provider_os_registry_url is defined -%}
+          {{ _inner_ansible_vars.content_provider_os_registry_url }}
+          {%- else -%}
+          null
+          {%- endif -%}
+      zuul_return:
+        data:
+          zuul:
+            pause: true
+          content_provider_registry_ip: "{{ cifmw_rp_registry_ip | default('nowhere') | trim }}"
+          cifmw_operator_build_output: "{{ _inner_ansible_vars.cifmw_operator_build_output }}"
+          cifmw_build_images_output: "{{ _inner_ansible_vars.cifmw_build_images_output }}"
+          content_provider_dlrn_md5_hash: "{{ _dlrn_md5 | default('') }}"
+          content_provider_os_registry_url: "{{ _tcib_registry | trim }}"
