@@ -1,0 +1,191 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Wait for provisioner node connection
+  ansible.builtin.wait_for_connection:
+
+- name: Refresh facts
+  ansible.builtin.gather_facts:
+    gather_subset:
+      - '!all'
+      - '!min'
+      - 'user'
+      - 'user_dir'
+
+- name: Install custom CA if needed
+  ansible.builtin.import_role:
+    name: install_ca
+
+- name: Set up repositories
+  tags:
+    - packages
+  vars:
+    cifmw_repo_setup_output: /etc/yum.repos.d
+  ansible.builtin.import_role:
+    name: repo_setup
+    tasks_from: rhos_release.yml
+
+- name: Install required packages need to execute openshift installer
+  tags:
+    - packages
+  become: true
+  ansible.builtin.package:
+    name: "{{ cifmw_ocp_ipi_required_packages }}"
+    state: present
+
+- name: Configure chrony
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    regexp: '^pool '
+    line: "pool {{ cifmw_ocp_ipi_ntp_server }} iburst"
+
+- name: Restart chronyd.service
+  become: true
+  ansible.builtin.systemd_service:
+    name: chronyd.service
+    state: restarted
+
+- name: Ensure directories in user home directory
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - bin
+    - files
+    - clusterconfigs
+
+- name: Set up libvirt
+  vars:
+    cifmw_libvirt_manager_user: kni
+  ansible.builtin.include_role:
+    name: libvirt_manager
+
+- name: List available pools
+  register: _pools
+  community.libvirt.virt_pool:
+    command: list_pools
+
+- name: Create default storage pool
+  when: "'default' not in _pools.list_pools"
+  community.libvirt.virt_pool:
+    command: define
+    name: default
+    xml: "{{ lookup('file', 'pool-default.xml') }}"
+
+- name: Build the default storage pool
+  when: "'default' not in _pools.list_pools"
+  community.libvirt.virt_pool:
+    command: build
+    name: default
+
+- name: Start the default storage pool
+  when: "'default' not in _pools.list_pools"
+  community.libvirt.virt_pool:
+    command: create
+    name: default
+
+- name: Ensure that the default pool is active, and will start on boot
+  when: "'default' not in _pools.list_pools"
+  community.libvirt.virt_pool:
+    autostart: true
+    name: default
+
+# TODO(hjensas): Remove/Re-factor when https://issues.redhat.com/browse/RHEL-38927 is fixed
+- name: Remove the ifcfg-eth files and the udev rules cloud-init wrote
+  when: cifmw_ocp_ipi_create_provisoner_host | default(true) | bool
+  block:
+    - name: Find files ifcfg-eth* files
+      register: _ifcfg_eth_files
+      ansible.builtin.find:
+        paths: /etc/sysconfig/network-scripts/
+        patterns: "ifcfg-eth*"
+        use_regex: true
+        file_type: file
+
+    - name: Delete files
+      become: true
+      ansible.builtin.file:
+        state: absent
+        path: "{{ item.path }}"
+      loop: "{{ _ifcfg_eth_files.files }}"
+
+    - name: Remove persistent-net.rules cloud-init wrote
+      become: true
+      ansible.builtin.lineinfile:
+        state: absent
+        path: /etc/udev/rules.d/70-persistent-net.rules
+        regexp: '^SUBSYSTEM.*NAME="eth.*"'
+
+- name: Configure baremetal and provisioning interfaces
+  # NOTE(hjensas): When https://issues.redhat.com/browse/RHEL-38927 is fixed
+  #                this can be run only when provisioner host is not created
+  #                by the role.
+  # when: not cifmw_ocp_ipi_create_provisoner_host | default(true) | bool
+  block:
+    - name: Make sure /etc/systemd/network directory exists
+      become: true
+      ansible.builtin.file:
+        path: /etc/systemd/network
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Write systemd.link files to name interfaces
+      become: true
+      vars:
+        _name: "{{ item.name }}"
+        _mac_address: "{{ item.mac_address }}"
+      ansible.builtin.template:
+        src: systemd.link.j2
+        dest: "/etc/systemd/network/10-{{ _name }}.link"
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - name: baremetal
+          mac_address: "{{ cifmw_ocp_ipi_baremetal_mac_address }}"
+        - name: provisioning
+          mac_address: "{{ cifmw_ocp_ipi_provisioning_mac_address }}"
+
+    - name: Restart systemd-udevd.service
+      become: true
+      ansible.builtin.systemd_service:
+        name: systemd-udevd.service
+        state: restarted
+
+    - name: Re-Apply systemd.link configuration to set interface names
+      become: true
+      ansible.builtin.shell: |
+        udevadm control --reload
+        udevadm trigger --verbose --settle --action add /sys/class/net/*
+
+    - name: Restart NetworkManager.service
+      become: true
+      ansible.builtin.systemd_service:
+        name: NetworkManager.service
+        state: restarted
+
+    - name: Write nmstate config manifest
+      ansible.builtin.template:
+        src: nmstate.yaml.j2
+        dest: '{{ cifmw_ocp_ipi_artifacts_dir }}/nmstate.yaml'
+
+    - name: Apply network config with nmstatectl
+      become: true
+      ansible.builtin.command: "/usr/bin/nmstatectl apply --timeout 30 {{ cifmw_ocp_ipi_artifacts_dir }}/nmstate.yaml"

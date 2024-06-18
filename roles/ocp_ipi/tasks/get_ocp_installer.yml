@@ -1,0 +1,62 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Download client
+  ansible.builtin.get_url:
+    url: "{{ cifmw_ocp_ipi_ocp_mirror_uri }}/{{ cifmw_ocp_ipi_ocp_version }}/{{ cifmw_ocp_ipi_client_file }}"
+    dest: "{{ ansible_user_dir }}/files/openshift-client-linux.tar.gz"
+
+- name: Extract client to /usr/local/bin
+  become: true
+  ansible.builtin.unarchive:
+    src: /home/kni/files/openshift-client-linux.tar.gz
+    remote_src: true
+    dest: /usr/local/bin/
+
+- name: Make client executable
+  become: true
+  ansible.builtin.file:
+    path: "/usr/local/bin/{{ item }}"
+    mode: 'a+x'
+  loop:
+    - oc
+    - kubectl
+
+- name: Get the OpenShift Container Platform installer release.txt
+  register: _release_txt
+  ansible.builtin.uri:
+    url: "https://mirror.openshift.com/pub/openshift-v4/{{ cifmw_ocp_ipi_ocp_release_arch }}/clients/ocp/{{ cifmw_ocp_ipi_ocp_version }}/release.txt"
+    method: GET
+    return_content: true
+
+- name: Extracting the OpenShift Container Platform installer
+  environment:
+    pullsecret_file: "{{ cifmw_ocp_ipi_basedir }}/secrets/pull_secret.json"
+    cmd: openshift-baremetal-install
+    extract_dir: "{{ ansible_user_dir }}/files"
+    release_image: "{{ _release_txt.content | ansible.builtin.regex_search('Pull From: quay.io.*') | split('Pull From: ') | last }}"
+  ansible.builtin.command: |
+    /usr/local/bin/oc adm release extract --registry-config "${pullsecret_file}" --command=${cmd} --to "${extract_dir}" "${release_image}"
+
+- name: Copy openshift install to /usr/local/bin
+  become: true
+  ansible.builtin.copy:
+    src: "{{ ansible_user_dir }}/files/openshift-baremetal-install"
+    remote_src: true
+    dest: /usr/local/bin/
+    owner: root
+    group: root
+    mode: '0755'
