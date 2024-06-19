@@ -6,10 +6,9 @@
     - inventory_hostname != 'instance'  # needed for molecule
   delegate_to: localhost
   vars:
-    extracted_ip: >-
-      {{
-        vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4']
-      }}
+    extracted_ips:
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4'] | default('') }}"
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v6'] | default('') }}"
     proxy_hostname: "{{ ansible_host | default(inventory_hostname) }}"
     vm_name: "{{ vm_ip.key }}"
   ansible.builtin.blockinfile:
@@ -18,9 +17,9 @@
     marker: "## {mark} {{ vm_name }} {{ inventory_hostname }}"
     mode: "0600"
     block: |-
-      Host {{ vm_name }} {{ vm_name }}.{{ inventory_hostname }} cifmw-{{ vm_name }} {{ extracted_ip }}
+      Host {{ vm_name }} {{ vm_name }}.{{ inventory_hostname }} cifmw-{{ vm_name }} {{ extracted_ips | reject('match', '^$') | join(' ') }}
         ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ proxy_hostname }}
-        Hostname {{ extracted_ip }}
+        Hostname {{ extracted_ips | reject('match', '^$') | first }}
         User {{ 'core' if vm_name is match('^(crc|ocp).*') else 'zuul' }}
         StrictHostKeyChecking no
         UserKnownHostsFile /dev/null
@@ -33,10 +32,9 @@
   when:
     - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
-    extracted_ip: >-
-      {{
-        vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4']
-      }}
+    extracted_ips:
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4'] | default('') }}"
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v6'] | default('') }}"
     identity_file: >-
       {{
         cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type is match('^ocp.*') else
@@ -50,8 +48,8 @@
     marker: "## {mark} {{ vm_name }}"
     mode: "0600"
     block: |-
-      Host {{ vm_name }} {{ vm_name }}.{{ inventory_hostname }} cifmw-{{ vm_name }} {{ extracted_ip }}
-        Hostname {{ extracted_ip }}
+      Host {{ vm_name }} {{ vm_name }}.{{ inventory_hostname }} cifmw-{{ vm_name }} {{ extracted_ips | reject('match', '^$') | join(' ') }}
+        Hostname {{ extracted_ips | reject('match', '^$') | first }}
         User {{ 'core' if vm_name is match('^(crc|ocp)') else 'zuul' }}
         IdentityFile {{ identity_file }}
         StrictHostKeyChecking no
@@ -85,12 +83,11 @@
   when:
     - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
-    extracted_ip: >-
-      {{
-        vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4']
-      }}
+    extracted_ips:
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4'] | default('') }}"
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v6'] | default('') }}"
   ansible.builtin.wait_for:
-    host: "{{ extracted_ip }}"
+    host: "{{ extracted_ips | reject('match', '^$') | first }}"
     port: 22
     delay: 5
   loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
@@ -199,16 +196,15 @@
   when:
     - vm_ip.key is match(vm_type ~ '-[0-9]+')
   vars:
-    extracted_ip: >-
-      {{
-        vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4']
-      }}
+    extracted_ips:
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v4'] | default('') }}"
+      - "{{ vm_ip.value.networks[cifmw_libvirt_manager_pub_net]['ip_v6'] | default('') }}"
   ansible.builtin.add_host:
     name: "{{ vm_ip.key }}"
     groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
     ansible_host: "{{ vm_ip.key }}.{{ inventory_hostname }}"
     ansible_ssh_user: "{{ _cifmw_libvirt_manager_layout.vms[vm_type].admin_user | default('zuul') }}"
-    host_ip: "{{ extracted_ip }}"
+    host_ip: "{{ extracted_ips | reject('match', '^$') | first }}"
   loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
   loop_control:
     loop_var: vm_ip
