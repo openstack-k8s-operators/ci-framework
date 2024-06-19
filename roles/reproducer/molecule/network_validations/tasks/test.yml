@@ -1,0 +1,52 @@
+---
+- name: Mark run as failed
+  ansible.builtin.set_fact:
+    _run_fail: false
+
+- name: Load environment file
+  ansible.builtin.include_vars:
+    file: "{{ env_file }}"
+
+- name: Use block/rescue/always
+  block:
+    - name: Output scenario name
+      ansible.builtin.debug:
+        msg: "Running: {{ scenario }}"
+
+    - name: Validate data
+      register: _validate
+      ansible.builtin.include_role:
+        name: "reproducer"
+        tasks_from: "network_assertions.yml"
+
+  rescue:
+    - name: Clear host errors
+      ansible.builtin.meta: clear_host_errors
+
+    - name: Mark run as failed
+      ansible.builtin.set_fact:
+        _run_fail: true
+
+  always:
+    - name: Mark failure
+      when:
+        - (not _run_fail | bool and
+           should_fail | default(false) | bool) or
+          (_run_fail | bool and
+           not should_fail | default(false) | bool)
+      ansible.builtin.set_fact:
+        is_failed: true
+
+    - name: Manage error
+      when:
+        - is_failed | bool
+      block:
+        - name: Display error message
+          ansible.builtin.debug:
+            msg: >-
+              Failed to validate against {{ env_file }}
+              for {{ scenario }}.
+
+        - name: Append failed scenario to list
+          ansible.builtin.set_fact:
+            failure_list: "{{ failure_list + [scenario] }}"
