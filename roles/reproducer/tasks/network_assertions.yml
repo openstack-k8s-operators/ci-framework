@@ -1,0 +1,34 @@
+---
+- name: Shared variables
+  vars:
+    _attached: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms | dict2items |
+        map(attribute='value.nets') | flatten | unique
+      }}
+    _spine: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms | dict2items |
+        map(attribute='value.spineleafnets', default=[]) | flatten | unique
+      }}
+    _all_nets: "{{ _attached + _spine }}"
+    _defined: "{{ _cifmw_libvirt_manager_layout.networks.keys() }}"
+  block:
+    - name: Ensure all standard attached networks are defined
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _all_nets | difference(_defined) | length == 0
+        msg: >-
+          Inconsistency detected: ensure you're defining all of the
+          attached networks. Those nets don't seem to be defined:
+          {{ _all_nets | difference(_defined) }}
+
+    - name: Ensure we don't have extra network defined
+      ansible.builtin.assert:
+        that:
+          - _defined | difference(_all_nets) | length == 0
+        msg: >-
+          Inconsistency detected: ensure you're attaching all of the
+          defined networks. Those nets don't seem to be attached:
+          {{ _defined | difference(_all_nets) }}
