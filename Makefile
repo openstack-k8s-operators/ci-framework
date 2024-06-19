@@ -235,3 +235,14 @@ spelling: docs ## Run spell check as in CI
 	fi
 
 	pyspelling -c .spellcheck.yml -v -n documentation -S "docs/_build/html/**/*.html"
+
+.PHONY: plugin-development-enable
+plugin-development-enable: # Replace all imports from ansible_collecton to the local git repo and override the PYTHONPATH environment var
+	grep -rl --include=\*.py --exclude-dir=.venv 'ansible_collections.cifmw.general' | xargs gsed -i 's/from ansible_collections\.cifmw\.general./from /g'
+	grep PYTHONPATH .env 2>/dev/null || echo "PYTHONPATH=${PWD}" >> .env
+
+.PHONY: plugin-development-disable
+plugin-development-disable: # Revert all changes and delete .env if no longer needed
+	grep -lEr --include=\*.py --exclude-dir=.venv 'from (?:plugins|tests)' | xargs gsed -i -e 's/from plugins/from ansible_collections\.cifmw\.general\.plugins/g' -e 's/from tests/from ansible_collections\.cifmw\.general\.tests/g'
+	gsed -i '/PYTHONPATH=/d' .env
+	[ -s .env ] || rm .env

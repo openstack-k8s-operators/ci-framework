@@ -794,3 +794,41 @@ def test_network_definition_parse_valid_router_ok():
     assert router_def.name == "testing-router"
     assert router_def.external_network == "provider-net"
     assert router_def.networks == ["test-net1", "test-net2"]
+
+
+# This will test if passing a route that doesn't match the network version
+# will cause a failure.
+def test_network_definition_parse_tools_route_version_fail():
+    net_name = "testing-net"
+
+    for network_ip in (
+        net_map_stub_data.NETWORK_1_IPV4_NET,
+        net_map_stub_data.NETWORK_1_IPV6_NET,
+    ):
+        net_config = {
+            "network": str(network_ip),
+            "tools": {
+                "multus": {
+                    "ranges": [
+                        {
+                            "start": str(network_ip[100]),
+                            "length": 20,
+                        },
+                    ],
+                    "routes": [
+                        {
+                            "destination": "192.168.121.0/24",
+                            "gateway": "192.168.122.1",
+                        },
+                        {
+                            "destination": "fdc0:8b54:108a:c949::/64",
+                            "gateway": "fdc0:8b54:108a:c948:0000:0000:0000:0001",
+                        },
+                    ],
+                },
+            },
+        }
+        with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+            networking_definition.NetworkDefinition(net_name, net_config)
+        assert net_name in str(exc_info.value)
+        assert "are not supported in" in str(exc_info.value)
