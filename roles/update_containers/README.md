@@ -7,7 +7,6 @@ openstack services containers, Ansibleee and EDPM Baremetal Image.
 If apply, please explain the privilege escalation done in this role.
 
 ## Parameters
-* `cifmw_update_containers`: The boolean value which will decide to run the 'Update the containers' role. Default to `false`.
 * `cifmw_update_containers_metadata`: The metadata name of podified control plane custom resources. Default to `controlplane`.
 * `cifmw_update_containers_namespace`: The namespace of the podified control plane deployment. Default to `openstack`.
 * `cifmw_update_containers_base_dir`: The base directory of update_containers role. Default is "ansible_user_dir ~ '/ci-framework-data')".
