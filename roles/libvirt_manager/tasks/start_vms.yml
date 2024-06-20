@@ -9,16 +9,69 @@
   loop_control:
     label: "{{ item.key }}"
 
-# Start and manage VMs, such as injecting SSH configurations,
-# inject the VMs in the live inventory for later reference, and so on.
-# In case we create a "blank" VM, without any OS, it shouldn't be known by
-# ansible, so no access should be done.
 - name: "Start VMs for type {{ vm_type }}"
+  when:
+    - vm_data.start | default(true) | bool
+    - vm_data.disk_file_name != 'blank'
+  vars:
+    _matcher: >-
+      {{
+        '(cifmw-)?' ~
+        '([a-z0-9]+)-[0-9]+'
+      }}
+    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm_data: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms[vm_type]
+      }}
   community.libvirt.virt:
     state: running
-    name: "cifmw-{{ vm_type }}-{{ vm_id }}"
+    name: "cifmw-{{ vm }}"
     uri: "qemu:///system"
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
+  loop: "{{ cifmw_libvirt_manager_all_vms }}"
   loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
+    loop_var: vm
+    pause: 1
+
+- name: "Wait for SSH on started VMs"
+  register: _async_wait_ssh
+  when:
+    - vm_data.start | default(true) | bool
+    - vm_data.disk_file_name != 'blank'
+  vars:
+    _matcher: >-
+      {{
+        '(cifmw-)?' ~
+        '([a-z0-9]+)-[0-9]+'
+      }}
+    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm_data: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms[vm_type]
+      }}
+    extracted_ip: >-
+      {{
+        _libvirt_manager_networking.instances[vm].networks[cifmw_libvirt_manager_pub_net]['ip_v4']
+      }}
+  ansible.builtin.wait_for:
+    host: "{{ extracted_ip }}"
+    port: 22
+    delay: 2
+  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop_control:
+    loop_var: vm
+  async: 120
+  poll: 0
+
+- name: Ensure we get SSH on nodes
+  when:
+    - a_result.ansible_job_id is defined
+  ansible.builtin.async_status:
+    jid: "{{ a_result.ansible_job_id }}"
+  loop: "{{ _async_wait_ssh.results }}"
+  loop_control:
+    loop_var: a_result
+  register: a_poll_result
+  until: a_poll_result.finished
+  retries: 60
+  delay: 2
