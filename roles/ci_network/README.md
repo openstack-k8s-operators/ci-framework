@@ -16,8 +16,6 @@ It needs sudo access to edit Network Manager connections.
 * `cifmw_network_nm_config_dir`: (Str) Path to NetworkManager configuration directory. Defaults to `/etc/NetworkManager`.
 * `cifmw_network_nm_config_file`: (Str) Path to NetworkManager configuration file. Defaults to `cifmw_network_nm_config_dir ~ NetworkManager.conf`.
 * `cifmw_network_nm_config_dnsmasq_file`: (Str) Path to NetworkManager dnsmasq enabling file. Defaults to `cifmw_network_nm_config_dir ~ /conf.d/00-use-dnsmasq.conf`.
-
-### Deprecated parameters
 * `cifmw_network_dnsmasq_config`: (Dict) dnsmasq configuration to be applied on the KVM host.
 * `cifmw_network_dnsmasq_leases_file`: (Str) Path to the dnsmasq DHCP static leases file. Defaults to `cifmw_network_nm_config_dir ~ /dnsmasq.d/98-cifmw-static-leases.conf`.
 * `cifmw_network_dnsmasq_forwarders_file`: (Str) Path to the dnsmasq forwarders file. Defaults to `cifmw_network_nm_config_dir ~ /dnsmasq.d/99-cifmw-dns-forwarders.conf`.
@@ -63,8 +61,6 @@ If it finds it, it will consume it instead of `cifmw_network_layout`.
 
 ## DNS configuration
 
-WARNING: deprecated feature!
-
 The configuration is represented by
 
 ```YAML
@@ -81,8 +77,6 @@ cifmw_network_dnsmasq_config:
 
 
 ## DHCP configuration
-
-WARNING: deprecated feature!
 
 To enable dnsmasq configuration is represented by
 
