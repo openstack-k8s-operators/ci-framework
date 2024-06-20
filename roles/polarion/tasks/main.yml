@@ -63,6 +63,12 @@
         state: latest # noqa: package-latest
         extra_args: --upgrade
 
+    - name: Install junitparser
+      ansible.builtin.pip:
+        name: junitparser
+        virtualenv: "{{ cifmw_polarion_jump_repo_dir }}/jump-venv"
+        state: latest # noqa: package-latest
+
     - name: Use polarion-staging
       when:
         - cifmw_polarion_use_stage
@@ -88,6 +94,13 @@
       ansible.builtin.debug:
         var: pylero_output.stdout_lines
 
+    - name: Merge result XML files
+      ansible.builtin.shell:
+        chdir: "{{ cifmw_polarion_jump_result_dir }}"
+        cmd: >-
+          source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" &&
+          junitparser merge {{ xml_files.files | json_query('[*].path') | join(' ') }} ./results_merged.xml
+
     - name: Update Test Runs
       ansible.builtin.shell:
         chdir: "{{ cifmw_polarion_jump_repo_dir }}"
@@ -95,10 +108,9 @@
           source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" &&
           {{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/python jump.py
           --testrun-id={{ cifmw_polarion_testrun_id }}
-          --xml-file={{ item.path }}
+          --xml-file={{ cifmw_polarion_jump_result_dir }}/results_merged.xml
           --update_testcases={{ cifmw_polarion_update_testcases | default(false) }}
           {{ cifmw_polarion_jump_extra_vars | default ('') }}
-      loop: "{{ xml_files.files }}"
       register: jump_script
 
     - name: Output of jump
