@@ -4,6 +4,28 @@
     - _cifmw_libvirt_manager_layout is not defined
   ansible.builtin.include_tasks: generate_layout.yml
 
+# TODO(hjensas): We should have a dedicated role for firewall
+- name: Enable forwarding in the libvirt zone
+  when: cifmw_libvirt_manager_firewalld_zone_libvirt_forward | default(true) | bool
+  become: true
+  notify: Restart firewalld
+  ansible.builtin.command:
+    cmd: >-
+       firewall-cmd --permanent --zone libvirt --add-forward
+
+- name: Enable masquerading for public traffic
+  when: cifmw_libvirt_manager_firewalld_default_zone_masquerade | default(true) | bool
+  become: true
+  ansible.posix.firewalld:
+    masquerade: true
+    zone: "{{ cifmw_libvirt_manager_firewalld_default_zone }}"
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Ensure firewalld is restarts
+  ansible.builtin.meta: flush_handlers
+
 # todo(Lewis): We need to deploy VirtualBMC on the controller rather than hypervisor
 # Deploy VBMC only on the hypervisor running OpenShift services,
 # being OCP cluster or single CRC.

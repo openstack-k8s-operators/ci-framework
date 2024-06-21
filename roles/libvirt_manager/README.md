@@ -38,6 +38,9 @@ Used for checking if:
 * `cifmw_libvirt_manager_spineleaf_setup`: (Boolean) Whether the VMs deployed are connected to a spine/leaf virtual infrastructure or not. When set to `true`, the interfaces of the instances from a certain type of VM are not connected to the same networks, but they can be defined per VM using the `spineleafnets` list (except for the `controller`). Defaults to `false`.
 * `cifmw_libvirt_manager_network_interface_types`: (Dict) By default, interfaces attached to VMs are created with `--type bridge`, but with this parameter, those interfaces can be configured with any other types. Defaults to empty dictionary.
 * `cifmw_libvirt_manager_configuration_patch(.)*`: (Dict) Structure describing the patch to combine on top of `cifmw_libvirt_manager_configuration`.
+* `cifmw_libvirt_manager_firewalld_zone_libvirt_forward`: (Bool) Enable forwarding in the libvirt firewall zone. Defaults to: `true`
+* `cifmw_libvirt_manager_firewalld_default_zone`: (String) Name of the default firewall zone. Defaults to `public`.
+* `cifmw_libvirt_manager_firewalld_default_zone_masquerade`: (Bool) Enable masquerading on the default firewall zone. Defaults to `true`.
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 
