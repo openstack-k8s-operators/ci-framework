@@ -281,10 +281,6 @@ BAREMETAL_BRANCH    ?= main
 BMH_NAMESPACE       ?= ${NAMESPACE}
 
 # Dataplane Operator
-OPENSTACK_DATAPLANENODESET                       ?= config/samples/dataplane_v1beta1_openstackdataplanenodeset.yaml
-OPENSTACK_DATAPLANENODESET_BAREMETAL             ?= config/samples/dataplane_v1beta1_openstackdataplanenodeset_baremetal_with_ipam.yaml
-DATAPLANE_NODESET_CR                             ?= ${OPERATOR_BASE_DIR}/dataplane-operator/${OPENSTACK_DATAPLANENODESET}
-DATAPLANE_NODESET_BAREMETAL_CR                   ?= ${OPERATOR_BASE_DIR}/dataplane-operator/${OPENSTACK_DATAPLANENODESET_BAREMETAL}
 DATAPLANE_ANSIBLE_SECRET                         ?=dataplane-ansible-ssh-private-key-secret
 DATAPLANE_ANSIBLE_USER                           ?=
 DATAPLANE_COMPUTE_IP                             ?=192.168.122.100
