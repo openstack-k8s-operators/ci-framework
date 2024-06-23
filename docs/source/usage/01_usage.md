@@ -39,6 +39,7 @@ are shared among multiple roles:
 - `cifmw_config_nmstate`: (Bool) toggle NMstate networking deployment. Default to false.
 - `cifmw_config_bmh`: (Bool) toggle Metal3 BareMetalHost CRs deployment. Default to false.
 - `cifmw_config_certmanager`: (Bool) toggle cert-manager deployment. Default to false.
+- `cifmw_skip_os_net_setup`: (bool) Specifies whether os_net_setup should be executed. Default to false.
 - `cifmw_ssh_keytype`: (String) Type of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to `ecdsa`.
 - `cifmw_ssh_keysize`: (Integer) Size of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to 521.
 - `cifmw_architecture_repo`: (String) Path of the architecture repository on the controller node.
