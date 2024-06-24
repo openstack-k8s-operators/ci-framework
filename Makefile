@@ -143,6 +143,13 @@ run_ctx_all_tests: run_ctx_pre_commit run_ctx_molecule run_ctx_ansible_test run_
 
 .PHONY: run_ctx_pre_commit
 run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
+	@if [ -f .git ]; then \
+		echo "" ; \
+		echo 'If you are using git worktrees you must use \
+		"make pre_commit" or "make pre_commit_nodeps" as \
+		the git mapping fails inside the container.' ; \
+		false ; \
+	fi
 	podman run \
 		--rm \
 		--security-opt label=disable \
