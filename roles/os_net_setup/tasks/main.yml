@@ -1,53 +1,87 @@
 ---
-- name: Get openstack admin credentials from k8s
+
+- name: Delete existing resources
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  when: not cifmw_os_net_setup_dry_run | bool
   block:
-    - name: Get clouds.yaml configuration
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        context: "{{ cifmw_openshift_context }}"
-        kind: ConfigMap
-        namespace: openstack
-        name: openstack-config
-      register: clouds_yaml
+    - name: Delete existing subnets
+      ansible.builtin.shell: |
+        set -euxo pipefail
+        if [
+            $(oc exec -n openstack openstackclient --
+              openstack subnet list --network {{ item.0.name }} -c Name -f value |
+              grep -c {{ item.1.name }}) != 0
+        ];then
+          oc exec -n openstack openstackclient --
+          openstack subnet delete {{ item.1.name }}
+        fi
+      loop: >-
+        {{
+          cifmw_os_net_setup_config |
+          subelements('subnets', skip_missing=True)
+        }}
+    - name: Delete existing subnet pools
+      ansible.builtin.shell: |
+        set -euxo pipefail
+        if [
+            $(oc exec -n openstack openstackclient --
+              openstack subnet pool list -c Name -f value |
+              grep -c {{ item.name }}) != 0
+        ];then
+          oc exec -n openstack openstackclient --
+          openstack subnet pool delete {{ item.name }}
+        fi
+      loop: "{{ cifmw_os_net_subnetpool_config }}"
+    - name: Delete existing networks
+      ansible.builtin.shell: |
+        set -euxo pipefail
+        if [
+            $(oc exec -n openstack openstackclient --
+              openstack network list -c Name -f value |
+              grep -c {{ item.name }}) != 0
+        ];then
+          oc exec -n openstack openstackclient --
+          openstack network delete {{ item.name }}
+        fi
+      loop: "{{ cifmw_os_net_setup_config }}"
 
-    - name: Get the OSP admin password
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        context: "{{ cifmw_openshift_context }}"
-        kind: Secret
-        namespace: openstack
-        name: openstack-config-secret
-      register: osp_secret
-
-- name: Construct auth param for openstack
+- name: Create required resources
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
   block:
-    - name: Set openstack auth fact
-      ansible.builtin.set_fact: # noqa: yaml[line-length]
-        openstack_auth: |
-          {{ ((clouds_yaml.resources[0].data['clouds.yaml']| from_yaml)['clouds']['default'] |
-          combine ({'auth': { 'password' : (osp_secret.resources[0].data['secure.yaml']|b64decode|from_yaml)['clouds']['default']['auth']['password']} }, recursive=true))['auth'] }}
-        region_name: "{{ (clouds_yaml.resources[0].data['clouds.yaml']| from_yaml)['clouds']['default']['region_name'] }}"
-  rescue:
-    - name: Fail if we do not have auth information
-      ansible.builtin.fail:
-        msg: |
-          Failed to Retrive auth Infomation
-          clouds.yaml: {{ clouds_yaml }}
-          osp_secret: {{ osp_secret }}
-
-- name: Get network information
-  openstack.cloud.networks_info:
-    auth: "{{ openstack_auth }}"
-    validate_certs: "{{ cifmw_os_net_setup_verify_tls }}"
-    ca_cert: /etc/pki/tls/certs/ca-bundle.crt
-  register: cifmw_os_net_setup_network_list_out
-  until: cifmw_os_net_setup_network_list_out is not failed
-  retries: "{{ cifmw_os_net_setup_osp_calls_retries }}"
-  delay: "{{ cifmw_os_net_setup_osp_calls_delay }}"
-
-- name: Process network list element
-  ansible.builtin.include_tasks:
-    file: subtask_net.yml
-  loop: "{{ cifmw_os_net_setup_config|flatten(levels=1) }}"
-  loop_control:
-    loop_var: net_item
+    - name: Create network resources
+      vars:
+        _template_file: network_command.j2
+      block:
+        - name: Print network creation commands
+          ansible.builtin.debug:
+            msg: "{{ lookup('ansible.builtin.template', _template_file) }}"
+        - name: Create networks
+          ansible.builtin.shell: >
+            {{ lookup('ansible.builtin.template', _template_file) }}
+          when: not cifmw_os_net_setup_dry_run | bool
+    - name: Create subnet resources
+      vars:
+        _template_file: 'subnet_command.j2'
+      block:
+        - name: Print subnet command creation
+          ansible.builtin.debug:
+            msg: "{{ lookup('ansible.builtin.template', _template_file) }}"
+        - name: Create subnets
+          ansible.builtin.shell: >
+            {{ lookup('ansible.builtin.template', _template_file) }}
+          when: not cifmw_os_net_setup_dry_run | bool
+    - name: Create required subnet pools
+      vars:
+        _template_file: 'subnet_pool_command.j2'
+      block:
+        - name: Print subnet pools command creation
+          ansible.builtin.debug:
+            msg: "{{ lookup('ansible.builtin.template', _template_file) }}"
+        - name: Create subnet pools
+          ansible.builtin.shell: >
+            {{ lookup('ansible.builtin.template', _template_file) }}
+          when: not cifmw_os_net_setup_dry_run | bool
