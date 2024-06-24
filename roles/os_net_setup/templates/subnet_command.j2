@@ -1,0 +1,79 @@
+{% set ipv6_modes_arguments = [
+    "dhcpv6-stateful",
+    "dhcpv6-stateless",
+    "slaac"
+] %}
+set -euo pipefail
+{% for net_args in cifmw_os_net_setup_config %}
+{%  if net_args.subnets is defined %}
+{%      for subnet_args in net_args.subnets %}
+oc exec -n openstack openstackclient -- openstack subnet create \
+{%          if subnet_args.allocation_pool_start is defined and
+       subnet_args.allocation_pool_end is defined %}
+    --allocation-pool start={{ subnet_args.allocation_pool_start }},end={{ subnet_args.allocation_pool_end }} \
+{%          endif %}
+{%          if subnet_args.cidr is defined %}
+    --subnet-range {{ subnet_args.cidr }} \
+{%          endif %}
+{%          if subnet_args.description is defined %}
+    --description {{ subnet_args.description }} \
+{%          endif %}
+{%          if subnet_args.disable_gateway_ip is defined and
+           subnet_args.disable_gateway_ip and
+           subnet_args.gateway_ip is not defined %}
+    --gateway none \
+{%          elif subnet_args.gateway_ip is defined and
+             subnet_args.disable_gateway_ip is not defined %}
+    --gateway {{ subnet_args.gateway_ip }} \
+{%          else %}
+    --gateway auto \
+{%          endif %}
+{%          if subnet_args.dns_nameservers is defined and
+           subnet_args.dns_nameservers is iterable %}
+{%              for dns in subnet_args.dns_nameservers %}
+    --dns-nameserver {{ dns }}
+{%              endfor %}
+{%          endif %}
+{%-          if subnet_args.extra_attrs is defined and
+           subnet_args.extra_attrs is mapping  %}
+    --extra-property
+    {%-          for key, value in subnet_args.extra_attrs.items() %}
+ {{ key }}:{{ value }};
+    {%-         endfor %} \
+{%          endif %}
+{%          if subnet_args.host_routes is defined and
+        subnet_args.host_routes is iterable %}
+{%              for hr in subnet_args.host_routes %}
+    --host-routes destination={{ hr.destination }},gateway={{ hr.nexthop }} \
+{%              endfor %}
+{%          endif %}
+{%          if subnet_args.ip_version is defined and
+           subnet_args.ip_version | int == 6 %}
+    --ip-version {{subnet_args.ip_version }} \
+{%          endif %}
+{%          if subnet_args.ipv6_address_mode is defined and
+               subnet_args.ipv6_address_mode in ipv6_modes_arguments %}
+    --ipv6-address-mode {{subnet_args.provider_physical_network }} \
+{%          endif %}
+{%          if subnet_args.ipv6_ra_mode is defined and
+           subnet_args.ipv6_ra_mode in ipv6_modes_arguments %}
+    --ipv6-ra-mode {{subnet_args.provider_physical_network }} \
+{%          endif %}
+{%          if subnet_args.is_dhcp_enabled is defined and
+               not subnet_args.is_dhcp_enabled %}
+    --no-dhcp \
+{%          endif %}
+{%          if net_args.name is defined %}
+    --network {{ net_args.name }} \
+{%          endif %}
+{%          if subnet_args.subnet_pool is defined %}
+    --subnet-pool {{ subnet_args.subnet_pool }} \
+{%          endif %}
+{%          if subnet_args.use_default_subnet_pool is defined and
+               subnet_args.use_default_subnet_pool %}
+    --use-default-subnet-pool \
+{%          endif %}
+    {{subnet_args.name }}
+{%      endfor %}
+{%  endif %}
+{% endfor %}
