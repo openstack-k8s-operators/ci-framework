@@ -62,6 +62,7 @@
         uri: "qemu:///system"
       loop: "{{ cleanup_vms }}"
 
+    # KEEP this for now to ensure smoother migration
     - name: "(localhost) Clean ssh jumpers"
       when:
         - inventory_hostname != 'localhost'
@@ -75,19 +76,7 @@
         create: true
       loop: "{{ cleanup_vms }}"
 
-    - name: "(localhost) Clean old ssh jumpers"
-      when:
-        - inventory_hostname != 'localhost'
-      delegate_to: localhost
-      vars:
-        vm: "{{ item | replace('cifmw-', '') }}"
-      ansible.builtin.blockinfile:
-        path: "{{ lookup('env', 'HOME') }}/.ssh/config"
-        marker: "## {mark} {{ vm }}"
-        state: absent
-        create: true
-      loop: "{{ cleanup_vms }}"
-
+    # KEEP this for now to ensure smoother migration
     - name: "({{ inventory_hostname }}) Clean ssh jumpers"  # noqa: name[template]
       vars:
         vm: "{{ item | replace('cifmw-', '') }}"
@@ -290,6 +279,21 @@
   ansible.builtin.import_role:
     name: virtualbmc
     tasks_from: cleanup.yml
+
+- name: Clean remote ssh config
+  vars:
+    cifmw_ssh_jumper_config_dir: "{{ ansible_user_dir }}/.ssh"
+  ansible.builtin.include_role:
+    name: "ssh_jumper"
+    tasks_from: "cleanup.yml"
+
+- name: Clean local ssh config
+  vars:
+    cifmw_ssh_jumper_target: 'localhost'
+    cifmw_ssh_jumper_config_dir: "{{ lookup('env', 'HOME') }}/.ssh"
+  ansible.builtin.include_role:
+    name: "ssh_jumper"
+    tasks_from: "cleanup.yml"
 
 - name: Clean dnsmasq
   ansible.builtin.import_role:

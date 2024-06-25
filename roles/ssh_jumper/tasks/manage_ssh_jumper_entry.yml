@@ -14,20 +14,21 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Make sure ~/.ssh/cifw_ssh_config.d directory exists
-  delegate_to: "{{ _config.target | default(cifmw_ssh_jumper_defaults.target) }}"
+- name: Make sure ~/.ssh/cifmw_ssh_config.d directory exists
+  delegate_to: "{{ _config.target | default(omit) }}"
   vars:
-    _ssh_dir: "{{ _config.ssh_dir | default(cifmw_ssh_jumper_defaults.ssh_dir) }}"
+    _ssh_dir: >-
+      {{
+        _config.ssh_dir |
+        default(cifmw_ssh_jumper_defaults.ssh_dir)
+      }}
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ _ssh_dir }}/cifmw_ssh_config.d//{{ inventory_hostname }}"
     state: directory
     mode: '0700'
-  loop:
-    - "{{ _ssh_dir | default((ansible_user_dir, '/.ssh') | path_join) }}/cifw_ssh_config.d"
-    - "{{ _ssh_dir | default((ansible_user_dir, '/.ssh') | path_join) }}/cifw_ssh_config.d/{{ inventory_hostname }}"
 
-- name: Include ~/.ssh/cifw_ssh_config.d/inventory_hostname/*.conf
-  delegate_to: "{{ _config.target | default(cifmw_ssh_jumper_defaults.target) }}"
+- name: Include ~/.ssh/cifmw_ssh_config.d/inventory_hostname/*.conf
+  delegate_to: "{{ _config.target | default(omit) }}"
   vars:
     _ssh_dir: "{{ _config.ssh_dir | default(cifmw_ssh_jumper_defaults.ssh_dir) }}"
   ansible.builtin.lineinfile:
@@ -36,13 +37,13 @@
     state: present
     path: "{{ _ssh_dir | default((ansible_user_dir, '/.ssh') | path_join) }}/config"
     mode: '0600'
-    line: 'Include cifw_ssh_config.d/{{ inventory_hostname }}/*.conf'
+    line: 'Include cifmw_ssh_config.d/{{ inventory_hostname }}/*.conf'
 
 - name: "Inject ssh jumpers for {{ _config.hostname }}"
-  delegate_to: "{{ _config.target | default(cifmw_ssh_jumper_defaults.target) }}"
+  delegate_to: "{{ _config.target | default(omit) }}"
   vars:
     _ssh_dir: "{{ _config.ssh_dir | default(cifmw_ssh_jumper_defaults.ssh_dir) }}"
-    _dir: "{{ _ssh_dir }}/cifw_ssh_config.d/{{ inventory_hostname }}"
+    _dir: "{{ _ssh_dir }}/cifmw_ssh_config.d/{{ inventory_hostname }}"
     _filename: >-
       {%- if _config.proxy_host is defined and _config.proxy_host is not none -%}
       {{ _config.hostname }}-via-{{ _config.proxy_host }}.conf

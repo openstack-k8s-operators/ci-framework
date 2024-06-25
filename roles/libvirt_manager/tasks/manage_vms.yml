@@ -1,44 +1,37 @@
 ---
-- name: "(localhost) Inject ssh jumpers for {{ vm }}"
-  when:
-    - inventory_hostname != 'localhost'
-    - inventory_hostname != 'instance'  # needed for molecule
-  delegate_to: localhost
+- name: "Push ssh jumper/configuration for {{ vm }}"
   vars:
-    proxy_hostname: "{{ ansible_host | default(inventory_hostname) }}"
-  ansible.builtin.blockinfile:
-    create: true
-    path: "{{ lookup('env', 'HOME') }}/.ssh/config"
-    marker: "## {mark} {{ vm }} {{ inventory_hostname }}"
-    mode: "0600"
-    block: |-
-      Host {{ vm }} {{ vm }}.{{ inventory_hostname }} cifmw-{{ vm }} {{ extracted_ip }}
-        ProxyJump {{ ansible_user | default(lookup('env', 'USER')) }}@{{ proxy_hostname }}
-        Hostname {{ extracted_ip }}
-        User {{ 'core' if vm is match('^(crc|ocp).*') else 'zuul' }}
-        StrictHostKeyChecking no
-        UserKnownHostsFile /dev/null
-
-- name: "({{ inventory_hostname }}) Inject ssh jumpers for {{ vm }}"  # noqa: name[template]
-  vars:
-    identity_file: >-
-      {{
-        cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type is match('^ocp.*') else
-        ansible_user_dir ~ '/.crc/machines/crc/id_ecdsa' if vm_type == 'crc' else
-        ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
-      }}
-  ansible.builtin.blockinfile:
-    create: true
-    path: "{{ ansible_user_dir }}/.ssh/config"
-    marker: "## {mark} {{ vm }}"
-    mode: "0600"
-    block: |-
-      Host {{ vm }} {{ vm }}.{{ inventory_hostname }} cifmw-{{ vm }} {{ extracted_ip }}
-        Hostname {{ extracted_ip }}
-        User {{ 'core' if vm is match('^(crc|ocp)') else 'zuul' }}
-        IdentityFile {{ identity_file }}
-        StrictHostKeyChecking no
-        UserKnownHostsFile /dev/null
+    _user: "{{ 'core' if vm is match('^(crc|ocp).*') else 'zuul' }}"
+    dataset:
+      ssh_dir: "{{ ansible_user_dir }}/.ssh"
+      user: "{{ _user }}"
+      hostname: "{{ extracted_ip }}"
+      patterns:
+        - "{{ vm }}"
+        - "{{ vm }}.{{ inventory_hostname }}"
+        - "cifmw-{{ vm }}"
+    proxy_data:
+      target: localhost
+      proxy_host: "{{ ansible_host | default(inventory_hostname) }}"
+      proxy_user: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+      ssh_dir: "{{ lookup('env', 'HOME') }}/.ssh"
+    ssh_ident:
+      identity_file: >-
+        {{
+          cifmw_libvirt_manager_basedir ~ '/artifacts/cifmw_ocp_access_key' if vm_type is match('^ocp.*') else
+          ansible_user_dir ~ '/.crc/machines/crc/id_ecdsa' if vm_type == 'crc' else
+          ansible_user_dir ~ '/.ssh/cifmw_reproducer_key'
+        }}
+    config: >-
+      {% set output = [] -%}
+      {% if inventory_hostname not in ['localhost', 'instance'] -%}
+      {% set _ = output.append(dataset | combine(proxy_data) ) -%}
+      {% endif -%}
+      {% set _ = output.append(dataset | combine(ssh_ident)) -%}
+      {{ output }}
+    cifmw_ssh_jumper_config: "{{ config }}"
+  ansible.builtin.include_role:
+    name: "ssh_jumper"
 
 - name: Inject nodes in the ansible inventory
   delegate_to: localhost
