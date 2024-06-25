@@ -1,21 +1,12 @@
 ---
-- hosts: crc
-  name: "Tweak CRC node"
+- name: "Tweak CRC node"
+  hosts: crc
   gather_facts: false
   tasks:
-
     - name: Load network parameters
       register: _cifmw_multinode_customizations_crc_net_env_slurp
       ansible.builtin.slurp:
         src: "/etc/ci/env/networking-info.yml"
-
-    - name: Check which dnsmasq config we must edit
-      register: _dnsmasq
-      ansible.builtin.stat:
-        path: '/srv/dnsmasq.conf'
-        get_attributes: false
-        get_checksum: false
-        get_mime: false
 
     - name: Shared parameter across blocks
       vars:
@@ -69,84 +60,11 @@
                 name: NetworkManager
                 state: reloaded
 
-        - name: Configure dnsmasq
-          vars:
-            _dnsmasq_config: >-
-              {{
-                _dnsmasq.stat.exists |
-                ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
-              }}
-            _crc_default_net_dns: >-
-              {{
-                 _decoded_net_env.crc_ci_bootstrap_provider_dns |
-                default([])
-              }}
-          block:
-            - name: Configure dns forwarders
-              become: true
-              ansible.builtin.blockinfile:
-                path: "{{ _dnsmasq_config }}"
-                block: |-
-                  {% for dns_server in _crc_default_net_dns %}
-                  server={{ dns_server }}
-                  {% endfor %}
+    - name: Patch dnsmasq service
+      ansible.builtin.include_role:
+        name: openshift_setup
+        tasks_from: patch_dnsmasq.yml
 
-            - name: Configure local DNS for CRC pod
-              become: true
-              register: last_modification
-              ansible.builtin.replace:
-                path: "{{ _dnsmasq_config }}"
-                regexp: "192.168.130.11"
-                replace: >-
-                  {{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}
-
-            # Note(Lewis): Only needed for CRC => 2.32.0-4.14.8
-            - name: Configure dnsmasq listen-address to listen on both br-ex and ci-private-network
-              when:
-                - not _dnsmasq.stat.exists
-              become: true
-              ansible.builtin.lineinfile:
-                path: "{{ _dnsmasq_config }}"
-                insertafter: '^listen-address='
-                line: "listen-address={{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}"
-
-    - name: Restart dnsmasq service if used
-      become: true
-      when:
-        - not _dnsmasq.stat.exists
-      ansible.builtin.service:
-        name: dnsmasq
-        state: restarted
-
-    - name: Manage old dnsmasq container
-      when:
-        - _dnsmasq.stat.exists
-      block:
-        # Avoid 'state: restarted' due to issues with IP not
-        # available when crc-dnsmasq starts
-        - name: Stop dnsmasq
-          become: true
-          ansible.builtin.systemd:
-            state: stopped
-            name: crc-dnsmasq
-
-        - name: Make sure that crc-dnsmasq is not running
-          containers.podman.podman_container:
-            name: crc-dnsmasq
-            state: absent
-
-        - name: Start dnsmasq
-          become: true
-          ansible.builtin.systemd:
-            state: started
-            name: crc-dnsmasq
-          register: _dnsmasq_start_reg
-          retries: 15
-          delay: 20
-          until:
-            - _dnsmasq_start_reg.failed is false
-            - _dnsmasq_start_reg.status is defined
-            - _dnsmasq_start_reg.status.ActiveState == "active"
 
     - name: Wait for CRC to be ready
       register: wait_crc
@@ -168,8 +86,8 @@
       ansible.builtin.include_tasks: tasks/set_crc_insecure_registry.yml
       when: content_provider_registry_ip is defined
 
-- hosts: controller
-  name: "Tweak Controller"
+- name: "Tweak Controller"
+  hosts: controller
   gather_facts: true
   tasks:
     - name: Install other packages
