@@ -3,23 +3,27 @@
 # https://github.com/crc-org/crc/issues/4109#issuecomment-2042497411.
 # It will be removed once https://github.com/crc-org/crc/issues/4109
 # closed.
-- name: Delete the pods from openshift-marketplace namespace
-  kubernetes.core.k8s:
-    kind: Pod
-    state: absent
-    delete_all: true
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    namespace: openshift-marketplace
+- name: Fix OpenShift Marketplace
+  when:
+    - not cifmw_openshift_setup_dry_run
+  block:
+    - name: Delete the pods from openshift-marketplace namespace
+      kubernetes.core.k8s:
+        kind: Pod
+        state: absent
+        delete_all: true
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: openshift-marketplace
 
-- name: Wait for openshift-marketplace pods to be running
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc wait pod --all --for=condition=Ready
-      -n openshift-marketplace --timeout=1m
-  register: _pod_status
-  retries: 4
-  delay: 10
-  until: _pod_status.rc == 0
+    - name: Wait for openshift-marketplace pods to be running
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc wait pod --all --for=condition=Ready
+          -n openshift-marketplace --timeout=1m
+      register: _pod_status
+      retries: 4
+      delay: 10
+      until: _pod_status.rc == 0
