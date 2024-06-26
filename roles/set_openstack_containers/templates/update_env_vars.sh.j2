@@ -10,6 +10,10 @@ export PATH="{{ cifmw_path }}"
 {#   Add `-` to the cifmw_set_openstack_containers_prefix to avoid issues with #}
 {#   openstack-openstackclient image name #}
 {% set _container_prefix = cifmw_set_openstack_containers_prefix + '-' -%}
+{# This is required to instruct openstack-operator to place environment variables for openstack services containers entries in openstackversion cr under targeted version #}
+{% if cifmw_set_openstack_containers_openstack_version_change | bool %}
+{%     set _ = containers_dict.update({'OPENSTACK_RELEASE_VERSION': cifmw_set_openstack_containers_update_target_version}) -%}
+{% endif                                       %}
 {# Environment variables contains = sign, Based on that we need to split with key and value #}
 {% for container in containers_env_list.stdout_lines if '=' in container -%}
 {%   set container_data = container.split('=') -%}
@@ -24,7 +28,12 @@ export PATH="{{ cifmw_path }}"
 {#   It filters out the same and update the container address with new url #}
 {%   elif (_container_prefix in _container) and ('operator' not in _container) -%}
 {%     set _container_data = _container.split(_container_prefix)[-1] -%}
-{%     set _container_name = _container_data.split('@sha256')[0] -%}
+{#   There is sha256 tag initially for container tags, but in some jobs we switch to dlrn tag #}
+{%     if '@sha256' in _container_data  -%}
+{%        set _container_name = _container_data.split('@sha256')[0]      -%}
+{%     else                                                              -%}
+{%        set _container_name = _container_data.split(':')[0]            -%}
+{%     endif                                                             -%}
 {%     set _container_address = _container_registry + '/' + _container_prefix + _container_name + ':' + cifmw_set_openstack_containers_tag -%}
 {%     set _ = containers_dict.update({_container_env: _container_address}) -%}
 {%   endif -%}
