@@ -113,6 +113,22 @@
     _dns_listener:
       - "{{ ansible_facts[_name].ipv4.address | default('') }}"
       - "{{ _ipv6.address | default('') }}"
+    _translate: >-
+      {{ cifmw_networking_mapper_interfaces_info_translations | default({}) }}
+    _net_domain: >-
+      {{
+        (_no_prefix_name in _translate) |
+        ternary(_translate[_no_prefix_name], [_no_prefix_name])
+      }}
+    _domain: >-
+      {%- if _no_prefix_name == cifmw_libvirt_manager_pub_net -%}
+      {{ cifmw_reproducer_domain | default('local') }}
+      {%- else -%}
+      {{
+        [_net_domain | first,
+         cifmw_reproducer_domain | default('local')] | join('.')
+      }}
+      {%- endif -%}
     _local_net_info:
       - name: "{{ _no_prefix_name }}"
         original_name: "{{ item }}"
@@ -135,6 +151,7 @@
               {{ _ipv6.prefix }}
               {%- endif -%}
             options: "{{ _dns_options | from_yaml }}"
+            domain: "{{ _domain }}"
   ansible.builtin.set_fact:
     _network_data: "{{ _network_data | default([]) + _local_net_info }}"
     _dns_listeners: >-

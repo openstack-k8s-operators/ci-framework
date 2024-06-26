@@ -67,6 +67,57 @@
         name: dnsmasq
         tasks_from: manage_network.yml
 
+    - name: Check for enable-ra line in startrek
+      block:
+        - name: Inject enable-ra in startrek
+          become: true
+          register: _enable_ra
+          ansible.builtin.lineinfile:
+            line: "enable-ra"
+            path: "/etc/cifmw-dnsmasq.d/startrek.conf"
+
+        - name: Assert no change was done in startrek
+          ansible.builtin.assert:
+            that:
+              - _enable_ra is not changed
+            msg: >-
+              ipv6 not properly detected.
+
+    - name: Create IPv4-only network
+      vars:
+        cifmw_dnsmasq_network_name: oldies
+        cifmw_dnsmasq_network_state: present
+        cifmw_dnsmasq_listen_addresses:
+          - "192.168.252.1"
+        cifmw_dnsmasq_network_definition:
+          ranges:
+            - label: goodies
+              domain: "goodies.lan"
+              start_v4: 192.168.252.10
+              start_v6: ''
+              prefix_length_v4: 26
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_network.yml
+
+    - name: Check for enable-ra line in oldies
+      block:
+        - name: Inject enable-ra in oldies
+          become: true
+          register: _set_ra
+          ansible.builtin.lineinfile:
+            line: "enable-ra"
+            path: "/etc/cifmw-dnsmasq.d/oldies.conf"
+
+        - name: Debug
+          ansible.builtin.debug:
+            var: _set_ra
+
+        - name: Assert oldies was changed
+          ansible.builtin.assert:
+            that:
+              - _set_ra is changed
+
     - name: Inject some node in starwars network
       vars:
         cifmw_dnsmasq_host_network: "{{ item.net }}"
@@ -145,18 +196,3 @@
 
     - name: Force reload dnsmasq
       ansible.builtin.meta: flush_handlers
-
-    - name: Copy generated content in ci-framework-data/artifacts
-      vars:
-        dest_dir: >-
-          {{
-            (ansible_user_dir,
-             'ci-framework-data',
-             'artifacts') | path_join
-          }}
-      ansible.posix.synchronize:
-        src: "{{ item }}"
-        dest: "{{ dest_dir }}"
-      loop:
-        - /etc/cifmw-dnsmasq.conf
-        - /etc/cifmw-dnsmasq.d/
