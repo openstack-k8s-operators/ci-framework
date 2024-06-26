@@ -1,0 +1,172 @@
+---
+- name: Mark run status
+  ansible.builtin.set_fact:
+    _run_fail: false
+    _local_fail: false
+
+- name: Load environment file
+  ansible.builtin.include_vars:
+    file: "{{ env_file }}"
+
+- name: Use block/rescue/always
+  vars:
+    _cifmw_libvirt_manager_layout: >-
+      {{
+        cifmw_libvirt_manager_configuration |
+        combine(test.patch | default({}), recursive=true)
+      }}
+    ocp_num: "{{ _cifmw_libvirt_manager_layout.vms.ocp.amount }}"
+    worker_num: >-
+      {{ _cifmw_libvirt_manager_layout.vms.ocp_worker.amount  | default(0) }}
+    vols: >-
+      {{
+        [['base-cifmw-ocp_master'] |
+        product(range(0, ocp_num|int)) |
+        map('join', '-') |
+        product(range(0, create_vols|int)) |
+        map('join', '-vol-') | flatten] +
+        [['base-cifmw-ocp_worker'] |
+        product(range(0, worker_num|int)) |
+        map('join', '-vol-') |
+        product(range(0, create_vols|int)) |
+        map('join', '-') | flatten]
+      }}
+    vol_dir: "{{ ansible_user_dir }}/ci-framework-data/ocp_volumes"
+    img_dir: "{{ ansible_user_dir }}/ci-framework-data/images"
+    cluster_dir: >-
+      {{ ansible_user_dir }}/src/github.com/openshift-metal3/dev-scripts/ocp
+    cifmw_devscripts_config_overrides:
+      num_masters: "{{ ocp_num }}"
+      num_workers: "{{ worker_num }}"
+  block:
+    - name: Output scenario name
+      ansible.builtin.debug:
+        msg: "Running: {{ scenario }}"
+
+    - name: Create cluster if needed
+      when:
+        - create_cluster | bool
+      ansible.builtin.file:
+        mode: "0755"
+        path: "{{ cluster_dir }}/ocp"
+        state: directory
+
+    - name: Create volumes if needed
+      when:
+        - (create_vols | int) > 0
+      ansible.builtin.file:
+        mode: "0644"
+        path: "{{ vol_dir }}/{{ _vol }}"
+        state: touch
+      loop_control:
+        loop_var: _vol
+      loop: "{{ vols | flatten }}"
+
+    - name: Create workers if needed
+      when:
+        - (create_workers | int) > 0
+      ansible.builtin.file:
+        mode: "0644"
+        path: "{{ img_dir }}/{{ _worker }}.qcow2"
+        state: touch
+      loop_control:
+        loop_var: _worker
+      loop: >-
+        {{
+          ['ocp_worker'] |
+          product(range(0, create_workers|int)) |
+          map('join', '-') | flatten
+        }}
+
+    - name: Set date flag
+      vars:
+        _tweak: "{{ date_tweak }}"
+        _date: >-
+          {{ lookup('ansible.builtin.pipe', 'date +"%Y-%m-%d %H:%M:%S" -d ' ~ _tweak | quote) }}
+      ansible.builtin.copy:
+        dest: "/home/dev-scripts/.ocp_cert_not_after"
+        content: "{{ _date }}"
+
+    - name: Ensure freshly built config
+      ansible.builtin.include_role:
+        name: "devscripts"
+        tasks_from: "build_config.yml"
+
+    - name: Validate data
+      ansible.builtin.include_role:
+        name: "devscripts"
+        tasks_from: "110_check_ocp.yml"
+
+    - name: Assert status
+      ansible.builtin.assert:
+        that:
+          - _needed_overlays | bool
+          - _needed_volumes | bool
+          - (not _openshift_adm_check_cert_approve) | bool
+          - cifmw_devscripts_ocp_exists | bool
+
+  rescue:
+    - name: Clear host errors
+      ansible.builtin.meta: clear_host_errors
+
+    - name: Mark check as failed
+      ansible.builtin.set_fact:
+        _run_fail: true
+
+  always:
+    - name: Delete cluster
+      ansible.builtin.file:
+        mode: "0755"
+        path: "{{ cluster_dir }}/ocp"
+        state: absent
+
+    - name: Delete volumes if needed
+      when:
+        - (create_vols | int) > 0
+      ansible.builtin.file:
+        mode: "0644"
+        path: "{{ vol_dir }}/{{ _vol }}"
+        state: absent
+      loop_control:
+        loop_var: _vol
+      loop: "{{ vols | flatten }}"
+
+    - name: Delete workers if needed
+      when:
+        - (create_workers | int) > 0
+      ansible.builtin.file:
+        mode: "0644"
+        path: "{{ img_dir }}/{{ _worker }}.qcow2"
+        state: absent
+      loop_control:
+        loop_var: _worker
+      loop: >-
+        {{
+          ['ocp_worker'] |
+          product(range(0, create_workers|int)) |
+          map('join', '-') | flatten
+        }}
+
+    - name: Mark failure
+      when:
+        - (not _run_fail | bool and
+           should_fail | default(false) | bool) or
+          (_run_fail | bool and
+           not should_fail | default(false) | bool)
+      ansible.builtin.set_fact:
+        is_failed: true
+        _local_fail: true
+
+    - name: Manage error
+      when:
+        - _local_fail | bool
+      block:
+        - name: Display error message
+          ansible.builtin.debug:
+            msg: >-
+              Failed to validate against {{ env_file }}
+              for {{ scenario }}.
+
+        - name: Append failed scenario to list
+          ansible.builtin.set_fact:
+            failure_list: "{{ failure_list + [scenario] }}"
