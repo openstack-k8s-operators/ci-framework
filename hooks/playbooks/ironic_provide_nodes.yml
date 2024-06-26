@@ -1,0 +1,65 @@
+---
+- name: Manage and Provide ironic baremetal nodes
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Move all nodes to managed state
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          oc project {{ namespace }}
+
+          BAREMETAL_NODES=$(oc rsh openstackclient openstack baremetal node list -c UUID -f value)
+
+          # Manage nodes
+          for node in $BAREMETAL_NODES; do
+            CURRENT_STATE=$(oc rsh openstackclient openstack baremetal node show $node -f value -c provision_state)
+            if [ "${CURRENT_STATE}" == "enroll" ]; then
+              oc rsh openstackclient openstack baremetal node manage $node
+            fi
+          done
+
+    - name: Wait for nodes to reach manageable state
+      register: _os_out
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ namespace }} > /dev/null
+        oc rsh openstackclient \
+          openstack baremetal node list -f value -c "Provisioning State"
+      until: '_os_out.stdout_lines | difference(["manageable"]) | length == 0'
+      retries: 6
+      delay: 10
+
+    - name: Move all nodes to managed active state
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          oc project {{ namespace }}
+
+          BAREMETAL_NODES=$(oc rsh openstackclient openstack baremetal node list -c UUID -f value)
+
+          # Provide nodes
+          for node in $BAREMETAL_NODES; do
+            CURRENT_STATE=$(oc rsh openstackclient openstack baremetal node show $node -f value -c provision_state)
+            if [ "${CURRENT_STATE}" == "manageable" ]; then
+              oc rsh openstackclient openstack baremetal node provide $node
+            fi
+          done
+
+    - name: Wait for nodes to reach available state
+      register: _os_out
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ namespace }} > /dev/null
+        oc rsh openstackclient \
+          openstack baremetal node list -f value -c "Provisioning State"
+      until: '_os_out.stdout_lines | difference(["available"]) | length == 0'
+      retries: 60
+      delay: 10
