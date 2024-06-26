@@ -77,6 +77,23 @@ be controlled with the following parameters.
 * `cifmw_lvms_delay`: (Int) Ansible `delay` passed to tasks which wait for `kubernetes.core.k8s_info` (default `10`)
 * `cifmw_lvms_retries`: (Int) Ansible `retries` passed to tasks which wait for `kubernetes.core.k8s_info` (default `60`)
 
+
+### Optional parameters
+
+* `ci_lvms_storage_tolerations`: (Dict) Allows to pass a set of tolerations to the lvms-operator to configure pods to eventually ignore scheduling restrictions applied to specific workers.
+
+Here an example showing how tolerations can be configured:
+
+```yaml
+ci_lvms_storage_tolerations:
+  - key: "testOperator"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "testOperator"
+    value: "true"
+    effect: "NoExecute"
+```
+
 ## Examples
 
 The example playbook below will create an LVMS cluster using the disks
