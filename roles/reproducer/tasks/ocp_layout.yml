@@ -87,30 +87,26 @@
     - name: Inject A/AAAA records for api/api-int/pxe
       vars:
         cifmw_dnsmasq_host_record:
-          - names: "{{ record.names }}"
-            ips: "{{ record.ips }}"
+          - names:
+              - "api.{{ _cluster }}.{{ _domain }}"
+              - "api-int.{{ _cluster }}.{{ _domain }}"
+            ips: "{{ _api_addr }}"
+            state: present
+          - names:
+              - "pxe.{{ _cluster }}.{{ _domain }}"
+            ips: >-
+              {% set _ips = [] -%}
+              {% if _pxe_addr_v4 | length > 0 -%}
+              {% set _ = _ips.append(_pxe_addr_v4 | ansible.utils.ipmath(1)) -%}
+              {% endif -%}
+              {% if _pxe_addr_v6 | length > 0 -%}
+              {% set _ = _ips.append(_pxe_addr_v6 | ansible.utils.ipmath(1)) -%}
+              {% endif -%}
+              {{ _ips }}
             state: present
       ansible.builtin.include_role:
         name: "dnsmasq"
         tasks_from: "manage_host_record.yml"
-      loop_control:
-        loop_var: record
-      loop:
-        - names:
-            - "api.{{ _cluster }}.{{ _domain }}"
-            - "api-int.{{ _cluster }}.{{ _domain }}"
-          ips: "{{ _api_addr }}"
-        - names:
-            - "pxe.{{ _cluster }}.{{ _domain }}"
-          ips: >-
-            {% set _ips = [] -%}
-            {% if _pxe_addr_v4 | length > 0 -%}
-            {% set _ = _ips.append(_pxe_addr_v4 | ansible.utils.ipmath(1)) -%}
-            {% endif -%}
-            {% if _pxe_addr_v6 | length > 0 -%}
-            {% set _ = _ips.append(_pxe_addr_v6 | ansible.utils.ipmath(1)) -%}
-            {% endif -%}
-            {{ _ips }}
 
     - name: Push wildcard A/AAAA for apps
       when:
@@ -179,8 +175,6 @@
 
     - name: Generate baremetal content fact
       vars:
-        _hypervisor_ip4: >-
-          {{ hostvars[inventory_hostname].ansible_default_ipv4.address }}
         _vm_name: "cifmw-{{ item }}"
         _mac: >-
           {{
@@ -207,7 +201,7 @@
           driver_info:
             username: "admin"
             password: "password"
-            address: "ipmi://{{ _hypervisor_ip4 }}:{{ _ipmi_port }}"
+            address: "ipmi://ipmi.utility:{{ _ipmi_port }}"
             deploy_kernel: >-
               http://{{ _pxe_host }}/images/ironic-python-agent.kernel
             deploy_ramdisk: >-
