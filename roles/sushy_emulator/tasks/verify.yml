@@ -36,28 +36,36 @@
       ansible.builtin.set_fact:
         cifmw_baremetal_hosts: "{{ _yaml.cifmw_baremetal_hosts }}"
 
-- name: Test Sushy Emulator and connection to hypervisor libvirt socket
-  ansible.builtin.uri:
-    url: "{{ _sushy_url}}/redfish/v1/Managers"
-    return_content: true
-    user: "{{ cifmw_sushy_emulator_redfish_username }}"
-    password: "{{ cifmw_sushy_emulator_redfish_password }}"
-  retries: 5
-  delay: 5
-  register: _sushy_emulator_content
+- name: Choose right URI value
+  vars:
+    _sushy_url: >-
+      {{
+        (ocp_sushy_uri is defined and ocp_sushy_uri | length > 0) |
+        ternary(ocp_sushy_uri, cifmw_sushy_emulator_uri)
+      }}
+  block:
+    - name: Test Sushy Emulator and connection to hypervisor libvirt socket
+      ansible.builtin.uri:
+        url: "{{ _sushy_url }}/redfish/v1/Managers"
+        return_content: true
+        user: "{{ cifmw_sushy_emulator_redfish_username }}"
+        password: "{{ cifmw_sushy_emulator_redfish_password }}"
+      retries: 5
+      delay: 5
+      register: _sushy_emulator_content
 
-- name: Verify connection to baremetal VMs via Sushy Emulator
-  when:
-    - _cifmw_sushy_emulator_instances | length > 0
-  ansible.builtin.uri:
-    url: "{{ _sushy_url}}/redfish/v1/Systems/{{item}}"
-    return_content: true
-    user: "{{ cifmw_sushy_emulator_redfish_username }}"
-    password: "{{ cifmw_sushy_emulator_redfish_password }}"
-  retries: 5
-  delay: 5
-  register: _sushy_emulator_content_system
-  loop: "{{ _cifmw_sushy_emulator_instances }}"
+    - name: Verify connection to baremetal VMs via Sushy Emulator
+      when:
+        - _cifmw_sushy_emulator_instances | length > 0
+      ansible.builtin.uri:
+        url: "{{ _sushy_url }}/redfish/v1/Systems/{{item}}"
+        return_content: true
+        user: "{{ cifmw_sushy_emulator_redfish_username }}"
+        password: "{{ cifmw_sushy_emulator_redfish_password }}"
+      retries: 5
+      delay: 5
+      register: _sushy_emulator_content_system
+      loop: "{{ _cifmw_sushy_emulator_instances }}"
 
 - name: Verify baremetal VM power status
   when: _sushy_emulator_content_system != 'All items skipped'
