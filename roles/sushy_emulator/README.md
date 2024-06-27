@@ -20,10 +20,10 @@ Required to installed required packages.
 * `cifmw_sushy_emulator_driver_openstack_client_config_file`: (String) Path to OpenStack config file, used by OpenStack Sushi Emulator driver. Defaults to `/etc/openstack/clouds.yaml`
 * `cifmw_sushy_emulator_driver_openstack_cloud`: (String) Cloud key reference in OpenStack config file. Defaults to `None`
 * `cifmw_sushy_emulator_hypervisor_target` (String) Hostname of the Libvirt hypervisor to connect to.
-* `cifmw_sushy_emulator_hypervisor_target_connection_ip` (String) IP Address used to connect to hypervisor, optional override for `cifmw_sushy_emulator_hypervisor_target` when specific address is required.
+* `cifmw_sushy_emulator_hypervisor_address` (String) Address used to connect to hypervisor, optional override for `cifmw_sushy_emulator_hypervisor_target` when specific address is required.
 * `cifmw_sushy_emulator_install_type`: (String) Install type can either be `ocp` or `podman` and dictates where Sushi Emulator will be installed. Defaults to `ocp`
 * `cifmw_sushy_emulator_image`: (String) Container image used when deploying Sushi Emulator container and pod. Defaults to `quay.io/metal3-io/sushy-tools:latest`
-* `cifmw_sushy_emulator_libvirt_uri`: (String) Internal URI to access qemu daemon. Defaults to `qemu+ssh://{{ cifmw_sushy_emulator_libvirt_user }}@{{ cifmw_sushy_emulator_hypervisor_target_connection_ip | default(cifmw_sushy_emulator_hypervisor_target) }}/system?no_tty=1`
+* `cifmw_sushy_emulator_libvirt_uri`: (String) Internal URI to access qemu daemon. Defaults to `qemu+ssh://{{ cifmw_sushy_emulator_libvirt_user }}@{{ cifmw_sushy_emulator_hypervisor_address | default(cifmw_sushy_emulator_hypervisor_target) }}/system?no_tty=1`
 * `cifmw_sushy_emulator_libvirt_user`: (String) Username used by Sushi Emulator to connect to Libvirt socket. Defaults to `zuul`
 * `cifmw_sushy_emulator_listen_ip`: (String) IP address Sushy Emulator listens on. Defaults to `0.0.0.0`
 * `cifmw_sushy_emulator_namespace`: (String) Namespace Sushi Emulator is deployed into when using the `ocp` install method. Defaults to `sushy-emulator`
@@ -35,6 +35,8 @@ Required to installed required packages.
 * `cifmw_sushy_emulator_sshkey_type`: (String) Type of SSH keypair. Defaults to `{{ cifmw_ssh_keytype | default('ecdsa') }}`.
 * `cifmw_sushy_emulator_sshkey_size`: (Integer) Size of the SSH keypair. Defaults to `{{ cifmw_ssh_keysize | default(521) }}`.
 * `cifmw_sushy_emulator_vm_prefix_filter`: (String) Prefix string used to filter instances created for baremetal use. Defaults to `.*`
+* `cifmw_sushy_emulator_connection_name`: (String) Name to use to access sushy_emulator. Defaults to `localhost`.
+* `cifmw_sushy_emulator_uri`: (String) URI to access sushy_emulator. Defaults to `http://{{ cifmw_sushy_emulator_connection_name }}:8000`.
 
 ## Examples
 
@@ -43,7 +45,7 @@ Required to installed required packages.
   vars:
     cifmw_sushy_emulator_hypervisor_target: "{{ cifmw_target_host | default('localhost') }}"
     cifmw_sushy_emulator_install_type: podman
-    cifmw_sushy_emulator_hypervisor_target_connection_ip: "{{ network_bridge_info['cifmw-public'] }}"
+    cifmw_sushy_emulator_hypervisor_address: "{{ network_bridge_info['cifmw-public'] }}"
     cifmw_sushy_emulator_vm_prefix_filter: cifmw-compute
   tasks:
     - name: Deploy and configure sushy-emulator

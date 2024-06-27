@@ -21,14 +21,23 @@
   delegate_to: controller-0
   delegate_facts: false
   vars:
+    cifmw_sushy_emulator_hypervisor_target: "{{ inventory_hostname }}"
+    cifmw_sushy_emulator_install_type: podman
+    cifmw_sushy_emulator_hypervisor_address: >-
+      {{ inventory_hostname }}.utility
     cifmw_sushy_emulator_basedir: "{{ _ctl_reproducer_basedir }}"
+    cifmw_sushy_emulator_connection_name: "sushy.utility"
     cifmw_sushy_emulator_sshkey_path: >-
       {{
         [_ctl_reproducer_basedir, '../.ssh/sushy_emulator-key'] |
         path_join
       }}
     cifmw_podman_user_linger: "zuul"
-    cifmw_sushy_emulator_libvirt_user: "{{ hostvars[cifmw_sushy_emulator_hypervisor_target].ansible_user_id | default('zuul') }}"
+    cifmw_sushy_emulator_libvirt_user: >-
+      {{
+        hostvars[cifmw_sushy_emulator_hypervisor_target].ansible_user_id |
+        default('zuul')
+      }}
   block:
     - name: Ensure directories exist
       ansible.builtin.file:
@@ -314,26 +323,20 @@
         - bootstrap_layout
       when: cifmw_use_sushy_emulator | default(true) | bool
       block:
+        # Switch to import_role to ensure we load the parameters
+        # and environment, that are then consumed further down in
+        # generate_bm_info.yml
         - name: Deploy Sushy Emulator
-          vars:
-            cifmw_sushy_emulator_hypervisor_target: "{{ cifmw_target_host | default('localhost') }}"
-            cifmw_sushy_emulator_install_type: podman
-            cifmw_sushy_emulator_hypervisor_target_connection_ip: "{{ network_bridge_info['cifmw-public'] }}"
-          ansible.builtin.include_role:
+          ansible.builtin.import_role:
             name: sushy_emulator
 
-        - name: Let the project know we have Sushy Emulator available
-          ansible.builtin.set_fact:
-            _sushy_emulator_available: true
+        - name: Generate baremetal-info fact
+          ansible.builtin.import_tasks: generate_bm_info.yml
 
-    - name: Generate baremetal-info fact
-      ansible.builtin.import_tasks: generate_bm_info.yml
-
-    - name: Verify connection to baremetal VMs via Sushy Emulator
-      when: _sushy_emulator_available | default(false)
-      ansible.builtin.include_role:
-        name: sushy_emulator
-        tasks_from: verify.yml
+        - name: Verify connection to baremetal VMs via Sushy Emulator
+          ansible.builtin.include_role:
+            name: sushy_emulator
+            tasks_from: verify.yml
 
     - name: Install ansible dependencies
       register: _async_dep_install
