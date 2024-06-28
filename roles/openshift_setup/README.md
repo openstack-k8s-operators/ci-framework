@@ -15,3 +15,14 @@ should be configured for in an OCP/CRC cluster.
 * `cifmw_openshift_setup_ca_bundle_path`: (String) Path to the CA bundle.
 Defaults to `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`. Only has an
 effect if `cifmw_openshift_setup_ca_registry_to_add` is set.
+* `cifmw_openshift_setup_digest_mirrors`: (List) List of alternative mirrored repository locations. Defaults to `[]`.
+    * Example:
+        ```yaml
+        cifmw_openshift_setup_digest_mirrors:
+          - source: quay.io
+            mirrors:
+              - mirror.quay.io
+          - source: quay.rdoproject.org
+            mirrors:
+              - mirror.quay.rdoproject.org
+        ```
