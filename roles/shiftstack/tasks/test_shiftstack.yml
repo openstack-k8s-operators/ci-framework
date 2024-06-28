@@ -55,46 +55,8 @@
     log_file_name: "find_playbook.log"
   ansible.builtin.include_tasks: exec_command_in_pod.yml
 
-- name: Check the test configuration file exists in the repository
-  vars:
-    namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
-    pod: "{{ cifmw_shiftstack_client_pod_name }}"
-    command: >-
-      test -f shiftstack-qa/jobs_definitions/{{ cifmw_run_test_shiftstack_testconfig }}
-    log_file_name: "find_test_config.log"
-  ansible.builtin.include_tasks: exec_command_in_pod.yml
-
-- name: OCP install and test block
-  block:
-    - name: Test Openshift on Openstack with the test configuration '{{ cifmw_run_test_shiftstack_testconfig }}'
-      vars:
-        namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
-        pod: "{{ cifmw_shiftstack_client_pod_name }}"
-        command: >-
-          cd shiftstack-qa &&
-          ansible-navigator run playbooks/{{ cifmw_shiftstack_run_playbook }} -e @jobs_definitions/{{ cifmw_run_test_shiftstack_testconfig }} -e ocp_cluster_name={{ cifmw_shiftstack_cluster_name }} -e user_cloud={{ cifmw_shiftstack_project_name }}
-      ansible.builtin.include_tasks: exec_command_in_pod.yml
-
-  rescue:
-    - name: Fail task when OCP installation/test fails
-      ansible.builtin.fail:
-        msg: "OCP install/test block failed, see logs for more information."
-
-  always:
-    - name: Retrieve artifacts from the pod
-      block:
-        - name: Create the directory for the artifacts
-          ansible.builtin.file:
-            path: "{{ cifmw_shiftstack_artifacts_dir }}"
-            state: directory
-            mode: "0755"
-
-        - name: Copy the artifacts from the pod '{{ cifmw_shiftstack_client_pod_name }}'
-          environment:
-            PATH: "{{ cifmw_path }}"
-            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-          ansible.builtin.command:
-            cmd: >
-              oc rsync -n {{ cifmw_shiftstack_client_pod_namespace }}
-              {{ cifmw_shiftstack_client_pod_name }}:{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/
-              {{ cifmw_shiftstack_artifacts_dir }}/
+- name: Include test config tasks and loop over '{{ cifmw_run_test_shiftstack_testconfig }}'
+  ansible.builtin.include_tasks: test_config.yml
+  loop: "{{ cifmw_run_test_shiftstack_testconfig }}"
+  loop_control:
+    loop_var: testconfig

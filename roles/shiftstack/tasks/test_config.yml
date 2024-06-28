@@ -1,0 +1,51 @@
+---
+# These tasks are intended to be run inside a loop, where `testconfig`
+# is the loop parameter and can take different values in each run.
+- name: "{{ testconfig }} Check the test configuration file exists in the repository"
+  vars:
+    namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
+    pod: "{{ cifmw_shiftstack_client_pod_name }}"
+    command: >-
+      test -f shiftstack-qa/jobs_definitions/{{ testconfig }}
+    log_file_name: "{{ testconfig }}-find_test_config.log"
+  ansible.builtin.include_tasks: exec_command_in_pod.yml
+
+- name: OCP install and test block
+  vars:
+    # Remove the file extension from the testconfig here
+    testconfig_dir_name: "{{ testconfig }}"
+    testconfig_artifacts_dir: "{{ (cifmw_shiftstack_artifacts_dir, testconfig_dir_name) | path_join }}"
+
+  block:
+    - name: "{{ testconfig }}: Create the directory for the test config artifacts ({{ testconfig_artifacts_dir }})"
+      ansible.builtin.file:
+        path: "{{ testconfig_artifacts_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: "{{ testconfig }}: Test Openshift on Openstack with the test configuration '{{ testconfig }}'"
+      vars:
+        namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
+        pod: "{{ cifmw_shiftstack_client_pod_name }}"
+        command: >-
+          cd shiftstack-qa &&
+          ansible-navigator run playbooks/{{ cifmw_shiftstack_run_playbook }} -e @jobs_definitions/{{ testconfig }} -e ocp_cluster_name={{ cifmw_shiftstack_cluster_name }} -e user_cloud={{ cifmw_shiftstack_project_name }}
+      ansible.builtin.include_tasks: exec_command_in_pod.yml
+
+  rescue:
+    - name: "{{ testconfig }}: Fail task when OCP installation/test fails"
+      ansible.builtin.fail:
+        msg: "OCP {{ testconfig }} install/test block failed, see logs for more information."
+
+  always:
+    - name: Retrieve the artifacts from the pod
+      block:
+        - name: "{{ testconfig }}: Copy the artifacts from the pod '{{ cifmw_shiftstack_client_pod_name }}'"
+          environment:
+            PATH: "{{ cifmw_path }}"
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+          ansible.builtin.command:
+            cmd: >
+              oc rsync -n {{ cifmw_shiftstack_client_pod_namespace }}
+              {{ cifmw_shiftstack_client_pod_name }}:{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/
+              {{ testconfig_artifacts_dir }}/
