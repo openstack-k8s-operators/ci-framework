@@ -80,12 +80,12 @@ be controlled with the following parameters.
 
 ### Optional parameters
 
-* `ci_lvms_storage_tolerations`: (Dict) Allows to pass a set of tolerations to the lvms-operator to configure pods to eventually ignore scheduling restrictions applied to specific workers.
+* `cifmw_lvms_storage_tolerations`: (Dict) Allows to pass a set of tolerations to the lvms-operator to configure pods to eventually ignore scheduling restrictions applied to specific workers.
 
 Here an example showing how tolerations can be configured:
 
 ```yaml
-ci_lvms_storage_tolerations:
+cifmw_lvms_storage_tolerations:
   - key: "testOperator"
     value: "true"
     effect: "NoSchedule"
