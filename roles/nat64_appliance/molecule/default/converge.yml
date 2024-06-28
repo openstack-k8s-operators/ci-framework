@@ -18,7 +18,7 @@
   hosts: instance
   vars:
     ansible_user_dir: "{{ lookup('env', 'HOME') }}"
-    cifmw_basedir: "/opt/basedir"
+    cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
   tasks:
     - name: Crate SSH keypair
       register: _test_key
@@ -26,6 +26,18 @@
         comment: "test-key"
         path: "{{ (ansible_user_dir, '.ssh/id_test') | path_join }}"
         type: "ecdsa"
+
+    - name: Enable forwarding in the libvirt zone
+      become: true
+      ansible.builtin.command:
+       cmd: >-
+         firewall-cmd --permanent --zone libvirt --add-forward
+
+    - name: Restart firewalld.service
+      become: true
+      ansible.builtin.systemd_service:
+        name: firewalld
+        state: restarted
 
     - name: Discover latest image
       when:
@@ -52,6 +64,15 @@
         cifmw_nat64_appliance_run_dib_as_root: true
       ansible.builtin.include_role:
         name: nat64_appliance
+
+    - name: Fix permissions on logs dir - because we ran dib as root
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/logs"
+        state: directory
+        recurse: true
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
 
     - name: Fix permissions on nat64_appliance dir - because we ran dib as root
       become: true
@@ -82,7 +103,7 @@
           <network>
             <name>br-mol</name>
             <forward mode='open'/>
-            <bridge name='br-mol' stp='on' delay='0'/>
+            <bridge name='br-mol' zone='libvirt' stp='on' delay='0'/>
             <ip family='ipv6' address='2620:cf:cf:aaaa::1' prefix='64'/>
             <dns>
               <forwarder addr='2620:cf:cf:fc00::2'/>
@@ -107,6 +128,27 @@
         autostart: true
         name: br-mol
         uri: 'qemu:///system'
+
+    # TODO(hjensas): With the zone set in libvirt XML these bridges "should"
+    # already be in this zone. But logs indicate that they are not.
+    # See: https://libvirt.org/formatnetwork.html
+    - name:  Make sure all bridges are in the libvirt zone
+      become: true
+      ansible.posix.firewalld:
+        zone: libvirt
+        interface: "{{ item }}"
+        state: enabled
+        permanent: true
+      loop:
+        - br-mol
+        - br-64v6
+        - br-64v4
+
+    - name: Restart firewalld.service
+      become: true
+      ansible.builtin.systemd_service:
+        name: firewalld
+        state: restarted
 
     - name: Generate test node UUID
       ansible.builtin.set_fact:
@@ -261,8 +303,18 @@
       ansible.builtin.add_host:
         name: test-node
         groups:
-          - test_nodes
+          - testnodes
         ansible_host: '2620:cf:cf:aaaa::101'
+        ansible_ssh_user: 'cloud-user'
+        ansible_ssh_private_key_file: "{{ _test_key.filename }}"
+        ansible_ssh_extra_args: '-o StrictHostKeyChecking=no'
+
+    - name: Add nat64 appliance to the invetory
+      ansible.builtin.add_host:
+        name: nat64-appliance
+        groups:
+          - nat64appliances
+        ansible_host: '172.31.255.2'
         ansible_ssh_user: 'cloud-user'
         ansible_ssh_private_key_file: "{{ _test_key.filename }}"
         ansible_ssh_extra_args: '-o StrictHostKeyChecking=no'
@@ -272,6 +324,127 @@
     - name: Wait a little to let the test instance boot.
       ansible.builtin.pause:
         seconds: 20
+
+    - name: Run some commands to test the nat64-appliance DNS64 functions
+      register: _nat64_appliance_dns64_debug
+      ansible.builtin.shell: |
+        echo "--- ping the DNS service listening address ---"
+        ping -c 4 2620:cf:cf:fc00::2 || true
+        echo
+        echo "--- Try to resolve a name using 2620:cf:cf:fc00::2 ---"
+        dig AAAA @2620:cf:cf:fc00::2 example.com
+        echo
+        echo "--- Try to resolve a name forwarding on test-network 2620:cf:cf:aaaa::1 ---"
+        dig AAAA @2620:cf:cf:aaaa::1 example.com
+        echo
+        echo "--- Try to ping exmaple.com ---"
+        ping -c 4 example.com || true
+
+    - name: Grab some info from the test node
+      become: true
+      delegate_to: test-node
+      register: _test_node_debug_info
+      ansible.builtin.shell: |
+        echo "--- ip addr show ---"
+        ip addr show
+        echo
+        echo "--- ip -6 route show ---"
+        ip -6 route show
+        echo
+        echo "--- /etc/resolv.conf ---"
+        cat /etc/resolv.conf
+        echo
+        echo "--- NetworkManager system-connections ---"
+        for file in $(find /etc/NetworkManager/system-connections/ -type f); do
+          echo "--- $file ---"
+          cat $file
+          echo
+        done
+
+    - name: Grab some info from the nat64 appliance
+      become: true
+      delegate_to: nat64-appliance
+      register: _nat64_appliance_debug_info
+      ansible.builtin.shell: |
+        echo "--- ip addr show ---"
+        ip addr show
+        echo
+        echo "--- ip -4 route show ---"
+        ip -4 route show
+        echo
+        echo "--- ip -6 route show ---"
+        ip -6 route show
+        echo
+        echo "--- /etc/resolv.conf ---"
+        cat /etc/resolv.conf
+        echo
+        echo "--- NetworkManager system-connections ---"
+        for file in $(find /etc/NetworkManager/system-connections/ -type f); do
+          echo "--- $file ---"
+          cat $file
+          echo
+        done
+        echo
+        echo "--- systemctl status unbound.service ---"
+        systemctl status unbound.service
+        echo
+        echo "--- systemctl status nat64-v4-dnsmasq.service ---"
+        systemctl status nat64-v4-dnsmasq.service
+        echo
+        echo "--- systemctl status nat64-v6-dnsmasq.service ---"
+        systemctl status nat64-v6-dnsmasq.service
+
+    - name: Grab the journal from the nat64 appliance
+      become: true
+      delegate_to: nat64-appliance
+      register: _nat64_appliance_journal
+      ansible.builtin.shell: |
+        journalctl -b --no-pager
+
+    - name: Grab some info from hypervisor
+      become: true
+      delegate_to: instance
+      register: _hypervisor_info
+      ansible.builtin.shell: |
+        echo "--- ip addr show ---"
+        ip addr show
+        echo
+        echo "--- ip -4 route show ---"
+        ip -4 route show
+        echo
+        echo "--- ip -6 route show ---"
+        ip -6 route show
+        echo
+        echo "--- firewall - list-all-zones"
+        firewall-cmd --list-all-zones
+        echo
+        echo "--- sysctl - list all"
+        sysctl -a
+
+    - name: Write test-node info to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/logs/test_node_info.log"
+        content: "{{ _test_node_debug_info.stdout }}"
+
+    - name: Write nat64-appliance info to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/logs/nat64_appliance_node_info.log"
+        content: "{{ _nat64_appliance_debug_info.stdout }}"
+
+    - name: Write nat64-appliance journal to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/logs/nat64_appliance_journal.log"
+        content: "{{ _nat64_appliance_journal.stdout }}"
+
+    - name: Write nat64-appliance DNS64 debug to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/logs/nat64_appliance_dns64_debug.log"
+        content: "{{ _nat64_appliance_dns64_debug.stdout }}"
+
+    - name: Write hypervisor info to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/logs/hypervisor_info.log"
+        content: "{{ _hypervisor_info.stdout }}"
 
     - name: Ping example.com (delegate to test-node)
       delegate_to: test-node
