@@ -10,6 +10,7 @@
 * `cifmw_nat64_appliance_workdir`: (String) Working directory. Defaults to `{{ cifmw_nat64_appliance_basedir }}/nat64_appliance`.
 * `cifmw_nat64_appliance_venv_dir`: (String) Python virtual environment directory. Defaults to `{{ cifmw_nat64_appliance_workdir }}/venv`.
 * `cifmw_nat64_libvirt_uri`: (String) The libvirt URI for the hypervisor to deploy on. Defaults to `qemu:///system`.
+* `cifmw_nat64_firewall_zone`: (String) The value for the firewalld `zone` attribute on the libvirt networks. Defaults to `libvirt`.
 * `cifmw_nat64_network_ipv4_name`: (String) Name of the nat64 IPv4 libvirt network. Defaults to: `nat64-net-v4`.
 * `cifmw_nat64_network_ipv4_bridge_name`: (String) Bridge name for the nat64 IPv4 libvirt network. Defaults to: `br-64v4`.
 * `cifmw_nat64_network_ipv4_address`: (String) IP address for the nat64 IPv4 libvirt network. Defaults to: `172.31.255.1`.

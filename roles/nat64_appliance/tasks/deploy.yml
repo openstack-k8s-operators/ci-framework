@@ -54,6 +54,26 @@
     name: "{{ cifmw_nat64_network_ipv6_name }}"
     uri: "{{ cifmw_nat64_libvirt_uri }}"
 
+# TODO(hjensas): With the zone set in libvirt XML these bridges "should"
+# already be in this zone. But logs indicate that they are not.
+# See: https://libvirt.org/formatnetwork.html
+- name: Make sure all bridges are in the libvirt firewalld zone
+  become: true
+  ansible.posix.firewalld:
+    zone: "{{ cifmw_nat64_firewall_zone }}"
+    interface: "{{ item }}"
+    state: enabled
+    permanent: true
+  loop:
+    - "{{ cifmw_nat64_network_ipv6_bridge_name }}"
+    - "{{ cifmw_nat64_network_ipv4_bridge_name }}"
+
+- name: Restart firewalld.service
+  become: true
+  ansible.builtin.systemd_service:
+    name: firewalld
+    state: restarted
+
 - name: "Generate nat64-appliance UUID"
   ansible.builtin.set_fact:
     nat64_appliance_uuid: "{{ 99999999 | random | to_uuid | lower }}"
