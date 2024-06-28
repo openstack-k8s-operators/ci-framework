@@ -47,6 +47,28 @@
   ansible.builtin.debug:
     var: cifmw_edpm_prepare_crs_kustomize_result
 
+- name: Collect stdout/stderr for ovn db pods
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: |
+      sleep 35
+      while true;
+      do
+        logfile={{ cifmw_edpm_prepare_basedir }}/artifacts/ovndbs.log
+        date -uIns >> $logfile
+        echo =================================== >>$logfile 2>&1
+        oc logs -n openstack ovsdbserver-nb-0 |grep -v set >>$logfile 2>&1
+        echo =================================== >>$logfile 2>&1
+        date -uIns >> $logfile
+        echo =================================== >>$logfile 2>&1
+        oc logs -n openstack ovsdbserver-sb-0 |grep -v set >>$logfile 2>&1
+        echo =================================== >>$logfile 2>&1
+        sleep 0.5
+      done
+  async: 90
+  poll: 0
+
 - name: Apply the OpenStackControlPlane CR
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
@@ -99,9 +121,26 @@
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
+  ignore_errors: true  # noqa: ignore-errors
+  register: wait_result
   ansible.builtin.command:
     cmd: >-
       oc wait OpenStackControlPlane {{ _ctlplane_name }}
       --namespace={{ cifmw_install_yamls_defaults['NAMESPACE'] }}
       --for=condition=ready
-      --timeout={{ cifmw_edpm_prepare_timeout }}m
+      --timeout=10m
+
+- name: Dump artifacts when failed
+  when: wait_result is failed
+  ansible.builtin.shell: |
+        /usr/bin/cat {{ cifmw_edpm_prepare_basedir }}/artifacts/ovndbs.log
+  register: debug_result
+
+- name: Dump output var
+  when: wait_result is failed
+  ansible.builtin.debug:
+    var: debug_result.stdout_lines
+
+- name: Fail the job irrespective of deployment result
+  ansible.builtin.fail:
+    msg: "Failing to end early"
