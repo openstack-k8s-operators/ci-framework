@@ -20,6 +20,9 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_node_selector`: (Dict) `nodeSelector` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
 * `cifmw_test_operator_storage_class_prefix`: (String) Prefix for `storageClass` in generated Tempest CRD file. Defaults to `"lvms-"` only if `cifmw_use_lvms` is True, otherwise it defaults to `""`. The prefix is prepended to the `cifmw_test_operator_storage_class`. It is not recommended to override this value, instead set `cifmw_use_lvms` True or False.
 * `cifmw_test_operator_storage_class`: (String) Value for `storageClass` in generated Tempest or Tobiko CRD file. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
+* `cifmw_test_operator_storage_class`: (String) Value for `storageClass` in generated Tempest CRD file. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
+* `cifmw_test_operator_check_pod_retries`: (Integer) How many times to check if the test-operator-logs-pod is running. Default value: `20`
+* `cifmw_test_operator_check_pod_delay`: (Integer) How long is the delay between retries when check if test-operator-logs-pod is running
 
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
