@@ -60,6 +60,8 @@
 #
 # START generate all IPs using networking_mapper role/module
 - name: Inject all VMs in the inventory
+  when:
+    - (_cifmw_libvirt_manager_layout.vms[_vm_type].amount | default(1) | int) > 0
   vars:
     _vm_type: "{{ item.key | regex_replace('(cifmw\\-)?([a-z]+)\\-[0-9]+', '\\2') }}"
     _std_group: "{{ (_vm_type == 'crc') | ternary('ocp', _vm_type) }}"
@@ -142,10 +144,11 @@
           ((_cifmw_libvirt_manager_layout.vms[group].amount is defined and
             (_cifmw_libvirt_manager_layout.vms[group].amount | int) > 0) or
           _cifmw_libvirt_manager_layout.vms[group].amount is undefined) %}
-        {{ (group == 'crc') | ternary('ocp', group) }}s:
+      {% set _gr = (group == 'crc') | ternary('ocp', group)                                                             %}
+        {{ _gr }}s:
           networks:
             {{ _lnet_data.name | replace('cifmw_', '') }}:
-      {% if cifmw_networking_definition['group-templates'][group ~ 's']['network-template'] is undefined %}
+      {% if cifmw_networking_definition['group-templates'][_gr ~ 's']['network-template'] is undefined %}
       {%   if net_4 is defined %}
               range-v4:
                 start: {{  net_4 | ansible.utils.nthhost(ns.ip_start | int ) }}
@@ -187,10 +190,6 @@
       {%   endif %}
       {% endif %}
   block:
-    - name: Expose _dataset
-      ansible.builtin.debug:
-        msg: "{{ _dataset }}"
-
     - name: Expose patch for networking_mapper
       vars:
         _filtered: >-
@@ -201,6 +200,20 @@
       ansible.builtin.set_fact:
         cifmw_networking_mapper_definition_patch_01_libvirt: >-
           {{  _filtered }}
+
+  rescue:
+    - name: Failure detected - output _network_data
+      ansible.builtin.debug:
+        var: _network_data
+
+    - name: Failure detected - output _match
+      ansible.builtin.debug:
+        var: _match
+
+    - name: Finally fail for goof
+      ansible.builtin.fail:
+        msg: >-
+          Failure detected. Check the debug outputs above
 
 - name: Save networking_mapper patch
   ansible.builtin.copy:

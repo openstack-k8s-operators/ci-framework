@@ -4,6 +4,28 @@
     - _cifmw_libvirt_manager_layout is not defined
   ansible.builtin.include_tasks: generate_layout.yml
 
+# TODO(hjensas): We should have a dedicated role for firewall
+- name: Enable forwarding in the libvirt zone
+  when: cifmw_libvirt_manager_firewalld_zone_libvirt_forward | default(true) | bool
+  become: true
+  notify: Restart firewalld
+  ansible.builtin.command:
+    cmd: >-
+       firewall-cmd --permanent --zone libvirt --add-forward
+
+- name: Enable masquerading for public traffic
+  when: cifmw_libvirt_manager_firewalld_default_zone_masquerade | default(true) | bool
+  become: true
+  ansible.posix.firewalld:
+    masquerade: true
+    zone: "{{ cifmw_libvirt_manager_firewalld_default_zone }}"
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Ensure firewalld is restarts
+  ansible.builtin.meta: flush_handlers
+
 # todo(Lewis): We need to deploy VirtualBMC on the controller rather than hypervisor
 # Deploy VBMC only on the hypervisor running OpenShift services,
 # being OCP cluster or single CRC.
@@ -199,21 +221,54 @@
        (vm_data.value.amount | int) > 0) or
       vm_data.value.amount is undefined
   vars:
-    vm_type: "{{ vm_data.key }}"
+    _matcher: >-
+      {{
+        '(cifmw-)?' ~
+        '([a-z0-9]+)-[0-9]+'
+      }}
+    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm_data: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms[vm_type]
+      }}
     pub_key: "{{ pub_ssh_key.content | b64decode }}"
     priv_key: "{{ priv_ssh_key.content | b64decode }}"
-    _init_admin_user: "{{ vm_data.value.admin_user | default('root') }}"
   ansible.builtin.include_tasks:
     file: create_vms.yml
-  loop: >-
-    {{
-      _cifmw_libvirt_manager_layout.vms | dictsort(reverse=true) |
-      community.general.dict | dict2items
-    }}
+  loop: "{{ cifmw_libvirt_manager_all_vms }}"
   loop_control:
-    label: "{{ vm_data.key }}"
-    loop_var: vm_data
-    index_var: family_id
+    loop_var: vm
+
+- name: "Start (power-on) VMs"
+  ansible.builtin.include_tasks: start_vms.yml
+
+- name: "Configure managed VMs"
+  when:
+    - vm_data.manage | default(true) | bool
+    - vm_data.start | default(true) | bool
+    - vm_data.disk_file_name != 'blank'
+  vars:
+    _matcher: >-
+      {{
+        '(cifmw-)?' ~
+        '([a-z0-9]+)-[0-9]+'
+      }}
+    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm_data: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms[vm_type]
+      }}
+    _init_admin_user: "{{ vm_data.value.admin_user | default('root') }}"
+    extracted_ip: >-
+      {{
+        _libvirt_manager_networking.instances[vm].networks[cifmw_libvirt_manager_pub_net]['ip_v4']
+      }}
+    pub_key: "{{ pub_ssh_key.content | b64decode }}"
+    priv_key: "{{ priv_ssh_key.content | b64decode }}"
+  ansible.builtin.include_tasks: manage_vms.yml
+  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop_control:
+    loop_var: vm
 
 - name: Create VBMC entity
   when:

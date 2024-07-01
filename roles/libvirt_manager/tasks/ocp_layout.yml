@@ -7,6 +7,25 @@
   ansible.builtin.import_role:
     name: "virtualbmc"
 
+# TODO(hjensas): We should have a dedicated role for firewall
+- name: Enable forwarding in the libvirt zone
+  when: cifmw_libvirt_manager_firewalld_zone_libvirt_forward | default(true) | bool
+  become: true
+  notify: Restart firewalld
+  ansible.builtin.command:
+    cmd: >-
+       firewall-cmd --permanent --zone libvirt --add-forward
+
+- name: Enable masquerading for public traffic
+  when: cifmw_libvirt_manager_firewalld_default_zone_masquerade | default(true) | bool
+  become: true
+  ansible.posix.firewalld:
+    masquerade: true
+    zone: "{{ cifmw_libvirt_manager_firewalld_default_zone }}"
+    permanent: true
+    immediate: true
+    state: enabled
+
 - name: Manage virtual resources
   vars:
     cifmw_libvirt_manager_storage_pool: >-
@@ -59,16 +78,23 @@
 
     - name: Create blank images for OCP cluster resources
       vars:
-        vm_type: "{{ vm_data.key }}"
+        _matcher: >-
+          {{
+            '(cifmw-)?' ~
+            '([a-z0-9]+)-[0-9]+'
+          }}
+        vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+        vm_data: >-
+          {{
+            _ocp_layout.vms[vm_type]
+          }}
         is_base_img: true
       ansible.builtin.include_role:
         name: "libvirt_manager"
         tasks_from: "create_vms.yml"
-      loop: "{{ _ocp_layout['vms'] | dict2items }}"
+      loop: "{{ _vm_list }}"
       loop_control:
-        label: "{{ vm_data.key }}"
-        loop_var: vm_data
-        index_var: family_id
+        loop_var: vm
 
     - name: Create VBMC entities for OCP
       vars:

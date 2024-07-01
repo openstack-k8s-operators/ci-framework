@@ -4,14 +4,18 @@
   vars:
     _base_img_name: >-
       {{
-        (vm_data.value.image_local_dir | default(ansible_user_dir),
-         vm_data.value.disk_file_name) |
+        (vm_data.image_local_dir | default(ansible_user_dir),
+         vm_data.disk_file_name) |
          path_join
+      }}
+    _vm_id: >-
+      {{
+        vm | split('-') | last
       }}
     _img: >-
       {{
-        (vm_type is match('.*ocp.*')) |
-        ternary(_base_img_name ~ "-" ~ vm_id ~ ".qcow2",
+        (vm is match('.*ocp.*')) |
+        ternary(_base_img_name ~ "-" ~ _vm_id ~ ".qcow2",
                 _base_img_name)
       }}
     _workload: "{{ cifmw_libvirt_manager_basedir }}/workload"
@@ -19,151 +23,103 @@
     _chdir: >-
       {{ (is_base_img | default(false) | bool) | ternary(_img_dir, _workload) }}
   block:
-    - name: "Create VM image for {{ vm_type }}"
+    - name: "Create VM image for {{ vm }}"
       vars:
         _vm_img: >-
-          {{ vm_type }}-{{ vm_id }}.qcow2
+          {{ vm }}.qcow2
       ansible.builtin.command:
         cmd: >-
           qemu-img create
-          {% if vm_data.value.disk_file_name != 'blank' %}
+          {% if vm_data.disk_file_name != 'blank' %}
           -o backing_file={{ _img }},backing_fmt=qcow2
           {% endif %}
           -f qcow2
           "{{ _vm_img }}"
-          "{{ vm_data.value.disksize|default ('40') }}G"
+          "{{ vm_data.disksize | default ('40') }}G"
         creates: "{{ _vm_img }}"
         chdir: "{{ _chdir }}"
-      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-      loop_control:
-        index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
 
-    - name: "Ensure file ownership and rights for {{ vm_type }}"
+    - name: "Ensure file ownership and rights for {{ vm }}"
       become: true
       vars:
         _vm_img: >-
-          {{ vm_type }}-{{ vm_id }}.qcow2
+          {{ vm }}.qcow2
       ansible.builtin.file:
         path: "{{ (_chdir, _vm_img) | path_join }}"
         group: "qemu"
         mode: "0664"
         owner: "{{ ansible_user_id }}"
         state: file
-      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-      loop_control:
-        index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
 
-    - name: "Define VMs for type {{ vm_type }}"
+    - name: "Define VMs for type {{ vm }}"
       community.libvirt.virt:
         command: define
         xml: "{{ lookup('template', cifmw_libvirt_manager_vm_template) }}"
         uri: "qemu:///system"
-      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-      loop_control:
-        index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: "Attach listed networks to the VMs {{ vm_type }}"  # noqa: no-handler
+- name: "Attach listed networks to the VMs {{ vm }}"
   vars:
-    vm_item: >-
-      {{ vm_type }}-{{ vm_id }}
-    networks: "{{ vm_data.value.nets }}"
+    vm_item: "{{ vm }}"
+    networks: "{{ vm_data.nets }}"
   ansible.builtin.include_tasks: net_to_vms.yml
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: "Attach spines/leafs networks to the VMs {{ vm_type }}"
+- name: "Attach spines/leafs networks to the VMs {{ vm }}"
   when:
     - cifmw_libvirt_manager_spineleaf_setup
-    - vm_data.value.spineleafnets is defined
+    - vm_data.spineleafnets is defined
   vars:
-    vm_item: >-
-      {{ vm_type }}-{{ vm_id }}
-    networks: "{{ vm_data.value.spineleafnets[vm_id] }}"
+    _vm_id: >-
+      {{
+        vm | split('-') | last
+      }}
+    vm_item: "{{ vm }}"
+    networks: "{{ vm_data.spineleafnets[_vm_id | int] }}"
   ansible.builtin.include_tasks: net_to_vms.yml
-  loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-  loop_control:
-    index_var: vm_id
-    label: "{{ vm_type }}-{{ vm_id }}"
 
-- name: "Manage volumes for VMs {{ vm_type }}"
+- name: "Manage volumes for VMs {{ vm }}"
   when:
-    - vm_data.value.extra_disks_num is defined
-    - vm_data.value.extra_disks_num | int > 0
+    - vm_data.extra_disks_num is defined
+    - vm_data.extra_disks_num | int > 0
   vars:
     _pool_dir: >-
       {{
-        (vm_type is match('^ocp.*')) |
+        (vm is match('^ocp.*')) |
         ternary(cifmw_libvirt_manager_ocp_pool_dir,
                 cifmw_libvirt_manager_pool_dir)
       }}
-    _vname: "{{ (vm_type == 'ocp') | ternary('ocp_master', vm_type)}}"
+    _vname: >-
+      {{
+        vm | regex_replace('ocp-([0-9]+)', 'ocp_master-\1')
+      }}
+    vol_prefix: >-
+      {{
+        [cifmw_libvirt_manager_vol_prefix,
+        'cifmw-', _vname] | join('')
+      }}
   block:
-    - name: "Create the requested extra disks for {{ vm_type }}"
+    - name: "Create the requested extra disks for {{ vm }}"
       vars:
-        vol_prefix: >-
-          {{
-            [cifmw_libvirt_manager_vol_prefix,
-            'cifmw-', _vname, '-', vm_id] | join('')
-          }}
-        vol_num: "{{ vm_data.value.extra_disks_num }}"
-        vol_size: "{{ vm_data.value.extra_disks_size }}"
+        vol_num: "{{ vm_data.extra_disks_num }}"
+        vol_size: "{{ vm_data.extra_disks_size }}"
       ansible.builtin.include_tasks: volumes.yml
-      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-      loop_control:
-        index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
-        loop_var: vms_id
 
-    - name: "Find volume attachments for VMs {{ vm_type }}"
+    - name: "Find volume attachments for VM {{ vm }}"
       register: _found_vols
-      vars:
-        vol_prefix: >-
-          {{
-            [cifmw_libvirt_manager_vol_prefix,
-            'cifmw-', _vname, '-', vm_id] | join('')
-          }}
       ansible.builtin.find:
         path: "{{ _pool_dir }}"
         pattern: "{{ vol_prefix }}-vol-*.xml"
-      loop: "{{ range(0, vm_data.value.amount | default(1) | int) }}"
-      loop_control:
-        index_var: vm_id
-        label: "{{ vm_type }}-{{ vm_id }}"
 
-    - name: "Attach volumes for VMs {{ vm_type }}"
-      register: _attach
+    - name: "Attach volumes for VM {{ vm }}"
       when:
-        - _res.matched != 0
+        - _found_vols.matched != 0
       vars:
-        _vm_name: "cifmw-{{ vm_type }}-{{ _res.item }}"
+        _vm_name: "cifmw-{{ vm }}"
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
-          {% for f in _res.files -%}
+          {% for f in _found_vols.files -%}
           {% set _vol = f.path | basename | replace('.xml', '') -%}
           virsh domblklist {{ _vm_name }} | grep {{ _vol }} ||
           virsh -c qemu:///system attach-device {{ _vm_name }} {{ f.path }}
           --config --persistent;
           {% endfor -%}
-      loop: "{{ _found_vols.results }}"
-      loop_control:
-        loop_var: _res
-        label: "cifmw-{{ vm_type }}-{{ _res.item }}"
-
-- name: "Start (power-on) {{ vm_type }}"
-  when:
-    - vm_data.value.start | default(true) | bool
-    - "vm_data.value.disk_file_name != 'blank'"
-  ansible.builtin.include_tasks: start_vms.yml
-
-- name: "Grab IP address and manage {{ vm_type }}"
-  when:
-    - vm_data.value.manage | default(true) | bool
-    - vm_data.value.start | default(true) | bool
-    - "vm_data.value.disk_file_name != 'blank'"
-  ansible.builtin.include_tasks: manage_vms.yml

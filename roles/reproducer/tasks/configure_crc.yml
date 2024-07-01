@@ -5,108 +5,75 @@
   ansible.builtin.slurp:
     path: /etc/ci/env/networking-environment-definition.yml
 
-- name: Configure CRC services
-  delegate_to: crc-0
-  vars:
-    _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
-    _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
-  block:
-    - name: Ensure crc-0 knows about its second NIC
-      become: true
-      vars:
-        _ctlplane: "{{ _parsed.networks.ctlplane }}"
-      community.general.nmcli:
-        autoconnect: true
-        conn_name: private_net
-        ifname: "{{ _crc.interface_name }}"
-        type: ethernet
-        ip4: "{{ _crc.ip_v4 }}/24"
-        never_default4: true
-        state: present
-
-    - name: Ensure NetworkManager does not override /etc/resolv.conf
-      become: true
-      ansible.builtin.copy:
-        dest: "/etc/NetworkManager/conf.d/no-resolvconf.conf"
-        mode: "0644"
-        content: |
-          [main]
-          rc-manager = unmanaged
-
-    - name: Ensure we use local dnsmasq only
-      become: true
-      ansible.builtin.copy:
-        dest: "/etc/resolv.conf"
-        mode: "0644"
-        content: |
-          # Managed by ansible/cifmw
-          nameserver {{ _crc.ip_v4 }}
-
-    - name: Reload NetworkManager to ensure it read the conf changes
-      become: true
-      ansible.builtin.service:
-        name: NetworkManager
-        state: "reloaded"
-
-    - name: Check which dnsmasq config we must edit
-      register: _dnsmasq
-      ansible.builtin.stat:
-        path: '/srv/dnsmasq.conf'
-        get_attributes: false
-        get_checksum: false
-        get_mime: false
-
-    - name: Configure local DNS for CRC pod
-      become: true
-      vars:
-        _config_file: >-
-          {{
-            _dnsmasq.stat.exists |
-            ternary(_dnsmasq.stat.path, '/etc/dnsmasq.d/crc-dnsmasq.conf')
-          }}
-      block:
-        - name: Configure dns forwarders
-          become: true
-          ansible.builtin.blockinfile:
-            path: "{{ _config_file }}"
-            block: |-
-              {% if cifmw_reproducer_dns_servers %}
-              {% for dns_server in cifmw_reproducer_dns_servers %}
-              server={{ dns_server }}
-              {% endfor %}
-              {% endif %}
-
-        - name: Configure local DNS for CRC pod
-          register: last_modification
-          ansible.builtin.replace:
-            path: "{{ _config_file }}"
-            regexp: "192.168.130.11"
-            replace: "{{ _crc.ip_v4 }}"
-
-        - name: Ensure dnsmasq listens on correct interfaces
-          ansible.builtin.replace:
-            path: "{{ _config_file }}"
-            regexp: "listen-address={{ _crc.ip_v4 }}"
-            replace: "listen-address={{ _crc.ip_v4 }},127.0.0.1"
-
-    - name: Reboot CRC node
-      become: true
-      ansible.builtin.reboot:
-
-- name: Ensure hypervisor has the right CRC IP
+- name: Remove entry from /etc/hosts
   become: true
   vars:
     _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
     _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
   ansible.builtin.blockinfile:
+    state: absent
     path: "/etc/hosts"
     marker: "# {mark}"
     marker_begin: "Added by CRC"
     marker_end: "End of CRC section"
-    block: >-
-      {{ _crc.ip_v4 }} api.crc.testing
-      canary-openshift-ingress-canary.apps-crc.testing
-      console-openshift-console.apps-crc.testing
-      default-route-openshift-image-registry.apps-crc.testing
-      downloads-openshift-console.apps-crc.testing
-      oauth-openshift.apps-crc.testing
+
+- name: Inject our DNS in cifmw-dnsmasq
+  vars:
+    _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
+    _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
+    _act: 'install'
+  block:
+    # Following official OCP-4.15 doc here:
+    # https://docs.redhat.com/en/documentation/openshift_container_platform/4.15/html/installing/installing-on-a-single-node#install-sno-requirements-for-installing-on-a-single-node_install-sno-preparing
+    - name: Inject wildcard A/AAAA record for apps-crc.testing
+      when:
+        - ip | length > 0
+      vars:
+        cifmw_dnsmasq_address:
+          - domains:
+              - apps-crc.testing
+            ipaddr: "{{ ip }}"
+            state: present
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_address.yml"
+      loop:
+        - "{{ _crc.ip_v4 | default('') }}"
+        - "{{ _crc.ip_v6 | default('') }}"
+      loop_control:
+        loop_var: ip
+
+    - name: Inject A/AAAA record for api/api-int.crc.testing
+      vars:
+        _ips: >-
+          {% set output = [] -%}
+          {% if _crc.ip_v4 is defined and _crc.ip_v4 | length > 0 -%}
+          {%   set _ = output.append(_crc.ip_v4) -%}
+          {% endif -%}
+          {% if _crc.ip_v6 is defined and _crc.ip_v6 | length > 0 -%}
+          {%   set _ = output.append(_crc.ip_v6) -%}
+          {% endif -%}
+          {{ output }}
+        cifmw_dnsmasq_host_record:
+          - names:
+              - api.crc.testing
+              - api-int.crc.testing
+            ips: "{{ _ips }}"
+            state: present
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_host_record.yml"
+
+- name: Ensure "testing" domain is "local"
+  become: true
+  notify: "Restart dnsmasq"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_dnsmasq_basedir }}/crc-local.conf"
+    mode: "0644"
+    content: |
+      expand-hosts
+      local=/testing/
+      domain=crc.testing
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

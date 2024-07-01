@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 
 # Copyright Red Hat, Inc.
 # Apache License Version 2.0 (see LICENSE)

@@ -1,12 +1,39 @@
 ---
-- name: Import assertions
-  ansible.builtin.import_tasks: ocp_layout_assertions.yml
+# Let's patch the OCP with the needed bits such as amounts.
+- name: Generate patched overrides for devscripts
+  vars:
+    _num_workers: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.ocp_worker.amount | default(0)
+      }}
+    _num_masters: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.ocp.amount | default(3)
+      }}
+    _pub_net: >-
+      {{
+        _libvirt_manager_networking['networks'][cifmw_libvirt_manager_pub_net]
+      }}
+  ansible.builtin.set_fact:
+    cifmw_devscripts_config_overrides_patch_01_workers_masters:
+      num_workers: "{{ _num_workers }}"
+      num_masters: "{{ _num_masters }}"
+      external_subnet_v4: >-
+        {{ _pub_net['network_v4'] | default('') }}
+      external_subnet_v6: >-
+        {{ _pub_net['network_v6'] | default('') }}
+
+- name: Build devscripts overrides for assertions
+  ansible.builtin.include_role:
+    name: "devscripts"
+    tasks_from: "build_config.yml"
+
+- name: Validate environment parameters
+  when:
+    - cifmw_reproducer_validate_ocp_layout | bool
+  ansible.builtin.include_tasks: ocp_layout_assertions.yml
 
 - name: Push OCP related DNS entries
-  become: true
-  notify:
-    - "Restart dnsmasq"
-    - "Restart NetworkManager"
   vars:
     _cluster: "{{ cifmw_devscripts_config.cluster_name }}"
     _domain: "{{ cifmw_devscripts_config.base_domain }}"
@@ -56,63 +83,69 @@
       {{
         (_ocppr_net_v6 | first).get('ip', '')
       }}
-  ansible.builtin.copy:
-    dest: "/etc/cifmw-dnsmasq.d/ocp_dns.conf"
-    mode: "0644"
-    content: |
-      local=/{{ _cluster }}.{{ _domain }}/
-      domain={{ _cluster }}.{{ _domain }}
-      {% for ip in _api_addr %}
-      address=/api.{{ _cluster }}.{{ _domain }}/{{ ip }}
-      address=/api-int.{{ _cluster }}.{{ _domain }}/{{ ip }}
-      ptr-record={{ ip | ansible.utils.ipaddr('revdns') }},api-int.{{ _cluster }}.{{ _domain }}
-      {% endfor %}
-      {% for ip in _apps_addr %}
-      address=/.apps.{{ _cluster }}.{{ _domain }}/{{ ip }}
-      {% endfor %}
-      {% if _pxe_addr_v4 | length > 0 %}
-      address=/pxe.{{ _cluster }}.{{ _domain }}/{{ _pxe_addr_v4 | ansible.utils.ipmath(1) }}
-      {% endif %}
-      {% if _pxe_addr_v6 | length > 0 %}
-      address=/pxe.{{ _cluster }}.{{ _domain }}/{{ _pxe_addr_v6 | ansible.utils.ipmath(1) }}
-      {% endif %}
-      localise-queries
-    validate: "/usr/sbin/dnsmasq -C %s --test"
+  block:
+    - name: Inject A/AAAA records for api/api-int/pxe
+      vars:
+        cifmw_dnsmasq_host_record:
+          - names: "{{ record.names }}"
+            ips: "{{ record.ips }}"
+            state: present
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_host_record.yml"
+      loop_control:
+        loop_var: record
+      loop:
+        - names:
+            - "api.{{ _cluster }}.{{ _domain }}"
+            - "api-int.{{ _cluster }}.{{ _domain }}"
+          ips: "{{ _api_addr }}"
+        - names:
+            - "pxe.{{ _cluster }}.{{ _domain }}"
+          ips: >-
+            {% set _ips = [] -%}
+            {% if _pxe_addr_v4 | length > 0 -%}
+            {% set _ = _ips.append(_pxe_addr_v4 | ansible.utils.ipmath(1)) -%}
+            {% endif -%}
+            {% if _pxe_addr_v6 | length > 0 -%}
+            {% set _ = _ips.append(_pxe_addr_v6 | ansible.utils.ipmath(1)) -%}
+            {% endif -%}
+            {{ _ips }}
+
+    - name: Push wildcard A/AAAA for apps
+      when:
+        - ip | length > 0
+      vars:
+        cifmw_dnsmasq_address:
+          - domains:
+              - "apps.{{ _cluster }}.{{ _domain }}"
+            ipaddr: "{{ ip }}"
+            state: present
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_address.yml"
+      loop: "{{ _apps_addr }}"
+      loop_control:
+        loop_var: "ip"
+
+    - name: Push configuration
+      become: true
+      notify:
+        - "Restart dnsmasq"
+      ansible.builtin.copy:
+        dest: "/etc/cifmw-dnsmasq.d/ocp.conf"
+        mode: "0644"
+        content: |
+          localise-queries
+          local=/{{ _cluster }}.{{ _domain }}/
+          domain={{ _cluster }}.{{ _domain }}
+          {% for ip in _api_addr %}
+          ptr-record={{ ip | ansible.utils.ipaddr('revdns') }},api-int.{{ _cluster }}.{{ _domain }}
+          {% endfor %}
+        validate: "/usr/sbin/dnsmasq -C %s --test"
 
 - name: Ensure services are reloaded
   ansible.builtin.meta: flush_handlers
-
-- name: Generate patched overrides for devscripts
-  vars:
-    _num_workers: >-
-      {{
-        _cifmw_libvirt_manager_layout.vms.ocp_worker.amount | default(0)
-      }}
-    _num_masters: >-
-      {{
-        _cifmw_libvirt_manager_layout.vms.ocp.amount | default(3)
-      }}
-    _pub_net: >-
-      {{
-        _libvirt_manager_networking['networks'][cifmw_libvirt_manager_pub_net]
-      }}
-  ansible.builtin.set_fact:
-    cifmw_devscripts_config_overrides_patch_01_workers_masters:
-      num_workers: "{{ _num_workers }}"
-      num_masters: "{{ _num_masters }}"
-      external_subnet_v4: >-
-        {{ _pub_net['network_v4'] | default('') }}
-      external_subnet_v6: >-
-        {{ _pub_net['network_v6'] | default('') }}
-
-# We manually order a build:
-# devscripts role includes the config builder
-# if and only if local cifmw_devscripts_config is
-# undefined.
-- name: Build devscripts overrides
-  ansible.builtin.include_role:
-    name: "devscripts"
-    tasks_from: "build_config.yml"
 
 - name: Check if devscript cluster exists
   ansible.builtin.import_role:
@@ -264,12 +297,17 @@
           vars:
             cifmw_dnsmasq_host_network: "{{ cifmw_libvirt_manager_pub_net }}"
             cifmw_dnsmasq_host_state: present
-            cifmw_dnsmasq_host_mac: "{{_bootstrap_mac }}"
+            cifmw_dnsmasq_host_mac: "{{ _bootstrap_mac }}"
             cifmw_dnsmasq_host_name: "ocp-bootstrap"
-            cifmw_dnsmasq_host_ipv4: >-
-              {{
-                _pub_net_data.network_v4 | ansible.utils.nthhost(4)
-              }}
+            cifmw_dnsmasq_host_ips: >-
+              {%- set data = [] -%}
+              {%- if _pub_net_data.network_v4 is defined and _pub_net_data.network_v4 | length > 0 -%}
+              {%- set _ = data.append(_pub_net_data.network_v4 | ansible.utils.nthhost(4)) -%}
+              {%- endif -%}
+              {%- if _pub_net_data.network_v6 is defined and _pub_net_data.network_v6 | length > 0 -%}
+              {%- set _ = data.append(_pub_net_data.network_v6 | ansible.utils.nthhost(4)) -%}
+              {%- endif -%}
+              {{ data }}
           ansible.builtin.include_role:
             name: "dnsmasq"
             tasks_from: "manage_host.yml"

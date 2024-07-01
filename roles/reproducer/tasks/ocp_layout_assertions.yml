@@ -2,6 +2,37 @@
 # A series of assertions around the OCP layout.
 # They are in a dedicated tasks file so that we can
 # easily test them in molecule.
+
+- name: Ensure we don't try to pass resources via devscripts_overrides
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_devscripts_config.master_memory is undefined
+      - cifmw_devscripts_config.master_disk is undefined
+      - cifmw_devscripts_config.master_vcpu is undefined
+      - cifmw_devscripts_config.worker_memory_mb is undefined
+      - cifmw_devscripts_config.worker_disk is undefined
+      - cifmw_devscripts_config.worker_vcpu is undefined
+      - cifmw_devscripts_config.vm_extradisks is undefined
+      - cifmw_devscripts_config.vm_extradisks_list is undefined
+      - cifmw_devscripts_config.vm_extradisks_size is undefined
+    msg: >-
+      Inconsistency detected: your environment wants to provide
+      devscripts configuration overrides. This isn't supported,
+      and you must pass those ressource allocation via the usual
+      cifmw_libvirt_manager_configuration, or patch it.
+
+- name: Ensure we don't try to create extra_workers
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_devscripts_config.num_extra_workers is undefined or
+        cifmw_devscripts_config.num_extra_workers == 0
+    msg: >-
+      Inconsistency detected: dev-scripts extra_worker resources
+      aren't supported here. You can create compute, networker or any
+      other kind of VM by defining it as you define OCP cluster nodes.
+
 - name: Ensure we get required data in the layout description
   vars:
     _element: "{{ _cifmw_libvirt_manager_layout.vms.ocp }}"
@@ -105,20 +136,28 @@
 
     - name: Ensure created amount matches at least allocated amounts
       when:
-        - _cifmw_libvirt_manager_layout.vms.ocp_worker is defined
+        - _ocp.extra_disks_num is defined
+        - _ocp.extra_disks_num > 0
+      vars:
+        _cinder_vols: >-
+          {{
+            (cifmw_devscripts_create_logical_volume | bool) |
+            ternary(cifmw_devscripts_cinder_volume_pvs, [])
+          }}
+        _lvms_vols: >-
+          {{
+            (cifmw_use_lvms | default(false) | bool) |
+            ternary(cifmw_lvms_disk_list, [])
+          }}
       ansible.builtin.assert:
         quiet: true
         that:
-          - (_ocp.extra_disks_num is defined and _ocp.extra_disks_num > 0 and
-             (cifmw_devscripts_cinder_volume_pvs | default([]) | length) +
-             (cifmw_lvms_disk_list | default([]) | length) <= _ocp.extra_disks_num)
-            or _ocp.extra_disks_num is undefined or _ocp.extra_disks_num == 0
+          - (_cinder_vols + _lvms_vols) | length
+            <= _ocp.extra_disks_num | int
         msg: >-
-          Inconsistency detected: ensure ocp.extra_disks_num is the same value
-          as ocp_worker.extra_disks_num, ocp.extra_disks_size is the same value
-          as ocp_worker.extra_disks_size. Also ensure you don't allocate more
-          disks in cifmw_lvms_disk_list and cifmw_devscripts_cinder_volume_pvs
-          than available.
+          Inconsistency detected: Created amount of volumes
+          {{ _ocp.extra_disks_num }} is smaller than allocated volumes
+          {{ (_cinder_vols + _lvms_vols) | length }}
 
 - name: Ensure we correctly allocate volumes
   when:
@@ -151,15 +190,24 @@
           Inconsistency detected: you seem to allocate a volume in
           both cinder and lvms
 
-    - name: Ensure all allocated disks are available
+    - name: Ensure LVMS allocated disks are available
       ansible.builtin.assert:
         that:
           - cifmw_lvms_disk_list |
             community.general.lists_intersect(_vm_extradisks_list) ==
             cifmw_lvms_disk_list
+        msg: >-
+          Inconsistency detected: you seem to allocate volumes for LVMS
+          that aren't present on the system.
+
+    - name: Ensure Cinder PVs allocated disks are available
+      when:
+        - cifmw_devscripts_create_logical_volume | bool
+      ansible.builtin.assert:
+        that:
           - cifmw_devscripts_cinder_volume_pvs |
             community.general.lists_intersect(_vm_extradisks_list) ==
             cifmw_devscripts_cinder_volume_pvs
         msg: >-
-          Inconsistency detected: you seem to allocate volumes that
-          aren't present on the system.
+          Inconsistency detected: you seem to allocate volumes for Cinder
+          that aren't present on the system.

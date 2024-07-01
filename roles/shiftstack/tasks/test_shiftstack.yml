@@ -72,7 +72,7 @@
         pod: "{{ cifmw_shiftstack_client_pod_name }}"
         command: >-
           cd shiftstack-qa &&
-          ansible-navigator run playbooks/{{ cifmw_shiftstack_run_playbook }} -e @jobs_definitions/{{ cifmw_run_test_shiftstack_testconfig }}
+          ansible-navigator run playbooks/{{ cifmw_shiftstack_run_playbook }} -e @jobs_definitions/{{ cifmw_run_test_shiftstack_testconfig }} -e ocp_cluster_name={{ cifmw_shiftstack_cluster_name }} -e user_cloud={{ cifmw_shiftstack_project_name }}
       ansible.builtin.include_tasks: exec_command_in_pod.yml
 
   rescue:
@@ -81,28 +81,20 @@
         msg: "OCP install/test block failed, see logs for more information."
 
   always:
-    - name: Retrieve artifacts and installation files from the pod
-      vars:
-        directory_list:
-          - controller_dir: "{{ cifmw_shiftstack_artifacts_dir }}"
-            pod_dir: "{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}"
-          - controller_dir: "{{ cifmw_shiftstack_installation_dir }}"
-            pod_dir: "{{ cifmw_shiftstack_shiftstackclient_installation_dir }}"
+    - name: Retrieve artifacts from the pod
       block:
-        - name: Create the directories for the artifacts and installation files
+        - name: Create the directory for the artifacts
           ansible.builtin.file:
-            path: "{{ item.controller_dir }}"
+            path: "{{ cifmw_shiftstack_artifacts_dir }}"
             state: directory
             mode: "0755"
-          loop: "{{ directory_list }}"
 
-        - name: Copy the artifacts and installation files from the pod '{{ cifmw_shiftstack_client_pod_name }}'
+        - name: Copy the artifacts from the pod '{{ cifmw_shiftstack_client_pod_name }}'
           environment:
             PATH: "{{ cifmw_path }}"
             KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
           ansible.builtin.command:
             cmd: >
               oc rsync -n {{ cifmw_shiftstack_client_pod_namespace }}
-              {{ cifmw_shiftstack_client_pod_name }}:{{ item.pod_dir }}/
-              {{ item.controller_dir }}/
-          loop: "{{ directory_list }}"
+              {{ cifmw_shiftstack_client_pod_name }}:{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/
+              {{ cifmw_shiftstack_artifacts_dir }}/

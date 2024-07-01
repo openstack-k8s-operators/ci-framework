@@ -1,0 +1,149 @@
+---
+- name: Bootstrap step
+  ansible.builtin.import_playbook: >-
+    {{
+        [
+          ansible_user_dir,
+          zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir,
+          'playbooks',
+          '01-bootstrap.yml'
+        ] | ansible.builtin.path_join
+    }}
+
+- name: Run ci/playbooks/meta_content_provider/meta_content_provider.yml
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Install necessary dependencies
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_download_tools'
+
+    - name: Build OpenStack Services Packages using DLRN
+      vars:
+        cifmw_bop_yum_repos_dir: "{{ cifmw_build_containers_repo_dir }}"
+        cifmw_bop_gating_repo_dest: "{{ cifmw_build_containers_repo_dir }}"
+      ansible.builtin.include_role:
+        name: build_openstack_packages
+
+    - name: Check for gating repo
+      ansible.builtin.stat:
+        path: "{{ cifmw_build_containers_repo_dir }}/gating.repo"
+      register: _gating_repo
+
+    - name: Deploy content provider registry
+      ansible.builtin.include_role:
+        name: registry_deploy
+
+    - name: Construct project change list
+      ansible.builtin.set_fact:
+        zuul_change_list: "{{ zuul_change_list | default([]) + [item.project.short_name] }}"
+        cacheable: true
+      with_items: "{{ zuul['items'] }}"
+      when:
+        - zuul is defined
+        - "'change_url' in item"
+
+    - name: Build openstack services container when gating repo exists
+      when:
+        - "'os-net-config' not in zuul_change_list"
+        - _gating_repo.stat.exists
+      block:
+        - name: Build OpenStack services containers
+          ansible.builtin.include_role:
+            name: build_containers
+
+        - name: Return registry_url
+          ansible.builtin.set_fact:
+            content_provider_os_registry_url: "{{ cifmw_build_containers_push_registry }}/{{ cifmw_build_containers_registry_namespace }}"
+
+    - name: Build EDPM Images
+      when: "'edpm-image-builder' in zuul_change_list"
+      block:
+        - name: Get latest commit when no PR is provided
+          ansible.builtin.command:  # noqa: command-instead-of-module
+            cmd: git show-ref --head --hash head
+          args:
+            chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-image-builder"
+          register: git_head_out
+
+        - name: Set pr_sha to be used as image tag
+          ansible.builtin.set_fact:
+            pr_sha: "{{ git_head_out.stdout | trim }}"
+            cacheable: true
+
+        - name: Build edpm and ipa images
+          ansible.builtin.include_role:
+            name: edpm_build_images
+          vars:
+            cifmw_edpm_build_images_tag: "{{ pr_sha }}"
+
+        - name: Push edpm-hardened-uefi image to registry
+          containers.podman.podman_image:
+            name: "{{ item }}"
+            push_args:
+              dest: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001/{{ item }}:{{ pr_sha }}"
+            tag: "{{ pr_sha }}"
+            push: true
+          loop:
+            - edpm-hardened-uefi
+            - ironic-python-agent
+
+        - name: Set build images output
+          ansible.builtin.set_fact:
+            cifmw_build_images_output:
+              images:
+                edpm-hardened-uefi:
+                  image: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001/edpm-hardened-uefi:{{ pr_sha }}"
+                ironic-python-agent:
+                  image: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001/ironic-python-agent:{{ pr_sha }}"
+            cacheable: true
+
+    - name: Set build images output when EDPM image is not built
+      when: "'edpm-image-builder' not in zuul_change_list"
+      ansible.builtin.set_fact:
+        cifmw_build_images_output: {}
+
+    - name: Set var for cifmw_operator_build_operators var
+      # It handles the case of setting image_base for
+      # openstack-ansibleee-operator and openstack-operator project
+      # for openstack-ansibleee-operator, it will return openstack-ansibleee
+      # and for openstack-operator, openstack will be returned
+      when:
+        - zuul is defined
+        - "'project' in zuul"
+        - "'short_name' in zuul.project"
+        - "'operator' in zuul.project.short_name"
+      ansible.builtin.set_fact:
+        cifmw_operator_build_operators:
+          - name: "openstack-operator"
+            src: "~/src/github.com/{{ cifmw_operator_build_org }}/openstack-operator"
+            image_base: >-
+              {{ zuul.project.short_name | split('-') | reject('search','operator') | join('-') }}
+
+    - name: Build Operators
+      ansible.builtin.include_role:
+        name: operator_build
+
+    - name: Get the containers list from container registry
+      ansible.builtin.uri:
+        url: "http://{{ cifmw_rp_registry_ip }}:5001/v2/_catalog"
+        return_content: true
+      register: cp_imgs
+
+    - name: Add the container list to file
+      ansible.builtin.copy:
+        content: "{{ cp_imgs.content }}"
+        dest: "{{ ansible_user_dir }}/local_registry.log"
+        mode: "0644"
+
+- name: Run log related tasks
+  ansible.builtin.import_playbook: >-
+    {{
+        [
+          ansible_user_dir,
+          zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir,
+          'playbooks',
+          '99-logs.yml'
+        ] | ansible.builtin.path_join
+    }}

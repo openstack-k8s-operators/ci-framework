@@ -1,4 +1,9 @@
 ---
+- name: Ensure networks are consistent
+  when:
+    - cifmw_reproducer_validate_network | bool
+  ansible.builtin.include_tasks: "network_assertions.yml"
+
 - name: Ensure we get latest OCP config
   ansible.builtin.include_role:
     name: "devscripts"
@@ -103,12 +108,29 @@
               address:
                 - ip: 172.22.0.1
                   prefix-length: 24
+            bridge:
+              options:
+                stp:
+                  enabled: true
+                  forward-delay: 5
+                  hello-time: 2
+                  max-age: 20
+                  priority: 32768
   ansible.builtin.set_fact:
     cifmw_ci_nmstate_instance_config: "{{ _content | from_yaml }}"
 
 - name: Ensure the required network configurations are applied
   ansible.builtin.include_role:
     name: ci_nmstate
+
+- name: Select right domain
+  ansible.builtin.set_fact:
+    cifmw_reproducer_domain: >-
+      {%- if _use_crc | bool -%}
+      crc.testing
+      {%- elif _use_ocp | bool -%}
+      {{ cifmw_devscripts_config.base_domain }}
+      {%- endif -%}
 
 - name: Create the virtual networks
   when:
@@ -128,6 +150,8 @@
     content: |
       # Managed by ci-framework/reproducer
       server=/{{ _domain }}/127.0.0.2
+      server=/apps-crc.testing/127.0.0.2
+      server=/crc.testing/127.0.0.2
 
 - name: Flush handlers
   ansible.builtin.meta: flush_handlers

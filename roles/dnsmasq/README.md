@@ -162,6 +162,22 @@ supported in libvirt).
 * `cifmw_dnsmasq_host_network`: (String) Existing network name.
 * `cifmw_dnsmasq_host_state`: (String) Host status. Must be either `present` or `absent`.
 * `cifmw_dnsmasq_host_mac`: (String) Host MAC address.
-* `cifmw_dnsmasq_host_ipv6`: (String) Host IPv6. Optional if `cifmw_dnsmasq_host_ipv4` is set.
-* `cifmw_dnsmasq_host_ipv4`: (String) Host IPv4. Optional if `cifmw_dnsmasq_host_ipv6` is set.
+* `cifmw_dnsmasq_host_ips`: (List) Host IP addressees.
 * `cifmw_dnsmasq_host_name`: (String) Host name. Optional.
+
+#### Examples
+
+```yaml
+    - name: Inject some node in starwars network
+      vars:
+        cifmw_dnsmasq_host_network: starwars
+        cifmw_dnsmasq_host_state: present
+        cifmw_dnsmasq_host_mac: "0a:19:02:f8:4c:a7"
+        cifmw_dnsmasq_host_ips:
+          - "2345:0425:2CA1::0567:5673:cafe"
+          - "192.168.254.11"
+        cifmw_dnsmasq_host_name: r2d2
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_host.yml
+```

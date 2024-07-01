@@ -34,43 +34,27 @@
           {%- endif %}
           -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
 
-    - name: Slurp dlrn md5 hash
-      become: true
+    - name: Include inner ansible vars file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_artifacts_basedir }}/artifacts/ansible-vars.yml"
+      register: _inner_ansible
+
+    - name: Return Zuul related data
       vars:
-        _repo_path: >-
-          {%- if cifmw_repo_setup_output is defined %}
-          {{ cifmw_repo_setup_output }}
-          {%- else %}
-          {{ ansible_user_dir }}/ci-framework-data/artifacts/repositories
-          {%- endif %}
+        _inner_ansible_vars: "{{ _inner_ansible.content | b64decode | from_yaml }}"
+        _dlrn_md5: "{{ _inner_ansible_vars.cifmw_repo_setup_full_hash }}"
       block:
-        - name: Check DLRN md5 exists or not
-          ansible.builtin.stat:
-            path: "{{ _repo_path }}/delorean.repo.md5"
-          register: _check_dlrn_md5
+        - name: Return Zuul Data
+          ansible.builtin.debug:
+            msg: >-
+              Running Content provider registry on
+              {{ node_ip | default('nowhere') }} with dlrn md5 hash
+              {{ _dlrn_md5 | default('') }}
 
-        - name: Slurp dlrn md5 hash
-          ansible.builtin.slurp:
-            path: "{{ _repo_path }}/delorean.repo.md5"
-          register: _md5_data
-          when: _check_dlrn_md5.stat.exists
-
-        - name: Store md5 content
-          ansible.builtin.set_fact:
-            _dlrn_md5: "{{ _md5_data['content'] | b64decode }}"
-          when: _check_dlrn_md5.stat.exists
-
-    - name: Return Zuul Data
-      ansible.builtin.debug:
-        msg: >-
-          Running Content provider registry on
-          {{ node_ip | default('nowhere') }} with dlrn md5 hash
-          {{ _dlrn_md5 | default('') }}
-
-    - name: Set up content registry IP address
-      zuul_return:
-        data:
-          zuul:
-            pause: true
-          content_provider_registry_ip: "{{ node_ip | default('nowhere') }}"
-          content_provider_dlrn_md5_hash: "{{ _dlrn_md5 | default('') }}"
+        - name: Set up content registry IP address
+          zuul_return:
+            data:
+              zuul:
+                pause: true
+              content_provider_registry_ip: "{{ node_ip | default('nowhere') }}"
+              content_provider_dlrn_md5_hash: "{{ _dlrn_md5 | default('') }}"

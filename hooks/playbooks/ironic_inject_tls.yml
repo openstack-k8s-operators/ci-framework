@@ -1,0 +1,121 @@
+---
+- name: Inject CA bundle in ironic-python-agent and create images
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Collect facts
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - '!min'
+          - user_gid
+          - user_id
+
+    - name: Create directory
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/ironic_ipa_tls/initramfs"
+        state: directory
+        mode: "0755"
+
+    - name: Get internal-ca-bundle and IPA image from k8s resources
+      ansible.builtin.set_fact:
+        internal_ca_bundle: >-
+          {{
+            query(
+              'kubernetes.core.k8s',
+              api_version='v1',
+              kind='Secret',
+              resource_name='combined-ca-bundle',
+              namespace=namespace
+            ) | first
+              | community.general.json_query('data."internal-ca-bundle.pem"')
+          }}
+        ironic_python_image: >-
+          {{
+            query(
+              'kubernetes.core.k8s',
+              api_version='v1beta1',
+              kind='Ironic',
+              resource_name='ironic',
+              namespace=namespace
+            ) | map(attribute='spec.images.ironicPythonAgent')
+              | first
+          }}
+
+    - name: Write internal-ca-bundle to file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/ironic_ipa_tls/internal-ca-bundle.pem"
+        content: "{{ internal_ca_bundle | b64decode }}"
+        mode: "0644"
+
+    - name: Pull and extract ironic-python-ironic
+      containers.podman.podman_container:
+        image: "{{ ironic_python_image }}"
+        name: ironic-python-agent
+        rm: true
+        volumes:
+          - "{{ cifmw_basedir }}/artifacts/ironic_ipa_tls/:/target:Z"
+
+    - name: Install CA bundle in initramfs
+      become: true
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          zcat {{ cifmw_basedir }}/artifacts/ironic_ipa_tls/ironic-python-agent.initramfs | cpio -idmv
+          cp {{ cifmw_basedir }}/artifacts/ironic_ipa_tls/internal-ca-bundle.pem etc/pki/ca-trust/source/anchors/
+          chroot {{ cifmw_basedir }}/artifacts/ironic_ipa_tls/initramfs << EOF_CHROOT_SCRIPT
+          update-ca-trust
+          EOF_CHROOT_SCRIPT
+          find . | cpio -o -c -R root:root | gzip -9 > {{ cifmw_basedir }}/artifacts/ironic_ipa_tls/tls-ironic-python-agent.initramfs
+      args:
+        chdir: "{{ cifmw_basedir }}/artifacts/ironic_ipa_tls/initramfs"
+
+    - name: Change owner and permissions on tls-ironic-python-agent.initramfs
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/ironic_ipa_tls/tls-ironic-python-agent.initramfs"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+        mode: "0644"
+
+    - name: Recursively delete the content in artifacts/ironic_ipa_tls/initramfs
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/ironic_ipa_tls/initramfs/"
+        state: absent
+
+    - name: Create images in openstack and configure ironic node driver info
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          oc project {{ namespace }}
+          oc cp {{ cifmw_basedir }}/artifacts/ironic_ipa_tls/tls-ironic-python-agent.initramfs openstack/openstackclient:/tmp/tls-ironic-python-agent.initramfs
+          oc cp {{ cifmw_basedir }}/artifacts/ironic_ipa_tls/ironic-python-agent.kernel openstack/openstackclient:/tmp/ironic-python-agent.kernel
+          KERNEL_UUID=$(oc rsh openstackclient \
+            openstack image create deploy-kernel \
+              --public \
+              --container-format aki \
+              --disk-format aki \
+              --file /tmp/ironic-python-agent.kernel \
+              -f value -c id
+            )
+          INITRAMFS_UUID=$(oc rsh openstackclient \
+            openstack image create deploy-ramdisk \
+              --public --container-format ari \
+              --disk-format ari \
+              --file /tmp/tls-ironic-python-agent.initramfs \
+              -f value -c id
+            )
+          for node_uuid in $(oc rsh openstackclient openstack baremetal node list -f value -c UUID); do
+            oc rsh openstackclient \
+              openstack baremetal node set $node_uuid \
+                --driver-info deploy_ramdisk=$INITRAMFS_UUID \
+                --driver-info deploy_kernel=$KERNEL_UUID
+          done

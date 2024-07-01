@@ -16,8 +16,6 @@
 
 
 - name: Build configuration
-  when:
-    - cifmw_devscripts_config is undefined
   tags:
     - always
   ansible.builtin.include_tasks:
@@ -30,6 +28,7 @@
   ansible.builtin.set_fact:
     cifmw_devscripts_ocp_exists: false
     cifmw_devscripts_ocp_online: false
+    _openshift_adm_check_cert_approve: false
     cifmw_openshift_adm_cert_expire_date_file: >-
       {{
         (
@@ -44,6 +43,17 @@
     patterns: "{{ cifmw_devscripts_config.cluster_name }}_*.qcow2"
   register: _overlay_results
 
+- name: Ensure we have needed overlays
+  vars:
+    _cluster_members: >-
+      {{
+        cifmw_devscripts_config.num_masters | int +
+        cifmw_devscripts_config.num_workers | int
+      }}
+  ansible.builtin.set_fact:
+    _needed_overlays: >-
+      {{ _cluster_members|int == _overlay_results.matched|int }}
+
 - name: Get cluster status
   register: _deployed_cluster
   ansible.builtin.stat:
@@ -57,19 +67,29 @@
          cifmw_devscripts_config.cluster_name] | path_join
       }}
 
-- name: Verify the node definition match with expected count.
+- name: Get volumes
+  register: _volumes
+  ansible.builtin.find:
+    file_type: "file"
+    path: "{{ cifmw_devscripts_data_dir }}/ocp_volumes"
+    patterns: "base-cifmw-ocp_master-0*"
+    excludes: "*.xml"
+
+- name: Ensure we have needed volumes
   vars:
-    _cluster_members: >-
+    _needed_vols: >-
       {{
-        cifmw_devscripts_config.num_masters | int +
-        cifmw_devscripts_config.num_workers | int
+        _cifmw_libvirt_manager_layout.vms.ocp.extra_disks_num | default(0)
       }}
+  ansible.builtin.set_fact:
+    _needed_volumes: >-
+      {{ _volumes.matched|int == _needed_vols|int }}
+
+- name: Verify the node definition match with expected count.
   when:
     - _deployed_cluster.stat.exists | bool
-    - >-
-      (cifmw_devscripts_config.num_masters | int +
-       cifmw_devscripts_config.num_workers | int)
-       == _overlay_results.matched
+    - _needed_overlays | bool
+    - _needed_volumes | bool
   ansible.builtin.set_fact:
     cifmw_devscripts_ocp_exists: true
 
@@ -98,8 +118,3 @@
     - cifmw_devscripts_ocp_exists
     - not cifmw_devscripts_ocp_online
   ansible.builtin.include_tasks: 112_verify_golden_image.yml
-
-- name: Set the facts related to OpenShift ingress and api addresses.
-  when:
-    - cifmw_devscripts_ocp_exists
-  ansible.builtin.include_tasks: get_ocp_vips.yml

@@ -28,6 +28,32 @@
     - cifmw_job_uri is defined
   ansible.builtin.include_tasks: ci_data.yml
 
+- name: Discover and expose CI Framework path on remote node
+  vars:
+    default_path: >-
+      {{
+        cifmw_reproducer_default_repositories |
+        selectattr('src', 'match', '^.*/ci[_\-]framework$') |
+        map(attribute='dest') | first
+      }}
+    custom_path: >-
+      {{
+        cifmw_reproducer_repositories |
+        selectattr('src', 'match', '^.*/ci-framework$') |
+        map(attribute='dest')
+      }}
+    _path: >-
+      {{
+        (custom_path | length > 0) |
+        ternary(custom_path | first, default_path)
+      }}
+  ansible.builtin.set_fact:
+    _cifmw_reproducer_framework_location: >-
+      {{
+        (_path is match('.*/ci-framework/?$')) |
+        ternary(_path, [_path, 'ci-framework'] | path_join)
+      }}
+
 - name: Build final libvirt layout
   when:
     - cifmw_use_libvirt | default(false) | bool
@@ -66,6 +92,12 @@
           (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
            _cifmw_libvirt_manager_layout.vms.crc.amount|int > 0) or
         _cifmw_libvirt_manager_layout.vms.crc.amount is undefined)
+      }}
+    _use_ocp: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.ocp is defined and
+        (_cifmw_libvirt_manager_layout.vms.ocp.amount is defined and
+         _cifmw_libvirt_manager_layout.vms.ocp.amount|int > 0)
       }}
 
 - name: Ensure directories are present
@@ -228,7 +260,7 @@
             ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
           no_log: "{{ cifmw_nolog | default(true) | bool }}"
           ansible.builtin.command:
-            chdir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
+            chdir: "{{ _cifmw_reproducer_framework_location }}"
             cmd: >-
               ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
               -e @~/ci-framework-data/parameters/reproducer-variables.yml
@@ -289,7 +321,7 @@
         - cifmw_job_uri is undefined
       delegate_to: controller-0
       vars:
-        run_directory: "src/github.com/openstack-k8s-operators/ci-framework"
+        run_directory: "{{ _cifmw_reproducer_framework_location }}"
         exports:
           ANSIBLE_LOG_PATH: "~/ansible-deploy-edpm.log"
         default_extravars:

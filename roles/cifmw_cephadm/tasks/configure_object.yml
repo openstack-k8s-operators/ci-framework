@@ -35,8 +35,56 @@
     msg: "WARNING: Swift is deployed and the endpoint exists already, ceph RGW cannot be configured as object store service"
   when:
     - cifmw_openshift_kubeconfig is defined
-    - cifmw_ceph_daemons_layout.rgw_enabled | default(true) | bool
     - swift_in_ctlplane.stdout | bool
+
+- name: Get uuid for project 'service'
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command: "oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack project show service -c id -f value"
+  delegate_to: localhost
+  when: cifmw_openshift_kubeconfig is defined
+  register: project_service_uuid
+
+- name: Create swift service, user and roles
+  cifmw.general.ci_script:
+    extra_args:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    output_dir: "/home/zuul/ci-framework-data/artifacts"
+    script: |-
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack service create --name swift --description 'OpenStack Object Storage' object-store
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack user create --project {{ project_service_uuid.stdout }} --password {{ cifmw_ceph_rgw_keystone_psw }}  swift
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role create swiftoperator
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role create ResellerAdmin
+  delegate_to: localhost
+  when:
+    - cifmw_openshift_kubeconfig is defined
+    - not swift_in_ctlplane.stdout | bool
+    - swift_endpoints_count.stdout == "0"
+
+- name: Capture required UUIDs
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  delegate_to: localhost
+  when: cifmw_openshift_kubeconfig is defined
+  ansible.builtin.command: "oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack {{ item.os_command }} show {{ item.os_command_object }} -c id -f value"
+  register: all_uuids
+  loop:
+    - { os_command: 'user', os_command_object: 'swift' }
+    - { os_command: 'service', os_command_object: 'swift' }
+    - { os_command: 'role', os_command_object: 'member' }
+    - { os_command: 'role', os_command_object: 'admin' }
+    - { os_command: 'project', os_command_object: 'admin' }
+    - { os_command: 'user', os_command_object: 'admin' }
+    - { os_command: 'role', os_command_object: 'swiftoperator' }
+
+- name: Update urischeme based on cert/key
+  ansible.builtin.set_fact:
+    cifmw_cephadm_urischeme: "https"
+  when:
+    - cifmw_cephadm_certificate | length > 0
+    - cifmw_cephadm_key | length > 0
+    - cert_stat_result.stat.exists | bool
+    - key_stat_result.stat.exists | bool
 
 - name: Configure object store to use rgw
   cifmw.general.ci_script:
@@ -44,18 +92,13 @@
       KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     output_dir: "/home/zuul/ci-framework-data/artifacts"
     script: |-
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack service create --name swift --description 'OpenStack Object Storage' object-store
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack user create --project service --password {{ cifmw_ceph_rgw_keystone_psw }}  swift
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role create swiftoperator
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role create ResellerAdmin
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role add --user swift --project service member
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role add --user swift --project service admin
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack endpoint create --region regionOne object-store public http://{{ cifmw_cephadm_vip }}:8080/swift/v1/AUTH_%\(tenant_id\)s
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack endpoint create --region regionOne object-store internal http://{{ cifmw_cephadm_vip }}:8080/swift/v1/AUTH_%\(tenant_id\)s
-      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role add --project admin --user admin swiftoperator
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role add --user {{ all_uuids.results.0.stdout }} --project {{ project_service_uuid.stdout }} {{ all_uuids.results.2.stdout }}
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role add --user {{ all_uuids.results.0.stdout }} --project {{ project_service_uuid.stdout }} {{ all_uuids.results.3.stdout }}
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack endpoint create --region regionOne {{ all_uuids.results.1.stdout }} public {{ cifmw_cephadm_urischeme }}://{{ cifmw_cephadm_vip }}:8080/swift/v1/AUTH_%\(tenant_id\)s
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack endpoint create --region regionOne {{ all_uuids.results.1.stdout }} internal {{ cifmw_cephadm_urischeme }}://{{ cifmw_cephadm_vip }}:8080/swift/v1/AUTH_%\(tenant_id\)s
+      oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack role add --project {{ all_uuids.results.4.stdout }} --user {{ all_uuids.results.5.stdout }} {{ all_uuids.results.6.stdout }}
   delegate_to: localhost
   when:
     - cifmw_openshift_kubeconfig is defined
-    - cifmw_ceph_daemons_layout.rgw_enabled | default(true) | bool
     - not swift_in_ctlplane.stdout | bool
     - swift_endpoints_count.stdout == "0"

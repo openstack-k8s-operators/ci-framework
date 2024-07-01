@@ -19,7 +19,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_tolerations`: (Dict) `tolerations` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
 * `cifmw_test_operator_node_selector`: (Dict) `nodeSelector` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
 * `cifmw_test_operator_storage_class_prefix`: (String) Prefix for `storageClass` in generated Tempest CRD file. Defaults to `"lvms-"` only if `cifmw_use_lvms` is True, otherwise it defaults to `""`. The prefix is prepended to the `cifmw_test_operator_storage_class`. It is not recommended to override this value, instead set `cifmw_use_lvms` True or False.
-* `cifmw_test_operator_storage_class`: (String) Value for `storageClass` in generated Tempest CRD file. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
+* `cifmw_test_operator_storage_class`: (String) Value for `storageClass` in generated Tempest or Tobiko CRD file. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
 
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
@@ -37,6 +37,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_tempest_workflow`: (List) Definition of a Tempest workflow that consists of multiple steps. Each step can contain all values from Spec section of [Tempest CR](https://openstack-k8s-operators.github.io/test-operator/crds.html#tempest-custom-resource).
 * `cifmw_test_operator_tempest_extra_images`: (List) A list of images that should be uploaded to OpenStack before the tests are executed. The value is passed to extraImages parameter in the [Tempest CR](https://openstack-k8s-operators.github.io/test-operator/crds.html#tempest-custom-resource). Default value: `[]`
 * `cifmw_test_operator_tempest_network_attachments`: (List) List of network attachment definitions to attach to the tempest pods spawned by test-operator. Default value: `[]`.
+* `cifmw_test_operator_tempest_extra_rpms`: (List) . A list of URLs that point to RPMs that should be installed before the execution of tempest. Note that this parameter has no effect when `cifmw_test_operator_tempest_external_plugin` is used. Default value: `[]`
 * `cifmw_test_operator_tempest_config`: (Object) Definition of Tempest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#tempest-custom-resource)). Default value:
 ```
   apiVersion: test.openstack.org/v1beta1
@@ -46,6 +47,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_tempest_image }}:{{ cifmw_test_operator_tempest_image_tag }}"
+    storageClass: "{{ cifmw_test_operator_storage_class }}"
     tolerations: "{{ cifmw_test_operator_tolerations | default(omit) }}"
     nodeSelector: "{{ cifmw_test_operator_node_selector | default(omit) }}"
     tempestRun:
@@ -55,6 +57,8 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
         {{ cifmw_test_operator_tempest_exclude_list | default('') }}
       concurrency: "{{ cifmw_test_operator_concurrency }}"
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
+      extraRPMs: "{{ cifmw_test_operator_tempest_extra_rpms | default([]) }}"
+      extraImages: "{{ cifmw_test_operator_tempest_extra_images | default([]) }}"
     tempestconfRun: "{{ cifmw_tempest_tempestconf_config | default(omit) }}"
 ```
 
@@ -83,6 +87,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     kubeconfigSecretName: "{{ cifmw_test_operator_tobiko_kubeconfig_secret }}"
+    storageClass: "{{ cifmw_test_operator_storage_class }}"
     containerImage: "{{ cifmw_test_operator_tobiko_image }}:{{ cifmw_test_operator_tobiko_image_tag }}"
     testenv: "{{ cifmw_test_operator_tobiko_testenv }}"
     version: "{{ cifmw_test_operator_tobiko_version }}"
