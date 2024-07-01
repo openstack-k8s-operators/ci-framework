@@ -93,3 +93,27 @@ cifmw_ci_nmstate_instance_config:
       ansible.builtin.include_role:
         name: "ci_nmstate"
 ```
+
+```YAML
+- name: Apply an NMstate state to a unmanaged host
+  vars:
+    cifmw_ci_nmstate_unmanaged_node_config:
+      interfaces:
+      - name: eth0
+        type: ethernet
+        state: up
+        ipv4:
+          address:
+          - ip: 192.168.122.250
+            prefix-length: 24
+          enabled: true
+        ipv6:
+          address:
+          - ip: 2001:db8::1:1
+            prefix-length: 64
+          enabled: true
+    cifmw_ci_nmstate_unmanaged_host: compute-1
+  ansible.builtin.include_role:
+    name: "ci_nmstate"
+    tasks_from: "nmstate_unmanaged_provision_node.yml"
+```

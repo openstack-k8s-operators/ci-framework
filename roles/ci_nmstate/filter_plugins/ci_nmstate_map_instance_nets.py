@@ -158,14 +158,12 @@ class FilterModule:
     def __map_instance_vlan(instance_net_data):
         if "vlan_id" not in instance_net_data:
             return {}
+        content = {"type": "vlan", "vlan": {"id": int(instance_net_data["vlan_id"])}}
 
-        return {
-            "type": "vlan",
-            "vlan": {
-                "id": int(instance_net_data["vlan_id"]),
-                "base-iface": instance_net_data["parent_interface"],
-            },
-        }
+        if "parent_interface" in instance_net_data:
+            content["vlan"]["base-iface"] = instance_net_data["parent_interface"]
+
+        return content
 
     @classmethod
     def __map_instance_net_interface(cls, instance_net_data):
