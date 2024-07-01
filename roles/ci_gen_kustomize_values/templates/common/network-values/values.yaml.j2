@@ -1,5 +1,6 @@
 ---
 # source: common/network-values/values.yaml.j2
+{% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
 {% set ns = namespace(interfaces={},
                       ocp_index=0,
                       lb_tools={}) %}
@@ -18,7 +19,7 @@ data:
 {%     set ns.ocp_index = ns.ocp_index+1 %}
     name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}
 {%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
-    {{ network.network_name }}_ip: {{ network.ip_v4 }}
+    {{ network.network_name }}_ip: {{ network[_ipv.ip_vX] }}
 {%     endfor %}
 {%   endif %}
 {% endfor %}
@@ -35,22 +36,18 @@ data:
 {%      endif %}
 {%    endfor %}
       - allocationRanges:
-{%    for range in network.tools.netconfig.ipv4_ranges %}
+{%    for range in network.tools.netconfig[_ipv.ipvX_ranges] %}
         - end: {{ range.end }}
           start: {{ range.start }}
 {%    endfor %}
-        cidr: {{ network.network_v4 }}
-{%      if network.gw_v4 is defined %}
-        gateway: {{ network.gw_v4 }}
-{%      endif %}
+        cidr: {{ network[_ipv.network_vX] }}
+        gateway: {{ omit if network[_ipv.gw_vX] is not defined else network[_ipv.gw_vX] }}
         name: subnet1
-{%  if network.vlan_id is defined  %}
-        vlan: {{ network.vlan_id }}
-{%  endif %}
+        vlan: {{ omit if network.vlan_id is not defined else network.vlan_id }}
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
 {%      for tool in ns.lb_tools.keys() %}
-{%        for lb_range in network.tools[tool].ipv4_ranges %}
+{%        for lb_range in network.tools[tool][_ipv.ipvX_ranges] %}
       - {{ lb_range.start }}-{{ lb_range.end }}
 {%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
 {%        endfor %}
@@ -61,7 +58,7 @@ data:
 {%      endfor %}
 {%    endif %}
 {%  endif %}
-    prefix-length: {{ network.network_v4 | ansible.utils.ipaddr('prefix') }}
+    prefix-length: {{ network[_ipv.network_vX] | ansible.utils.ipaddr('prefix') }}
     mtu: {{ network.mtu | default(1500) }}
 {%  if network.vlan_id is defined  %}
     vlan: {{ network.vlan_id }}
@@ -89,9 +86,9 @@ data:
 {%  endif %}
         "ipam": {
           "type": "whereabouts",
-          "range": "{{ network.network_v4 }}",
-          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+          "range": "{{ network[_ipv.network_vX] }}",
+          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
+          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
         }
       }
 {%  endif %}
@@ -100,12 +97,12 @@ data:
   dns-resolver:
     config:
       server:
-        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
+        - "{{ cifmw_networking_env_definition.networks.ctlplane[_ipv.gw_vX] }}"
       search: []
     options:
       - key: server
         values:
-          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}
+          - {{ cifmw_networking_env_definition.networks.ctlplane[_ipv.gw_vX] }}
 {% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
       - key: server
         values:
@@ -119,11 +116,11 @@ data:
   rabbitmq:
     endpoint_annotations:
       metallb.universe.tf/address-pool: internalapi
-      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(85) }}
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX]  | ansible.utils.ipmath(85) }}
   rabbitmq-cell1:
     endpoint_annotations:
       metallb.universe.tf/address-pool: internalapi
-      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(86) }}
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX]  | ansible.utils.ipmath(86) }}
 
   lbServiceType: LoadBalancer
   storageClass: {{ cifmw_ci_gen_kustomize_values_storage_class }}
