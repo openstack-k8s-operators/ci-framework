@@ -55,13 +55,18 @@ need to be changed for a typical EDPM deployment.
 * `cifmw_cephadm_keys`: see below
 
  `cifmw_cephadm_certs`: The path on the ceph host where TLS/SSL certificates
-   are located. It points to '/etc/pki/tls'
+   are located. It points to `/etc/pki/tls`.
 
 * `cifmw_cephadm_certificate`: The SSL/TLS certificate signed by CA which is
-   an optional parameter. If it is provided, ceph dashboard and rgw will be
+   an optional parameter. If it is provided, ceph dashboard and RGW will be
    configured for SSL automatically. Certificate should be made available in
    `cifmw_cephadm_certs` path only. To enable SSL for dashboard, both
-   `cifmw_cephadm_certificate` and `cifmw_cephadm_key` are needed.
+   `cifmw_cephadm_certificate` and `cifmw_cephadm_key` are needed. These
+   certificates can be generated automatically by setting
+   `cifmw_cephadm_certificate` and `cifmw_cephadm_key` to the desired
+   path, provided that the `cifmw_openshift_kubeconfig` is set
+   correctly so that Ansible can request that k8s create a certificate
+   using an existing root CA.
 
 * `cifmw_cephadm_key`: The SSL/TLS certificate key which is an
    optional parameter. If it is provided, ceph dashboard and rgw will be
@@ -93,6 +98,9 @@ need to be changed for a typical EDPM deployment.
 
 * `cifmw_cephadm_ns`: Name of the OpenStack controlplane namespace
    used in configuring swift objects.
+
+* `cifmw_cephadm_config_key_set_ssl_option`: Optional colon separated
+  list of SSL context options (default: `no_sslv2:sslv3:no_tlsv1:no_tlsv1_1`)
 
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
