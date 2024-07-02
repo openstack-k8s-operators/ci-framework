@@ -223,6 +223,10 @@ enable-git-hooks:
 docs: ## Create documentation under docs/build/html
 	./docs/source/build-docs.sh
 
+.PHONY: docs_live
+docs_live: ## Create documentation live after any changes
+	BUILD_TYPE=live ./docs/source/build-docs.sh
+
 .PHONY: spelling
 spelling: docs ## Run spell check as in CI
 	if [ -f docs/dictionary/tmp ]; then \
