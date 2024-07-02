@@ -49,6 +49,8 @@ Here is an example, based on a common use-case, on how to use those variables
 
 A new role must get proper documentation. Please edit the README.md located in
 the role directory in order to explain its use and details the exposed parameters.
+Documentation must properly build and display in the CI preview job in order
+for the PR to be accepted.
 
 ### Testing
 
