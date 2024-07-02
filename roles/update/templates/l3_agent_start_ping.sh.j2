@@ -1,0 +1,28 @@
+#!/bin/bash
+#
+# Script which start an ICMP connectivity check on the first in use
+# floating IP during upgrade
+
+INSTANCE_FILE="{{ cifmw_update_artifacts_basedir }}/vm_info.sh"
+PING_LOG="{{ cifmw_update_artifacts_basedir }}/ping_results_$(date +%Y%m%d%H%M%S).log"
+
+if [ -f "${INSTANCE_FILE}" ]; then
+    source "${INSTANCE_FILE}"
+else
+    echo "Cannot find the instance file information (${INSTANCE_FILE})"
+    exit 1
+fi
+
+# NOTE: the &>> is necessary as if we don't redirect both
+# stdout and stderr we will make any script using this one to
+# hang until ping finishes. Meaning if some script crashes
+# and should fail in CI it will get stuck if we don't redirect
+# both outputs.
+# bash
+#    \ bash <script>
+#    \ &| awk blah
+# If script runs l3 start test and than runs something that fails
+# we will make the awk wait until this ping exits as it will hold
+# the output pipes. So again &>> instead of >> is necessary.
+
+ping -D "${VM_IP}" &>> "${PING_LOG}" &
