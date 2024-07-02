@@ -259,6 +259,43 @@
     loop_var: "net"
     label: "{{ net.name }}"
 
+# We match ^ctlplane networks mostly for the DCN case,
+# where they have multiple ctlplane networks in the form:
+# ctlplane_dcn1
+# ctlplane_dcn2
+# ...
+# Using the selectattr + match, then selecting the first
+# matched network should cover most of the cases if not all.
+- name: Create .utility zone entries
+  when:
+    - _net | length > 0
+  vars:
+    _net: >-
+      {{
+        vm.value.networks | dict2items |
+        selectattr('key', 'match', '^ctlplane')
+      }}
+    _entry:
+      - names:
+          - "{{ vm.key }}.utility"
+        ips:
+          - "{{ _net.0.value.ip_v4 | default('') }}"
+          - "{{ _net.0.value.ip_v6 | default('') }}"
+        state: present
+  ansible.builtin.set_fact:
+    _vm_utility: "{{ _vm_utility | default([]) + _entry }}"
+  loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.key }}"
+
+- name: Inject VMs in the .utility zone
+  vars:
+    cifmw_dnsmasq_host_record: "{{ _vm_utility }}"
+  ansible.builtin.include_role:
+    name: "dnsmasq"
+    tasks_from: "manage_host_record.yml"
+
 - name: Ensure dnsmasq is reloaded now
   ansible.builtin.meta: flush_handlers
 # END inject reserved IPs
