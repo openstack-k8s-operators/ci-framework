@@ -106,6 +106,23 @@ def _map_host_network_range_to_output(
     )
 
 
+def _map_host_network_route_to_output(
+    host_net_route: networking_definition.HostNetworkRoute,
+) -> typing.Union[
+    networking_env_definitions.MappedIpv4NetworkRoute,
+    networking_env_definitions.MappedIpv6NetworkRoute,
+]:
+    args = [
+        host_net_route.destination,
+        host_net_route.gateway,
+    ]
+    return (
+        networking_env_definitions.MappedIpv4NetworkRoute(*args)
+        if host_net_route.destination.version == 4
+        else networking_env_definitions.MappedIpv6NetworkRoute(*args)
+    )
+
+
 class NetworkingInstanceMapper:
     """Converts the Networking Definition and facts into a MappedInstance
 
@@ -631,7 +648,11 @@ class NetworkingNetworksMapper:
     @staticmethod
     def __build_network_tool_common(
         tool_net_def: networking_definition.SubnetBasedNetworkToolDefinition,
-        tool_type: typing.Type,
+        tool_type: typing.Union[
+            networking_env_definitions.MappedMetallbNetworkConfig,
+            networking_env_definitions.MappedMultusNetworkConfig,
+            networking_env_definitions.MappedNetconfigNetworkConfig,
+        ],
     ) -> typing.Union[
         networking_env_definitions.MappedMetallbNetworkConfig,
         networking_env_definitions.MappedMultusNetworkConfig,
@@ -647,6 +668,22 @@ class NetworkingNetworksMapper:
                 for ip_range in tool_net_def.ranges_ipv6
             ],
         ]
+        route_args_list = [
+            [
+                _map_host_network_route_to_output(ip_route)
+                for ip_route in tool_net_def.routes_ipv4
+            ],
+            [
+                _map_host_network_route_to_output(ip_route)
+                for ip_route in tool_net_def.routes_ipv6
+            ],
+        ]
+
+        if any(
+            route_field in tool_type.__dataclass_fields__
+            for route_field in ["ipv4_routes", "ipv6_routes"]
+        ):
+            args_list = args_list + route_args_list
         return tool_type(*args_list)
 
 

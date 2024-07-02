@@ -44,6 +44,34 @@ class MappedIpv6NetworkRange:
 
 
 @dataclasses.dataclass(frozen=True)
+class MappedIpv4NetworkRoute:
+    """Represents an IPv4 network route
+
+    Attributes:
+        destination: The destination network for the route.
+        gateway: The gateway address to use for packets
+        matching the destination.
+    """
+
+    destination: ipaddress.IPv4Address
+    gateway: ipaddress.IPv4Address
+
+
+@dataclasses.dataclass(frozen=True)
+class MappedIpv6NetworkRoute:
+    """Represents an IPv6 network route
+
+    Attributes:
+        destination: The destination network for the route.
+        gateway: The gateway address to use for packets
+        matching the destination.
+    """
+
+    destination: ipaddress.IPv6Address
+    gateway: ipaddress.IPv6Address
+
+
+@dataclasses.dataclass(frozen=True)
 class MappedInstanceNetwork:
     """Defines a network attached to an instance
 
@@ -106,11 +134,15 @@ class MappedMultusNetworkConfig:
     Attributes:
         ipv4_ranges: IPv4 ranges assigned to Multus.
         ipv6_ranges: IPv6 ranges assigned to Multus.
+        ipv4_routes: IPv4 routes assigned to Multus.
+        ipv6_routes: IPv6 routes assigned to Multus.
 
     """
 
     ipv4_ranges: typing.List[MappedIpv4NetworkRange]
     ipv6_ranges: typing.List[MappedIpv6NetworkRange]
+    ipv4_routes: typing.List[MappedIpv4NetworkRoute]
+    ipv6_routes: typing.List[MappedIpv6NetworkRoute]
 
 
 @dataclasses.dataclass(frozen=True)
