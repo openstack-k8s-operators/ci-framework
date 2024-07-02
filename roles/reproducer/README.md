@@ -20,6 +20,7 @@ None
 * `cifmw_reproducer_dnf_tweaks`: (List) Options you want to inject in dnf.conf, both on controller-0 and hypervisor. Defaults to `[]`.
 * `cifmw_reproducer_skip_fetch_repositories`: (Bool) Skip fetching repositories from zuul var and simply copy the code from the ansible controller. Defaults to `false`.
 * `cifmw_reproducer_supported_hypervisor_os`: (List) List of supported hypervisor operating systems and their minimum version.
+* `cifmw_reproducer_minimum_hardware_requirements`: (Dict) Define minimum hardware requirements for specific scenarios. Example below
 
 ### Advanced parameters
 Those parameters shouldn't be used, unless the user is able to understand potential issues in their environment.
@@ -77,4 +78,12 @@ cifmw_reproducer_repositories:
   # Just get HEAD
   - src: "https://github.com/openstack-k8s-operators/openstack-operators"
     dest: "{{ remote_base_dir }}/openstack-operators"
+```
+
+#### Example `cifmw_reproducer_minimum_hardware_requirements`:
+```YAML
+cifmw_reproducer_minimum_hardware_requirements:
+  vcpu: 16
+  memory: "32 GB"
+  disk: "200 GB"
 ```
