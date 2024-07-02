@@ -35,6 +35,35 @@
       retries: 6
       delay: 10
 
+    - name: Run inspection on baremtal nodes
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          oc project {{ namespace }} > /dev/null
+
+          BAREMETAL_NODES=$(oc rsh openstackclient openstack baremetal node list -c UUID -f value)
+
+          # Introspect nodes
+          for node in $BAREMETAL_NODES; do
+            CURRENT_STATE=$(oc rsh openstackclient openstack baremetal node show $node -f value -c provision_state)
+            if [ "${CURRENT_STATE}" == "manageable" ]; then
+              oc rsh openstackclient openstack baremetal node inspect $node
+            fi
+          done
+
+    - name: Wait for nodes to reach manageable state
+      register: _os_out
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ namespace }} > /dev/null
+        oc rsh openstackclient \
+          openstack baremetal node list -f value -c "Provisioning State"
+      until: '_os_out.stdout_lines | difference(["manageable"]) | length == 0'
+      retries: 60
+      delay: 10
+
     - name: Move all nodes to managed active state
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_basedir }}/artifacts"
