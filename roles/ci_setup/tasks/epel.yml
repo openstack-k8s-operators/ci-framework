@@ -1,23 +1,46 @@
 ---
+
+- name: Set epel_status id needed
+  when:
+    - epel_status is undefined
+  ansible.builtin.set_fact:
+    epel_status: present
+
 - name: Ensure we have needed repositories
+  when:
+    - epel_status == 'present'
   ansible.builtin.import_role:
     name: ci_setup
     tasks_from: repos.yml
 
 - name: Install EPEL
   become: true
+  when:
+    - epel_status == 'present'
   ansible.builtin.dnf:
     name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
     disable_gpg_check: true
 
 - name: Deactivate all of EPEL repositories
   become: true
+  when:
+    - epel_status == 'present'
   ansible.builtin.shell:  # noqa: command-instead-of-module
     cmd: sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*
 
 - name: Install packages from EPEL
   become: true
+  when:
+    - epel_status == 'present'
   ansible.builtin.dnf:  # noqa: package-latest
     enablerepo: epel
     name: "{{ cifmw_ci_setup_epel_pkgs }}"
     state: latest
+
+- name: Remove EPEL if instructed
+  become: true
+  when:
+    - epel_status == 'absent'
+  ansible.builtin.package:
+    name: "epel-release"
+    state: absent
