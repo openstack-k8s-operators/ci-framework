@@ -41,6 +41,38 @@
       {{ cifmw_reproducer_supported_hypervisor_os[ansible_distribution].minimum_version }}
       https://ci-framework.readthedocs.io/en/latest/quickstart/02_prepare_env.html#tested-environment
 
+- name: Validate the hardware requirments
+  when: cifmw_reproducer_minimum_hardware_requirements is defined
+  block:
+    - name: Verfy CPU count exceeds minimum defined in scenario file
+      when: cifmw_reproducer_minimum_hardware_requirements.vcpu is defined
+      ansible.builtin.assert:
+        that: ansible_processor_vcpus >= {{ cifmw_reproducer_minimum_hardware_requirements.vcpu }}
+        msg: >-
+          {{ ansible_hostname }} has {{ ansible_processor_vcpus }} VCPU but must have >=
+          {{ cifmw_reproducer_minimum_hardware_requirements.vcpu }} VCPU as defined by the scenario file
+
+    - name: Validate memory amount exceeds minimum defined in scenario file
+      when: cifmw_reproducer_minimum_hardware_requirements.memory is defined
+      vars:
+        _memory_bytes: "{{ ansible_memtotal_mb * 1048576 }}"
+      ansible.builtin.assert:
+        that: _memory_bytes | int >= cifmw_reproducer_minimum_hardware_requirements.memory | human_to_bytes
+        msg: >-
+          {{ ansible_hostname }} has {{ _memory_bytes | int | human_readable }} of memory but must have >=
+          {{ cifmw_reproducer_minimum_hardware_requirements.memory }} memory as defined by the scenario file
+
+    - name: Validate home disk size exceeds minimum defined in scenario file
+      when: cifmw_reproducer_minimum_hardware_requirements.memory is defined
+      vars:
+        _home_disk_size: >-
+          {{ ansible_mounts | selectattr('mount', 'equalto', '/home') | map(attribute='size_total') | first | human_readable }}
+      ansible.builtin.assert:
+        that: _home_disk_size | human_to_bytes >= cifmw_reproducer_minimum_hardware_requirements.disk | human_to_bytes
+        msg: >-
+          {{ ansible_hostname }} home mount is {{ _home_disk_size }} but must have >=
+          {{ cifmw_reproducer_minimum_hardware_requirements.disk }} as defined by the scenario file.
+
 - name: Verify cifmw_network_dnsmasq_config isn't set
   ansible.builtin.assert:
     quiet: true
