@@ -17,11 +17,57 @@
         state: directory
         mode: "0755"
 
+    - name: Set proper golang on the system
+      become: true
+      tags:
+        - golang
+      block:
+        - name: Deinstall golang
+          ansible.builtin.package:
+            state: absent
+            name:
+              - golang-bin
+              - golang-src
+              - golang
+
+        - name: Delete old go version installed from upstream
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          with_items:
+            - /usr/local/go
+            - "{{ lookup('env', 'HOME') }}/bin/go"
+            - "{{ lookup('env', 'HOME') }}/bin/gofmt"
+            - /usr/local/bin/go
+            - /usr/local/bin/gofmt
+
+        - name: Download and extract golang
+          ansible.builtin.unarchive:
+            src: "https://golang.org/dl/go{{ go_version | default('1.20.14') }}.linux-amd64.tar.gz"
+            dest: "/usr/local"
+            remote_src: true
+            extra_opts:
+              - "--exclude"
+              - "go/misc"
+              - "--exclude"
+              - "go/pkg/linux_amd64_race"
+              - "--exclude"
+              - "go/test"
+
+        - name: Set alternatives link to installed go version
+          ansible.builtin.shell: |
+            set -e
+            update-alternatives --install /usr/local/bin/{{ item }} {{ item }} \
+            /usr/local/go/bin/{{ item }} 1
+          with_items:
+            - go
+            - gofmt
+          changed_when: true
+
     - name: Install required packages
       become: true
       ansible.builtin.package:
         name:
           - make
           - python3
-          - golang
           - ruby
