@@ -266,6 +266,28 @@ def test_group_template_definition_parse_invalid_range_fail():
     assert exc_info.value.field == "length"
     assert exc_info.value.invalid_value == 0
 
+    # Test mix of single and dual-stack fields
+    invalid_range = {"start": 10, "length": 10}
+    group_template_definition_raw = {
+        "networks": {
+            first_net.name: {
+                "range": invalid_range,
+                "range-v4": {"start": 100, "length": 0},
+            },
+        },
+    }
+
+    with pytest.raises(exceptions.NetworkMappingValidationError) as exc_info:
+        networking_definition.GroupTemplateDefinition(
+            inventory_group, group_template_definition_raw, networks_definitions
+        )
+    assert exc_info.value.field == "range"
+    assert exc_info.value.invalid_value == invalid_range
+    assert "network_name" in exc_info.value.details
+    assert exc_info.value.details["network_name"] == first_net.name
+    assert exc_info.value.parent_name == inventory_group
+    assert exc_info.value.parent_type == "host-template"
+
 
 def test_group_template_definition_parse_invalid_net_fail():
     # Test invalid start value
