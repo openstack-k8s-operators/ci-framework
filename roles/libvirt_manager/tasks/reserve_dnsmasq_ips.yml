@@ -42,8 +42,25 @@
     label: "{{ host_data.key }} - {{ net.name }}"
     loop_var: "host_data"
 
-- name: Manage common parameters
+- name: Create host records
+  when:
+    - host_data.value.networks[_cleaned_netname] is defined
   vars:
+    _net_name: >-
+      {{ (net.name is match '.*osp_trunk$') | ternary('ctlplane', net.name) }}
+    _cleaned_netname: "{{ _net_name | regex_replace('^cifmw[_-]', '') }}"
+    _net_data: "{{ host_data.value.networks[_cleaned_netname] }}"
+    _ocp_name: >-
+      {{
+        host_data.key | replace('_', '-') |
+        replace('ocp-worker', 'worker') |
+        replace('ocp', 'master')
+      }}
+    _hostname: >-
+      {{
+        (host_data.key is match('^ocp.*')) |
+        ternary(_ocp_name, host_data.key)
+      }}
     _translate: >-
       {{ cifmw_networking_mapper_interfaces_info_translations | default({}) }}
     _net_domain: >-
@@ -51,85 +68,33 @@
         (net.name in _translate) |
         ternary(_translate[net.name], [net.name])
       }}
-    _net_name: >-
-      {{ _net_domain | first }}
-    _cleaned_netname: "{{ _net_name | regex_replace('^cifmw[_-]', '') }}"
-  block:
-    - name: Create host records
-      when:
-        - host_data.value.networks[_cleaned_netname] is defined
-      vars:
-        _net_data: "{{ host_data.value.networks[_cleaned_netname] }}"
-        _ocp_name: >-
+    _fqdn: >-
+      {%- if net.name == cifmw_libvirt_manager_pub_net -%}
+      {{ [_hostname ~ '.' ~ cifmw_reproducer_domain | default('local')] }}
+      {%- else -%}
+      {{
+        [_hostname] | product(_net_domain) |
+        map('join', '.') |
+        product([cifmw_reproducer_domain | default('local')]) |
+        map('join', '.')
+      }}
+      {%- endif -%}
+    _record:
+      - state: present
+        ips: >-
           {{
-            host_data.key | replace('_', '-') |
-            replace('ocp-worker', 'worker') |
-            replace('ocp', 'master')
+            [
+              _net_data.ip_v4 | default(''),
+              _net_data.ip_v6 | default('')
+            ]
           }}
-        _hostname: >-
-          {{
-            (host_data.key is match('^ocp.*')) |
-            ternary(_ocp_name, host_data.key)
-          }}
-        _fqdn: >-
-          {%- if net.name == cifmw_libvirt_manager_pub_net -%}
-          {{ [_hostname ~ '.' ~ cifmw_reproducer_domain | default('local')] }}
-          {%- else -%}
-          {{
-            [_hostname] | product(_net_domain) |
-            map('join', '.') |
-            product([cifmw_reproducer_domain | default('local')]) |
-            map('join', '.')
-          }}
-          {%- endif -%}
-        _record:
-          - state: present
-            ips: >-
-              {{
-                [
-                  _net_data.ip_v4 | default(''),
-                  _net_data.ip_v6 | default('')
-                ]
-              }}
-            names: "{{ _fqdn }}"
-      ansible.builtin.set_fact:
-        host_records: "{{ host_records | default([]) + _record }}"
-      loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
-      loop_control:
-        label: "{{ host_data.key }} - {{ net.name }}"
-        loop_var: "host_data"
-
-    - name: Debugging block/rescue
-      block:
-        - name: Assert we have records
-          ansible.builtin.assert:
-            that:
-              - host_records is defined
-
-      rescue:
-        - name: Debug net.name
-          ansible.builtin.debug:
-            msg: "net.name: {{ net.name }}"
-
-        - name: Debug _translate
-          ansible.builtin.debug:
-            var: _translate
-
-        - name: Debug _net_domain
-          ansible.builtin.debug:
-            var: _net_domain
-
-        - name: Debug _net_name
-          ansible.builtin.debug:
-            var: _net_name
-
-        - name: Debug _cleaned_netname
-          ansible.builtin.debug:
-            var: _cleaned_netname
-
-        - name: Fail for good
-          ansible.builtin.fail:
-            msg: "Error detected, please check debug above"
+        names: "{{ _fqdn }}"
+  ansible.builtin.set_fact:
+    host_records: "{{ host_records | default([]) + _record }}"
+  loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
+  loop_control:
+    label: "{{ host_data.key }} - {{ net.name }}"
+    loop_var: "host_data"
 
 - name: Inject host records
   vars:
