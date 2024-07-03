@@ -101,3 +101,47 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     # config: config is generated combining cifmw_test_operator_tobiko_default_conf and cifmw_test_operator_tobiko_override_conf
     workflow: "{{ cifmw_test_operator_tobiko_workflow }}"
 ```
+
+## AnsibleTest specific parameters
+* cifmw_test_operator_ansibletest_registry: (String) The registry where to pull ansibletests container. Default value: `quay.io`
+* cifmw_test_operator_ansibletest_namespace: (String) Registry's namespace where to pull ansibletests container. Default value:podified-antelope-centos9
+* cifmw_test_operator_ansibletest_container: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
+* cifmw_test_operator_ansibletest_image: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_ansibletest_registry }}/{{ cifmw_test_operator_ansibletest_namespace }}/{{ cifmw_test_operator_ansibletest_container }}`
+* cifmw_test_operator_ansibletest_image_tag: (String) Ansibletests image to be used. Default value: `current-podified`
+* cifmw_test_operator_ansibletest_compute_ssh_key_secret_name: (String) The name of the k8s secret that contains an ssh key for computes. Default value: `dataplane-ansible-ssh-private-key-secret`
+* cifmw_test_operator_ansibletest_workload_ssh_key_secret_name: (String) The name of the k8s secret that contains an ssh key for the ansible workload. Default value: `""`
+* cifmw_test_operator_ansibletest_ansible_git_repo: (String) Git repo to clone into container. Default value: `""`
+* cifmw_test_operator_ansibletest_ansible_playbook_path: (String) Path to ansible playbook. Default value: `""`
+* cifmw_test_operator_ansibletest_ansible_collection: (String) Extra ansible collections to install in addition to the ones that exist in the requirements.yaml. Default value: `""`
+* cifmw_test_operator_ansibletest_ansible_var_files: (String) interface to create ansible var files. Default value: `""`
+* cifmw_test_operator_ansibletest_ansible_extra_vars: (String) string to pass parameters to ansible. Default value: `""`
+* cifmw_test_operator_ansibletest_ansible_inventory: (String) string that contains the inventory file content. Default value: `""`
+* cifmw_test_operator_ansibletest_openstack_config_map: (String) The name of the ConfigMap containing the clouds.yaml. Default value: `openstack-config`
+* cifmw_test_operator_ansibletest_openstack_config_secret: (String) The name of the Secret containing the secure.yaml. Default value: "openstack-config-secret"
+* cifmw_test_operator_ansibletest_debug: (Bool) Run ansible playbook with -vvvv. Default value: `false`
+* cifmw_test_operator_ansibletest_workflow: (List) A parameter that contains a workflow definition. Default value: `[]`
+* cifmw_test_operator_ansibletest_extra_mounts: (List) Extra configmaps for mounting in the pod. Default value: `[]`
+* cifmw_test_operator_ansibletest_config: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value:
+```
+  apiVersion: test.openstack.org/v1beta1
+  kind: AnsibleTest
+  metadata:
+    name: horizontest-sample
+    namespace: "{{ cifmw_test_operator_namespace }}"
+  spec:
+    containerImage: "{{ cifmw_test_operator_ansibletest_image }}:{{ cifmw_test_operator_ansibletest_image_tag }}"
+    extraMounts: "{{ cifmw_test_operator_ansibletest_extra_mounts }}"
+    storageClass: "{{ cifmw_test_operator_storage_class }}"
+    computeSSHKeySecretName: "{{ cifmw_test_operator_ansibletest_compute_ssh_key_secret_name }}"
+    workloadSSHKeySecretName: "{{ cifmw_test_operator_ansibletest_workload_ssh_key_secret_name }}"
+    ansibleGitRepo: "{{ cifmw_test_operator_ansibletest_ansible_git_repo }}"
+    ansiblePlaybookPath: "{{ cifmw_test_operator_ansibletest_ansible_playbook_path }}"
+    ansibleCollections: "{{ cifmw_test_operator_ansibletest_ansible_collection }}"
+    ansibleVarFiles: "{{ cifmw_test_operator_ansibletest_ansible_var_files }}"
+    ansibleExtraVars: "{{ cifmw_test_operator_ansibletest_ansible_extra_vars }}"
+    ansibleInventory: "{{ cifmw_test_operator_ansibletest_ansible_inventory }}"
+    openStackConfigMap: "{{ cifmw_test_operator_ansibletest_openstack_config_map }}"
+    openStackConfigSecret: "{{ cifmw_test_operator_ansibletest_openstack_config_secret }}"
+    workflow: "{{ cifmw_test_operator_ansibletest_workflow }}"
+    debug: "{{ cifmw_test_operator_ansibletest_debug }}"
+```
