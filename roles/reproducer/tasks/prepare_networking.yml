@@ -97,17 +97,29 @@
   when:
     - cifmw_ci_nmstate_instance_config is undefined
   vars:
+    _ip_network: >-
+      {{ cifmw_devscripts_config.provisioning_network | default('172.22.0.0/24') }}
+    _ip_address: >-
+      {{ _ip_network | ansible.utils.nthhost(1) }}
+    _prefix_length: >-
+      {{ _ip_network | ansible.utils.ipaddr('prefix') }}
+    _ip_version_enable: >-
+      {{ _ip_address is ansible.utils.ipv4 | ternary('ipv4', 'ipv6') }}
+    _ip_version_disable: >-
+      {{ _ip_address is ansible.utils.ipv4 | ternary('ipv6', 'ipv4') }}
     _content: |-
       {{ cifmw_target_host | default('localhost') }}:
         interfaces:
           - name: ocppr
             type: linux-bridge
             state: up
-            ipv4:
+            {{ _ip_version_enable }}:
               enabled: true
               address:
-                - ip: 172.22.0.1
-                  prefix-length: 24
+                - ip: {{ _ip_address }}
+                  prefix-length: "{{ _prefix_length }}"
+            {{ _ip_version_disable }}:
+              enabled: false
             bridge:
               options:
                 stp:
