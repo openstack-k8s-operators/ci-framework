@@ -1,0 +1,70 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure needed directories exist
+  ansible.builtin.file:
+    path: "{{ cifmw_nat64_appliance_container_image_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Install required RPM packages
+  tags:
+    - packages
+  become: true
+  ansible.builtin.package:
+    name:
+      - buildah
+      - podman
+    state: present
+
+- name: Copy files to container image build dir
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ cifmw_nat64_appliance_container_image_dir }}"
+    mode: preserve
+  loop:
+    - Containerfile.nat64_appliance
+    - copy_out.sh
+
+- name: Make a copy of the built image in container-image build directory
+  become: true
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ cifmw_nat64_appliance_workdir }}/nat64-appliance.qcow2"
+    dest: "{{ cifmw_nat64_appliance_container_image_dir }}/nat64-appliance.qcow2"
+    mode: "0644"
+    owner: "{{ ansible_user_uid }}"
+    group: "{{ ansible_user_gid }}"
+
+- name: Create sha254sum for the nat64-appliance image
+  cifmw.general.ci_script:
+    chdir: "{{ cifmw_nat64_appliance_container_image_dir }}"
+    output_dir: "{{ cifmw_nat64_appliance_basedir }}/artifacts"
+    executable: "/bin/bash"
+    creates: "{{ cifmw_nat64_appliance_container_image_dir }}/nat64-appliance.qcow2.sha256"
+    script: "sha256sum --binary nat64-appliance.qcow2 > nat64-appliance.qcow2.sha256"
+
+- name: Build the container image
+  cifmw.general.ci_script:
+    chdir: "{{ cifmw_nat64_appliance_container_image_dir }}"
+    output_dir: "{{ cifmw_nat64_appliance_basedir }}/artifacts"
+    executable: "/bin/bash"
+    script: |
+      buildah build \
+        --file ./Containerfile.nat64_appliance \
+        --format docker \
+        --tls-verify=true \
+        --tag {{ cifmw_nat64_container_tag }}
