@@ -106,25 +106,25 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ```
 
 ## AnsibleTest specific parameters
-* cifmw_test_operator_ansibletest_registry: (String) The registry where to pull ansibletests container. Default value: `quay.io`
-* cifmw_test_operator_ansibletest_namespace: (String) Registry's namespace where to pull ansibletests container. Default value:podified-antelope-centos9
-* cifmw_test_operator_ansibletest_container: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
-* cifmw_test_operator_ansibletest_image: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_ansibletest_registry }}/{{ cifmw_test_operator_ansibletest_namespace }}/{{ cifmw_test_operator_ansibletest_container }}`
-* cifmw_test_operator_ansibletest_image_tag: (String) Ansibletests image to be used. Default value: `current-podified`
-* cifmw_test_operator_ansibletest_compute_ssh_key_secret_name: (String) The name of the k8s secret that contains an ssh key for computes. Default value: `dataplane-ansible-ssh-private-key-secret`
-* cifmw_test_operator_ansibletest_workload_ssh_key_secret_name: (String) The name of the k8s secret that contains an ssh key for the ansible workload. Default value: `""`
-* cifmw_test_operator_ansibletest_ansible_git_repo: (String) Git repo to clone into container. Default value: `""`
-* cifmw_test_operator_ansibletest_ansible_playbook_path: (String) Path to ansible playbook. Default value: `""`
-* cifmw_test_operator_ansibletest_ansible_collection: (String) Extra ansible collections to install in addition to the ones that exist in the requirements.yaml. Default value: `""`
-* cifmw_test_operator_ansibletest_ansible_var_files: (String) interface to create ansible var files. Default value: `""`
-* cifmw_test_operator_ansibletest_ansible_extra_vars: (String) string to pass parameters to ansible. Default value: `""`
-* cifmw_test_operator_ansibletest_ansible_inventory: (String) string that contains the inventory file content. Default value: `""`
-* cifmw_test_operator_ansibletest_openstack_config_map: (String) The name of the ConfigMap containing the clouds.yaml. Default value: `openstack-config`
-* cifmw_test_operator_ansibletest_openstack_config_secret: (String) The name of the Secret containing the secure.yaml. Default value: "openstack-config-secret"
-* cifmw_test_operator_ansibletest_debug: (Bool) Run ansible playbook with -vvvv. Default value: `false`
-* cifmw_test_operator_ansibletest_workflow: (List) A parameter that contains a workflow definition. Default value: `[]`
-* cifmw_test_operator_ansibletest_extra_mounts: (List) Extra configmaps for mounting in the pod. Default value: `[]`
-* cifmw_test_operator_ansibletest_config: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value:
+* `cifmw_test_operator_ansibletest_registry`: (String) The registry where to pull ansibletests container. Default value: `quay.io`
+* `cifmw_test_operator_ansibletest_namespace`: (String) Registry's namespace where to pull ansibletests container. Default value:podified-antelope-centos9
+* `cifmw_test_operator_ansibletest_container`: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
+* `cifmw_test_operator_ansibletest_image`: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_ansibletest_registry }}/{{ cifmw_test_operator_ansibletest_namespace }}/{{ cifmw_test_operator_ansibletest_container }}`
+* `cifmw_test_operator_ansibletest_image_tag`: (String) Ansibletests image to be used. Default value: `current-podified`
+* `cifmw_test_operator_ansibletest_compute_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for computes. Default value: `dataplane-ansible-ssh-private-key-secret`
+* `cifmw_test_operator_ansibletest_workload_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for the ansible workload. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_git_repo`: (String) Git repo to clone into container. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_playbook_path`: (String) Path to ansible playbook. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_collection`: (String) Extra ansible collections to install in addition to the ones that exist in the requirements.yaml. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_var_files`: (String) interface to create ansible var files. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_extra_vars`: (String) string to pass parameters to ansible. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_inventory`: (String) string that contains the inventory file content. Default value: `""`
+* `cifmw_test_operator_ansibletest_openstack_config_map`: (String) The name of the ConfigMap containing the clouds.yaml. Default value: `openstack-config`
+* `cifmw_test_operator_ansibletest_openstack_config_secret`: (String) The name of the Secret containing the secure.yaml. Default value: "openstack-config-secret"
+* `cifmw_test_operator_ansibletest_debug`: (Bool) Run ansible playbook with -vvvv. Default value: `false`
+* `cifmw_test_operator_ansibletest_workflow`: (List) A parameter that contains a workflow definition. Default value: `[]`
+* `cifmw_test_operator_ansibletest_extra_mounts`: (List) Extra configmaps for mounting in the pod. Default value: `[]`
+* `cifmw_test_operator_ansibletest_config`: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value:
 ```
   apiVersion: test.openstack.org/v1beta1
   kind: AnsibleTest
@@ -147,4 +147,47 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     openStackConfigSecret: "{{ cifmw_test_operator_ansibletest_openstack_config_secret }}"
     workflow: "{{ cifmw_test_operator_ansibletest_workflow }}"
     debug: "{{ cifmw_test_operator_ansibletest_debug }}"
+```
+
+## Horizontest specific parameters
+* `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `quay.io`
+* `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `podified-antelope-centos9`
+* `cifmw_test_operator_horizontest_container`: (String) Name of the horizontest container. Default value: `openstack-horizontest`
+* `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: `{{ cifmw_test_operator_horizontest_registry }}/{{ cifmw_test_operator_horizontest_namespace }}/{{ cifmw_test_operator_horizontest_container }}`
+* `cifmw_test_operator_horizontest_image_tag`: (String) Tag for the `cifmw_test_operator_horizontest_image`. Default value: `current-podified`
+* `cifmw_test_operator_horizontest_admin_username`: (String) OpenStack admin credentials. Default value: `admin`
+* `cifmw_test_operator_horizontest_admin_password`: (String) OpenStack admin credentials. Default value: `12345678`
+* `cifmw_test_operator_horizontest_dashboard_url`: (String) The URL of the Horizon dashboard. Default value: `https://horizon-openstack.apps.ocp.openstack.lab/`
+* `cifmw_test_operator_horizontest_auth_url`: (String) The OpenStack authentication URL. Default value: `https://keystone-public-openstack.apps.ocp.openstack.lab`
+* `cifmw_test_operator_horizontest_repo_url`: (String) The Horizon tests repository URL. Default value: `https://review.opendev.org/openstack/horizon`
+* `cifmw_test_operator_horizontest_horizon_repo_branch`: (String) The branch of the Horizon repository to checkout. Default value: `master`
+* `cifmw_test_operator_horizontest_image_url`: (String) The URL to download the Cirros image. Default value: `http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img`
+* `cifmw_test_operator_horizontest_project_name`: (String) The name of the OpenStack project for Horizon tests. Default value: `horizontest`
+* `cifmw_test_operator_horizontest_user`: (String) The username under which Horizon tests will run. Default value: `horizontest`
+* `cifmw_test_operator_horizontest_password`: (String) The password for the user running the Horizon tests. Default value: `horizontest`
+* `cifmw_test_operator_horizontest_flavor_name`: (String) The name of the OpenStack flavor to create for Horizon tests. Default value: `m1.tiny`
+* `cifmw_test_operator_horizontest_logs_directory_name`: (String) The name of the directory to store test logs. Default value: `horizon`
+* `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
+* `cifmw_test_operator_horizontest_config`: (Dict) Definition of HorizonTest CR instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#horizontest-custom-resource)). Default value:
+```
+  apiVersion: test.openstack.org/v1beta1
+  kind: HorizonTest
+  metadata:
+    name: horizontest
+    namespace: "{{ cifmw_test_operator_namespace }}"
+  spec:
+    containerImage: "{{ cifmw_test_operator_horizontest_image }}:{{ cifmw_test_operator_horizontest_image_tag }}"
+    adminUsername: "{{ cifmw_test_operator_horizontest_admin_username }}"
+    adminPassword: "{{ cifmw_test_operator_horizontest_admin_password }}"
+    dashboardUrl: "{{ cifmw_test_operator_horizontest_dashboard_url }}"
+    authUrl: "{{ cifmw_test_operator_horizontest_auth_url }}"
+    repoUrl: "{{ cifmw_test_operator_horizontest_repo_url }}"
+    horizonRepoBranch: "{{ cifmw_test_operator_horizontest_horizon_repo_branch }}"
+    imageUrl: "{{ cifmw_test_operator_horizontest_image_url }}"
+    projectName: "{{ cifmw_test_operator_horizontest_project_name }}"
+    user: "{{ cifmw_test_operator_horizontest_user }}"
+    password: "{{ cifmw_test_operator_horizontest_password }}"
+    flavorName: "{{ cifmw_test_operator_horizontest_flavor_name }}"
+    logsDirectoryName: "{{ cifmw_test_operator_horizontest_logs_directory_name }}"
+    horizonTestDir: "{{ cifmw_test_operator_horizontest_horizon_test_dir }}"
 ```
