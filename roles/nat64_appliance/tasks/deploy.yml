@@ -1,8 +1,21 @@
 ---
-- name: Set MAC address facts
+- name: Set nat64-appliance VM uuid and mac-address facts
   ansible.builtin.set_fact:
-    cifmw_nat64_appliance_ipv4_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
-    cifmw_nat64_appliance_ipv6_mac_address: "{{ '52:54:00' | community.general.random_mac }}"
+    cifmw_nat64_appliance_uuid: >-
+      {{
+        99999999 | ansible.builtin.random(seed=inventory_hostname + 'nat64')
+        | to_uuid | lower
+      }}
+    cifmw_nat64_appliance_ipv4_mac_address: >-
+      {{
+        '52:54:00' | community.general.random_mac(
+                     seed=inventory_hostname + 'nat64ipv4')
+      }}
+    cifmw_nat64_appliance_ipv6_mac_address: >-
+      {{
+        '52:54:00' | community.general.random_mac(
+                     seed=inventory_hostname + 'nat64ipv6')
+      }}
 
 - name: Create the IPv4 libvirt network for nat64
   community.libvirt.virt_net:
@@ -74,14 +87,10 @@
     name: firewalld
     state: restarted
 
-- name: "Generate nat64-appliance UUID"
-  ansible.builtin.set_fact:
-    nat64_appliance_uuid: "{{ 99999999 | random | to_uuid | lower }}"
-
 - name: "Create the config-drive ISO for the nat64-appliance"
   vars:
-    cifmw_config_drive_iso_image: "{{ cifmw_nat64_appliance_workdir }}/{{ nat64_appliance_uuid }}.iso"
-    cifmw_config_drive_uuid: "{{ nat64_appliance_uuid }}"
+    cifmw_config_drive_iso_image: "{{ cifmw_nat64_appliance_workdir }}/{{ cifmw_nat64_appliance_uuid }}.iso"
+    cifmw_config_drive_uuid: "{{ cifmw_nat64_appliance_uuid }}"
     cifmw_config_drive_name: "{{ cifmw_nat64_appliance_name }}"
     cifmw_config_drive_hostname: "{{ cifmw_nat64_appliance_name }}"
     cifmw_config_drive_userdata:
