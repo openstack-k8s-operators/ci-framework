@@ -1,0 +1,176 @@
+---
+- name: Ensure tree exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_basedir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+  loop:
+    - artifacts
+    - logs
+    - parameters
+
+- name: Mark run status
+  ansible.builtin.set_fact:
+    _run_fail: false
+    _failure: false
+
+- name: Use block/rescue/always
+  block:
+    - name: Output scenario name
+      ansible.builtin.debug:
+        msg: "Running: {{ scenario.name }}"
+
+    - name: Generate network data
+      ansible.builtin.include_role:
+        name: "libvirt_manager"
+        tasks_from: "generate_networking_data.yml"
+
+  rescue:
+    - name: Mark run as failed
+      ansible.builtin.set_fact:
+        _run_fail: true
+
+  always:
+    - name: Validate DNS
+      when:
+        - not _run_fail | bool
+        - scenario.check_dns is defined
+      block:
+        - name: Ensure we have expected records
+          vars:
+            _lookup: "{{ lookup('community.general.dig', dns.rec)  }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _lookup == dns.ip
+            msg: >-
+              {{ dns.rec }} points to "{{ _lookup }}" while
+              "{{ dns.ip }}" was expected
+          loop: "{{ scenario.check_dns }}"
+          loop_control:
+            loop_var: dns
+
+      rescue:
+        - name: Mark run as failed
+          ansible.builtin.set_fact:
+            _run_fail: true
+            _failure: true
+
+    - name: Validate DHCP files
+      when:
+        - not _run_fail | bool
+        - scenario.check_dhcp is defined
+      block:
+        - name: Glob all dhcp configuration files
+          register: _dhcp_files
+          ansible.builtin.find:
+            paths: "/etc/cifmw-dnsmasq.d/dhcp-hosts.d"
+
+        - name: Ensure files exist
+          vars:
+            matcher: ".*/{{ item }}.*"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _dhcp_files.files |
+                selectattr('path', 'match', matcher) |
+                length == 1
+            msg: >-
+              {{ item }} is missing
+          loop: "{{ scenario.check_dhcp }}"
+
+      rescue:
+        - name: Output found files
+          ansible.builtin.debug:
+            msg: "{{ _dhcp_files.files }}"
+
+        - name: Mark run as failed
+          ansible.builtin.set_fact:
+            _run_fail: true
+            _failure: true
+
+    - name: Assert we have expected facts set
+      block:
+        - name: Ensure it failed at the right place
+          when:
+            - scenario.failed_step is defined
+          ansible.builtin.assert:
+            that:
+              - molecule_failure_block is defined
+              - molecule_failure_block == scenario.failed_step
+
+      rescue:
+        - name: Debug molecule_failure_block
+          ansible.builtin.debug:
+            var: molecule_failure_block
+
+        - name: Mark total failure
+          ansible.builtin.set_fact:
+            _failure: true
+
+    - name: Mark failure
+      when:
+        - (_run_fail | bool and not scenario.should_fail | default(false)) or
+          (not _run_fail and scenario.should_fail | default(false))
+      ansible.builtin.set_fact:
+        is_failed: true
+        _failure: true
+
+    - name: Manage error
+      when:
+        - _failure | bool
+      block:
+        - name: Display error message
+          ansible.builtin.debug:
+            msg: >-
+              Failed to validate {{ scenario.name }}
+
+        - name: Append scenario to list
+          ansible.builtin.set_fact:
+            failure_list: "{{ failure_list + [scenario.name] }}"
+
+    - name: Copy generated contents
+      vars:
+        _dest: >-
+          {{ _output }}/{{ scenario.name | replace(' ', '_') | lower }}
+      block:
+        - name: Ensure directory exists
+          ansible.builtin.file:
+            path: "{{ _dest }}"
+            state: directory
+            mode: "0755"
+
+        - name: Copy files of interest
+          failed_when: false
+          ansible.builtin.copy:
+            remote_src: true
+            src: "{{ cifmw_basedir }}/{{ item }}"
+            dest: "{{ _dest }}/"
+          loop:
+            - artifacts
+            - logs
+            - parameters
+
+        - name: Copy cifmw-dnsmasq
+          failed_when: false
+          ansible.builtin.copy:
+            remote_src: true
+            src: "{{ item }}"
+            dest: "{{ _dest }}/"
+          loop:
+            - /etc/cifmw-dnsmasq.conf
+            - /etc/cifmw-dnsmasq.d
+
+    - name: Clean environment
+      ansible.builtin.include_role:
+        name: "libvirt_manager"
+        tasks_from: "clean_layout.yml"
+
+    - name: Clean leftovers
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}"
+        state: absent
