@@ -52,13 +52,18 @@
         ternary(_translate[net.name], [net.name])
       }}
     _net_name: >-
-      {{ (net.name is match '.*osp_trunk$') | ternary('ctlplane', net.name) }}
-    _cleaned_netname: "{{ _net_name | regex_replace('^cifmw[_-]', '') }}"
+      {{
+        _net_domain |
+        community.general.lists_intersect(host_data.value.networks.keys())
+      }}
   block:
     - name: Create host records
       when:
+        - _net_name | length > 0
         - host_data.value.networks[_cleaned_netname] is defined
       vars:
+        _vm_net_name: "{{ _net_name | first }}"
+        _cleaned_netname: "{{ _vm_net_name | regex_replace('^cifmw[_-]', '') }}"
         _net_data: "{{ host_data.value.networks[_cleaned_netname] }}"
         _ocp_name: >-
           {{
@@ -119,17 +124,46 @@
           ansible.builtin.debug:
             var: _net_domain
 
-        - name: Debug _net_name
+        - name: Debug _vm_net_name
           ansible.builtin.debug:
-            var: _net_name
+            var: _vm_net_name
 
         - name: Debug _cleaned_netname
           ansible.builtin.debug:
             var: _cleaned_netname
 
+        - name: Set molecule fact
+          ansible.builtin.set_fact:
+            molecule_failure_block: "host_loop"
+
         - name: Fail for good
           ansible.builtin.fail:
             msg: "Error detected, please check debug above"
+
+  rescue:
+    - name: Debug _translate
+      ansible.builtin.debug:
+        var: _translate
+
+    - name: Debug _net_domain
+      ansible.builtin.debug:
+        var: _net_domain
+
+    - name: Debug per-host networks
+      ansible.builtin.debug:
+        msg: "{{ host_data.value.networks.keys() }}"
+      loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
+      loop_control:
+        label: "{{ host_data.key }} - {{ net.name }}"
+        loop_var: "host_data"
+
+    - name: Set molecule fact
+      ansible.builtin.set_fact:
+        molecule_failure_block: "host_loop_prep"
+
+    - name: Fail for good
+      ansible.builtin.fail:
+        msg: "Error detected, please check debug above"
 
 - name: Inject host records
   vars:

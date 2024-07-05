@@ -210,6 +210,10 @@
       ansible.builtin.debug:
         var: _match
 
+    - name: Set molecule fact
+      ansible.builtin.set_fact:
+        molecule_failure_block: "net_map_patch"
+
     - name: Finally fail for goof
       ansible.builtin.fail:
         msg: >-
@@ -270,10 +274,20 @@
   when:
     - _net | length > 0
   vars:
-    _net: >-
+    _ctlplane_net: >-
       {{
         vm.value.networks | dict2items |
         selectattr('key', 'match', '^ctlplane')
+      }}
+    _pub_net_data: >-
+      {{
+        vm.value.networks | dict2items |
+        selectattr('key', 'match', cifmw_libvirt_manager_pub_net)
+      }}
+    _net: >-
+      {{
+        (_ctlplane_net | length > 0 ) |
+        ternary(_ctlplane_net, _pub_net_data)
       }}
     _entry:
       - names:
@@ -288,6 +302,21 @@
   loop_control:
     loop_var: vm
     label: "{{ vm.key }}"
+
+# This task might also be done via the reproducer/prepare_networking.yml
+# but, depending on how we call the libvirt_manager, we might not have it.
+# Using the same filename/permissions/content, we can ensure it's there without
+# re-doing the same tasks.
+# For the record, `local` ensures dnsmasq won't try to resolve names from other places.
+- name: Ensure .utility is local
+  become: true
+  notify: "Restart dnsmasq"
+  ansible.builtin.copy:
+    dest: "/etc/cifmw-dnsmasq.d/utility.conf"
+    mode: "0644"
+    content: |
+      local=/utility/
+    validate: "/usr/sbin/dnsmasq -C %s --test"
 
 - name: Inject VMs in the .utility zone
   vars:
