@@ -1,0 +1,68 @@
+---
+- name: Fetch present bridge interfaces
+  ansible.builtin.command:
+    cmd: "ip -j link show type bridge"
+  register: _cifmw_libvirt_manager_ip_bridges_out
+  changed_when: false
+
+- name: Fetch bridges ports link info
+  vars:
+    _brige_ifaces: >-
+      {{
+        _cifmw_libvirt_manager_ip_bridges_out.stdout | from_json |
+        selectattr('ifname', 'defined') |
+        map(attribute='ifname')
+      }}
+  when:
+    - item in _brige_ifaces
+  ansible.builtin.command:
+    cmd: "ip -j link show master {{ item }}"
+  loop: "{{ networks | map(attribute='name') | flatten }}"
+  register: _cifmw_libvirt_manager_bridges_ports
+  changed_when: false
+
+# NOTE(hjensas): Using a random string for dummy interface names because
+#                otherwise we hit the 15 char limitation on ifname.
+- name: Create dummy interfaces to ensure bridges are UP
+  vars:
+    cifmw_ci_nmstate_unmanaged_node_config: >-
+      {%- set interfaces = []                                            -%}
+      {%- for network in networks | map(attribute="name") | flatten
+            if
+              (
+                cifmw_libvirt_manager_network_interface_types[network |
+                regex_replace('cifmw[-_]','')] |
+                default('bridge') == 'bridge'
+              ) and
+              (
+                (
+                  _cifmw_libvirt_manager_bridges_ports.results |
+                  selectattr('item', 'equalto', network) |
+                  selectattr('stdout', 'defined') | first |
+                  default({'stdout': '[]'})
+                ).stdout | from_json | length == 0
+              )                                                          -%}
+      {%- set suffix = lookup('password',
+                              '/dev/null',
+                              chars=['ascii_lowercase', 'digits'],
+                              length=8,
+                              seed=network)                              -%}
+      {%- set _ = interfaces.append(
+        {
+          'name': 'dummy-' + suffix,
+          'type': 'dummy',
+          'ipv4': {'enabled': false},
+          'ipv6': {'enabled': false},
+          'controller': network,
+          'description': (
+            'Dummy for bridge: ' + network +
+            ' - to ensure bridge UP and IPv6 link-local addr is assigned.')
+        }
+      )                                                                  -%}
+      {%- endfor                                                         -%}
+      {{ {'interfaces': interfaces } }}
+    cifmw_ci_nmstate_unmanaged_host: "{{ inventory_hostname }}"
+  when: "cifmw_ci_nmstate_unmanaged_node_config['interfaces'] | length > 0"
+  ansible.builtin.include_role:
+    name: "ci_nmstate"
+    tasks_from: "nmstate_unmanaged_provision_node.yml"
