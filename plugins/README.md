@@ -67,7 +67,6 @@ Any of the `ansible.builtin.uri` module is supported.
     cifmw_discovered_image_url: "{{ discovered_image['data']['image_url'] }}"
     cifmw_discovered_hash: "{{ discovered_image['data']['hash'] }}"
     cifmw_discovered_hash_algorithm: "{{ discovered_image['data']['hash_algorithm'] }}"
-    cacheable: true
 ```
 
 # modules/get_makefiles_env
