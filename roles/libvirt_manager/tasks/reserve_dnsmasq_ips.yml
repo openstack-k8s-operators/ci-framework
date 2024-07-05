@@ -1,43 +1,84 @@
 ---
-# Reserve IPs in dnsmasq service, based on:
-# - networking_mapper output (provides IPs and MAC)
-# - networks configured on the host (_network_data fact built
-#   in the create_networks.yml tasks)
-
-- name: Loop on host IPs
-  when:
-    - host_data.value.networks[_cleaned_netname] is defined
+- name: Try/catch block
   vars:
-    _net_name: >-
-      {{ (net.name is match '.*osp_trunk$') | ternary('ctlplane', net.name) }}
-    _cleaned_netname: "{{ _net_name | regex_replace('^cifmw[_-]', '') }}"
-    _net_data: "{{ host_data.value.networks[_cleaned_netname] }}"
-    _ocp_name: >-
+    _no_dnsmasq: >-
       {{
-        host_data.key | replace('_', '-') |
-        replace('ocp-worker', 'worker') |
-        replace('ocp', 'master')
+        cifmw_libvirt_manager_no_dnsmasq_nets_defaults +
+        cifmw_libvirt_manager_no_dnsmasq_nets
       }}
-    _hostname: >-
+    _translate: "{{ cifmw_networking_mapper_interfaces_info_translations }}"
+    _rev_translate: >-
+      {%- set out = {} -%}
+      {%- for k,v in _translate.items() -%}
+      {%-   set data = v | product([k]) | community.general.dict -%}
+      {%-   set _ = out.update(data) -%}
+      {%- endfor -%}
+      {{ out }}
+    _translated_name: >-
       {{
-        (host_data.key is match('^ocp.*')) |
-        ternary(_ocp_name, host_data.key)
+        _rev_translate[net_name] |
+        default(net_name, true)
       }}
-    cifmw_dnsmasq_host_network: "{{ net.name }}"
-    cifmw_dnsmasq_host_name: "{{ _hostname }}"
-    cifmw_dnsmasq_host_state: 'present'
-    cifmw_dnsmasq_host_mac: "{{ _net_data.mac_addr }}"
-    cifmw_dnsmasq_host_ips: >-
-      {{
-        [
-          _net_data.ip_v4 | default(''),
-          _net_data.ip_v6 | default('')
-        ]
-      }}
-  ansible.builtin.include_role:
-    name: "dnsmasq"
-    tasks_from: "manage_host.yml"
-  loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
-  loop_control:
-    label: "{{ host_data.key }} - {{ net.name }}"
-    loop_var: "host_data"
+  block:
+    - name: Loop on host IPs
+      when:
+        - _translated_name not in _no_dnsmasq
+        - _translated_name in _cifmw_libvirt_manager_layout.networks.keys()
+        - host_data.value.networks[net_name] is defined
+      vars:
+        _net_data: "{{ host_data.value.networks[net_name] }}"
+        _ocp_name: >-
+          {{
+            host_data.key | replace('_', '-') |
+            replace('ocp-worker', 'worker') |
+            replace('ocp', 'master')
+          }}
+        _hostname: >-
+          {{
+            (host_data.key is match('^ocp.*')) |
+            ternary(_ocp_name, host_data.key)
+          }}
+        cifmw_dnsmasq_host_network: "{{ _translated_name }}"
+        cifmw_dnsmasq_host_name: "{{ _hostname }}"
+        cifmw_dnsmasq_host_state: 'present'
+        cifmw_dnsmasq_host_mac: "{{ _net_data.mac_addr }}"
+        cifmw_dnsmasq_host_ips: >-
+          {{
+            [
+              _net_data.ip_v4 | default(''),
+              _net_data.ip_v6 | default('')
+            ]
+          }}
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_host.yml"
+      loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
+      loop_control:
+        label: "{{ host_data.key }} - {{ net_name }}"
+        loop_var: "host_data"
+
+  rescue:
+    - name: Debug _rev_translate
+      ansible.builtin.debug:
+        var: _rev_translate
+
+    - name: Debug translated name
+      ansible.builtin.debug:
+        var: _translated_name
+
+    - name: Debug net_name
+      ansible.builtin.debug:
+        msg: "{{ net_name }}"
+
+    - name: Debug cifmw_networking_env_definition.instances
+      ansible.builtin.debug:
+        msg: "{{ cifmw_networking_env_definition.instances }}"
+
+    - name: Debug _cifmw_libvirt_manager_layout.vms
+      ansible.builtin.debug:
+        msg: "{{ _cifmw_libvirt_manager_layout.vms }}"
+
+    - name: Fail for good
+      ansible.builtin.fail:
+        msg: >-
+          Error detected. Check the debugging data above

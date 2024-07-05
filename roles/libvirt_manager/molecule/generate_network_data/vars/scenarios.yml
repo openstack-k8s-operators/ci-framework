@@ -1,0 +1,185 @@
+---
+# When adding a new scenario, you have to ensure you
+# provide the same hosts as the previous scenario.
+# This is mandatory, else your scenario will fail.
+# Reason:
+# we use ansible.builtin.add_host to populate the inventory
+# and there is *no* way to reset the inventory during the run.
+# Even using the ansible.builtin.meta "refresh_inventory" does
+# not help there. The inventory is then used in the networking_mapper
+# and that would fail if it doesn't have the data for "removed hosts".
+scenarios:
+  - name: Standard osp_trunk with extended translation
+    check_dns:
+      - rec: "compute-0.utility"
+        ip: "192.168.140.10"
+      - rec: "compute-0.ctlplane.local"
+        ip: "192.168.140.10"
+      - rec: "compute-0.public.local"
+        ip: "192.168.110.10"
+    check_dhcp:
+      - osp_trunk_compute-0
+      - public_compute-0
+    lm_config_patch:
+      networks:
+        osp_trunk: |
+          <network>
+            <name>osp_trunk</name>
+            <bridge name='osp_trunk'/>
+            <dns enabled='no'/>
+            <ip family='ipv4' address='192.168.140.1' prefix='24'/>
+          </network>
+
+  - name: Baremetal integration
+    check_dns:
+      - rec: "compute-0.utility"
+        ip: "192.168.140.10"
+      - rec: "compute-0.ctlplane.local"
+        ip: "192.168.140.10"
+      - rec: "compute-0.public.local"
+        ip: "192.168.110.10"
+      - rec: "bm-0.utility"
+        ip: "192.168.140.20"
+      - rec: "bm-0.ctlplane.local"
+        ip: "192.168.140.20"
+    check_dhcp:
+      - osp_trunk_compute-0
+      - public_compute-0
+      - public_bm-0
+    bm_hosts:
+      bm-0:
+        address: 10.10.1.12
+        boot_mode: uefi
+        connection: ipmi://10.10.1.12:6240
+        nics:
+          - mac: 52:54:00:c6:04:90
+            network: public
+          - mac: 52:54:00:ca:a1:e1
+            network: osp_trunk
+        password: password
+        port: 6240
+        status: running
+        username: admin
+        uuid: 6677a9e8-9e6d-44d4-a4b8-236720fd70ab
+    lm_config_patch:
+      networks:
+        osp_trunk: |
+          <network>
+            <name>osp_trunk</name>
+            <bridge name='osp_trunk'/>
+            <dns enabled='no'/>
+            <ip family='ipv4' address='192.168.140.1' prefix='24'/>
+          </network>
+
+  - name: DCN like network layout
+    pub_net: ocpbm
+    net_translate:
+      osp_trunk:
+        - controlplane
+        - ctlplane
+      dcn1_tr:
+        - ctlplanedcn1
+      dcn2_tr:
+        - ctlplanedcn2
+    check_dns:
+      - rec: "compute-0.utility"
+        ip: "192.168.140.10"
+      - rec: "compute-0.ctlplane.local"
+        ip: "192.168.140.10"
+      - rec: "compute-0.ocpbm.local"
+        ip: "192.168.111.10"
+      - rec: "bm-0.utility"
+        ip: "192.168.140.20"
+      - rec: "bm-0.ctlplane.local"
+        ip: "192.168.140.20"
+      - rec: "dcn1-compute-0.utility"
+        ip: "192.168.133.150"
+      - rec: "dcn1-compute-0.ctlplanedcn1.local"
+        ip: "192.168.133.150"
+      - rec: "dcn1-compute-0.ocpbm.local"
+        ip: "192.168.111.150"
+      - rec: "dcn1-compute-1.utility"
+        ip: "192.168.133.151"
+      - rec: "dcn2-compute-0.utility"
+        ip: "192.168.144.160"
+    check_dhcp:
+      - dcn1_tr_dcn1-compute-0
+      - dcn1_tr_dcn1-compute-1
+      - dcn2_tr_dcn2-compute-0
+      - ocpbm_bm-0
+      - ocpbm_compute-0
+      - ocpbm_dcn1-compute-0
+      - ocpbm_dcn1-compute-1
+      - ocpbm_dcn2-compute-0
+      - osp_trunk_bm-0
+      - osp_trunk_compute-0
+      - public_bm-0
+      - public_compute-0
+    bm_hosts:
+      bm-0:
+        address: 10.10.1.12
+        boot_mode: uefi
+        connection: ipmi://10.10.1.12:6240
+        nics:
+          - mac: 52:54:00:c6:04:90
+            network: ocpbm
+          - mac: 52:54:00:ca:a1:e1
+            network: osp_trunk
+        password: password
+        port: 6240
+        status: running
+        username: admin
+        uuid: 6677a9e8-9e6d-44d4-a4b8-236720fd70ab
+    lm_config_patch:
+      networks:
+        osp_trunk: |
+          <network>
+            <name>osp_trunk</name>
+            <bridge name='osp_trunk'/>
+            <dns enabled='no'/>
+            <ip family='ipv4' address='192.168.140.1' prefix='24'/>
+          </network>
+        ocpbm: |
+          <network>
+            <name>ocpbm</name>
+            <forward mode='nat'/>
+            <bridge name='ocpbm' stp='on' delay='0'/>
+            <dns enable="no"/>
+            <ip family='ipv4' address='192.168.111.1' prefix='24'>
+            </ip>
+          </network>
+        dcn1_tr: |
+          <network>
+            <name>dcn1_tr</name>
+              <forward mode='nat'/>
+                <bridge name='dcn1_tr' stp='on' delay='0'/>
+                  <ip family='ipv4' address='192.168.133.1' prefix='24'>
+                  </ip>
+          </network>
+        dcn2_tr: |
+          <network>
+            <name>dcn2_tr</name>
+              <forward mode='nat'/>
+                <bridge name='dcn2_tr' stp='on' delay='0'/>
+                  <ip family='ipv4' address='192.168.144.1' prefix='24'>
+                  </ip>
+          </network>
+      vms:
+        dcn1-compute:
+          amount: 2
+          disk_file_name: "blank"
+          disksize: "2"
+          memory: "1"
+          cpus: "1"
+          nets:
+            - ocpbm
+            - dcn1_tr
+        dcn2-compute:
+          amount: 1
+          disk_file_name: "blank"
+          disksize: "2"
+          memory: "1"
+          cpus: "1"
+          nets:
+            - ocpbm
+            - dcn2_tr
