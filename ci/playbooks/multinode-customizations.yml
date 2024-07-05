@@ -81,6 +81,11 @@
                  _decoded_net_env.crc_ci_bootstrap_provider_dns |
                 default([])
               }}
+            _validate: >-
+              {{
+                _dnsmasq.stat.exists |
+                ternary(omit, "/usr/sbin/dnsmasq -C %s --test")
+              }}
           block:
             - name: Configure dns forwarders
               become: true
@@ -90,6 +95,7 @@
                   {% for dns_server in _crc_default_net_dns %}
                   server={{ dns_server }}
                   {% endfor %}
+                validate: "{{ _validate }}"
 
             - name: Configure local DNS for CRC pod
               become: true
@@ -99,6 +105,7 @@
                 regexp: "192.168.130.11"
                 replace: >-
                   {{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}
+                validate: "{{ _validate }}"
 
             # Note(Lewis): Only needed for CRC => 2.32.0-4.14.8
             - name: Configure dnsmasq listen-address to listen on both br-ex and ci-private-network
@@ -109,14 +116,50 @@
                 path: "{{ _dnsmasq_config }}"
                 insertafter: '^listen-address='
                 line: "listen-address={{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}"
+                validate: "{{ _validate }}"
+
+          rescue:
+            - name: Debug _dnsmasq_config
+              ansible.builtin.debug:
+                var: _dnsmasq_config
+
+            - name: Debug _crc_default_net_dns
+              ansible.builtin.debug:
+                var: _crc_default_net_dns
+
+            - name: Debug net_ip value
+              ansible.builtin.debug:
+                msg: >-
+                  {{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}
+
+            - name: Fail for good
+              ansible.builtin.fail:
+                msg: "Failure detected, check debug output above"
 
     - name: Restart dnsmasq service if used
-      become: true
-      when:
-        - not _dnsmasq.stat.exists
-      ansible.builtin.service:
-        name: dnsmasq
-        state: restarted
+      block:
+        - name: Restart native dnsmasq service
+          when:
+            - not _dnsmasq.stat.exists
+          become: true
+          ansible.builtin.service:
+            name: dnsmasq
+            state: restarted
+
+      rescue:
+        - name: Get dnsmasq logs
+          become: true
+          register: _dnsmasq_log
+          ansible.builtin.command:
+            cmd: "journalctl -xe -u dnsmasq"
+
+        - name: Output dnsmasq logs
+          ansible.builtin.debug:
+            var: _dnsmasq_log
+
+        - name: Fail for good
+          ansible.builtin.fail:
+            msg: "Unable to restart dnsmasq, check logs above"
 
     - name: Manage old dnsmasq container
       when:
