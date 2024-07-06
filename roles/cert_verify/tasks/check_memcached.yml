@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Read memcached-0 config for tls
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c memcached -t memcached-0 -- bash -c 'cat /etc/sysconfig/memcached|grep OPTIONS'"
+  register: cert_verify_memcached_0_config
+
+- name: Check memcached-0 for tls
+  ansible.builtin.assert:
+    that:
+      - "'ssl_key=/etc/pki/tls/private/memcached.key' in cert_verify_memcached_0_config.stdout"
+      - "'ssl_chain_cert=/etc/pki/tls/certs/memcached.crt' in cert_verify_memcached_0_config.stdout"
+    success_msg: "memcached-0 is listening on SSL"
+    fail_msg: "memcached-0 is not SSL"
+
+- name: Read memcached-0 container key file
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c memcached -t memcached-0 -- bash -c 'cat /etc/pki/tls/private/memcached.key|base64 -w0'"
+  register: cert_verify_memcached_key_file
+
+- name: Read memcached-0 container crt file
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c memcached -t memcached-0 -- bash -c 'cat /etc/pki/tls/certs/memcached.crt|base64 -w0'"
+  register: cert_verify_memcached_crt_file
+
+- name: Read memcached secret key
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-memcached-svc -o jsonpath=\"{.data['tls\\.key']}\""
+  register: cert_verify_memcached_key_secret
+
+- name: Read memcached secret crt
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-memcached-svc -o jsonpath=\"{.data['tls\\.crt']}\""
+  register: cert_verify_memcached_crt_secret
+
+- name: memcached container key/crt match certmanage key/crt
+  ansible.builtin.assert:
+    that:
+      - cert_verify_memcached_key_file.stdout == cert_verify_memcached_key_secret.stdout
+      - cert_verify_memcached_crt_file.stdout == cert_verify_memcached_crt_secret.stdout
+    success_msg: "memcached container key/crt matches certmanage key/crt"
+    fail_msg: "memcachedcontainer key/crt does not matches certmanage key/crt"
+
