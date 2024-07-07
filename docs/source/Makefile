@@ -39,3 +39,6 @@ role_doc:
 		test -L ./roles/$${role_name}.md || \
 		ln -s ../$$i ./roles/$${role_name}.md; \
 	done
+
+.PHONY: autobuild_pre
+autobuild_pre: utils_doc plugin_doc role_doc

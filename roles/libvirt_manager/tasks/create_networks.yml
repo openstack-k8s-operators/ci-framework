@@ -81,6 +81,39 @@
   loop_control:
     label: "{{ item.name }}"
 
+# NOTE(hjensas): Using a random string for dummy interface names because
+#                otherwise we hit the 15 char limitation on ifname.
+- name: Create dummy interfaces to ensure bridges are UP
+  vars:
+    cifmw_ci_nmstate_unmanaged_node_config: >-
+      {%- set interfaces = []                                            -%}
+      {%- for network in networks | map(attribute="name") | flatten
+            if cifmw_libvirt_manager_network_interface_types[network | regex_replace('cifmw[-_]','')]
+            | default('bridge') == 'bridge'                              -%}
+      {%- set suffix = lookup('password',
+                              '/dev/null',
+                              chars=['ascii_lowercase', 'digits'],
+                              length=8,
+                              seed=network)                              -%}
+      {%- set _ = interfaces.append(
+        {
+          'name': 'dummy-' + suffix,
+          'type': 'dummy',
+          'ipv4': {'enabled': false},
+          'ipv6': {'enabled': false},
+          'controller': network,
+          'description': (
+            'Dummy for bridge: ' + network +
+            ' - to ensure bridge UP and IPv6 link-local addr is assigned.')
+        }
+      )                                                                  -%}
+      {%- endfor                                                         -%}
+      {{ {'interfaces': interfaces } }}
+    cifmw_ci_nmstate_unmanaged_host: "{{ inventory_hostname }}"
+  ansible.builtin.include_role:
+    name: "ci_nmstate"
+    tasks_from: "nmstate_unmanaged_provision_node.yml"
+
 ## Ensure we get dnsmasq DHCP service for all created networks
 # Refreshing network facts will ensure we get the new interfaces.
 # They (usually?) have the same name as the network itself.

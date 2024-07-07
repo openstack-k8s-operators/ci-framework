@@ -152,6 +152,63 @@
       server=/{{ _domain }}/127.0.0.2
       server=/apps-crc.testing/127.0.0.2
       server=/crc.testing/127.0.0.2
+      server=/utility/127.0.0.2
+
+- name: Feed utility records
+  block:
+    - name: Ensure "utility" domain is local
+      become: true
+      notify: "Restart dnsmasq"
+      ansible.builtin.copy:
+        dest: "/etc/cifmw-dnsmasq.d/utility.conf"
+        mode: "0644"
+        content: |-
+          local=/utility/
+
+    # Using "public" gateway IP should ensure we're targeting an IP
+    # on the hypervisor, reachable by the VMs, ensuring it can discuss
+    # with the host (vbmc and sushy_emulator reaching libvirt, etc).
+    # Note that "public" is either "public" or "ocpbm" virtual networks.
+    # We need one where the ocp-bootstrap instance is connected.
+    # Also, "public" network doesn't seem to provide any "gw_v*" - we have
+    # to build it.
+    - name: Build utility records dataset
+      vars:
+        # Since we use might skip some tags, we must re-iterate the default
+        # value for the cifmw_libvirt_manager_pub_net parameter here.
+        _pub_net: "{{ cifmw_libvirt_manager_pub_net | default('public') }}"
+        _target_net: >-
+          {{
+            cifmw_networking_env_definition.networks[_pub_net]
+          }}
+        _controller_net: >-
+          {{
+            cifmw_networking_env_definition.instances['controller-0'].networks
+          }}
+        cifmw_dnsmasq_host_record:
+          - names:
+              - "ipmi.utility"
+              - "{{ inventory_hostname }}.utility"
+            ips:
+              - >-
+                {%- if _target_net.network_v4 is defined -%}
+                {{ _target_net.network_v4 | ansible.utils.nthhost(1) }}
+                {%- endif -%}
+              - >-
+                {%- if _target_net.network_v6 is defined -%}
+                {{ _target_net.network_v6 | ansible.utils.nthhost(1) }}
+                {%- endif -%}
+            state: present
+          - names:
+              - "sushy.utility"
+              - "controller-0.utility"
+            ips:
+              - "{{ _controller_net.ctlplane.ip_v4 | default('') }}"
+              - "{{ _controller_net.ctlplane.ip_v6 | default('') }}"
+            state: present
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_host_record.yml"
 
 - name: Flush handlers
   ansible.builtin.meta: flush_handlers

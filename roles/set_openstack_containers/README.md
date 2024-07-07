@@ -16,6 +16,8 @@ The role will generate two 2 files in ~/ci-framework-data/artifacts/ directory a
 * `cifmw_set_openstack_containers_dlrn_md5_path`: Full path of delorean.repo.md5. Defaults to `/etc/yum.repos.d/delorean.repo.md5`.
 * `cifmw_set_openstack_containers_overrides`: Extra container overrides. Defaults to `{}`
 * `cifmw_set_openstack_containers_prefix`: Update container containing. Defaults to `openstack`
+* `cifmw_set_openstack_containers_openstack_version_change`: (Boolean) Set environment variables for openstack services containers for specific OPENSTACK_RELEASE_VERSION defined in cifmw_set_openstack_containers_update_target_version. It should be used only for meta openstack operator in prepare for openstack minor update. Defaults to `false`.
+* `cifmw_set_openstack_containers_update_target_version`: Value of OPENSTACK_RELEASE_VERSION env in openstack operator that should be set. Defaults to `0.0.2`.
 
 ## Examples
 
@@ -87,6 +89,22 @@ It is used in edpm-ansible job to update the `ANSIBLEEE_IMAGE_URL_DEFAULT`.
         cifmw_set_openstack_containers_operator_name: openstack-ansibleee
         cifmw_set_openstack_containers_overrides:
           ANSIBLEEE_IMAGE_URL_DEFAULT: "{{ ansibleee_runner_img }}"
+      ansible.builtin.include_role:
+        name: set_openstack_containers
+```
+
+### Update all openstack services containers env vars in meta operator with tag from delorean and set OPENSTACK_RELEASE_VERSION env
+
+It is used in update job to set openstack services containers in prepare for running openstack update.
+
+```yaml
+    - name: Update all openstack services containers env vars in meta operator with tag from delorean and set OPENSTACK_RELEASE_VERSION
+      vars:
+        cifmw_set_openstack_containers_dlrn_md5_path:  "~/ci-framework-data//artifacts/repositories/delorean.repo.md5"
+        cifmw_set_openstack_containers_tag_from_md5: true
+        cifmw_set_openstack_containers_registry: quay.rdoproject.org
+        cifmw_set_openstack_containers_openstack_version_change: true
+        cifmw_set_openstack_containers_update_target_version: 0.0.2
       ansible.builtin.include_role:
         name: set_openstack_containers
 ```
