@@ -87,7 +87,14 @@
     name: firewalld
     state: restarted
 
+- name: List VMs
+  register: _list_running_vms
+  community.libvirt.virt:
+    command: list_vms
+    state: running
+
 - name: "Create the config-drive ISO for the nat64-appliance"
+  when: 'not cifmw_nat64_appliance_name in _list_running_vms.list_vms'
   vars:
     cifmw_config_drive_iso_image: "{{ cifmw_nat64_appliance_workdir }}/{{ cifmw_nat64_appliance_uuid }}.iso"
     cifmw_config_drive_uuid: "{{ cifmw_nat64_appliance_uuid }}"
@@ -128,12 +135,14 @@
     name: config_drive
 
 - name: "Define nat64-appliance VM"
+  when: 'not cifmw_nat64_appliance_name in _list_running_vms.list_vms'
   community.libvirt.virt:
     command: define
     xml: "{{ lookup('template', 'domain.xml.j2') }}"
     uri: "{{ cifmw_nat64_libvirt_uri }}"
 
 - name: "Start nat64-appliance VM"
+  when: 'not cifmw_nat64_appliance_name in _list_running_vms.list_vms'
   community.libvirt.virt:
     state: running
     name: "{{ cifmw_nat64_appliance_name }}"
