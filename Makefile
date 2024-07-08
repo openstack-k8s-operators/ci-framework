@@ -162,6 +162,7 @@ run_ctx_pre_commit: ci_ctx ## Run pre-commit check in a container
 		"make pre_commit_nodeps  BASEDIR=$(BASEDIR)" ;
 
 .PHONY: run_ctx_molecule
+run_ctx_molecule: export MOLECULE_CONFIG=".config/molecule/config_local.yml"
 run_ctx_molecule: ci_ctx ## Run molecule check in a container
 	podman run \
 		--rm \
@@ -170,6 +171,7 @@ run_ctx_molecule: ci_ctx ## Run molecule check in a container
 		--user root \
 		-e MOLECULE_CONFIG=${MOLECULE_CONFIG} \
 		-e TEST_ALL_ROLES=$(TEST_ALL_ROLES) \
+		-e TEST_SINGLE_ROLE=$(TEST_SINGLE_ROLE) \
 		${CI_CTX_NAME} \
 		bash -c \
 		"make molecule_nodeps MOLECULE_CONFIG=${MOLECULE_CONFIG}";
