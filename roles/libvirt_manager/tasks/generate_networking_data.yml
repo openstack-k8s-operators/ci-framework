@@ -71,9 +71,27 @@
          cifmw_baremetal_hosts[item.key] is defined) |
         ternary('baremetal', _std_group)
       }}
+    _ocp_name: >-
+      {{
+        item.key | replace('_', '-') |
+        replace('ocp-worker', 'worker') |
+        replace('ocp', 'master')
+      }}
+    _hostname: >-
+      {{
+        (item.key is match('^ocp.*')) |
+        ternary(_ocp_name, item.key)
+      }}
+    _ssh_user: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms[_vm_type].admin_user |
+        default('zuul')
+      }}
   ansible.builtin.add_host:
     name: "{{ item.key }}"
     groups: "{{ _group }}s"
+    ansible_ssh_user: "{{ _ssh_user }}"
+    ansible_host: "{{ _hostname }}.{{ inventory_hostname }}"
   loop: "{{ cifmw_libvirt_manager_mac_map | dict2items }}"
   loop_control:
     label: "Adding {{ item.key }} to {{ _group }}s"
@@ -248,60 +266,8 @@
     cifmw_networking_mapper_definition_patch_01_libvirt: {}
 
 # START inject reserved IPs in dnsmasq, based on networking_mapper output
-- name: Reserve IPs on networks
-  when:
-    - net.name not in _no_dnsmasq
-  vars:
-    _no_dnsmasq: >-
-      {{
-        cifmw_libvirt_manager_no_dnsmasq_nets_defaults +
-        cifmw_libvirt_manager_no_dnsmasq_nets
-      }}
-  ansible.builtin.include_tasks: reserve_dnsmasq_ips.yml
-  loop: "{{ _network_data }}"
-  loop_control:
-    loop_var: "net"
-    label: "{{ net.name }}"
-
-# We match ^ctlplane networks mostly for the DCN case,
-# where they have multiple ctlplane networks in the form:
-# ctlplane_dcn1
-# ctlplane_dcn2
-# ...
-# Using the selectattr + match, then selecting the first
-# matched network should cover most of the cases if not all.
-- name: Create .utility zone entries
-  when:
-    - _net | length > 0
-  vars:
-    _ctlplane_net: >-
-      {{
-        vm.value.networks | dict2items |
-        selectattr('key', 'match', '^ctlplane')
-      }}
-    _pub_net_data: >-
-      {{
-        vm.value.networks | dict2items |
-        selectattr('key', 'match', cifmw_libvirt_manager_pub_net)
-      }}
-    _net: >-
-      {{
-        (_ctlplane_net | length > 0 ) |
-        ternary(_ctlplane_net, _pub_net_data)
-      }}
-    _entry:
-      - names:
-          - "{{ vm.key }}.utility"
-        ips:
-          - "{{ _net.0.value.ip_v4 | default('') }}"
-          - "{{ _net.0.value.ip_v6 | default('') }}"
-        state: present
-  ansible.builtin.set_fact:
-    _vm_utility: "{{ _vm_utility | default([]) + _entry }}"
-  loop: "{{ _libvirt_manager_networking.instances | dict2items }}"
-  loop_control:
-    loop_var: vm
-    label: "{{ vm.key }}"
+- name: Reserve IPs in DHCP and create DNS entries
+  ansible.builtin.import_tasks: create_dns_records.yml
 
 # This task might also be done via the reproducer/prepare_networking.yml
 # but, depending on how we call the libvirt_manager, we might not have it.
@@ -317,13 +283,6 @@
     content: |
       local=/utility/
     validate: "/usr/sbin/dnsmasq -C %s --test"
-
-- name: Inject VMs in the .utility zone
-  vars:
-    cifmw_dnsmasq_host_record: "{{ _vm_utility }}"
-  ansible.builtin.include_role:
-    name: "dnsmasq"
-    tasks_from: "manage_host_record.yml"
 
 - name: Ensure dnsmasq is reloaded now
   ansible.builtin.meta: flush_handlers

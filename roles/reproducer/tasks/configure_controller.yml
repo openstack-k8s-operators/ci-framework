@@ -172,6 +172,7 @@
           }}
       ansible.builtin.blockinfile:
         create: true
+        mode: "0600"
         path: "/home/zuul/.ssh/config"
         marker: "## {mark} {{ _ssh_host }}"
         block: |-
@@ -185,41 +186,39 @@
         label: "{{ host }}"
         loop_var: "host"
 
-    - name: Inject ProxyJump configuration for remote hypervisor VMs
+    - name: Inject SSH configuration
       when:
-        - hostvars[host]['host_ip'] is defined
+        - hostvars[host].ansible_host is defined
+        - hostvars[host].ansible_ssh_user is defined
       vars:
         _vm_type: "{{ host | regex_replace('\\-[0-9]*', '') }}"
         _vm_data: "{{ _cifmw_libvirt_manager_layout.vms[_vm_type] }}"
-        _proxy_user: >-
+        _ocp_name: >-
           {{
-            (hostvars[_vm_data.target]['ansible_user'] |
-            default(ansible_user_id)) |
-            default('')
+            host | replace('_', '-') |
+            replace('ocp-worker', 'worker') |
+            replace('ocp', 'master')
           }}
-        _proxy_host: "{{ _vm_data.target | default('') }}"
-        _ssh_host: >-
+        _hostname: >-
           {{
-            (hostvars[_proxy_host]['ansible_host'] |
-            default(hostvars[_proxy_host]['inventory_hostname'])) |
-            default('')
+            (host is match('^ocp.*')) |
+            ternary(_ocp_name, host)
           }}
-        _vm_ip: "{{ hostvars[host]['host_ip'] }}"
       ansible.builtin.blockinfile:
+        create: true
+        mode: "0600"
         path: "/home/zuul/.ssh/config"
         marker: "## {mark} {{ host }}"
         block: |-
-          Host {{ host }} {{ _vm_ip }} {{ hostvars[host]['host_ip'] }}
-            Hostname {{ hostvars[host]['host_ip'] }}
-            User {{ _vm_data['admin_user'] | default('zuul') }}
+          Host {{ host }} {{ _hostname }} {{ _hostname }}.utility {{ hostvars[host].ansible_host }}
+            Hostname {{ _hostname }}.utility
+            User {{ hostvars[host].ansible_ssh_user }}
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
-          {% if _vm_data.target is defined and
-             _vm_data.target != _cifmw_libvirt_manager_layout.vms.controller.target %}
-            IdentityFile ~/.ssh/ssh_{{ _ssh_host }}
-            ProxyJump {{ _proxy_user }}@{{ _proxy_host }}
-          {% elif host is match('^ocp.*') %}
+          {% if host is match('^ocp.*') %}
             IdentityFile ~/.ssh/devscripts_key
+          {% elif host is match('^crc.*') %}
+            IdentityFile ~/.ssh/crc_key
           {% else %}
             IdentityFile ~/.ssh/id_cifw
           {% endif %}
