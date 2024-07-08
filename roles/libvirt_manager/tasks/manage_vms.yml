@@ -1,15 +1,30 @@
 ---
 - name: "Push ssh jumper/configuration for {{ vm }}"
   vars:
+    _ocp_name: >-
+      {{
+        vm | replace('_', '-') |
+        replace('ocp-worker', 'worker') |
+        replace('ocp', 'master')
+      }}
+    _hostname: >-
+      {{
+        (vm is match('^ocp.*')) |
+        ternary(_ocp_name, vm)
+      }}
     _user: "{{ 'core' if vm is match('^(crc|ocp).*') else 'zuul' }}"
     dataset:
       ssh_dir: "{{ ansible_user_dir }}/.ssh"
       user: "{{ _user }}"
-      hostname: "{{ vm }}.utility"
+      hostname: "{{ _hostname }}.utility"
       patterns:
         - "{{ vm }}"
+        - "{{ _hostname }}"
+        - "{{ _hostname }}.utility"
         - "{{ vm }}.{{ inventory_hostname }}"
+        - "{{ _hostname }}.{{ inventory_hostname }}"
         - "cifmw-{{ vm }}"
+        - "cifmw-{{ _hostname }}"
     proxy_data:
       target: localhost
       proxy_host: "{{ ansible_host | default(inventory_hostname) }}"
@@ -32,20 +47,6 @@
     cifmw_ssh_jumper_config: "{{ config }}"
   ansible.builtin.include_role:
     name: "ssh_jumper"
-
-- name: Inject nodes in the ansible inventory
-  delegate_to: localhost
-  when:
-    - (_cifmw_libvirt_manager_layout.vms[vm_type].amount | default(1) | int) > 0
-  ansible.builtin.add_host:
-    name: "{{ vm }}"
-    groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
-    ansible_host: "{{ vm }}.{{ inventory_hostname }}"
-    ansible_ssh_user: >-
-      {{
-        _cifmw_libvirt_manager_layout.vms[vm_type].admin_user |
-        default(_init_admin_user)
-      }}
 
 - name: "Configure ssh access on VM {{ vm }}"
   vars:
@@ -120,17 +121,3 @@
     owner: zuul
     group: zuul
     mode: "0444"
-
-- name: Update inventory to consume correct user
-  delegate_to: localhost
-  when:
-    - (_cifmw_libvirt_manager_layout.vms[vm_type].amount | default(1) | int) > 0
-  ansible.builtin.add_host:
-    name: "{{ vm }}"
-    groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
-    ansible_host: "{{ vm }}.{{ inventory_hostname }}"
-    ansible_ssh_user: >-
-      {{
-        _cifmw_libvirt_manager_layout.vms[vm_type].admin_user | default('zuul')
-      }}
-    host_ip: "{{ vm }}.utility"

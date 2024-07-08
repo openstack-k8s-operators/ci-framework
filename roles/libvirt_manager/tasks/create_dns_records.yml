@@ -1,0 +1,86 @@
+---
+# We match ^ctlplane networks mostly for the DCN case,
+# where they have multiple ctlplane networks in the form:
+# ctlplane_dcn1
+# ctlplane_dcn2
+# ...
+# Using the selectattr + match, then selecting the first
+# matched network should cover most of the cases if not all.
+- name: Try/catch block with common variables
+  vars:
+    _no_dnsmasq: >-
+      {{
+        cifmw_libvirt_manager_no_dnsmasq_nets_defaults +
+        cifmw_libvirt_manager_no_dnsmasq_nets
+      }}
+  block:
+    - name: Reserve IPs on networks
+      when:
+        - net.name not in _no_dnsmasq
+      ansible.builtin.include_tasks: reserve_dnsmasq_ips.yml
+      loop: "{{ _network_data }}"
+      loop_control:
+        loop_var: "net"
+        label: "{{ net.name }}"
+
+    - name: Create per-network and .utility DNS entries
+      vars:
+        _ctlplane_net: >-
+          {{
+            vm.value.networks | dict2items |
+            selectattr('key', 'match', '^ctlplane')
+          }}
+        _pub_net_data: >-
+          {{
+            vm.value.networks | dict2items |
+            selectattr('key', 'match', cifmw_libvirt_manager_pub_net)
+          }}
+        _utility_net: >-
+          {{
+            (_ctlplane_net | length > 0 ) |
+            ternary(_ctlplane_net, _pub_net_data)
+          }}
+        _ocp_name: >-
+          {{
+            vm.key | replace('_', '-') |
+            replace('ocp-worker', 'worker') |
+            replace('ocp', 'master')
+          }}
+        _hostname: >-
+          {{
+            (vm.key is match('^ocp.*')) |
+            ternary(_ocp_name, vm.key)
+          }}
+        _domain: >-
+          {{
+             cifmw_reproducer_domain | default('local')
+          }}
+        _utility:
+          - names:
+              - "{{ _hostname }}.utility"
+            ips:
+              - "{{ _utility_net.0.value.ip_v4 | default('') }}"
+              - "{{ _utility_net.0.value.ip_v6 | default('') }}"
+            state: present
+        _entry: >-
+          {%- for network in vm.value.networks | dict2items -%}
+          {%- set _fqdn = [_hostname, network.key, _domain] | join('.') -%}
+          {%- set _ips = [network.value.ip_v4 | default(''),
+                          network.value.ip_v6 | default('') ]-%}
+          {%- set _rec = {'names': [_fqdn], 'ips': _ips, 'state': 'present'} -%}
+          {%- set _ = _utility.append(_rec) -%}
+          {%- endfor -%}
+          {{ _utility }}
+      ansible.builtin.set_fact:
+        _vm_records: "{{ _vm_records | default([]) + _entry }}"
+      loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
+      loop_control:
+        loop_var: vm
+        label: "{{ vm.key }}"
+
+    - name: Inject VMs in the .utility zone
+      vars:
+        cifmw_dnsmasq_host_record: "{{ _vm_records }}"
+      ansible.builtin.include_role:
+        name: "dnsmasq"
+        tasks_from: "manage_host_record.yml"
