@@ -10,6 +10,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
 * `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. Default value: `8`
+* `cifmw_test_operator_parallel`: (boolean) Reather or not use --parallel flag in tempest run. Default value: `true`
 * `cifmw_test_operator_cleanup`: (Bool) Delete all resources created by the role at the end of the testing. Default value: `false`
 * `cifmw_test_operator_default_groups`: (List) List of groups in the include list to search for tests to be executed. Default value: `[ 'default' ]`
 * `cifmw_test_operator_default_jobs`: (List) List of jobs in the exclude list to search for tests to be excluded. Default value: `[ 'default' ]`
