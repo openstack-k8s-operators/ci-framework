@@ -299,6 +299,39 @@
             name: openshift_setup
             tasks_from: patch_network_operator.yml
 
+# Run from the hypervisor
+- name: Ensure OCP cluster is stable
+  when:
+    - _wait_ocp_cluster is defined
+    - _wait_ocp_cluster | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  vars:
+    _auth_path: >-
+      {{
+        (
+          cifmw_devscripts_repo_dir,
+          'ocp',
+          cifmw_devscripts_config.cluster_name,
+          'auth'
+        ) | ansible.builtin.path_join
+      }}
+    cifmw_openshift_adm_op: "stable"
+    cifmw_openshift_kubeconfig: >-
+      {{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}
+  ansible.builtin.include_role:
+    name: openshift_adm
+
+- name: Run from controller-0
+  when:
+    - (
+        _cifmw_libvirt_manager_layout.vms.controller.target is defined and
+        _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
+      ) or
+      _cifmw_libvirt_manager_layout.vms.controller.target is undefined
+  delegate_to: controller-0
+  block:
     - name: Emulate CI job
       when:
         - cifmw_job_uri is defined
