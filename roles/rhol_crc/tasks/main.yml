@@ -83,14 +83,14 @@
           ansible.builtin.import_tasks: configuration.yml
 
         - name: Setup RHOL/CRC
-          ansible.builtin.shell:  # noqa risky-shell-pipe
+          ansible.builtin.shell: # noqa risky-shell-pipe
             cmd: >-
               {{ cifmw_rhol_crc_binary }} setup 2>&1 |
               tee {{ cifmw_rhol_crc_basedir }}/logs/crc-setup.log
           register: cifmw_rhol_crc_cmd_setup
 
         - name: Start RHOL/CRC
-          ansible.builtin.shell:  # noqa risky-shell-pipe
+          ansible.builtin.shell: # noqa risky-shell-pipe
             cmd: >-
               {{ cifmw_rhol_crc_binary }} start 2>&1 |
               tee {{ cifmw_rhol_crc_basedir }}/logs/crc-start.log
@@ -137,3 +137,37 @@
 - name: Add crc kubeconfig
   when: cifmw_rhol_crc_creds | bool
   ansible.builtin.import_tasks: add_crc_creds.yml
+
+# Note(Lewis): Only needed for CRC => 2.32.0-4.14.8
+- name: Configure DNS in CRC VM
+  delegate_to: crc
+  vars:
+    _crc_ip: "192.168.122.10"
+    _dnsmasq_config: "/etc/dnsmasq.d/crc-dnsmasq.conf"
+  when:
+    - cifmw_use_crc is defined
+    - cifmw_use_crc | bool
+  block:
+    - name: Check if using systemd dnsmasq
+      register: _dnsmasq
+      ansible.builtin.stat:
+        path: "{{ _dnsmasq_config }}"
+        get_attributes: false
+        get_checksum: false
+        get_mime: false
+
+    - name: Configure dnsmasq and restart service
+      when: _dnsmasq.stat.exists
+      block:
+        - name: Configure dnsmasq listen-address to listen on both br-ex and ospbr
+          become: true
+          ansible.builtin.lineinfile:
+            path: "{{ _dnsmasq_config }}"
+            insertafter: "^listen-address="
+            line: "listen-address={{ _crc_ip | ansible.utils.ipaddr('address') }}"
+
+        - name: Restart DNS in CRC VM
+          become: true
+          ansible.builtin.service:
+            name: dnsmasq
+            state: restarted
