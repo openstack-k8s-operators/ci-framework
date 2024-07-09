@@ -84,7 +84,7 @@
       to use a file present on the host.
 
 - name: Set _use_crc based on actual layout
-  ansible.builtin.set_fact:
+  vars:
     _use_crc: >-
       {{
         _cifmw_libvirt_manager_layout.vms.crc is defined and
@@ -99,6 +99,10 @@
         (_cifmw_libvirt_manager_layout.vms.ocp.amount is defined and
          _cifmw_libvirt_manager_layout.vms.ocp.amount|int > 0)
       }}
+  ansible.builtin.set_fact:
+    _use_crc: "{{ _use_crc }}"
+    _use_ocp: "{{ _use_ocp }}"
+    _has_openshift: "{{ _use_ocp or _use_crc }}"
 
 - name: Ensure directories are present
   tags:
@@ -169,7 +173,7 @@
 
 - name: Consume dev-scripts for OCP cluster
   when:
-    - _cifmw_libvirt_manager_layout.vms.ocp is defined
+    - _use_ocp
     - (
         _cifmw_libvirt_manager_layout.vms.ocp.target is defined and
         _cifmw_libvirt_manager_layout.vms.ocp.target == inventory_hostname
@@ -214,7 +218,7 @@
 - name: Apply VLAN ids to TAP type interfaces.
   when:
     - _cifmw_libvirt_manager_layout.networks is defined
-    - _cifmw_libvirt_manager_layout.vms.ocp is defined
+    - _use_ocp
     - (
         _cifmw_libvirt_manager_layout.vms.ocp.target is defined and
         _cifmw_libvirt_manager_layout.vms.ocp.target == inventory_hostname
@@ -289,10 +293,7 @@
 
         - name: Configure CRC network if needed
           when:
-            - _cifmw_libvirt_manager_layout.vms.crc is defined
-            - (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
-               (_cifmw_libvirt_manager_layout.vms.crc.amount | int ) > 0) or
-              _cifmw_libvirt_manager_layout.vms.crc.amount is undefined
+            - _use_crc | bool
           vars:
             cifmw_openshift_kubeconfig: "/home/zuul/.kube/config"
           ansible.builtin.include_role:
@@ -325,6 +326,7 @@
 
 - name: Run from controller-0
   when:
+    - _has_openshift
     - (
         _cifmw_libvirt_manager_layout.vms.controller.target is defined and
         _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
