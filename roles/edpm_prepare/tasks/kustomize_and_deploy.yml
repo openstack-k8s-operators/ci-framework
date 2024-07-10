@@ -14,44 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Controlplane name
-  ansible.builtin.set_fact:
-    _ctlplane_name: "controlplane"
-
-- name: Set vars related to update_containers content provider
-  when:
-    - content_provider_os_registry_url is defined
-    - content_provider_os_registry_url != 'null'
-  ansible.builtin.set_fact:
-    cifmw_update_containers_registry: "{{ content_provider_os_registry_url  | split('/') | first }}"
-    cifmw_update_containers_org: "{{ content_provider_os_registry_url  | split('/') | last }}"
-    cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
-    cifmw_update_containers_openstack: true
-
-- name: Prepare OpenStackVersion CR
-  when: >-
-      (cifmw_update_containers_edpm_image_url is defined) or
-      (cifmw_update_containers_ansibleee_image_url is defined) or
-      ((cifmw_update_containers_openstack is defined and
-      cifmw_update_containers_openstack | bool))
-  vars:
-    cifmw_update_containers_metadata: "{{ _ctlplane_name }}"
-  ansible.builtin.include_role:
-    name: update_containers
-
-- name: Controlplane name kustomization
-  ansible.builtin.set_fact:
-    _ctlplane_name_kustomizations:
-      - apiVersion: kustomize.config.k8s.io/v1beta1
-        kind: Kustomization
-        patches:
-          - target:
-              kind: OpenStackControlPlane
-            patch: |-
-              - op: replace
-                path: /metadata/name
-                value: {{ _ctlplane_name }}
-
 - name: Perform kustomizations to the OpenStackControlPlane CR
   vars:
     cifmw_edpm_prepare_openstack_crs_path: >-
@@ -66,7 +28,7 @@
   ci_kustomize:
     target_path: "{{ cifmw_edpm_prepare_openstack_crs_path }}"
     sort_ascending: false
-    kustomizations: "{{ cifmw_edpm_prepare_kustomizations + _ctlplane_name_kustomizations }}"
+    kustomizations: "{{ cifmw_edpm_prepare_kustomizations }}"
     kustomizations_paths: >-
       {{
         [
@@ -98,6 +60,39 @@
   # we need to wait a few seconds so it changes to a 'non-ready' status first.
   ansible.builtin.pause:
     seconds: "{{ cifmw_edpm_prepare_wait_controplane_status_change_sec }}"
+
+- name: Get controlplane name
+  ansible.builtin.set_fact:
+    _ctlplane_name: >-
+      {{
+        (
+          cifmw_edpm_prepare_crs_kustomize_result.result |
+          selectattr('kind', 'defined') |
+          selectattr('metadata.name', 'defined') |
+          selectattr('kind', 'equalto', 'OpenStackControlPlane') |
+          first
+        ).metadata.name
+      }}
+- name: Set vars related to update_containers content provider
+  when:
+    - content_provider_os_registry_url is defined
+    - content_provider_os_registry_url != 'null'
+  ansible.builtin.set_fact:
+    cifmw_update_containers_registry: "{{ content_provider_os_registry_url  | split('/') | first }}"
+    cifmw_update_containers_org: "{{ content_provider_os_registry_url  | split('/') | last }}"
+    cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
+    cifmw_update_containers_openstack: true
+
+- name: Update Openstack containers or BM CSV or Ansibleee CSV to update proper image
+  when: >-
+      (cifmw_update_containers_edpm_image_url is defined) or
+      (cifmw_update_containers_ansibleee_image_url is defined) or
+      ((cifmw_update_containers_openstack is defined and
+      cifmw_update_containers_openstack | bool))
+  vars:
+    cifmw_update_containers_metadata: "{{ _ctlplane_name }}"
+  ansible.builtin.include_role:
+    name: update_containers
 
 - name: Wait for OpenStack controlplane to be deployed
   environment:
