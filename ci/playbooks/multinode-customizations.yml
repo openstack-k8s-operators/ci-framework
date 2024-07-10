@@ -118,6 +118,35 @@
                 line: "listen-address={{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}"
                 validate: "{{ _validate }}"
 
+            - name: Ensure upstream dns servers are not present in resolv.conf
+              become: true
+              ansible.builtin.lineinfile:
+                path: "/etc/resolv.conf"
+                state: absent
+                regexp: "{{ item }}"
+              loop:
+                - 8.8.8.8
+                - 1.1.1.1
+
+            - name: Remove upstream servers from dsnamsq config
+              become: true
+              ansible.builtin.lineinfile:
+                path: "{{ _dnsmasq_config }}"
+                state: absent
+                regexp: "{{ item }}"
+              loop:
+                - 8.8.8.8
+                - 1.1.1.1
+
+            - name: Configure proper dns servers in /etc/resolv.conf
+              become: true
+              ansible.builtin.blockinfile:
+                path: "/etc/resolv.conf"
+                block: |-
+                  {% for dns_server in _crc_default_net_dns %}
+                  nameserver {{ dns_server }}
+                  {% endfor %}
+
           rescue:
             - name: Debug _dnsmasq_config
               ansible.builtin.debug:
