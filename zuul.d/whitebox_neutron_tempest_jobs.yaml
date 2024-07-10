@@ -1,0 +1,152 @@
+---
+# It contains the list of jobs running against
+# whitebox-neutron-tempest-plugin rdo third party check job
+
+- job:
+    name: whitebox-neutron-tempest-plugin-podified-multinode-edpm-deployment-crc-2comp
+    parent: podified-multinode-edpm-deployment-crc-2comp
+    override-checkout: main
+    description: |
+      A multinode EDPM Zuul job which one controller, one extracted crc and
+      2 computes. This job will run with meta content provider to test
+      whitebox-neutron-tempest-plugin opendev patches. It will validate the
+      deployment by running whitebox-neutron-tempest-plugin tests.
+    vars:
+      cifmw_run_test_role: test_operator
+      cifmw_os_must_gather_timeout: 28800
+      cifmw_test_operator_timeout: 14400
+      cifmw_block_device_size: 40G
+      cifmw_test_operator_concurrency: 6
+      cifmw_test_operator_tempest_network_attachments:
+        - ctlplane
+      cifmw_test_operator_tempest_container: openstack-tempest-all
+      cifmw_test_operator_tempest_registry: "{{ content_provider_os_registry_url | split('/') | first }}"
+      cifmw_test_operator_tempest_namespace: "{{ content_provider_os_registry_url | split('/') | last }}"
+      cifmw_test_operator_tempest_image_tag: "{{ content_provider_dlrn_md5_hash }}"
+      cifmw_test_operator_tempest_extra_images:
+          # TODO(chandan): Replace rocky qcow2 url once rhos-ops hosts it
+        - URL: "https://chandankumar.fedorapeople.org/rocky9_latest_neutron_whitebox.qcow2"
+          name: custom_neutron_guest
+          diskFormat: qcow2
+          ID: "11111111-1111-1111-1111-111111111111"
+          flavor:
+            name: custom_neutron_guest
+            ID: "22222222-2222-2222-2222-222222222222"
+            RAM: 1024
+            disk: 10
+            vcpus: 1
+      cifmw_edpm_prepare_kustomizations:
+        - apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          namespace: openstack
+          patches:
+            - patch: |-
+                apiVersion: core.openstack.org/v1beta1
+                kind: OpenStackControlPlane
+                metadata:
+                  name: unused
+                spec:
+                  heat:
+                    enabled: true
+                  neutron:
+                    template:
+                      customServiceConfig: |
+                        [DEFAULT]
+                        debug=true
+                        vlan_transparent = true
+                        global_physnet_mtu = 1400
+                        [ovn]
+                        ovn_emit_need_to_frag = true
+                        [ml2]
+                        path_mtu = 1400
+                        [ovs]
+                        igmp_snooping_enable=True
+              target:
+                kind: OpenStackControlPlane
+      cifmw_tempest_tempestconf_config:
+        overrides: |
+          compute-feature-enabled.vnc_console true
+          compute-feature-enabled.cold_migration true
+          compute-feature-enabled.block_migration_for_live_migration true
+          network-feature-enabled.port_security true
+          neutron_plugin_options.advanced_image_ssh_user rocky
+          neutron_plugin_options.available_type_drivers geneve
+          neutron_plugin_options.create_shared_resources true
+          neutron_plugin_options.is_igmp_snooping_enabled true
+          neutron_plugin_options.ipv6_metadata false
+          neutron_plugin_options.advanced_image_ref 11111111-1111-1111-1111-111111111111
+          neutron_plugin_options.advanced_image_flavor_ref 22222222-2222-2222-2222-222222222222
+          whitebox_neutron_plugin_options.openstack_type podified
+          whitebox_neutron_plugin_options.run_traffic_flow_tests True
+          whitebox_neutron_plugin_options.kubeconfig_path '/home/zuul/.crc/machines/crc/kubeconfig'
+          validation.allowed_network_downtime 15
+          validation.run_validation true
+          identity.v3_endpoint_type public
+          identity.v2_admin_endpoint_type public
+      # NOTE(gibi): This is a WA to force the publicURL as otherwise
+      # tempest gets configured with adminURL and that causes test
+      # instability.
+      cifmw_test_operator_tempest_workflow:
+        - stepName: multi-thread-testing
+          tempestRun:
+            concurrency: 6
+            includeList: |
+              whitebox_neutron_tempest_plugin.*
+            excludeList: |
+              neutron_tempest_plugin.scenario.test_mtu.NetworkWritableMtuTest
+              test_multicast.*ext*
+              test_multicast.*restart
+              whitebox_neutron_tempest_plugin.*south_north
+              whitebox_neutron_tempest_plugin.tests.scenario.*test_mtu
+              ^neutron_.*plugin..*scenario.test_.*macvtap
+              ^neutron_tempest_plugin.fwaas.*
+              ^whitebox_neutron_tempest_plugin.*many_vms
+              ^whitebox_neutron_tempest_plugin.*networker_reboot
+              ^whitebox_neutron_tempest_plugin.*ovn_controller_restart
+              ^whitebox_neutron_tempest_plugin.*reboot_node
+              ^whitebox_neutron_tempest_plugin.*test_previously_used_ip
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_internal_dns.InternalDNSInterruptions.*
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_l3ha_ovn.*
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_metadata_rate_limiting
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_ovn_dbs.OvnDbsMonitoringTest.*
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_qos.*external
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_security_group_logging
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_extra_dhcp_opts.ExtraDhcpOptionsTest.test_extra_dhcp_opts_ipv4_ipv6_stateless
+            # https://review.opendev.org/892839
+            # - neutron_tempest_plugin.scenario.test_mtu.NetworkWritableMtuTest
+            # It's in Blacklist before, FWaaS tests are not executed in any of our setups so there is no need to keep them whitelisted
+            #   ^neutron_tempest_plugin.fwaas.*
+            # Note(chandankumar): Skipping due to https://issues.redhat.com/browse/OSPRH-9091/RHOSZUUL-1940
+            # and It require xl node to fix no valid host.
+            # - whitebox_neutron_tempest_plugin.tests.scenario.test_extra_dhcp_opts.ExtraDhcpOptionsTest.test_extra_dhcp_opts_ipv4_ipv6_stateless
+        - stepName: single-thread-testing
+          tempestRun:
+            concurrency: 1
+            includeList: |
+              whitebox_neutron_tempest_plugin.*south_north
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_security_group_logging
+              test_multicast.ext
+              test_multicast.*restart
+              whitebox_neutron_tempest_plugin.*south_north
+              whitebox_neutron_tempest_plugin.tests.scenario.*test_mtu
+              ^neutron_.*plugin..*scenario.test_.*macvtap
+              ^whitebox_neutron_tempest_plugin.many_vms
+              ^whitebox_neutron_tempest_plugin.ovn_controller_restart
+              ^whitebox_neutron_tempest_plugin.test_previously_used_ip
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_internal_dns.InternalDNSInterruptions.
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_l3ha_ovn.
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_metadata_rate_limiting
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_ovn_dbs.OvnDbsMonitoringTest.
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_qos.*external
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_router_flavors
+              ^whitebox_neutron_tempest_plugin.tests.scenario.test_vlan_transparency.ProviderNetworkVlanTransparencyTest
+            # NOTE(mblue): Exclude list has test failures which need further debugging
+            # remove when bug OSPRH-7998 resolved
+            # - whitebox_neutron_tempest_plugin.tests.scenario.test_security_group_logging.*test_only_dropped_traffic_logged
+            excludeList: |
+              whitebox_neutron_tempest_plugin.tests.scenario.test_metadata_rate_limiting
+              whitebox_neutron_tempest_plugin.tests.scenario.test_mtu.GatewayMtuTestIcmp.test_northbound_pmtud_icmp
+              whitebox_neutron_tempest_plugin.tests.scenario.test_ovn_dbs.OvnDbsMonitoringTest
+              whitebox_neutron_tempest_plugin.tests.scenario.test_security_group_logging.*test_only_dropped_traffic_logged
+              whitebox_neutron_tempest_plugin.tests.scenario.test_security_group_logging.StatefulSecGroupLoggingTest.test_only_accepted_traffic_logged
+              whitebox_neutron_tempest_plugin.tests.scenario.test_security_group_logging.StatelessSecGroupLoggingTest.test_only_accepted_traffic_logged
