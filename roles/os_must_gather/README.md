@@ -14,7 +14,7 @@ testing the new changes.
 * `cifmw_os_must_gather_timeout`: (String) Timeout for must-gather command
 * `cifmw_os_must_gather_host_network`: (Bool) Flag to gather host network data
 * `cifmw_os_must_gather_namespaces`: (List) List of namespaces required by the gather task in case of failure
-* `cifmw_os_must_gather_additional_namespaces`: (String) List of comma separated additional namespaces
+* `cifmw_os_must_gather_additional_namespaces`: (String) List of comma separated additional namespaces. Defaults to `kuttl,openshift-storage,sushy-emulator`
 
 ## Examples
 ```
