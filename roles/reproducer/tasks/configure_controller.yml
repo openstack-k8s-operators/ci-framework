@@ -287,7 +287,7 @@
 
     - name: Manage secrets on controller-0
       vars:
-        cifmw_manage_secrets_basedir: "/home/zuul/ci-framework-data"
+        cifmw_manage_secrets_basedir: "{{ _ctl_reproducer_basedir }}"
         cifmw_manage_secrets_owner: "zuul"
       block:
         - name: Initialize secret manager
@@ -381,18 +381,18 @@
             items2dict
           }}
       ansible.builtin.copy:
-        dest: "/home/zuul/ci-framework-data/parameters/reproducer-variables.yml"
+        dest: "{{ _ctl_reproducer_basedir }}/parameters/reproducer-variables.yml"
         content: "{{ _filtered_vars | to_nice_yaml }}"
 
     - name: Create reproducer-variables.yml symlink to old location
       ansible.builtin.file:
         dest: "/home/zuul/reproducer-variables.yml"
-        src: "/home/zuul/ci-framework-data/parameters/reproducer-variables.yml"
+        src: "{{ _ctl_reproducer_basedir }}/parameters/reproducer-variables.yml"
         state: link
 
     - name: Inject local environment parameters
       ansible.builtin.copy:
-        dest: "/home/zuul/ci-framework-data/parameters/openshift-environment.yml"
+        dest: "{{ _ctl_reproducer_basedir }}/parameters/openshift-environment.yml"
         content: |-
           {% raw %}
           ---
@@ -414,9 +414,11 @@
     - name: Create openshift-environment.yml symlink to old location
       ansible.builtin.file:
         dest: "/home/zuul/openshift-environment.yml"
-        src: "/home/zuul/ci-framework-data/parameters/openshift-environment.yml"
+        src: "{{ _ctl_reproducer_basedir }}/parameters/openshift-environment.yml"
         state: link
 
+    # We must slurp it, networking_mapper is using include_vars to load it,
+    # and it works only from the ansible controller (for security reasons).
     - name: Get interfaces-info content
       register: _nic_info
       ansible.builtin.slurp:
@@ -445,9 +447,7 @@
       vars:
         cifmw_networking_mapper_ifaces_info: >-
           {{ _nic_info.content | b64decode | from_yaml }}
-        cifmw_networking_mapper_network_name: >-
-          {{ _cifmw_libvirt_manager_layout.vms.controller.nets.1 }}
-        cifmw_networking_mapper_basedir: "/home/zuul/ci-framework-data"
+        cifmw_networking_mapper_gather_facts: false
       ansible.builtin.import_role:
         name: networking_mapper
 
