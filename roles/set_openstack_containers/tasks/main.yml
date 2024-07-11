@@ -91,7 +91,29 @@
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_openstack_wait'
-  when: operator_name == 'openstack'
+  when:
+    - operator_name == 'openstack'
+    - not cifmw_architecture_scenario is defined
+
+# Needed when the deployment wasn't installed using install_yaml.
+- name: Wait for reinstallation of meta operator with arch scenario
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      oc get csv -l operators.coreos.com/openstack-operator.openstack-operators \
+      --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} \
+      --no-headers=true | grep -i "succeeded"
+  register: operator_status
+  until: operator_status.rc == 0
+  changed_when: false
+  retries: 600
+  delay: 1
+  when:
+    - operator_name == 'openstack'
+    - cifmw_architecture_scenario is defined
 
 - name: Wait for reinstallation of operator
   vars:
