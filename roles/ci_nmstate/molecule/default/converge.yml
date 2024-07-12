@@ -14,9 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Gather instance facts
+- name: Add crc to the inventory
   hosts: instance
   gather_facts: true
+  vars:
+    cifmw_molecule_ci_nmstate_crc_mac: "{{ '52:54:00' | community.general.random_mac(seed='crc') }}"
   tasks:
     - name: Add crc hostname with it's IP to /etc/hosts
       become: true
@@ -29,7 +31,14 @@
         name: crc
         ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
         ansible_ssh_user: core
+        cifmw_molecule_ci_nmstate_crc_mac: "{{ cifmw_molecule_ci_nmstate_crc_mac }}"
 
+    # Hot plugging a single interface is possible, but more interfaces will face a PCI limitation.
+    - name: Add a dummy ethernet interface to target the crc NMstate
+      become: true
+      ansible.builtin.command: >-
+        virsh attach-interface --type bridge --source crc
+        --model virtio crc --mac {{ cifmw_molecule_ci_nmstate_crc_mac }}
 
 - name: Get CRC facts
   hosts: crc
@@ -72,35 +81,29 @@
                 - 1.1.1.1
                 - 1.0.0.1
               mtu: "{{ _ci_nmstate_molecule_instance_target_mtu }}" # Set a non-default MTU to test
-            crc-net:
-              network: >-
-                {{
-                  hostvars.crc.ansible_default_ipv4.network +
-                  '/' + hostvars.crc.ansible_default_ipv4.prefix
-                }}
-              gateway: "{{ hostvars.crc.ansible_default_ipv4.gateway }}"
+            testing-untagged:
+              network: "172.17.20.0/24"
               dns: "{{ hostvars.crc.ansible_dns.nameservers }}"
-            testing:
-              network: "172.17.0.0/24"
-              gateway: "172.17.0.1"
-              vlan: 20
               mtu: "{{ hostvars.crc.ansible_default_ipv4.mtu | int }}"
+            testing-vlan:
+              network: "172.17.21.0/24"
+              vlan: 21
           instances:
             crc:
               networks:
-                crc-net:
-                  ip: "{{ hostvars.crc.ansible_default_ipv4.address }}"
-                testing:
-                  ip: "172.17.0.5"
-                  trunk-parent: crc-net
+                testing-untagged:
+                  ip: "172.17.20.5"
+                testing-vlan:
+                  ip: "172.17.21.5"
+                  trunk-parent: testing-untagged
             instance:
               networks:
                 default:
                   ip: "{{ ansible_default_ipv4.address }}"
         cifmw_networking_mapper_ifaces_info:
           crc:
-            - mac: "{{ hostvars.crc.ansible_default_ipv4.macaddress }}"
-              network: "crc-net"
+            - mac: "{{ hostvars.crc.cifmw_molecule_ci_nmstate_crc_mac }}"
+              network: "testing-untagged"
           instance:
             - mac: "{{ ansible_default_ipv4.macaddress }}"
               network: "default"
