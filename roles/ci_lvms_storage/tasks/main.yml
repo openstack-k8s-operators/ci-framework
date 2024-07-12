@@ -104,23 +104,25 @@
   register: result
   until: result.failed == false
 
-- name: Wait for lvms operator pod to be running
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    kind: Pod
-    namespace: "{{ cifmw_lvms_namespace }}"
-    label_selectors:
-      - app.kubernetes.io/name=lvms-operator
-  register: lvms_op_pod
-  until:
-    - lvms_op_pod.resources | length > 0
-    - lvms_op_pod.resources[0].status is defined
-    - lvms_op_pod.resources[0].status.phase is defined
-    - lvms_op_pod.resources[0].status.phase == "Running"
+- name: Wait for lvms operator CSV to be ready
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      -n "{{ cifmw_lvms_namespace }}"
+      -l operators.coreos.com/lvms-operator.openshift-storage
+      -o jsonpath='{.items[*].status.phase}'
+  changed_when: false
+  register: _cifmw_lvms_storage_cluster_csv_phase_out
   retries: "{{ cifmw_lvms_retries }}"
   delay: "{{ cifmw_lvms_delay }}"
+  until:
+    - _cifmw_lvms_storage_cluster_csv_phase_out is defined
+    - _cifmw_lvms_storage_cluster_csv_phase_out.failed is false
+    - _cifmw_lvms_storage_cluster_csv_phase_out.stdout_lines | length > 0
+    - "(_cifmw_lvms_storage_cluster_csv_phase_out.stdout_lines[0] | lower) == 'succeeded'"
 
 - name: Apply lvms-cluster manifest file
   kubernetes.core.k8s:
@@ -134,24 +136,21 @@
   register: result
   until: result.failed == false
 
-- name: Wait for vg-manger and topolvm controller and node to be running
+- name: Wait for the LVMCluster to be ready
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
     context: "{{ cifmw_openshift_context | default(omit) }}"
-    kind: Pod
+    api_version: lvm.topolvm.io/v1alpha1
+    kind: LVMCluster
+    name: "{{ cifmw_lvms_cluster_name }}"
     namespace: "{{ cifmw_lvms_namespace }}"
-    label_selectors:
-      - "app.kubernetes.io/component={{ item }}"
-  register: topolvm_pod
-  until:
-    - topolvm_pod.resources | length > 0
-    - topolvm_pod.resources[0].status is defined
-    - topolvm_pod.resources[0].status.phase is defined
-    - topolvm_pod.resources[0].status.phase == "Running"
+  register: _cifmw_lvms_storage_cluster_lvmscluster_out
   retries: "{{ cifmw_lvms_retries }}"
   delay: "{{ cifmw_lvms_delay }}"
-  loop:
-    - vg-manager
-    - topolvm-controller
-    - topolvm-node
+  until:
+    - _cifmw_lvms_storage_cluster_lvmscluster_out.resources | length == 1
+    - _cifmw_lvms_storage_cluster_lvmscluster_out.failed is false
+    - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status is defined
+    - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status.ready is defined
+    - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status.ready | bool
