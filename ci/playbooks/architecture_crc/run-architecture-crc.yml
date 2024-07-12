@@ -1,0 +1,72 @@
+---
+# Usage and expected parameters
+# $ ansible-playbook run-architecture-crc.yml \
+#     -e cifmw_architecture_repo=$HOME/architecture \
+#     -e cifmw_architecture_scenario=hci \
+#     -e cifmw_networking_mapper_networking_env_def_path=$HOME/net-env.yml
+#     [any other parameter/files your VA/DT might need]
+#
+# cifmw_architecture_repo: location of the architecture repository.
+# cifmw_architecture_scenario: the scenario you want to test.
+# cifmw_networking_mapper_networking_env_def_path: path to the
+#        networking-mapper environment definition file.
+#
+# Special parameters set in the playbook (you can override them)
+# cifmw_basedir: defaults to ~/ci-framework-data
+# cifmw_zuul_target_host: target host. Defaults to localhost
+
+- name: Test architecture automations
+  hosts: "{{ cifmw_zuul_target_host | default('controller') }}"
+  gather_facts: true
+  vars:
+    _homedir: "{{ ansible_user_dir | default(lookup('env', 'HOME')) }}"
+    cifmw_basedir: >-
+      {{
+        (_homedir,
+         'ci-framework-data') |
+        path_join
+      }}
+    cifmw_path: >-
+      {{
+        ['~/bin',
+         ansible_env.PATH] | join(':')
+      }}
+    ci_framework_src_dir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+  pre_tasks:
+    - name: Create needed directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ cifmw_basedir }}/logs"
+        - "{{ cifmw_basedir }}/artifacts"
+        - "{{ cifmw_basedir }}/parameters"
+
+  tasks:
+    - name: Run preparation steps for VA deployment in crc
+      ansible.builtin.command: >
+        ansible-playbook -i {{ cifmw_basedir }}/artifacts/zuul_inventory.yml
+        ci/playbooks/architecture_crc/prepare-architecture-crc.yml
+        -e cifmw_basedir="{{ cifmw_basedir }}"
+        {%- if cifmw_extras is defined %}
+        {%-   for extra_vars in cifmw_extras %}
+        -e "{{   extra_vars }}"
+        {%-   endfor %}
+        {%- endif %}
+      args:
+        chdir: "{{ ci_framework_src_dir }}"
+
+    - name: Deploy VA with crc
+      ansible.builtin.command: >
+        ansible-playbook -i {{ cifmw_basedir }}/artifacts/zuul_inventory.yml
+        deploy-edpm.yml
+        -e cifmw_basedir="{{ cifmw_basedir }}"
+        -e "@{{ ansible_user_dir  }}/ci-framework-data/artifacts/nodepool_params.yml"
+        {%- if cifmw_extras is defined %}
+        {%-   for extra_vars in cifmw_extras %}
+        -e "{{   extra_vars }}"
+        {%-   endfor %}
+        {%- endif %}
+      args:
+        chdir: "{{ ci_framework_src_dir }}"
