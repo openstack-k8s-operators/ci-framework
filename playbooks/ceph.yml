@@ -135,11 +135,6 @@
   tags: spec
   hosts: localhost
   gather_facts: true
-  vars:
-    ssh_network_range: 192.168.122.0/24
-    # storage_network_range: 172.18.0.0/24
-    # storage_mgmt_network_range: 172.20.0.0/24
-    all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
   pre_tasks:
     # end_play will end this current playbook and go the the next
     # imported play.
@@ -155,6 +150,33 @@
 
     - name: Use ansible_hostname when ceph_spec_fqdn parameter is false
       when: not (ceph_spec_fqdn | default(false))
+      ansible.builtin.set_fact:
+        ceph_hostname_var: 'ansible_hostname'
+
+    - name: Set IPv4 facts
+      when: ansible_all_ipv4_addresses | length > 0
+      ansible.builtin.set_fact:
+        ssh_network_range: 192.168.122.0/24
+        # storage_network_range: 172.18.0.0/24
+        storage_mgmt_network_range: 172.20.0.0/24
+        all_addresses: ansible_all_ipv4_addresses
+        ms_bind_ipv4: true
+        ms_bind_ipv6: false
+
+    - name: Set IPv6 facts
+      when: ansible_all_ipv4_addresses | length == 0
+      ansible.builtin.set_fact:
+        ssh_network_range: "2620:cf:cf:aaaa::/64"
+        # storage_network_range: "2620:cf:cf:cccc::/64"
+        storage_mgmt_network_range: "2620:cf:cf:dddd::/64"
+        all_addresses: ansible_all_ipv6_addresses
+        ms_bind_ipv4: false
+        ms_bind_ipv6: true
+
+    - name: Handle IPv6 job configuration
+      when:
+        - ansible_all_ipv4_addresses | length == 0
+        - not (cifmw_cephadm_ceph_spec_fqdn | default(false))
       ansible.builtin.set_fact:
         ceph_hostname_var: 'ansible_hostname'
 
@@ -186,8 +208,10 @@
             name: networking_mapper
             tasks_from: load_env_definition.yml
 
-        - name: Set network ranges vars
-          when: "cifmw_networking_env_definition is defined"
+        - name: Set IPv4 network ranges vars
+          when:
+            - cifmw_networking_env_definition is defined
+            - ansible_all_ipv4_addresses | length > 0
           ansible.builtin.set_fact:
             storage_network_range: >-
               {{
@@ -196,6 +220,20 @@
             storage_mgmt_network_range: >-
               {{
                 cifmw_networking_env_definition.networks.storagemgmt.network_v4
+              }}
+
+        - name: Set IPv6 network ranges vars
+          when:
+            - cifmw_networking_env_definition is defined
+            - ansible_all_ipv4_addresses | length == 0
+          ansible.builtin.set_fact:
+            storage_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storage.network_v6
+              }}
+            storage_mgmt_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storagemgmt.network_v6
               }}
 
   roles:
@@ -234,7 +272,6 @@
     cifmw_cephadm_bootstrap_conf: /tmp/initial_ceph.conf
     cifmw_ceph_client_vars: /tmp/ceph_client.yml
     cifmw_cephadm_default_container: true
-    all_addresses: ansible_all_ipv4_addresses # change if you need IPv6
     cifmw_cephadm_pools:
       - name: vms
         pg_autoscale_mode: true
@@ -268,6 +305,18 @@
         - not _deploy_ceph | default(true)
       ansible.builtin.meta: end_play
 
+    - name: Set IPv4 facts
+      when: ansible_all_ipv4_addresses | length > 0
+      ansible.builtin.set_fact:
+        all_addresses: ansible_all_ipv4_addresses
+        cidr: 24
+
+    - name: Set IPv6 facts
+      when: ansible_all_ipv4_addresses | length == 0
+      ansible.builtin.set_fact:
+        all_addresses: ansible_all_ipv6_addresses
+        cidr: 64
+
     - name: Generate a cephx key
       cephx_key:
       register: cephx
@@ -299,7 +348,7 @@
       vars:
         this_host: "{{ _target_hosts | first }}"
 
-    - name: Assert if any EDPM node's n/w interface is missing in storage network
+    - name: Assert if any EDPM nodes n/w interface is missing in storage network
       ansible.builtin.assert:
         that:
           - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | length > 0
@@ -355,7 +404,7 @@
         tasks_from: rgw
       vars:
         # cifmw_cephadm_vip is computed or passed as an override via -e @extra.yml
-        cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}/24"
+        cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}/{{ cidr }}"
 
     - name: Configure Monitoring Stack
       when: cifmw_ceph_daemons_layout.dashboard_enabled  | default(false) | bool
@@ -381,7 +430,7 @@
         tasks_from: cephnfs
       vars:
         # we reuse the same VIP reserved for rgw
-        cifmw_cephadm_nfs_vip: "{{ cifmw_cephadm_vip }}/24"
+        cifmw_cephadm_nfs_vip: "{{ cifmw_cephadm_vip }}/{{ cidr }}"
 
     - name: Create Cephx Keys for OpenStack
       ansible.builtin.import_role:
