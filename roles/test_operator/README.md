@@ -15,6 +15,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_default_jobs`: (List) List of jobs in the exclude list to search for tests to be excluded. Default value: `[ 'default' ]`
 * `cifmw_test_operator_dry_run`: (Boolean) Whether test-operator should run or not. Default value: `false`
 * `cifmw_test_operator_fail_fast`: (Boolean) Whether the test results are evaluated when each test framework execution finishes or when all test frameworks are done. Default value: `false`
+* `cifmw_test_operator_fail_on_test_failure`: (Boolean) Whether the role should fail on any test failure or not. Default value: `true`
 * `cifmw_test_operator_controller_ip`: (String) An ip address of the controller node. Default value: `ansible_default_ipv4.address` which defaults to (`""`).
 * `cifmw_test_operator_tolerations`: (Dict) `tolerations` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
 * `cifmw_test_operator_node_selector`: (Dict) `nodeSelector` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
