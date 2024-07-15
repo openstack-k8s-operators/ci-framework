@@ -66,12 +66,14 @@
           set -x
           sudo dnf install -y rsync
           mkdir -p /tmp/{{ host_ip }}
-          sudo test -d /etc/ci/env && sudo cp -r /etc/ci/env /tmp/{{ host_ip }}/ci-env
+          sudo rsync -rq --exclude "**/ssh" --exclude "**/ubound" \
+            --exclude "**/pki" --exclude "**/pkcs12" --exclude "**/audit" \
+            --exclude "**/crypt*" --exclude "**/fonts" --exclude "**/gss*" \
+            /etc/ /tmp/{{ host_ip }}/etc
           sudo cp -a /var/log/ /tmp/{{ host_ip }}
           sudo test -d /var/lib/openstack && sudo cp -a /var/lib/openstack /tmp/{{ host_ip }}
           sudo test -d /var/lib/config-data && sudo cp -a /var/lib/config-data /tmp/{{ host_ip }}
           sudo test -d /var/lib/cloud && sudo cp -a /var/lib/cloud /tmp/{{ host_ip }}
-          sudo test -d /etc && sudo cp -RP /etc /tmp/{{ host_ip }}
           sudo find /tmp/{{ host_ip }} -type d -exec chmod ugoa+rx '{}' \;
           sudo find /tmp/{{ host_ip }} -type f -exec chmod ugoa+r '{}' \;
           command -v ovs-vsctl && sudo ovs-vsctl list Open_vSwitch > /tmp/{{ host_ip }}/ovs_vsctl_list_openvswitch.txt
@@ -99,7 +101,7 @@
         output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
         script: >-
           rsync -a -e "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i {{ ssh_key_file }}"
-          {{ ssh_user }}@{{ host_ip }}:/tmp/{{ host_ip }} {{ cifmw_artifacts_basedir }}/logs/
+          {{ ssh_user }}@{{ host_ip }}:/tmp/{{ host_ip }} {{ cifmw_artifacts_basedir }}/logs/;
       loop: "{{ edpm_vms }}"
       loop_control:
         label: "{{ item.split('/')[0] }}"
