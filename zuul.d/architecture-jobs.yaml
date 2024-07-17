@@ -45,7 +45,8 @@
 
 - job:
     name: cifmw-architecture-crc-base
-    parent: cifmw-podified-multinode-edpm-base-crc
+    parent: cifmw-podified-multinode-edpm-ci-bootstrap-staging
+    #parent: podified-multinode-edpm-deployment-crc-bootstrap
     nodeset: centos-9-medium-3x-centos-9-crc-extracted-2-36-0-3xl
     vars:
       <<: *architecture_vars
@@ -59,6 +60,7 @@
       cifmw_controller_name: controller
       cifmw_openshift_setup_skip_internal_registry_tls_verify: true
       cifmw_networking_env_def_file: "networking-env-definition.yml"
+      cifmw_networking_mapper_networking_env_def_path: "/etc/ci/env/networking-environment-definition.yml"
       cifmw_run_tempest: true
       cifmw_run_test_role: test_operator
       cifmw_run_tests: true
@@ -73,90 +75,125 @@
                   - key: server
                     values:
                       - 192.168.122.10
+      cifmw_crc_default_network: ctlplane
     extra-vars:
-      crc_ci_bootstrap_networking:
+      cifmw_bootstrap_create_application_credential: false
+      cifmw_bootstrap_cloud_name: >-
+        {%- if 'ibm-bm3' in nodepool.cloud -%}
+        cifmw_ibm3
+        {%- elif 'ibm-bm4' in nodepool.cloud -%}
+        cifmw_ibm4
+        {%- else -%}
+        cifmw_vexxhost
+        {%- endif -%}
+      cifmw_networking_definition:
         networks:
-          default:
+          ctlplane:
             mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1440', '1500') }}"
             router_net: "{{ ('ibm' in nodepool.cloud) | ternary('hostonly', 'public') }}"
-            range: 192.168.122.0/24
+            network: 192.168.122.0/24
+            gateway: 192.168.122.1
           internalapi:
+            mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1436', '1496') }}"
             vlan: 20
-            range: 172.17.0.0/24
+            network: 172.17.0.0/24
           storage:
+            mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1436', '1496') }}"
             vlan: 21
-            range: 172.18.0.0/24
+            network: 172.18.0.0/24
           tenant:
+            mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1436', '1496') }}"
             vlan: 22
-            range: 172.19.0.0/24
+            network: 172.19.0.0/24
           storagemgmt:
+            mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1436', '1496') }}"
             vlan: 23
-            range: 172.20.0.0/24
+            network: 172.20.0.0/24
         instances:
           controller:
             networks:
-              default:
+              ctlplane:
                 ip: 192.168.122.11
           crc:
             networks:
-              default:
+              ctlplane:
                 ip: 192.168.122.10
+                is-trunk-parent: true
               internalapi:
                 ip: 172.17.0.10
+                trunk-parent: ctlplane
+                is-trunk-parent: false
+                vlan_id: 20
               storage:
                 ip: 172.18.0.10
+                trunk-parent: ctlplane
+                is-trunk-parent: false
+                vlan_id: 21
               tenant:
                 ip: 172.19.0.10
-              storagemgmt:
-                ip: 172.20.0.10
+                trunk-parent: ctlplane
+                is-trunk-parent: false
+                vlan_id: 22
           compute-0:
             networks:
-              default:
+              ctlplane:
                 ip: 192.168.122.100
               internalapi:
                 ip: 172.17.0.100
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               storage:
                 ip: 172.18.0.100
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               tenant:
                 ip: 172.19.0.100
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               storagemgmt:
                 ip: 172.20.0.100
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
           compute-1:
             networks:
-              default:
+              ctlplane:
                 ip: 192.168.122.101
               internalapi:
                 ip: 172.17.0.101
-                config_nm: false
+                skip-nm-configuration: true
+                trunk-parent: ctlplane
               storage:
                 ip: 172.18.0.101
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               tenant:
                 ip: 172.19.0.101
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               storagemgmt:
                 ip: 172.20.0.101
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
           compute-2:
             networks:
-              default:
+              ctlplane:
                 ip: 192.168.122.102
               internalapi:
                 ip: 172.17.0.102
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               storage:
                 ip: 172.18.0.102
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               tenant:
                 ip: 172.19.0.102
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
               storagemgmt:
                 ip: 172.20.0.102
-                config_nm: false
+                trunk-parent: ctlplane
+                skip-nm-configuration: true
     run:
       - ci/playbooks/architecture_crc/run-architecture-crc.yml
     required-projects:
@@ -171,6 +208,5 @@
       # 12 pvs is not enough
       cifmw_cls_pv_count: 20
       cifmw_extras:
-        - '@scenarios/reproducers/networking-definition-architecture-crc.yml'
         - '@scenarios/reproducers/va-hci-reduced.yml'
         - 'cifmw_run_test_role=test_operator'

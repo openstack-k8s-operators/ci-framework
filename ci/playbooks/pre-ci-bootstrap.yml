@@ -13,6 +13,15 @@
                 ansible.builtin.include_role:
                   name: networking_mapper
 
+    - name: Store nodepool data if defined so we can set mtu depending on provider
+      when: nodepool is defined
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/nodepool_params.yml"
+        content: |
+          nodepool:
+            {{ nodepool | to_nice_yaml | indent(2) }}
+        mode: '0644'
+
     - name: Run networking_mapper playbook
       environment:
         ANSIBLE_HOST_KEY_CHECKING: false
@@ -23,3 +32,6 @@
           -i {{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml
           -e @scenarios/centos-9/base.yml
           -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+          {% if nodepool is defined %}
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/nodepool_params.yml"
+          {% endif %}

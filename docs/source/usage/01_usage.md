@@ -68,6 +68,7 @@ are shared among multiple roles:
 - `cifmw_nolog`: (Bool) Toggle `no_log` value for selected tasks. Defaults to `true` (hiding those logs by default).
 - `cifmw_parent_scenario`: (String or List(String)) path to existing scenario/parameter file to inherit from.
 - `cifmw_configure_switches`: (Bool) Specifies whether switches should be configured. Computes in `reproducer.yml` playbook. Defaults to `false`.
+- `cifmw_crc_default_network`: (String) name of the untagged network used to address DNS on the crc node. Default is `default`.
 
 ```{admonition} Words of caution
 :class: danger
