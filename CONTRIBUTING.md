@@ -97,3 +97,45 @@ script is covering, also in the commit message.
 For random scripts, only the pre-commit target is useful from the Makefile.
 If you feel you can improve the testing, please create a new target in the
 Makefile, so that we can integrate it in Prow later on.
+
+### Help others debugging issues
+
+If your code adds complex patterns, like consuming data sets and manipulating them in task vars,
+be sure to use the `block/rescue` pattern as shown bellow. There are many other examples in the
+framework code, and such pattern proves being of invaluable help whenever the run hits some
+uncovered corner case.
+
+```yaml
+# Here we're creating tests in a block. You can of course put anything in such a block.
+# You can also use such a block to share variables with multiple tasks.
+- name: Try/catch block
+  block:
+    - name: Ensure all VM types have defined nets parameter
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - item.value.nets is defined
+        msg: >-
+          Inconsistency detected: VM type "{{ item.key }}"
+          doesn't seem to have any network.
+      loop: "{{ _cifmw_libvirt_manager_layout.vms | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+# We caught an inconsistency, so we want to dump some data to make
+# debugging easier. In this case, since the assert above is using
+# the _cifmw_libvirt_manager_layout variable, we want to display it
+# to ease debugging.
+  rescue:
+    - name: Dump built layout
+      ansible.builtin.debug:
+        var: _cifmw_libvirt_manager_layout
+
+# Since "rescue" removes the errors, we have to get a proper "fail"
+# to ensure we stop the whole run.
+    - name: Fail for good
+      ansible.builtin.fail:
+        msg: >-
+          Error detected, please check assertions and
+          debugging output above.
+```
