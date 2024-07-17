@@ -86,26 +86,51 @@
     content: "{{ _cifmw_networking_mapper_definition | to_nice_yaml }}"
     mode: '0644'
 
-- name: Call the networking mapper
-  cifmw.general.ci_net_map:
-    networking_definition: "{{ _cifmw_networking_mapper_definition }}"
-    interfaces_info: >-
-      {{
-        cifmw_networking_mapper_ifaces_info |
-        default(omit)
-      }}
-    search_domain_base: >-
-      {{
-        cifmw_networking_mapper_search_domain_base |
-        default(omit)
-      }}
-    interfaces_info_translations: >-
-      {{
-        cifmw_networking_mapper_interfaces_info_translations |
-        default(omit)
-      }}
-    full_map: "{{ cifmw_networking_mapper_full_map |  default(omit) }}"
-  register: _networking_mapper_out
+- name: Try/catch block
+  block:
+    - name: Call the networking mapper
+      cifmw.general.ci_net_map:
+        networking_definition: "{{ _cifmw_networking_mapper_definition }}"
+        interfaces_info: >-
+          {{
+            cifmw_networking_mapper_ifaces_info |
+            default(omit)
+          }}
+        search_domain_base: >-
+          {{
+            cifmw_networking_mapper_search_domain_base |
+            default(omit)
+          }}
+        interfaces_info_translations: >-
+          {{
+            cifmw_networking_mapper_interfaces_info_translations |
+            default(omit)
+          }}
+        full_map: "{{ cifmw_networking_mapper_full_map |  default(omit) }}"
+      register: _networking_mapper_out
+
+  rescue:
+    - name: Debug interfaces_info
+      ansible.builtin.debug:
+        var: cifmw_networking_mapper_ifaces_info
+
+    - name: Debug search_domain_base
+      ansible.builtin.debug:
+        var: search_domain_base
+
+    - name: Debug interfaces_info_translations
+      ansible.builtin.debug:
+        var: interfaces_info_translations
+
+    - name: Debug full_map
+      ansible.builtin.debug:
+        var: full_map
+
+    - name: Fail for good
+      ansible.builtin.fail:
+        msg: >-
+          Error detected while calling networking_mapper.
+          Check above debug outputs to fix your env.
 
 - name: Set networking mapper facts
   ansible.builtin.set_fact:
