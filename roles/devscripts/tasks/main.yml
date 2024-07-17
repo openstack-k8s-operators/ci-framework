@@ -41,11 +41,20 @@
           (cifmw_devscripts_ocp_online | bool)
         )
       )
+  register: _devscripts_deploy
   community.general.make:
     chdir: "{{ cifmw_devscripts_repo_dir }}"
     target: "all"
   async: "{{ cifmw_devscripts_installer_timeout }}"
-  poll: 30
+  poll: 0
+
+- name: Check async deploy status
+  ansible.builtin.async_status:
+    jid: "{{ _devscripts_deploy.ansible_job_id }}"
+  register: _deploy_status
+  until: _deploy_status.finished
+  retries: "{{ (cifmw_devscripts_installer_timeout / 15) | int }}"
+  delay: 30
 
 - name: Executing dev-scripts post-install tasks.
   when:
