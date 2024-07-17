@@ -47,6 +47,39 @@
               defined networks. Those nets don't seem to be attached:
               {{ _defined | difference(_all_nets) }}
   rescue:
+    # We don't want it when cifmw_libvirt_manager_configuration_gen is
+    # defined: it could confuse people.
+    - name: Dump initial layout
+      when:
+        - cifmw_libvirt_manager_configuration_gen is undefined
+      ansible.builtin.debug:
+        var: cifmw_libvirt_manager_configuration
+
+    # This param exists only in case of CI reproducer run
+    # so it's expected to usually see it as "undefined" in
+    # the debugging output.
+    - name: Dump CI reproducer generated layout
+      when:
+        - cifmw_libvirt_manager_configuration_gen is defined
+      ansible.builtin.debug:
+        var: cifmw_libvirt_manager_configuration_gen
+
+    - name: Dump layout patches
+      vars:
+        _layout_patches: >-
+          {{
+            hostvars[inventory_hostname] |
+            dict2items |
+            selectattr("key", "match",
+                       "^cifmw_libvirt_manager_configuration_patch.*") |
+            sort(attribute='key')
+          }}
+      ansible.builtin.debug:
+        msg: "{{ item.value }}"
+      loop: "{{ _layout_patches }}"
+      loop_control:
+        label: "{{ item.key }}"
+
     - name: Dump built layout
       ansible.builtin.debug:
         var: _cifmw_libvirt_manager_layout
