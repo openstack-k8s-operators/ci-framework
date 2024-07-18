@@ -1,0 +1,40 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get horizon-public cert serial
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -t openstackclient -- bash -c \"echo 'QUIT'|openssl s_client -showcerts -connect horizon-openstack.apps.ocp.openstack.lab:443 2>&1|openssl x509 -noout -serial\""
+  register: cert_verify_horizon_cert_serial
+
+- name: Read horizon secret crt
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-horizon-route -o jsonpath=\"{.data['tls\\.crt']}\""
+  register: cert_verify_horizon_cert_secret
+
+- name: get horizon secret cert serial
+  shell: "echo \"{{ cert_verify_horizon_cert_secret.stdout }}\" |base64 -d |openssl x509 -noout -serial"
+  register: cert_verify_horizon_cert_secret_serial
+
+- name: horizon route cert match certmanage route cert
+  ansible.builtin.assert:
+    that:
+      - cert_verify_horizon_cert_serial.stdout == cert_verify_horizon_cert_secret_serial.stdout
+    success_msg: "horizon public route cert matches certmanage route cert"
+    fail_msg: "horizon public route cert does not matche certmanage route cert"

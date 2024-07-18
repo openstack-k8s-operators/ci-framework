@@ -1,0 +1,99 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Read openstack galera config for tls
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c galera -t openstack-galera-0 -- bash -c 'cat /etc/my.cnf.d/galera_tls.cnf|grep ssl-mode'"
+  register: cert_verify_galera_server_config
+
+- name: Check openstack galera for tls
+  ansible.builtin.assert:
+    that:
+      - "'REQUIRED' in cert_verify_galera_server_config.stdout"
+    success_msg: "openstack-galera-0 is listening on SSL"
+    fail_msg: "openstack-galera-0 is not SSL"
+
+- name: Read openstack galera config for server addesss
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c galera -t openstack-galera-0 -- bash -c 'cat /etc/my.cnf.d/galera.cnf|grep wsrep_provider_options'"
+  register: cert_verify_galera_server_address
+
+- name: Read openstack-galera-0 container key file
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c galera -t openstack-galera-0 -- bash -c 'cat /etc/pki/tls/private/galera.key|base64 -w0'"
+  register: cert_verify_galera_key_file
+
+- name: Read openstack-galera-0 container crt file
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c galera -t openstack-galera-0 -- bash -c 'cat /etc/pki/tls/certs/galera.crt|base64 -w0'"
+  register: cert_verify_galera_crt_file
+
+- name: Read openstack-galera secret key
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-galera-openstack-svc -o jsonpath=\"{.data['tls\\.key']}\""
+  register: cert_verify_galera_key_secret
+
+- name: Read galera secret crt
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-galera-openstack-svc -o jsonpath=\"{.data['tls\\.crt']}\""
+  register: cert_verify_galera_crt_secret
+
+- name: galera container key/crt match certmanage key/crt
+  ansible.builtin.assert:
+    that:
+      - cert_verify_galera_key_file.stdout == cert_verify_galera_key_secret.stdout
+      - cert_verify_galera_crt_file.stdout == cert_verify_galera_crt_secret.stdout
+    success_msg: "galera container key/crt matches certmanage key/crt"
+    fail_msg: "galera container key/crt does not matches certmanage key/crt"
+
+- name: Get internal galera endpoint cert serial
+  vars:
+    cert_verify_galera_server: "{{ cert_verify_galera_server_address.stdout.split('/').2 }}"
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -t openstackclient -- bash -c \"echo 'QUIT'|openssl s_client -showcerts -connect {{ cert_verify_galera_server }} 2>&1|openssl x509 -noout -serial\""
+  register: cert_verify_galera_cert_serial
+
+- name: Read galera secret crt
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-galera-openstack-svc -o jsonpath=\"{.data['tls\\.crt']}\""
+  register: cert_verify_galera_cert_secret
+
+- name: get galera secret cert serial
+  shell: "echo \"{{ cert_verify_galera_cert_secret.stdout }}\" |base64 -d |openssl x509 -noout -serial"
+  register: cert_verify_galera_cert_secret_serial
+
+- name: galera svc cert match certmanage csv cert
+  ansible.builtin.assert:
+    that:
+      - cert_verify_galera_cert_serial.stdout == cert_verify_galera_cert_secret_serial.stdout
+    success_msg: "galera internal svc cert matches certmanage svc cert"
+    fail_msg: "galera internal svc cert does not matche certmanage svc cert"

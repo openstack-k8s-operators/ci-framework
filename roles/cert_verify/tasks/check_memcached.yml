@@ -21,13 +21,20 @@
   ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -c memcached -t memcached-0 -- bash -c 'cat /etc/sysconfig/memcached|grep OPTIONS'"
   register: cert_verify_memcached_0_config
 
-- name: Check memcached-0 for tls
+- name: Check memcached-0 for tls key/cert
   ansible.builtin.assert:
     that:
       - "'ssl_key=/etc/pki/tls/private/memcached.key' in cert_verify_memcached_0_config.stdout"
       - "'ssl_chain_cert=/etc/pki/tls/certs/memcached.crt' in cert_verify_memcached_0_config.stdout"
     success_msg: "memcached-0 is listening on SSL"
     fail_msg: "memcached-0 is not SSL"
+
+- name: Check memcached-0 for tls serial
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -t openstackclient -- bash -c \"echo 'QUIT'|openssl s_client -showcerts -connect memcached-0.memcached.openstack.svc:11212 2>&1|openssl x509 -noout -serial\""
+  register: cert_verify_memcached_cert_serial
 
 - name: Read memcached-0 container key file
   environment:
