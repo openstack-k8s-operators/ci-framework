@@ -38,26 +38,30 @@
             (host_data.key is match('^ocp.*')) |
             ternary(_ocp_name, host_data.key)
           }}
-        cifmw_dnsmasq_host_network: "{{ _translated_name }}"
-        cifmw_dnsmasq_host_name: "{{ _hostname }}"
-        cifmw_dnsmasq_host_state: 'present'
-        cifmw_dnsmasq_host_mac: "{{ _net_data.mac_addr }}"
-        cifmw_dnsmasq_host_ips: >-
-          {{
-            [
-              _net_data.ip_v4 | default(''),
-              _net_data.ip_v6 | default('')
-            ]
-          }}
-      ansible.builtin.include_role:
-        name: "dnsmasq"
-        tasks_from: "manage_host.yml"
+        _host:
+          network: "{{ _translated_name }}"
+          name: "{{ _hostname }}"
+          state: 'present'
+          mac: "{{ _net_data.mac_addr }}"
+          ips: >-
+            {{
+              [
+                _net_data.ip_v4 | default(''),
+                _net_data.ip_v6 | default('')
+              ]
+            }}
+      ansible.builtin.set_fact:
+        _lm_dhcp_entries: "{{ _lm_dhcp_entries + [_host] }}"
       loop: "{{ cifmw_networking_env_definition.instances | dict2items }}"
       loop_control:
         label: "{{ host_data.key }} - {{ net_name }}"
         loop_var: "host_data"
 
   rescue:
+    - name: Debug built entries
+      ansible.builtin.debug:
+        var: _lm_dhcp_entries
+
     - name: Debug _rev_translate
       ansible.builtin.debug:
         var: _rev_translate

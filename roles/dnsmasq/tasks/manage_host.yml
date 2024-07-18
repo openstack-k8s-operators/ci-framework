@@ -14,72 +14,100 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Ensure we have the right data and type
+  ansible.builtin.assert:
+    that:
+      - cifmw_dnsmasq_dhcp_entries is defined
+      - (cifmw_dnsmasq_dhcp_entries | type_debug) == 'list'
+    quiet: true
+    msg: >-
+      Error: cifmw_dnsmasq_dhcp_entries must be a dict. Check
+      documentation for proper format.
+
 - name: Assert we have needed host data
   ansible.builtin.assert:
     quiet: true
     that:
-      - cifmw_dnsmasq_host_network is defined
-      - cifmw_dnsmasq_host_state is defined
-      - cifmw_dnsmasq_host_state in ['present', 'absent']
-      - cifmw_dnsmasq_host_mac is defined
-      - cifmw_dnsmasq_host_ips is defined
+      - (entry | type_debug) == 'dict'
+      - entry.network is defined
+      - (entry.state | default('present')) in ['present', 'absent']
+      - entry.mac is defined
+      - entry.ips is defined
+  loop: "{{ cifmw_dnsmasq_dhcp_entries }}"
+  loop_control:
+    loop_var: entry
 
-- name: Check network file status
-  register: _network_exists
-  ansible.builtin.stat:
-    path: "{{ cifmw_dnsmasq_basedir }}/{{ cifmw_dnsmasq_host_network }}.conf"
-    get_attributes: false
-    get_checksum: false
-    get_mime: false
+- name: Ensure networks exists
+  vars:
+    _nets: >-
+      {{
+        cifmw_dnsmasq_dhcp_entries | map(attribute='network') | unique
+      }}
+  ansible.builtin.include_tasks: _check_net_status.yml
+  loop: "{{ _nets }}"
+  loop_control:
+    loop_var: net_name
 
-- name: Assert network exists
-  ansible.builtin.assert:
-    that:
-      - _network_exists.stat.exists
-    quiet: true
-    msg: >-
-      You must create {{ cifmw_dnsmasq_host_network }} network first, calling
-      dnsmasq/manage_network.yml task.
+- name: Initialize empty dhcp_host_entries
+  ansible.builtin.set_fact:
+    dhcp_host_entries: []
 
 - name: Compute entry
-  ansible.builtin.set_fact:
-    _host_entry: >
-      {% set data = [cifmw_dnsmasq_host_mac]                                                  -%}
-      {% for ip in cifmw_dnsmasq_host_ips if ip is not none and ip | length > 0               -%}
-      {% set _ = data.append(ip | ansible.utils.ipwrap)                                       -%}
-      {% endfor                                                                               -%}
-      {% set _ = data.append(cifmw_dnsmasq_host_name) if
-                 cifmw_dnsmasq_host_name is defined and cifmw_dnsmasq_host_name | length > 0  -%}
+  vars:
+    _state: "{{ entry.state | default('present') }}"
+    _fname: >-
+      {%- set data = [entry.network] -%}
+      {%- set _ = data.append(entry.name) if
+                  entry.name is defined and entry.name | length > 0 -%}
+      {%- set _ = data.append(entry.mac) -%}
+      {{ data | join('_') }}
+    _entry: >-
+      {% set data = [entry.mac]                                     -%}
+      {% for ip in entry.ips if ip is not none and ip | length > 0  -%}
+      {% set _ = data.append(ip | ansible.utils.ipwrap)             -%}
+      {% endfor                                                     -%}
+      {% set _ = data.append(entry.name) if
+                 entry.name is defined and entry.name | length > 0  -%}
       {{ data | join(',') }}
+  ansible.builtin.set_fact:
+    dhcp_host_entries: >-
+      {{
+        dhcp_host_entries + [{'file': _fname, 'entry': _entry, 'state': _state}]
+      }}
+  loop: "{{ cifmw_dnsmasq_dhcp_entries }}"
+  loop_control:
+    loop_var: entry
 
-- name: Debug _host_entry
-  ansible.builtin.debug:
-    var: _host_entry
+- name: Create add/remove sets
+  ansible.builtin.set_fact:
+    _dhcp_add: >-
+      {{
+        dhcp_host_entries | selectattr('state', 'equalto', 'present')
+      }}
+    _dhcp_remove: >-
+      {{
+        dhcp_host_entries | selectattr('state', 'equalto', 'absent')
+      }}
 
-- name: Manage host entry - add
+- name: Add DHCP entries
   become: true
   notify: Reload dnsmasq
-  when:
-    - cifmw_dnsmasq_host_state == 'present'
-  vars:
-    _fname: >-
-      {%- set data = [cifmw_dnsmasq_host_network] -%}
-      {%- set _ = data.append(cifmw_dnsmasq_host_name) if
-                  cifmw_dnsmasq_host_name is defined and cifmw_dnsmasq_host_name | length > 0 -%}
-      {%- set _ = data.append(cifmw_dnsmasq_host_mac) -%}
-      {{ data | join('_') }}
   ansible.builtin.copy:
-    content: "{{ _host_entry }}"
-    dest: "{{ cifmw_dnsmasq_basedir }}/dhcp-hosts.d/{{ _fname }}"
+    content: "{{ entry.entry }}"
+    dest: "{{ cifmw_dnsmasq_basedir }}/dhcp-hosts.d/{{ entry.file }}"
     mode: '0644'
     owner: root
     group: root
+  loop: "{{ _dhcp_add }}"
+  loop_control:
+    loop_var: entry
 
-- name: Manage host entry - remove
+- name: Remove DHCP entries
   become: true
-  when:
-    - cifmw_dnsmasq_host_state == 'absent'
   notify: Restart dnsmasq
   ansible.builtin.file:
     state: absent
-    path: "{{ cifmw_dnsmasq_basedir }}/dhcp-hosts.d/{{ cifmw_dnsmasq_host_mac }}"
+    path: "{{ cifmw_dnsmasq_basedir }}/dhcp-hosts.d/{{ entry.file }}"
+  loop: "{{ _dhcp_remove }}"
+  loop_control:
+    loop_var: entry

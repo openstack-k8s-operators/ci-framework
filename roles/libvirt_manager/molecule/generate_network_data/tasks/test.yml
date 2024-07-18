@@ -71,22 +71,24 @@
 
         - name: Ensure files exist
           vars:
-            matcher: ".*/{{ item }}.*"
+            matcher: "^{{ item }}.*"
+            matched: >-
+              {{
+                _dhcp_files.files |
+                map(attribute='path') |
+                map('basename') |
+                select('match', matcher)
+              }}
           ansible.builtin.assert:
             quiet: true
             that:
-              - _dhcp_files.files |
-                selectattr('path', 'match', matcher) |
-                length == 1
+              - (matched | length) == 1
             msg: >-
-              {{ item }} is missing
+              {{ item }} appears {{ matched | length }} times
+              {{ matched | join(', ') }}
           loop: "{{ scenario.check_dhcp }}"
 
       rescue:
-        - name: Output found files
-          ansible.builtin.debug:
-            msg: "{{ _dhcp_files.files }}"
-
         - name: Mark run as failed
           ansible.builtin.set_fact:
             _run_fail: true
