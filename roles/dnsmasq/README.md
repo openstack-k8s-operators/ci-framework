@@ -159,24 +159,29 @@ supported in libvirt).
 
 ### New host parameters
 
-* `cifmw_dnsmasq_host_network`: (String) Existing network name.
-* `cifmw_dnsmasq_host_state`: (String) Host status. Must be either `present` or `absent`.
-* `cifmw_dnsmasq_host_mac`: (String) Host MAC address.
-* `cifmw_dnsmasq_host_ips`: (List) Host IP addressees.
-* `cifmw_dnsmasq_host_name`: (String) Host name. Optional.
+* `cifmw_dnsmasq_dhcp_entries`: (List[mapping]) List of DHCP entries.
+
+### DHCP entry mapping
+
+* `state`: (String) Entry status. Must be either `present` or `absent`. Defaults to `present`
+* `network`: (String) Entry network. Must already exist in dnsmasq. Mandatory.
+* `mac`: (String) Entry MAC address. Mandatory.
+* `ips`: (List[string]) List of IP addresses associated to the MAC (v4, v6). Mandatory.
+* `name`: (String) Host name. Optional.
 
 #### Examples
 
 ```yaml
     - name: Inject some node in starwars network
       vars:
-        cifmw_dnsmasq_host_network: starwars
-        cifmw_dnsmasq_host_state: present
-        cifmw_dnsmasq_host_mac: "0a:19:02:f8:4c:a7"
-        cifmw_dnsmasq_host_ips:
-          - "2345:0425:2CA1::0567:5673:cafe"
-          - "192.168.254.11"
-        cifmw_dnsmasq_host_name: r2d2
+        cifmw_dnsmasq_dhcp_entries:
+          - network: starwars
+            state: present
+            mac: "0a:19:02:f8:4c:a7"
+            ips:
+              - "2345:0425:2CA1::0567:5673:cafe"
+              - "192.168.254.11"
+            name: r2d2
       ansible.builtin.include_role:
         name: dnsmasq
         tasks_from: manage_host.yml
