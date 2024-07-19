@@ -20,9 +20,70 @@
   vars:
     ansible_user_dir: "{{ lookup('env', 'HOME') }}"
     cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
-    cifmw_install_yamls_defaults:
-      NAMESPACE: openstack
-    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-  roles:
-    - role: test_deps
-    - role: ci_setup
+    async_duration: 6000
+  tasks:
+    # This is mostly when you want to run rhol_crc molecule
+    # on your own node: it might not come with pre-provisioned
+    # CRC like the CI nodeset in zuul.
+    # Check in the molecule.yml for "add_crc_creds" scenario
+    # for more information about activating this task
+    - name: Setup CRC if wanted
+      when:
+        - setup_crc is defined
+        - setup_crc | bool
+      block:
+        - name: Setup libvirt
+          ansible.builtin.include_role:
+            name: libvirt_manager
+
+        - name: Setup CRC
+          ansible.builtin.include_role:
+            name: rhol_crc
+
+    - name: Start RHOL/CRC
+      when:
+        - start_crc is defined
+        - start_crc | bool
+        - setup_crc is undefined or not setup_crc | bool
+      async: "{{ async_duration | int }}"
+      poll: 0
+      register: _start_crc
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          crc start | tee {{ cifmw_basedir }}/logs/crc-start-{{ scenario }}
+
+    - name: Inject our own NetworkManager configuration
+      notify: Restart NetworkManager
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/NetworkManager/conf.d/zzz-molecule-dns.conf
+        mode: "0644"
+        content: |
+          [main]
+          dns=dnsmasq
+
+    - name: Run test_deps role
+      ansible.builtin.import_role:
+        name: test_deps
+
+    - name: Run ci_setup role
+      ansible.builtin.import_role:
+        name: ci_setup
+
+    - name: Check for CRC startup
+      when:
+        - _start_crc.ansible_job_id is defined
+      register: _check_crc_start
+      ansible.builtin.async_status:
+        jid: "{{ _start_crc.ansible_job_id }}"
+      until: _check_crc_start.finished
+      retries: 120  ## can't use the parameter here. That makes 50*120 = 6000
+      delay: 50
+
+  handlers:
+    - name: Restart NetworkManager
+      become: true
+      ansible.builtin.systemd_service:
+        name: NetworkManager
+        state: restarted

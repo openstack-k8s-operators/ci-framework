@@ -18,14 +18,17 @@
   tags:
     - always
   ansible.builtin.file:
-    path: "{{ cifmw_rhol_crc_basedir }}/{{ item }}"
+    path: "{{ item }}"
     state: directory
+    mode: "0755"
   loop:
-    - artifacts
-    - bin
-    - logs
+    - "{{ cifmw_rhol_crc_basedir }}/artifacts"
+    - "{{ cifmw_rhol_crc_basedir }}/logs"
+    - "{{ cifmw_rhol_crc_binary_folder }}"
 
 - name: Initialize manage_secrets
+  tags:
+    - always
   ansible.builtin.import_role:
     name: manage_secrets
 
@@ -35,18 +38,24 @@
   ansible.builtin.import_tasks: find_crc.yml
 
 - name: Fail if crc domain is already defined
-  ansible.builtin.fail:
-    msg: "The crc domain already exist. Set cifmw_rhol_crc_force_cleanup to true to force the cleanup. Interrupting tasks..."
+  tags:
+    - always
   when:
-    - crc_present|bool
-    - not cifmw_rhol_crc_force_cleanup|bool
+    - crc_present | bool
+    - not cifmw_rhol_crc_force_cleanup | bool
     - not cifmw_rhol_crc_reuse | bool
+  ansible.builtin.fail:
+    msg: >-
+      The crc domain already exist. Set cifmw_rhol_crc_force_cleanup
+      to true to force the cleanup. Interrupting tasks.
 
 - name: Ensure pull-secret is in place if we need to configure CRC
+  tags:
+    - always
   when:
-    - (cifmw_rhol_crc_force_cleanup|bool) or
-      (not crc_present|bool) or
-      (not crc_running|bool)
+    - (cifmw_rhol_crc_force_cleanup | bool) or
+      (not crc_present | bool) or
+      (not crc_running | bool)
   vars:
     cifmw_manage_secrets_pullsecret_dest: "{{ cifmw_rhol_crc_pullsecret_dest }}"
   ansible.builtin.include_role:
@@ -58,17 +67,15 @@
     - name: Retrieve RHOL/CRC if not existing
       when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_present|bool
       block:
-        - name: Check RHOL/CRC binary exists
-          ansible.builtin.stat:
-            path: "{{ cifmw_rhol_crc_binary }}"
-          register: cifmw_rhol_crc_binary_stat
-
         - name: Get RHOL/CRC binary if does not exist
-          ansible.builtin.import_tasks: binary.yml
-          when: not cifmw_rhol_crc_binary_stat.stat.exists
+          when:
+            - (not crc_bin_available | bool) or
+              (crc_version is defined and
+              cifmw_rhol_crc_version is not version(crc_version, '=='))
+          ansible.builtin.include_tasks: binary.yml
 
         - name: Setup sudoers file for sudo commands in RHOL/CRC setup
-          ansible.builtin.import_tasks: sudoers_grant.yml
+          ansible.builtin.include_tasks: sudoers_grant.yml
 
         - name: Clean RHOL/CRC if wanted
           when:
@@ -79,19 +86,25 @@
     - name: Configure and start RHOL/CRC
       when: (cifmw_rhol_crc_force_cleanup|bool) or not crc_running|bool
       block:
-        - name: Set RHOL/CRC configuration options
-          ansible.builtin.import_tasks: configuration.yml
+        - name: Setup if RHOL/CRC does not exists
+          when:
+            - not crc_present | bool
+          block:
+            - name: Set RHOL/CRC configuration options
+              ansible.builtin.include_tasks: configuration.yml
 
-        - name: Setup RHOL/CRC
-          ansible.builtin.shell: # noqa risky-shell-pipe
-            cmd: >-
-              {{ cifmw_rhol_crc_binary }} setup 2>&1 |
-              tee {{ cifmw_rhol_crc_basedir }}/logs/crc-setup.log
-          register: cifmw_rhol_crc_cmd_setup
+            - name: Setup RHOL/CRC
+              ansible.builtin.shell:
+                cmd: >-
+                  set -o pipefail;
+                  {{ cifmw_rhol_crc_binary }} setup 2>&1 |
+                  tee {{ cifmw_rhol_crc_basedir }}/logs/crc-setup.log
+              register: cifmw_rhol_crc_cmd_setup
 
         - name: Start RHOL/CRC
-          ansible.builtin.shell: # noqa risky-shell-pipe
+          ansible.builtin.shell:
             cmd: >-
+              set -o pipefail;
               {{ cifmw_rhol_crc_binary }} start 2>&1 |
               tee {{ cifmw_rhol_crc_basedir }}/logs/crc-start.log
           register: cifmw_rhol_crc_cmd_start

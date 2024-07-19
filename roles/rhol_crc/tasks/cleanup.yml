@@ -18,10 +18,25 @@
 # domain and XML definition, network and XML definition, crc instance, ...
 
 - name: Check RHOL/CRC binary exists
+  register: _crc_binary
   ansible.builtin.stat:
     path: "{{ cifmw_rhol_crc_binary }}"
-  register: cifmw_rhol_crc_binary_stat
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
 
 - name: Delete RHOL/CRC instance and associated configuration
-  when: cifmw_rhol_crc_binary_stat.stat.exists
-  ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} cleanup"
+  when:
+    - _crc_binary.stat.exists
+  ansible.builtin.command: "{{ cifmw_rhol_crc_binary }} {{ item }}"
+  loop:
+    - "delete -f"
+    - "cleanup"
+
+- name: Deepscrub CRC directory
+  tags:
+    - never
+    - deepscrub
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/.crc"
+    state: absent
