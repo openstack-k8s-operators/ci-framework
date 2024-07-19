@@ -1,0 +1,31 @@
+- name: Check compute node libvirt for tls
+  vars:
+    cert_verify_compute_node: "{{ cert_verify_check_compute_node.Host.split('.').0 }}"
+    cert_verify_compute_node_url: "{{ cert_verify_check_compute_node.Host }}"
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc exec -n openstack -t openstackclient -- bash -c \"echo 'QUIT'|openssl s_client -showcerts -connect {{ cert_verify_compute_node }}.ocp.openstack.lab:16514 2>&1|openssl x509 -noout -serial\""
+  register: cert_verify_compute_libvirt_cert_serial
+
+- name: Read compute libvirt secret crt
+  vars:
+    cert_verify_compute_node: "{{ cert_verify_check_compute_node.Host.split('.').0 }}"
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: "{{ lookup('env', 'HOME') }}/bin/oc get secret/cert-libvirt-default-{{ cert_verify_compute_node }} -o jsonpath=\"{.data['tls\\.crt']}\""
+  register: cert_verify_compute_libvirt_cert_secret
+
+- name: get compute libvirt secret cert serial
+  shell: "echo \"{{ cert_verify_compute_libvirt_cert_secret.stdout }}\" |base64 -d |openssl x509 -noout -serial"
+  register: cert_verify_compute_libvirt_cert_secret_serial
+
+- name: verify compute node for tls
+  vars:
+    cert_verify_compute_node: "{{ cert_verify_check_compute_node.Host.split('.').0 }}"
+  ansible.builtin.assert:
+    that:
+      - "cert_verify_compute_libvirt_cert_secret_serial.stdout in cert_verify_compute_libvirt_cert_serial.stdout"
+    success_msg: "{{ cert_verify_compute_node }} has tls cert"
+    fail_msg: "{{ cert_verify_compute_node }} does not have tls cert"
