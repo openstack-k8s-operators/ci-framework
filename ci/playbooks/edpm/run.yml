@@ -1,6 +1,48 @@
 ---
+- name: Fix machineconfg on crc
+  hosts: crc
+  tasks:
+    - name: Read kubelet file
+      become: true
+      ansible.builtin.shell: |
+        cat /var/lib/kubelet/config.json
+      register: _config_json
+      changed_when: false
+
+    - name: Create machineconfig manifest to overwrite config.json
+      ansible.builtin.copy:
+        content: |
+          apiVersion: machineconfiguration.openshift.io/v1
+          kind: MachineConfig
+          metadata:
+            labels:
+              machineconfiguration.openshift.io/role: {{ item }}
+            name: 99-overwrite-kubelet-config-{{ item }}
+          spec:
+            config:
+              ignition:
+                version: 3.4.0
+              storage:
+                files:
+                - contents:
+                    source: data:,{{ _config_json.stdout | urlencode }}
+                  mode: 384
+                  overwrite: true
+                  path: /var/lib/kubelet/config.json
+        dest: /tmp/mc-{{ item }}.yaml
+      loop:
+        - master
+        - worker
+
+    - name: Apply machineconfig manifest
+      ansible.builtin.command: oc apply -f /tmp/mc-{{ item }}.yaml
+      changed_when: false
+      loop:
+        - master
+        - worker
+
 - name: "Run ci/playbooks/edpm/run.yml"
-  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
   gather_facts: true
   tasks:
     - name: Filter out host if needed
