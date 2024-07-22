@@ -1,0 +1,21 @@
+- name: Make Metal3 watch all namespaces
+  when:
+    - cifmw_openshift_setup_metal3_watch_all_ns | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  block:
+    - name: Fetch Metal3 configuration name
+      ansible.builtin.command:
+        cmd: "oc get Provisioning -o name"
+      register: _cifmw_openshift_setup_provisioning_name
+      changed_when: false
+
+    - name: Apply the patch to Metal3 Provisioning
+      ansible.builtin.command:
+        cmd: >-
+          oc patch {{ _cifmw_openshift_setup_provisioning_name.stdout }}
+          --type='json'
+          -p='[{"op": "replace", "path": "/spec/watchAllNamespaces", "value": true}]'
+      register: _cifmw_openshift_setup_provisioning_ns_patch_out
+      changed_when: "'no change' not in _cifmw_openshift_setup_provisioning_ns_patch_out.stdout"

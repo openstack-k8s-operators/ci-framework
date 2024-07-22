@@ -26,3 +26,4 @@ effect if `cifmw_openshift_setup_ca_registry_to_add` is set.
             mirrors:
               - mirror.quay.rdoproject.org
         ```
+* `cifmw_openshift_setup_metal3_watch_all_ns`: (Boolean) Tells Metal3 BMO to watch resources out of its namespace. Defaults to `false`.
