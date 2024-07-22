@@ -22,6 +22,14 @@ For instance, `tags` aren't passed along, unless we use `apply` keyword.
 
 The `include_*` directives may also have an impact on performances.
 
+##### When and include
+
+A `when` condition will be applied to the "action of including" the tasks or role. This means,
+if the condition is `false`, ansible will not evaluate anything from within the non-included content.
+
+This is great, since we can avoid a huge list of `skipped` in the logs, and see a performance gain since
+ansible won't have to re-evaluate the same condition over and over.
+
 #### Import
 
 The `import_*` directives allow to load content statically. It's usually
@@ -29,11 +37,19 @@ The `import_*` directives allow to load content statically. It's usually
 small performances improvements. They fully support `tags` so that we may
 get a more convenient way to filter tasks in the play.
 
+##### When and import
+
+A `when` condition will be applied to every single tasks imported. This means, if the condition is `false`,
+ansible will evaluate that same condition for every single imported tasks.
+
+This might lead to a huge amount of tasks with `skipped` action, and a slower run since evaluating the condition
+will consume time for nothing.
+
 ~~~{admonition} What to use then?
 :class: tip
 A simple rule of thumb: if I intend to run the tasks/role multiple time
-over the same play, I'll use `include_*` module. For the rest, I'll use
-`import_*`.
+in a loop, or if there's a condition to the tasks inclusion, I'll use `include_*`
+module. For the rest, I'll use `import_*`.
 ~~~
 
 ## Testing
