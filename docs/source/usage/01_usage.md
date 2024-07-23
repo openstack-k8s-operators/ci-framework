@@ -167,6 +167,7 @@ or `--skip-tags`:
 - `bootstrap_libvirt`: Run the [reproducer](../reproducers/01-considerations.md) libvirt bootstrap only.
 - `bootstrap_repositories`: Run the [reproducer](../reproducers/01-considerations.md) repositories bootstrap steps only.
 - `devscripts_layout`: Run the [reproducer](../reproducers/01-considerations.md) devscripts bootstrap only.
+- `fix_marketplace`: When skipped, allows to not re-run the `openshift_setup/fix_openshift_marketplace.yml` tasks.
 - `infra`: Denotes tasks to prepare host virtualization and Openshift Container Platform when deploy-edpm.yml playbook is run.
 - `build-packages`: Denotes tasks to call the role [pkg_build](../roles/pkg_build.md) when deploy-edpm.yml playbook is run.
 - `build-containers`: Denotes tasks to call the role [build_containers](../roles/build_containers.md) when deploy-edpm.yml playbook is run.
