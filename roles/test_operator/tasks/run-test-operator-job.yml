@@ -67,7 +67,7 @@
     - not cifmw_test_operator_dry_run | bool
     - not testjob_timed_out
   block:
-    - name: Get information about PVC that stores the logs
+    - name: Get information about PVCs that store the logs
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -75,7 +75,30 @@
         kind: PersistentVolumeClaim
         label_selectors:
           - "instanceName={{ test_operator_job_name }}"
-      register: logsPVC
+      register: logsPVCs
+
+    - name: Set up volume mounts and volumes for all PVCs
+      ansible.builtin.set_fact:
+        volume_mounts: >
+          {{
+            (volume_mounts | default([])) + [{
+              'name': "logs-volume-" ~ index,
+              'mountPath': "/mnt/logs-{{ test_operator_job_name }}-step-" ~ index
+            }]
+          }}
+        volumes: >
+          {{
+            (volumes | default([])) + [{
+              'name': "logs-volume-" ~ index,
+              'persistentVolumeClaim': {
+                'claimName': pvc.metadata.name
+              }
+            }]
+          }}
+      loop: "{{ logsPVCs.resources }}"
+      loop_control:
+        loop_var: pvc
+        index_var: index
 
     - name: Start test-operator-logs-pod
       kubernetes.core.k8s:
@@ -95,13 +118,8 @@
                 image: "{{ cifmw_test_operator_logs_image }}"
                 command: ["sleep"]
                 args: ["infinity"]
-                volumeMounts:
-                  - name: logs-volume
-                    mountPath: /mnt
-            volumes:
-              - name: logs-volume
-                persistentVolumeClaim:
-                  claimName: "{{ logsPVC.resources[0].metadata.name }}"
+                volumeMounts: "{{ volume_mounts }}"
+            volumes: "{{ volumes }}"
             tolerations: "{{ cifmw_test_operator_tolerations | default(omit) }}"
 
     - name: Ensure that the test-operator-logs-pod is Running
