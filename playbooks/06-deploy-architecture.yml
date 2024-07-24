@@ -66,42 +66,68 @@
             type: "{{ cifmw_ssh_keytype | default('ecdsa') }}"
             size: "{{ cifmw_ssh_keysize | default(521) }}"
 
-        - name: Generate needed facts out of local files
+        - name: Try/catch block
           vars:
+            # We want to match anything like:
+            # - controller (in Zuul)
+            # - controller-0.foo.com (FQDN)
+            # - controller-0 (no FQDN) - compatibility match
+            _ctl_data: >-
+              {{
+                hostvars | dict2items |
+                selectattr('key', 'match', '^(controller-0.*|controller)') |
+                map(attribute='value') | first
+              }}
             _ifaces_vars: >-
               {{
-                hostvars['controller-0'].ansible_interfaces |
+                _ctl_data.ansible_interfaces |
                 map('regex_replace', '^(.*)$', 'ansible_\1')
               }}
-            _controller_host: "{{ hostvars['controller-0'].ansible_host }}"
-            _ipv4_network_data: >-
-              {{
-                hostvars['controller-0'] | dict2items |
-                selectattr('key', 'in', _ifaces_vars) |
-                selectattr('value.ipv4.address', 'defined') |
-                selectattr('value.ipv4.address', 'equalto', _controller_host) |
-                map(attribute='value.ipv4') | first | default({})
-              }}
-          ansible.builtin.set_fact:
-            cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
-              {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
-            cifmw_ci_gen_kustomize_values_ssh_private_key: >-
-              {{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}
-            cifmw_ci_gen_kustomize_values_ssh_public_key: >-
-              {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
-            cifmw_ci_gen_kustomize_values_migration_pub_key: >-
-              {{ lookup('file', _ssh_file ~ '.pub', rstrip=False)}}
-            cifmw_ci_gen_kustomize_values_migration_priv_key: >-
-              {{ lookup('file', _ssh_file, rstrip=False) }}
-            cifmw_ci_gen_kustomize_values_sshd_ranges: >-
-              {{
-                [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
-                (
-                  [
-                    _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
-                  ]
-                ) if (_ipv4_network_data | length > 0) else []
-              }}
+            _controller_host: "{{ _ctl_data.ansible_host }}"
+          block:
+            - name: Generate needed facts out of local files
+              vars:
+                _ipv4_network_data: >-
+                  {{
+                    _ctl_data | dict2items |
+                    selectattr('key', 'in', _ifaces_vars) |
+                    selectattr('value.ipv4.address', 'defined') |
+                    selectattr('value.ipv4.address', 'equalto', _controller_host) |
+                    map(attribute='value.ipv4') | first | default({})
+                  }}
+              ansible.builtin.set_fact:
+                cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
+                  {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
+                cifmw_ci_gen_kustomize_values_ssh_private_key: >-
+                  {{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}
+                cifmw_ci_gen_kustomize_values_ssh_public_key: >-
+                  {{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}
+                cifmw_ci_gen_kustomize_values_migration_pub_key: >-
+                  {{ lookup('file', _ssh_file ~ '.pub', rstrip=False)}}
+                cifmw_ci_gen_kustomize_values_migration_priv_key: >-
+                  {{ lookup('file', _ssh_file, rstrip=False) }}
+                cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+                  {{
+                    [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
+                    (
+                      [
+                        _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
+                      ]
+                    ) if (_ipv4_network_data | length > 0) else []
+                  }}
+          rescue:
+            - name: Debug _ctl_data
+              ansible.builtin.debug:
+                var: _ctl_data
+
+            - name: Debug _ifaces_vars
+              ansible.builtin.debug:
+                var: _ifaces_vars
+
+            - name: Fail for good
+              ansible.builtin.fail:
+                msg: >-
+                  Error detected. Check debugging output above.
 
     - name: Load architecture automation file
       tags:
