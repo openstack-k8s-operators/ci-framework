@@ -14,18 +14,25 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Get CA bundle data with retries
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: 'oc get secret combined-ca-bundle -n openstack -o "jsonpath={.data.tls-ca-bundle\.pem}"'
-  retries: 10
-  no_log: true
-  delay: 3
-  until: ca_bundle_data.rc == 0
-  register: ca_bundle_data
-  ignore_errors: true
+# Here we rescue and not force error to preseve
+# the ignore_errors: true
+- name: Try/catch block
+  block:
+    - name: Get CA bundle data with retries
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: 'oc get secret combined-ca-bundle -n openstack -o "jsonpath={.data.tls-ca-bundle\.pem}"'
+      retries: 10
+      no_log: true
+      delay: 3
+      until: ca_bundle_data.rc == 0
+      register: ca_bundle_data
+  rescue:
+    - name: Dump ca_bundle_data var
+      ansible.builtin.debug:
+        var: ca_bundle_data
 
 - name: Get CA bundle
   when: ca_bundle_data.rc == 0
@@ -49,7 +56,7 @@
     get_checksum: false
     get_mime: false
 
-- name: Inject OpenStackControlplane CA bundle  # noqa: no-handler
+- name: Inject OpenStackControlplane CA bundle # noqa: no-handler
   when: _ca_bundle_file.stat.exists
   vars:
     cifmw_install_ca_bundle_src: "{{ _ca_bundle_file.stat.path }}"
