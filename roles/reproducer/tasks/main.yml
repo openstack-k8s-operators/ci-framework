@@ -14,7 +14,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Discover latest image for CS9
+- name: Discover latest image
   tags:
     - bootstrap
     - bootstrap_layout
@@ -26,9 +26,15 @@
     - bootstrap_layout
   when:
     - cifmw_job_uri is defined
-  ansible.builtin.include_tasks: ci_data.yml
+  ansible.builtin.include_tasks:
+    file: ci_data.yml
+    apply:
+      tags:
+        - bootstrap_layout
 
 - name: Discover and expose CI Framework path on remote node
+  tags:
+    - always
   vars:
     default_path: >-
       {{
@@ -55,6 +61,9 @@
       }}
 
 - name: Build final libvirt layout
+  tags:
+    - bootstrap_env
+    - bootstrap_layout
   when:
     - cifmw_use_libvirt | default(false) | bool
   ansible.builtin.include_role:
@@ -62,6 +71,8 @@
     tasks_from: "generate_layout.yml"
 
 - name: Assert no conflicting parameters were passed
+  tags:
+    - always
   ansible.builtin.assert:
     that:
       - (_cifmw_libvirt_manager_layout.vms.crc is defined) or
@@ -74,6 +85,8 @@
       Please chose between CRC and OCP cluster.
 
 - name: Assert that deprecated cifmw_reproducer_internal_ca parameters was not passed
+  tags:
+    - always
   ansible.builtin.assert:
     that:
       - cifmw_reproducer_internal_ca is not defined
@@ -84,6 +97,8 @@
       to use a file present on the host.
 
 - name: Set _use_crc based on actual layout
+  tags:
+    - always
   vars:
     _use_crc: >-
       {{
@@ -214,6 +229,7 @@
       tags:
         - bootstrap
         - bootstrap_layout
+        - bootstrap_env
 
 - name: Apply VLAN ids to TAP type interfaces.
   when:
