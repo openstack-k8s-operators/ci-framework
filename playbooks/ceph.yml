@@ -143,16 +143,6 @@
         - not _deploy_ceph | default(true)
       ansible.builtin.meta: end_play
 
-    - name: Use ansible_fqdn when ceph_spec_fqdn parameter is true
-      when: ceph_spec_fqdn | default(false)
-      ansible.builtin.set_fact:
-        ceph_hostname_var: 'ansible_fqdn'
-
-    - name: Use ansible_hostname when ceph_spec_fqdn parameter is false
-      when: not (ceph_spec_fqdn | default(false))
-      ansible.builtin.set_fact:
-        ceph_hostname_var: 'ansible_hostname'
-
     - name: Set IPv4 facts
       when: ansible_all_ipv4_addresses | length > 0
       ansible.builtin.set_fact:
@@ -173,27 +163,18 @@
         ms_bind_ipv4: false
         ms_bind_ipv6: true
 
-    - name: Handle IPv6 job configuration
-      when:
-        - ansible_all_ipv4_addresses | length == 0
-        - not (cifmw_cephadm_ceph_spec_fqdn | default(false) | bool)
-      ansible.builtin.set_fact:
-        ceph_hostname_var: 'ansible_hostname'
-
     - name: Build a dict mapping hostname to its IP which is in management network range
       ansible.builtin.set_fact:
         host_to_ip:
           "{{ host_to_ip | default({}) |
             combine(
               {
-                hostvars[item][ceph_hostname_var] :
+                item :
                 hostvars[item][all_addresses] | ansible.utils.ipaddr(ssh_network_range) | first
               }
             )
            }}"
       delegate_to: "{{ item }}"
-      when:
-        - hostvars[item][ceph_hostname_var] is defined
       loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
 
     - name: Load network ranges from Networking Environment Definition if not provided
