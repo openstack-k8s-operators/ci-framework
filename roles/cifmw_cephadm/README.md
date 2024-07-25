@@ -92,10 +92,6 @@ need to be changed for a typical EDPM deployment.
    used as entry point to reach the `ganesha backends` through an `haproxy`
    instance where proxy-protocol is enabled.
 
-* `cifmw_cephadm_ceph_spec_fqdn`: When true, the Ceph spec should use
-  a fully qualified domain name (e.g. server1.bar.com). When false, the
-  Ceph spec should use a short hostname (e.g. server1).
-
 * `cifmw_cephadm_ns`: Name of the OpenStack controlplane namespace
    used in configuring swift objects.
 
