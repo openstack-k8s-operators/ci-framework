@@ -67,6 +67,11 @@
     - not cifmw_test_operator_dry_run | bool
     - not testjob_timed_out
   block:
+    - name: Reset volumes and volume_mounts to an empty list
+      ansible.builtin.set_fact:
+        volumes: []
+        volume_mounts: []
+
     - name: Get information about PVCs that store the logs
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -140,10 +145,15 @@
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
+      vars:
+        pod_path: mnt/logs-{{ test_operator_job_name }}-step-{{ index }}
       ansible.builtin.shell: >
         oc cp -n {{ cifmw_test_operator_namespace }}
-        openstack/test-operator-logs-pod-{{ run_test_fw }}:mnt/
+        openstack/test-operator-logs-pod-{{ run_test_fw }}:{{ pod_path }}
         {{ cifmw_test_operator_artifacts_basedir }}
+      loop: "{{ logsPVCs.resources }}"
+      loop_control:
+        index_var: index
 
 - name: Get list of all pods
   kubernetes.core.k8s_info:
