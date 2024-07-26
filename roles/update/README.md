@@ -11,5 +11,5 @@ Role to run update
 * `cifmw_update_create_volume`: (Boolean) Attach a volume to the test OS instance when set to true.  Default to `False`
 * `cifmw_update_ping_loss_second` : (Integer) Number of seconds that the ping test is allowed to fail. Default to `0`. Note that 1 packet loss is always accepted to avoid false positive.
 * `cifmw_update_ping_loss_percent` : (Integer) Maximum percentage of ping loss accepted.  Default to `0`. Only relevant when `cifmw_update_ping_loss_second` is not 0.
-
+* `cifmw_update_control_plane_check`: (Boolean) Activate a continuous control plane testing. Default to `False`
 ## Examples
