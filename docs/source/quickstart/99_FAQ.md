@@ -176,3 +176,22 @@ dev-scripts related resources such as repository, OCP resources and so on.
 `hypervisor-1` is the name we use in the example inventories through the documentation.
 Please be sure to pass the proper inventory hostname.
 ~~~
+
+### How can I reauthenticate?
+
+After my deployment has been running for a few days I'm unable to access k8s from the controller and I see the following error message. What do I do?
+```
+[zuul@controller-0 ~]$ oc get pods
+E0729 08:58:18.781204   67525 memcache.go:265] couldn't get current server API group list: the server has asked for the client to provide credentials
+E0729 08:58:18.805259   67525 memcache.go:265] couldn't get current server API group list: the server has asked for the client to provide credentials
+E0729 08:58:18.829791   67525 memcache.go:265] couldn't get current server API group list: the server has asked for the client to provide credentials
+E0729 08:58:18.848560   67525 memcache.go:265] couldn't get current server API group list: the server has asked for the client to provide credentials
+E0729 08:58:18.866136   67525 memcache.go:265] couldn't get current server API group list: the server has asked for the client to provide credentials
+error: You must be logged in to the server (the server has asked for the client to provide credentials)
+[zuul@controller-0 ~]$
+```
+After running the following you should be able to authenticate.
+```
+export PASS=$(cat ~/.kube/kubeadmin-password)
+oc login -u kubeadmin -p $PASS https://api.ocp.openstack.lab:6443
+```
