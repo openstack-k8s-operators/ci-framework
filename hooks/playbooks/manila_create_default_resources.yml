@@ -2,12 +2,33 @@
 - name: Create Manila resources needed for tempest run
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
+  vars:
+    share_type_name: "default"
+    driver_handles_share_servers: "False"
+    extra_specs:
+      snapshot_support: "True"
+      create_share_from_snapshot_support: "True"
   tasks:
-    - name: Creat share type default for manila tempest plugin tests
+    - name: Create share type default for manila tempest plugin tests
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
-      ansible.builtin.shell: |
+      ansible.builtin.command: |
         oc -n {{ namespace }} exec -it pod/openstackclient \
-          -- openstack share type create default false \
-          --snapshot-support True --create-share-from-snapshot-support True
+          -- openstack share type create {{ share_type_name }} {{ driver_handles_share_servers }}
+      register: _manila_share_creation
+      failed_when: >-
+        ( ( _manila_share_creation.rc | int ) != 0 )
+        and not ( "HTTP 409" in _manila_share_creation.stderr )
+
+    - name: Update default share type properties
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      vars:
+        # convert dict to 'k=v ...' format
+        extra_spec_opt: "{%- for k, v in extra_specs.items() -%}{{ k }}={{ v }} {% endfor -%}"
+      when: extra_spec_opt | length > 0
+      ansible.builtin.command: |
+        oc -n {{ namespace }} exec -it pod/openstackclient \
+          -- openstack share type set {{ share_type_name }} --extra-specs {{ extra_spec_opt }}
