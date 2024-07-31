@@ -76,7 +76,7 @@ be controlled with the following parameters.
 
 * `cifmw_lvms_delay`: (Int) Ansible `delay` passed to tasks which wait for `kubernetes.core.k8s_info` (default `10`)
 * `cifmw_lvms_retries`: (Int) Ansible `retries` passed to tasks which wait for `kubernetes.core.k8s_info` (default `60`)
-
+* `cifmw_lvms_wait_nodes_lvs_retries`: (Int) Number of retries to wait for the logical volumes to show up in each OCP node (default `120`)
 
 ### Optional parameters
 

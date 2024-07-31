@@ -154,3 +154,63 @@
     - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status is defined
     - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status.ready is defined
     - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status.ready | bool
+    - _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status.deviceClassStatuses is defined
+    - >-
+      _cifmw_lvms_storage_cluster_lvmscluster_out.resources[0].status.deviceClassStatuses |
+      selectattr("name", "defined") |
+      selectattr("nodeStatus", "defined") |
+      selectattr("name", "equalto", cifmw_lvms_storage_class) |
+      map(attribute="nodeStatus") | flatten |
+      selectattr("status", "defined") |
+      map(attribute="status") | unique == ["Ready"]
+
+- name: Wait for all the LVMVolumeGroupNodeStatus to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: lvm.topolvm.io/v1alpha1
+    kind: LVMVolumeGroupNodeStatus
+    namespace: "{{ cifmw_lvms_namespace }}"
+  register: _cifmw_lvms_storage_cluster_lvmvolumegroupnodestatus_out
+  retries: "{{ cifmw_lvms_retries }}"
+  delay: "{{ cifmw_lvms_delay }}"
+  until:
+    - _cifmw_lvms_storage_cluster_lvmvolumegroupnodestatus_out.failed is false
+    - _cifmw_lvms_storage_cluster_lvmvolumegroupnodestatus_out.resources is defined
+    - >-
+      _cifmw_lvms_storage_cluster_lvmvolumegroupnodestatus_out.resources |
+      selectattr("spec.nodeStatus", "defined") |
+      map(attribute="spec.nodeStatus") | flatten |
+      selectattr("status", "defined") |
+      map(attribute="status") | unique == ["Ready"]
+
+- name: Wait for all nodes to have the LVM annotation
+  vars:
+    _cifmw_lvms_storage_nodes: >-
+      {{
+        _cifmw_lvms_storage_cluster_lvmvolumegroupnodestatus_out.resources |
+        selectattr("metadata.name", "defined") |
+        map(attribute="metadata.name")
+      }}
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  when: _cifmw_lvms_storage_nodes | length > 0
+  ansible.builtin.command:
+    cmd: >-
+      oc get node
+      -l 'topology.topolvm.io/node in ({{ _cifmw_lvms_storage_nodes | join(", ") }})'
+      -o=jsonpath='{.items[*].metadata.annotations.capacity\.topolvm\.io/{{ cifmw_lvms_storage_class }}}'
+  changed_when: false
+  register: _cifmw_lvms_storage_nodes_annotations_out
+  retries: "{{ cifmw_lvms_wait_nodes_lvs_retries }}"
+  delay: "{{ cifmw_lvms_delay }}"
+  until:
+    - _cifmw_lvms_storage_nodes_annotations_out is defined
+    - _cifmw_lvms_storage_nodes_annotations_out.failed is false
+    - _cifmw_lvms_storage_nodes_annotations_out.stdout | trim | length != 0
+    - >-
+      _cifmw_lvms_storage_nodes_annotations_out.stdout | split(" ") |
+      map("int") | select("gt", 0) |
+      length == _cifmw_lvms_storage_nodes | length
