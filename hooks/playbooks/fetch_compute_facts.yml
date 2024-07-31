@@ -193,10 +193,14 @@
                         ---
                         {% set mtu_list = [ctlplane_mtu] %}
                         {% for network in nodeset_networks %}
-                        {{ mtu_list.append(lookup("vars", networks_lower[network] ~ "_mtu")) }}
+                        {{ mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) }}
                         {%- endfor %}
                         {% set min_viable_mtu = mtu_list | max %}
                         network_config:
+                        - type: interface
+                          name: nic1
+                          use_dhcp: true
+                          mtu: {{ min_viable_mtu }}
                         - type: ovs_bridge
                           name: {{ neutron_physical_bridge_name }}
                           mtu: {{ min_viable_mtu }}
@@ -205,6 +209,7 @@
                           domain: {{ dns_search_domains }}
                           addresses:
                           - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_cidr }}
+                          routes: {{ ctlplane_host_routes }}
                           members:
                           - type: interface
                             name: nic2
@@ -213,11 +218,11 @@
                             primary: true
                         {% for network in nodeset_networks %}
                           - type: vlan
-                            mtu: {{ min_viable_mtu - 4 }}
+                            mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
                             vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
                             addresses:
                             - ip_netmask:
-                                {{ lookup("vars", networks_lower[network] ~ "_ip") }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+                                {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
                             routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
                         {% endfor %}
                         {% endraw %}
