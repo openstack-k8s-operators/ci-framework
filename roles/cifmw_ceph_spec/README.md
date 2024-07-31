@@ -28,6 +28,10 @@ None
   which is created by the `cifmw_block_device` role)
 * `cifmw_ceph_spec_path`: path of the rendered spec file (default
   `/tmp/ceph_spec.yml`)
+* `cifmw_ceph_spec_encryption`: Produce an initial Ceph configuration
+  file with both over-the-wire
+  ([msgr2 secure mode](https://docs.ceph.com/en/latest/rados/configuration/msgr2/))
+  and on-disk (LUKS and dm-crypt) encryption enabled (default: `false`).
 
 ## Examples
 
