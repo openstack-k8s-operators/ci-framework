@@ -95,3 +95,11 @@ If at any time your patch no longer meets this criteria the label will be remove
 
 If you would like to bring attention to your patch before a reviewer has made it to your patch
 reach out in our [slack channel](https://redhat.enterprise.slack.com/archives/C03MD4LG22Z)
+
+## PR Approval Policy
+
+All pull requests must be approved by at least two reviewers, excluding the PR owner.
+
+Please note that this requirement is a project-specific guideline rather than a tooling constraint, as Prow does not currently support enforcing a minimum number of approvals.
+
+This policy is in place to ensure code quality and to minimize the risk of introducing breaking changes.
