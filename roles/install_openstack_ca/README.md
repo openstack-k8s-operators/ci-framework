@@ -8,6 +8,8 @@ Note that this role assumes that an OpenstackControlPlane is deployed.
 OpenstackControlPlane CA. Defaults to `~/ci-framework/artifacts/manifests`.
 * `cifmw_install_openstack_ca_file`: (String) File name to the extracted CA file
 that will be installed. Defaults to `tls-ca-bundle.pem`.
+* `cifmw_install_openstack_ca_file_full_path`: (String) Full path to the extracted CA file
+that will be installed. Defaults to `(cifmw_install_openstack_ca_dest_path, cifmw_install_openstack_ca_file) | path_join`.
 
 ## Examples
 ```YAML
