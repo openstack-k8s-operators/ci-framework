@@ -22,6 +22,7 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_update_containers_edpm_image_url`: Full EDPM Image url for updating EDPM OS image.
 * `cifmw_update_containers_ipa_image_url`: Full Ironic Python Agent url needed in Ironic specific podified deployment
 * `cifmw_update_containers_rollback`: Rollback the container update changes. Default to `false`. It will be used with cleanup.
+* `cifmw_update_containers_prefix`: The OpenStack services container name prefix. Default to `openstack`. In downstream release content, we use `rhoso18-openstack`.
 
 ## Examples
 ### 1 - Update OpenStack container
@@ -38,7 +39,22 @@ If apply, please explain the privilege escalation done in this role.
         name: update_containers
 ```
 
-### 2 - Update Ansibleee container image
+### 2 - Update OpenStack containers with different container prefix
+```yaml
+- hosts: all
+  vars:
+    cifmw_update_containers_openstack: true
+    cifmw_update_containers_registry: xxxx
+    cifmw_update_containers_namespace: xxxx
+    cifmw_update_containers_tag: xxxx
+    cifmw_update_containers_prefix: rhoso18-openstack
+  tasks:
+    - name: Generate CR for updating openstack containers
+      ansible.builtin.include_role:
+        name: update_containers
+```
+
+### 3 - Update Ansibleee container image
 ```yaml
 - hosts: all
   vars:
@@ -49,7 +65,7 @@ If apply, please explain the privilege escalation done in this role.
         name: update_containers
 ```
 
-### 3 - Update EDPM OS image
+### 4 - Update EDPM OS image
 ```yaml
 - hosts: all
   vars:
