@@ -168,6 +168,33 @@
             additionalTrustedCA:
               name: "registry-cas"
 
+- name: Add insecure registry
+  when: cifmw_update_containers_registry is defined
+  vars:
+    default_allowed_registries:
+      - "quay.io"
+      - "gcr.io"
+      - "registry.redhat.io"
+      - "registry-proxy.engineering.redhat.com"
+      - "images.paas.redhat.com"
+      - "image-registry.openshift-image-registry.svc:5000"
+    all_registries: "{{ [cifmw_update_containers_registry] + default_allowed_registries | unique }}"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    merge_type: "merge"
+    definition:
+      apiVersion: config.openshift.io/v1
+      kind: Image
+      metadata:
+        name: cluster
+      spec:
+        registrySources:
+          insecureRegistries:
+            - "{{ cifmw_update_containers_registry }}"
+          allowedRegistries: "{{ all_registries }}"
+
 - name: Create a ICSP with repository digest mirrors
   when:
     - cifmw_openshift_setup_digest_mirrors is defined
