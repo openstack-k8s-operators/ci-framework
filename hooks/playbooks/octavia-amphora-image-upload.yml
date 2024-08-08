@@ -1,0 +1,15 @@
+---
+- name: Upload Octavia amphora image
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Set amphoraImageContainerImage
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: |
+        crname=$(oc get openstackcontrolplane -o name -n {{ namespace }})
+        # TODO: replace with D/S image
+        oc patch ${crname} -n {{ namespace }} --type=merge --patch \
+          '{"spec":{"octavia":{"template":{"amphoraImageContainerImage":"quay.io/gthiemonge/octavia-amphora-image"}}}}'
+        oc wait -n {{ namespace }} --timeout=180s --for=condition=OctaviaAmphoraImagesReady octavia.octavia.openstack.org/octavia
