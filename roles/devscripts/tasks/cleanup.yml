@@ -19,7 +19,8 @@
     - never
     - deepscrub
   when: >-
-    (cifmw_devscripts_ocp_exists is undefined) or
+    (cifmw_devscripts_ocp_comply is undefined) or
+    (not cifmw_devscripts_ocp_comply) or
     (cifmw_devscripts_force_cleanup | default(false) | bool)
   block:
     - name: Gather the configurations to be passed to dev-scripts.
@@ -77,3 +78,19 @@
       ansible.builtin.include_role:
         name: ci_network
         tasks_from: cleanup-dns.yml
+
+    - name: Ensure no dangling qcow2 images
+      block:
+        - name: Get files
+          register: _found_imgs
+          ansible.builtin.find:
+            path: "{{ cifmw_devscripts_data_dir }}/images"
+            patterns: "{{ cifmw_devscripts_config.cluster_name }}_*.qcow2"
+
+        - name: Remove dangling images
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ _found_imgs.files }}"
+          loop_control:
+            label: "{{ item.path }}"
