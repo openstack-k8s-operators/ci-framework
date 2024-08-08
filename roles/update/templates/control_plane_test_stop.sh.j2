@@ -1,0 +1,70 @@
+#!/bin/bash
+#
+# Script to stop a previously started control plane testing.
+# Get the pid, kill it and wait for the end of the last run.
+set -eu
+
+MAX_CONS_FAIL=${1:-2}
+MAX_FAIL=${2:-3}
+BASE_DIR="${3:-{{ cifmw_update_artifacts_basedir }}}"
+STOP_MAX_TRIES=${4:-60} # 5 seconds x MAX_TRIES = 5 min by default
+
+pid_file="${BASE_DIR}/control-plane-test.pid"
+
+if [ ! -e "${pid_file}" ]; then
+    echo "Not pid file: ${pid_file}"
+    exit 1
+fi
+
+PID=$(cat "${pid_file}")
+
+done_file=${BASE_DIR}/control-plane-test-${PID}.done
+result_file=${BASE_DIR}/control-plane-test-${PID}.log
+
+kill "${PID}"
+
+current_try=0
+until [ -e "${done_file}" ]; do
+    if [ $current_try -le "${STOP_MAX_TRIES}" ]; then
+        sleep 5
+        current_try=$((current_try+1))
+    else
+        echo "Waited to long for ${PID} to finish. Aborting."
+        exit 1
+    fi
+done
+
+# Verify that we didn't get any workload issue.
+FAILURE=""
+# Number of successive failure
+successive_failure=$(
+    awk 'BEGIN{fail=0; max=0}
+         NR>1 && NF>1 && $(NF-1)==prev{fail++; if (fail > max){max = fail}}
+         /FAIL/{prev=$(NF-1)}
+         /SUCCESS/{fail=0}
+         END{print max}' "${result_file}"
+)
+if [ "${successive_failure}" -gt  "${MAX_CONS_FAIL}" ]; then
+    echo "Max number of consecutive control plane failure (${MAX_CONS_FAIL}) reached."
+    echo "Found ${successive_failure} consecutive failures during update."
+    grep FAILED "${result_file}"
+    FAILURE="true"
+fi
+# Total number of failure
+failures=$(grep -Fc FAILED "${result_file}" ||:) # prevents exit 1 when no match
+if [ "${failures}" -gt "${MAX_FAIL}" ]; then
+    echo "Max number of control plan failure (${MAX_FAIL}) reached."
+    echo "Found ${failures} failures during update."
+    grep FAILED "${result_file}"
+    FAILURE="true"
+fi
+
+if [ -n "${FAILURE}" ]; then
+    echo "Concaneted files in ${BASE_DIR}/control-plane-testing-detailed.log"
+    tail -n +1 ./ct-"${PID}"/*.log > "${BASE_DIR}/control-plane-testing-detailed.log"
+    exit 1
+else
+    echo "$(date) No (or not enough) failure(s) during control plane testing"
+    echo "Successive failure: ${successive_failure}/${MAX_CONS_FAIL}"
+    echo "Total number of failures: ${failures}/${MAX_FAIL}"
+fi
