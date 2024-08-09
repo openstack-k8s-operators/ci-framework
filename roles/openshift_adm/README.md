@@ -14,11 +14,13 @@ requires administrator level privileges for the deployed OpenShift.
 
 This role requires the following parameters to be configured.
 
+* `cifmw_openshift_adm_basedir` (str) Framework base directory, defaults to `cifmw_basedir` or
+  `~/ci-framework-data`.
 * `cifmw_openshift_api` (str) Cluster endpoint to be used for communication.
 * `cifmw_openshift_user` (str) Name of the user to be used for authentication.
 * `cifmw_openshift_password` (str) Password of the provided user.
 * `cifmw_openshift_kubeconfig` (str) Absolute path to the kubeconfig file.
-* `cifmw_base_dir` (str) Absolute path to the base directory
+* `cifmw_openshift_adm_stable_period` (str) Minimal period for cluster stability. Defaults to `3m`.
 * `cifmw_path` (str) containing information for environment.path.
 
 ## Parameters - Role
