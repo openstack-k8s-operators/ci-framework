@@ -121,6 +121,8 @@
           -e @./scenarios/centos-9/base.yml
           -e @./scenarios/centos-9/tcib.yml
           -e cifmw_zuul_target_host=controller-0
+          -e "cifmw_build_containers_registry_namespace="{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}""
+          -e "cifmw_build_containers_image_tag="{{ cifmw_update_containers_tag | default('current-podified') }}""
           -e "cifmw_rp_registry_ip="{{ hostvars['localhost']['cifmw_rp_registry_ip'] }}""
           -e "@{{ ansible_user_dir }}/ci-framework-data/parameters/reproducer-variables.yml"
           -e "@~/{{ job_id }}-params/zuul-params.yml"
@@ -132,8 +134,16 @@
         dest: "{{ ansible_user_dir }}/{{ job_id }}-params/content-provider.yml"
         content: |-
           {{
-            {'content_provider_registry_ip': cifmw_rp_registry_ip
+            {'content_provider_registry_ip': cifmw_rp_registry_ip,
+             'cifmw_update_containers_registry': '{{ content_provider_registry_ip }}:5001'
             } | to_nice_yaml
           }}
+
+    - name: Create symlink of content provider var file
+      ansible.builtin.file:
+        src: "{{ ansible_user_dir }}/{{ job_id }}-params/content-provider.yml"
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/content-provider.yml"
+        state: link
+
 {% endraw %}
 {% endif %}
