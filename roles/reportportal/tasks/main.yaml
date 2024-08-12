@@ -1,0 +1,71 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if mandatory variables are defined and not empty
+  ansible.builtin.assert:
+    that:
+      - cifmw_reportportal_datarouter_url is defined and cifmw_reportportal_datarouter_url | length > 0
+      - cifmw_reportportal_datarouter_username is defined and cifmw_reportportal_datarouter_username | length > 0
+      - cifmw_reportportal_datarouter_password is defined and cifmw_reportportal_datarouter_password | length > 0
+      - cifmw_reportportal_project is defined and cifmw_reportportal_project | length > 0
+      - cifmw_reportportal_droute_client_url is defined and cifmw_reportportal_droute_client_url | length > 0
+
+- name: Make sure the droute directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_reportportal_droute_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Get the Data router client
+  vars:
+    _droute_url: >-
+      {{
+        (cifmw_reportportal_droute_client_url,
+         cifmw_reportportal_droute_version,
+         cifmw_reportportal_droute_binary) |
+        path_join
+      }}
+  ansible.builtin.get_url:
+    url: "{{ _droute_url }}"
+    dest: "{{ cifmw_reportportal_droute_dir }}"
+    backup: true
+    mode: "0755"
+  when: not cifmw_reportportal_dry_run | bool
+
+- name: Create the metadata file
+  ansible.builtin.template:
+    src: metadata.json.j2
+    dest: "{{ cifmw_reportportal_metadata_file }}"
+    mode: "0755"
+
+- name: Send the results via Data router client call
+  ansible.builtin.command:
+    chdir: "{{ cifmw_reportportal_droute_dir }}"
+    cmd: >-
+      {{ cifmw_reportportal_droute_dir }}/{{ cifmw_reportportal_droute_binary }} send
+      --wait
+      --metadata={{ cifmw_reportportal_metadata_file }}
+      --results={{ cifmw_reportportal_results_search }}
+      --username={{ cifmw_reportportal_datarouter_username }}
+      --password={{ cifmw_reportportal_datarouter_password }}
+      --url={{ cifmw_reportportal_datarouter_url }}
+  register: droute_result
+  when: not cifmw_reportportal_dry_run | bool
+
+- name: Log droute result
+  ansible.builtin.debug:
+    var: droute_result.stdout
+  when: not cifmw_reportportal_dry_run | bool
