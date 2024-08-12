@@ -43,6 +43,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_firewalld_default_zone_masquerade`: (Bool) Enable masquerading on the default firewall zone. Defaults to `true`.
 * `cifmw_libvirt_manager_attach_dummy_interface_on_bridges`: (Bool) Attach dummy interface on bridges. Defaults to `true`.
 * `cifmw_libvirt_manager_default_gw_nets`: (List[String]) List of networks used as default gateway. If not set, defaults to the `cifmw_libvirt_manager_pub_net`. Read bellow for more information about that parameter.
+* `cifmw_libvirt_manager_vm_users`: (List[Dict]) Used to override the default list of users enabled in the vm. For its format, refers to cloud-init [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) about `users`. Defaults to `[]`.
 
 ### `cifmw_libvirt_manager_default_gw_nets` parameter usage
 
@@ -86,10 +87,12 @@ cifmw_libvirt_manager_configuration:
       nets: (ordered list of networks to connect to)
       extra_disks_num: (integer, optional. Number of extra disks to be configured.)
       extra_disks_size: (string, optional. Storage capacity to be allocated. Example 1G, 512M)
+      user: (string, optional. Username to create on the vm which can becomes root. Defaults to `zuul`)
       password: (string, optional, defaults to fooBar. Root password for console access)
       target: (Hypervisor hostname you want to deploy the family on. Optional)
       uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
       bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
+      networkconfig: (dict or list[dict], [network-config](https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html#network-config-v2) v2 config, needed if a static ip address should be defined at boot time in absence of a dhcp server in special scenarios. Optional)
   networks:
     net_name: <XML definition of the network to create>
 ```
@@ -125,10 +128,6 @@ cifmw_libvirt_manager_configuration:
       disksize: 50
       memory: 4
       cpus: 2
-      ip_address:
-        address: "192.168.111.9/24"
-        gw: "192.168.111.1"
-        dns: "192.168.111.1"
       nets:
         - public
         - osp_trunk
