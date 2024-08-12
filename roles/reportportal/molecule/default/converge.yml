@@ -1,0 +1,72 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  roles:
+    - role: "reportportal"
+      cifmw_reportportal_dry_run: true
+      cifmw_reportportal_datarouter_url: "https://data.router.example.com"
+      cifmw_reportportal_datarouter_username: "username"
+      cifmw_reportportal_datarouter_password: "password"
+      cifmw_reportportal_project: "test-project"
+      cifmw_reportportal_droute_client_url: "https://data.router.client.repo example.com"
+
+  tasks:
+    - name: Check directory creation
+      block:
+        - name: Stat directory
+          register: dir_stat
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/ci-framework-data/droute"
+
+        - name: Validate directory state
+          ansible.builtin.assert:
+            that:
+              - dir_stat.stat.isdir is defined
+              - dir_stat.stat.isdir
+
+    - name: Check the metadata file exists
+      block:
+        - name: Stat metadata file
+          register: metadata_file_stat
+          ansible.builtin.stat:
+            path: "{{ ansible_user_dir }}/ci-framework-data/droute/metadata.json"
+
+        - name: Validate file state
+          ansible.builtin.assert:
+            that:
+              - metadata_file_stat.stat.isreg is defined
+              - metadata_file_stat.stat.isreg
+
+    - name: Check the metadata file content
+      block:
+        - name: Stat metadata golden file
+          register: metadata_golden_file_stat
+          ansible.builtin.stat:
+            path: "files/metadata-golden.json"
+
+        - name: Validate metadata golden file state
+          ansible.builtin.assert:
+            that:
+              - metadata_golden_file_stat.stat.isreg is defined
+              - metadata_golden_file_stat.stat.isreg
+
+        - name: Validate metadata golden is the same as produced metadata
+          ansible.builtin.assert:
+            that:
+              - metadata_golden_file_stat.stat.checksum == metadata_file_stat.stat.checksum
