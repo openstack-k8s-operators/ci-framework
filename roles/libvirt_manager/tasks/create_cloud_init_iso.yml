@@ -1,0 +1,67 @@
+---
+
+- name: "Acquire authorized_keys from hypervisor"
+  ansible.builtin.slurp:
+    src: "{{ ansible_user_dir ~ '/.ssh/authorized_keys' }}"
+  register: _authorized_keys_b64
+
+- name: "Define the default users for the vm"
+  when:
+    - cifmw_libvirt_manager_vm_users is not defined or
+      cifmw_libvirt_manager_vm_users | length == 0
+  vars:
+    _ssh_authorized_keys: |-
+      [
+      {% for ssh_key in (_authorized_keys_b64.content | b64decode).split('\n') | select() %}
+        "{{ ssh_key | trim }}",
+      {% endfor %}
+      ]
+  ansible.builtin.set_fact:
+    _users:
+      - name: root
+        ssh_authorized_keys: "{{ _ssh_authorized_keys }}"
+        lock_passwd: false
+        plain_text_passwd: "{{ vm_data.password | default('fooBar') }}"
+      - name: "{{ vm_data.user | default('zuul') }}"
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        ssh_authorized_keys: "{{ _ssh_authorized_keys }}"
+        lock_passwd: false
+        plain_text_passwd: "{{ vm_data.password | default('fooBar') }}"
+
+- name: "Define the user data"
+  ansible.builtin.set_fact:
+    _user_data:
+      users: "{{ _users | default(cifmw_libvirt_manager_vm_users) }}"
+      hostname: "{{ vm }}"
+      create_hostname_file: true
+      growpart:
+        devices: [/]
+        ignore_growroot_disabled: true
+        mode: growpart
+      resize_rootfs: noblock
+
+- name: "Define network config"
+  when:
+    - vm_data.networkconfig is defined
+    - vm_data.networkconfig | length > 0
+  block:
+    - name: "Define the network config for all vms"
+      when:
+        - vm_data.networkconfig | type_debug == "dict"
+      ansible.builtin.set_fact:
+        _network_data: vm_data.networkconfig
+    - name: "Define the network config for each vm"
+      when:
+        - vm_data.networkconfig | type_debug == "list"
+      ansible.builtin.set_fact:
+        _network_data: vm_data.networkconfig[vm_idx]
+
+- name: "Call the config_drive role"
+  vars:
+    cifmw_config_drive_iso_image: "{{ _iso_path }}"
+    cifmw_config_drive_uuid: "{{ 99999999 | random(seed=vm) | to_uuid | lower }}"
+    cifmw_config_drive_hostname: "{{ vm }}"
+    cifmw_config_drive_networkconfig: "{{ _network_config | default(None) }}"
+    cifmw_config_drive_userdata: "{{ _user_data }}"
+  ansible.builtin.include_role:
+    name: config_drive

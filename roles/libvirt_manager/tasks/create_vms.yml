@@ -40,7 +40,6 @@
         chdir: "{{ _chdir }}"
 
     - name: "Ensure file ownership and rights for {{ vm }}"
-      become: true
       vars:
         _vm_img: >-
           {{ vm }}.qcow2
@@ -123,3 +122,31 @@
           virsh -c qemu:///system attach-device {{ _vm_name }} {{ f.path }}
           --config --persistent;
           {% endfor -%}
+
+- name: Create and attach ISO
+  when:
+    - vm_data.disk_file_name != 'blank'
+    - vm is not match('^(crc|ocp).*$')
+    - vm_data.start | default(true) | bool
+    - vm_data.manage | default(true) | bool
+  vars:
+    _img_dir: "{{ cifmw_libvirt_manager_basedir }}/workload"
+    _vm_name: "cifmw-{{ vm }}"
+    _iso_name: "{{ vm }}.iso"
+    _iso_path: "{{ [_img_dir, _iso_name] | ansible.builtin.path_join }}"
+  block:
+    - name: Create cloud-init ISO
+      ansible.builtin.include_tasks:
+        file: create_cloud_init_iso.yml
+    - name: Attach cloud-init ISO if exists
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system attach-disk
+          --domain {{ _vm_name }}
+          --source {{ _iso_path }}
+          --target sdz
+          --targetbus usb
+          --type cdrom
+          --mode readonly
+          --persistent
+        removes: "{{ _iso_path }}"
