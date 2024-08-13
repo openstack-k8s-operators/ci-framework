@@ -167,12 +167,8 @@
        (vm_data.value.amount | int) > 0) or
       vm_data.value.amount is undefined
   vars:
-    _matcher: >-
-      {{
-        '(cifmw-)?' ~
-        '([a-z0-9]+)-[0-9]+'
-      }}
-    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm_type: "{{ _vm.value }}"
+    vm: "{{ _vm.key }}"
     vm_data: >-
       {{
         _cifmw_libvirt_manager_layout.vms[vm_type]
@@ -181,9 +177,9 @@
     priv_key: "{{ priv_ssh_key.content | b64decode }}"
   ansible.builtin.include_tasks:
     file: create_vms.yml
-  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop: "{{ cifmw_libvirt_manager_all_vms | dict2items }}"
   loop_control:
-    loop_var: vm
+    loop_var: _vm
     index_var: vm_idx
 
 - name: "Start (power-on) VMs"
@@ -195,12 +191,8 @@
     - vm_data.start | default(true) | bool
     - vm_data.disk_file_name != 'blank'
   vars:
-    _matcher: >-
-      {{
-        '(cifmw-)?' ~
-        '([a-z0-9]+)-[0-9]+'
-      }}
-    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm_type: "{{ _vm.value }}"
+    vm: "{{ _vm.key }}"
     vm_data: >-
       {{
         _cifmw_libvirt_manager_layout.vms[vm_type]
@@ -208,10 +200,11 @@
     _init_admin_user: "{{ vm_data.value.admin_user | default('root') }}"
     pub_key: "{{ pub_ssh_key.content | b64decode }}"
     priv_key: "{{ priv_ssh_key.content | b64decode }}"
+    vm_con_name: "{{ vm | replace('ocp-', '') }}.{{ inventory_hostname }}"
   ansible.builtin.include_tasks: manage_vms.yml
-  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop: "{{ cifmw_libvirt_manager_all_vms | dict2items }}"
   loop_control:
-    loop_var: vm
+    loop_var: _vm
 
 - name: Create VBMC entity
   when:

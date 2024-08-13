@@ -141,42 +141,11 @@ If you provide neither, or both, it will fail.
 ## Examples
 
 * Sample config for deploying a compact OpenShift platform with extra nodes, existing external network,
-  separate NIC for RH-OSP networks and with OpenShift provisioning network disabled.
+  separate NIC for RH-OSP networks.
 
   ```yaml
   ---
   ...
-  cifmw_use_libvirt: true
-  cifmw_libvirt_manager_configuration:
-    vms:
-      ocp:
-        amount: 3
-        admin_user: core
-        image_local_dir: "/home/dev-scripts/pool"
-        disk_file_name: "ocp_master"
-        disksize: "105"
-        xml_paths:
-          - /home/dev-scripts/ocp_master_0.xml
-          - /home/dev-scripts/ocp_master_1.xml
-          - /home/dev-scripts/ocp_master_2.xml
-
-  cifmw_manage_secrets_citoken_file: "{{ lookup('env', 'HOME')/ci_token }}"
-  cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME')/pull_secret }}"
-
-  cifmw_use_devscripts: true
-  cifmw_devscripts_config_overrides:
-    provisioning_network_profile: "Disabled"
-    num_extra_workers: 2
-    extra_worker_memory_mb: 16384
-    extra_worker_disk: 50
-    worker_vcpu: 8
-  ...
-  ```
-
-* Sample config for deploying a HA OpenShift platform with additional networks, OpenShift provisioning network
-  is enabled and separate RH OSP networks.
-
-  ```YAML
   cifmw_use_libvirt: true
   cifmw_libvirt_manager_configuration:
     networks:
@@ -187,32 +156,54 @@ If you provide neither, or both, it will fail.
           <bridge name='osp_trunk' stp='on' delay='0'/>
           <ip family='ipv4' address='192.168.122.1' prefix='24'> </ip>
         </network>
+    ocpbm: |
+      <network>
+        <name>ocpbm</name>
+        <forward mode='nat'/>
+        <bridge name='ocpbm' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4' address='192.168.111.1' prefix='24'>
+        </ip>
+      </network>
+    ocppr: |
+      <network>
+        <name>ocppr</name>
+        <forward mode='bridge'/>
+        <bridge name='ocppr'/>
+      </network>
     vms:
       ocp:
         amount: 3
         admin_user: core
-        image_local_dir: "/home/dev-scripts/pool"
+        image_local_dir: "{{ cifmw_basedir }}/images/"
         disk_file_name: "ocp_master"
-        disksize: "105"
-        xml_paths:
-          - /home/dev-scripts/ocp_master_0.xml
-          - /home/dev-scripts/ocp_master_1.xml
-          - /home/dev-scripts/ocp_master_2.xml
+        disksize: "100"
+        cpus: 16
+        memory: 32
+        extra_disks_num: 3
+        extra_disks_size: 50G
         nets:
+          - ocppr
+          - ocpbm
+          - osp_trunk
+      worker:
+        amount: 2
+        admin_user: core
+        image_local_dir: "{{ cifmw_basedir }}/images/"
+        disk_file_name: "ocp_worker"
+        disksize: "100"
+        cpus: 8
+        memory: 16
+        extra_disks_num: 3
+        extra_disks_size: 50G
+        nets:
+          - ocppr
+          - ocpbm
           - osp_trunk
 
-  cifmw_use_devscripts: true
-
-  cifmw_manage_secrets_citoken_content: REDACTED
-  cifmw_manage_secrets_pullsecret_content: |
-    REDACTED
-
-  cifmw_devscripts_config_overrides:
-    openshift_version: "4.16.0"
-    num_workers: 3
-    worker_memory: 16384
-    worker_disk: 100
-    worker_vcpu: 10
+  cifmw_manage_secrets_citoken_file: "{{ lookup('env', 'HOME')/ci_token }}"
+  cifmw_manage_secrets_pullsecret_file: "{{ lookup('env', 'HOME')/pull_secret }}"
+  ...
   ```
 
 * Sample custom variable file for customizing the deployment with add-on configurations.
@@ -228,6 +219,21 @@ If you provide neither, or both, it will fail.
           <bridge name='osp_trunk' stp='on' delay='0'/>
           <ip family='ipv4' address='192.168.122.1' prefix='24'> </ip>
         </network>
+    ocpbm: |
+      <network>
+        <name>ocpbm</name>
+        <forward mode='nat'/>
+        <bridge name='ocpbm' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4' address='192.168.111.1' prefix='24'>
+        </ip>
+      </network>
+    ocppr: |
+      <network>
+        <name>ocppr</name>
+        <forward mode='bridge'/>
+        <bridge name='ocppr'/>
+      </network>
     vms:
       ocp:
         amount: 3
@@ -240,21 +246,19 @@ If you provide neither, or both, it will fail.
           - /home/dev-scripts/ocp_master_1.xml
           - /home/dev-scripts/ocp_master_2.xml
         nets:
+          - ocppr
+          - ocpbm
           - osp_trunk
 
   cifmw_manage_secrets_citoken_content: REDACTED
   cifmw_manage_secrets_pullsecret_content: |
     REDACTED
-  cifmw_use_devscripts: true
   cifmw_devscripts_enable_ocp_nodes_host_routing: true
   cifmw_devscripts_enable_iscsi_on_ocp_nodes: true
   cifmw_devscripts_enable_multipath_on_ocp_nodes: true
   cifmw_devscripts_create_logical_volume: true
   cifmw_devscripts_config_overrides:
     openshift_version: "4.16.0"
-    vm_extradisks: "true"
-    vm_extradisks_list: "vdb vdc vdd"
-    vm_extradisks_size: "10G"
   ```
 
 ## References

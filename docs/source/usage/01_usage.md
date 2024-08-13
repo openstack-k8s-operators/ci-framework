@@ -71,6 +71,8 @@ are shared among multiple roles:
 - `cifmw_crc_default_network`: (String) name of the untagged network used to address DNS on the crc node. Default is `default`.
 - `cifmw_run_operators_compliance_scans`: (Bool) Specifies whether to run operator compliance scans.  Defaults to `false`.
 - `cifmw_run_compute_compliance_scans`: (Bool) Specifies whether to run compliance scans on the first compute.  Defaults to `false`.
+- `cifmw_run_id`: (String) CI Framework run identifier. This is used in libvirt_manager, to add some uniqueness to some types of virtual machines (anything that's not OCP, CRC nor controller).
+  If not set, the Framework will generate a random string for you, and store it on the target host, in `{{ cifmw_basedir }}/artifacts/run-id`
 
 ```{admonition} Words of caution
 :class: danger

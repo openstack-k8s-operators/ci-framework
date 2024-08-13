@@ -45,15 +45,18 @@
           }}
         _ocp_name: >-
           {{
-            vm.key | replace('_', '-') |
-            replace('ocp-worker', 'worker') |
-            replace('ocp', 'master')
+            vm.key |
+            replace('ocp-', '')
           }}
         _hostname: >-
           {{
             (vm.key is match('^ocp.*')) |
             ternary(_ocp_name, vm.key)
           }}
+        _compat_name: >-
+          {%- set _id = vm.key | regex_replace('^.*-([0-9]+)$', '\\1') -%}
+          {%- set _type = hostvars[vm.key].vm_type -%}
+          {{ (_type, _id) | join('-') }}
         _domain: >-
           {{
              cifmw_reproducer_domain | default('local')
@@ -61,6 +64,9 @@
         _utility:
           - names:
               - "{{ _hostname }}.utility"
+              - "{{ _hostname }}.{{ inventory_hostname }}"
+              - "{{ _compat_name }}.utility"
+              - "{{ _compat_name }}.{{ inventory_hostname }}"
             ips:
               - "{{ _utility_net.0.value.ip_v4 | default('') }}"
               - "{{ _utility_net.0.value.ip_v6 | default('') }}"
@@ -68,9 +74,12 @@
         _entry: >-
           {%- for network in vm.value.networks | dict2items -%}
           {%- set _fqdn = [_hostname, network.key, _domain] | join('.') -%}
+          {%- set _compat_fqdn = [_compat_name, network.key, _domain] |
+                                 join('.')                              -%}
+          {%- set _fqdns = [_fqdn, _compat_fqdn] -%}
           {%- set _ips = [network.value.ip_v4 | default(''),
                           network.value.ip_v6 | default('') ]-%}
-          {%- set _rec = {'names': [_fqdn], 'ips': _ips, 'state': 'present'} -%}
+          {%- set _rec = {'names': _fqdns, 'ips': _ips, 'state': 'present'} -%}
           {%- set _ = _utility.append(_rec) -%}
           {%- endfor -%}
           {{ _utility }}
