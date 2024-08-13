@@ -37,15 +37,30 @@
 
     - name: Generate VM list
       vars:
+        _run_id: "{{ cifmw_run_id | lower }}"
         vm_list: >-
-          {% set _vm_list = [] -%}
+          {% set _vm_list = {} -%}
           {% set _range = [] -%}
           {% for _type in _cifmw_libvirt_manager_layout.vms.keys() -%}
-          {%   set _range = range(0, _cifmw_libvirt_manager_layout.vms[_type].amount | default(1) | int) -%}
-          {%   set _vms = [_type] | product(_range) | map('join', '-') -%}
-          {%   set _ = _vm_list.append(_vms) -%}
+          {%   set _amount = _cifmw_libvirt_manager_layout.vms[_type].amount |
+                             default(1) | int -%}
+          {%   set _range = range(0, _amount) -%}
+          {%     if _type is not match('^(controller|ocp|crc).*') -%}
+          {%       set _name = _type ~ '-' ~ _run_id          -%}
+          {%     else                                         -%}
+          {%       if _type == 'ocp'                          -%}
+          {%         set _name = 'ocp-master'                 -%}
+          {%       else                                       -%}
+          {%         set _name = _type                        -%}
+          {%       endif                                      -%}
+          {%     endif                                        -%}
+          {%   set _vms = [_name | replace('_', '-')] |
+                          product(_range) |
+                          map('join', '-')                    -%}
+          {%   set _map = dict(_vms | zip([_type] * _amount)) -%}
+          {%   set _ = _vm_list.update(_map)                  -%}
           {% endfor -%}
-          {{ _vm_list | list | flatten }}
+          {{ _vm_list }}
       ansible.builtin.set_fact:
         cifmw_libvirt_manager_all_vms: "{{ vm_list }}"
 
@@ -63,7 +78,7 @@
   when:
     - (_cifmw_libvirt_manager_layout.vms[_vm_type].amount | default(1) | int) > 0
   vars:
-    _vm_type: "{{ item.key | regex_replace('(cifmw\\-)?([a-z]+)\\-[0-9]+', '\\2') }}"
+    _vm_type: "{{ cifmw_libvirt_manager_all_vms[item.key] | default('none') }}"
     _std_group: "{{ (_vm_type == 'crc') | ternary('ocp', _vm_type) }}"
     _group: >-
       {{
@@ -74,13 +89,13 @@
     _ocp_name: >-
       {{
         item.key | replace('_', '-') |
-        replace('ocp-worker', 'worker') |
-        replace('ocp', 'master')
+        replace('ocp-', '')
       }}
     _hostname: >-
       {{
         (item.key is match('^ocp.*')) |
-        ternary(_ocp_name, item.key)
+        ternary(_ocp_name, item.key) |
+        replace('_', '-')
       }}
     _ssh_user: >-
       {{
@@ -88,10 +103,11 @@
         default('zuul')
       }}
   ansible.builtin.add_host:
-    name: "{{ item.key }}"
+    name: "{{ item.key | replace('_', '-') }}"
     groups: "{{ _group }}s"
     ansible_ssh_user: "{{ _ssh_user }}"
     ansible_host: "{{ _hostname }}.{{ inventory_hostname }}"
+    vm_type: "{{ _group }}"
   loop: "{{ cifmw_libvirt_manager_mac_map | dict2items }}"
   loop_control:
     label: "Adding {{ item.key }} to {{ _group }}s"
@@ -271,10 +287,11 @@
 
 # This task might also be done via the reproducer/prepare_networking.yml
 # but, depending on how we call the libvirt_manager, we might not have it.
-# Using the same filename/permissions/content, we can ensure it's there without
-# re-doing the same tasks.
-# For the record, `local` ensures dnsmasq won't try to resolve names from other places.
-- name: Ensure .utility is local
+# Using the same filename/permissions/content, we can ensure it's there
+# without re-doing the same tasks.
+# For the record, `local` ensures dnsmasq won't try to resolve names from
+# other places.
+- name: Ensure some domains are local
   become: true
   notify: "Restart dnsmasq"
   ansible.builtin.copy:
@@ -282,6 +299,7 @@
     mode: "0644"
     content: |
       local=/utility/
+      local=/{{ inventory_hostname }}/
     validate: "/usr/sbin/dnsmasq -C %s --test"
 
 - name: Ensure dnsmasq is reloaded now

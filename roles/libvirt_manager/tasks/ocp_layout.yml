@@ -44,15 +44,18 @@
             ansible.utils.remove_keys(target="xml_paths")
           }}
     _vm_list: >-
-      {% set _vm_list = [] -%}
-      {% set _range = [] -%}
-      {% for _type in _ocp_layout.vms.keys() -%}
-      {%   set _range = range(0, _ocp_layout.vms[_type].amount |
-                              default(1) | int) -%}
-      {%   set _vms = [_type] | product(_range) | map('join', '-') -%}
-      {%   set _ = _vm_list.append(_vms) -%}
+      {% set _vm_list = {} -%}
+      {% set _range = []   -%}
+      {% for _type in _ocp_layout.vms.keys()                -%}
+      {%   set _amount = _ocp_layout.vms[_type].amount |
+                         default(1) | int                   -%}
+      {%   set _range = range(0, _amount)                   -%}
+      {%   set _vms = [_type | replace('_', '-')] |
+                      product(_range) | map('join', '-')    -%}
+      {%   set _map = dict(_vms | zip([_type] * _amount))   -%}
+      {%   set _ = _vm_list.update(_map)                    -%}
       {% endfor -%}
-      {{ _vm_list | list | flatten }}
+      {{ _vm_list }}
   block:
     - name: Ensure needed directories exist
       ansible.builtin.file:
@@ -70,12 +73,8 @@
 
     - name: Create blank images for OCP cluster resources
       vars:
-        _matcher: >-
-          {{
-            '(cifmw-)?' ~
-            '([a-z0-9]+)-[0-9]+'
-          }}
-        vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+        vm: "{{ _vm.key }}"
+        vm_type: "{{ _vm.value }}"
         vm_data: >-
           {{
             _ocp_layout.vms[vm_type]
@@ -84,9 +83,9 @@
       ansible.builtin.include_role:
         name: "libvirt_manager"
         tasks_from: "create_vms.yml"
-      loop: "{{ _vm_list }}"
+      loop: "{{ _vm_list | dict2items }}"
       loop_control:
-        loop_var: vm
+        loop_var: _vm
 
     # vBMC is started in reproducer/ocp_layout.yml tasks file.
     - name: Verify vBMC status
@@ -96,18 +95,19 @@
 
     - name: Create VBMC entities for OCP
       vars:
-        cifmw_virtualbmc_machine: "cifmw-{{ item }}"
+        cifmw_virtualbmc_machine: "cifmw-{{ item.key }}"
         cifmw_virtualbmc_ipmi_port: "{{ 51881 + index }}"
         cifmw_virtualbmc_action: "add"
         cifmw_virtualbmc_ipmi_address: "ipmi.utility"
       ansible.builtin.include_role:
         name: "virtualbmc"
         tasks_from: "manage_host.yml"
-      loop: "{{ _vm_list }}"
+      loop: "{{ _vm_list | dict2items }}"
       loop_control:
         index_var: index
-        label: "{{ item }}"
+        label: "{{ item.key }}"
 
     - name: Expose OCP cluster members
       ansible.builtin.set_fact:
-        _cifmw_libvirt_manager_ocp_cluster: "{{ _vm_list }}"
+        _cifmw_libvirt_manager_ocp_cluster: >-
+          {{ _vm_list | dict2items | map(attribute='key') }}
