@@ -339,27 +339,43 @@
     # public network always exist because is provided by the ceph_spec role
     - name: Get Storage network range
       ansible.builtin.set_fact:
-        cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+        cifmw_cephadm_storage_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+
+    - name: Set RGW network range to storage network only if it was not provided
+      ansible.builtin.set_fact:
+        cifmw_cephadm_rgw_network: "{{ cifmw_cephadm_storage_network }}"
+      when:
+        - cifmw_cephadm_rgw_network is not defined or
+          cifmw_cephadm_rgw_network | length == 0
 
     - name: Set IP address of first monitor
       ansible.builtin.set_fact:
-        cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
+        cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_storage_network) | first }}"
       vars:
         this_host: "{{ _target_hosts | first }}"
 
     - name: Assert if any EDPM nodes n/w interface is missing in storage network
       ansible.builtin.assert:
         that:
+          - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_storage_network) | length > 0
+        fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_storage_network }}"
+      loop: "{{ _target_hosts }}"
+
+    - name: Assert if any EDPM nodes n/w interface is missing in RGW network
+      ansible.builtin.assert:
+        that:
           - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | length > 0
         fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_rgw_network }}"
       loop: "{{ _target_hosts }}"
+      when:
+        - cifmw_cephadm_rgw_network != cifmw_cephadm_storage_network
 
-    - name: Get already assigned IP addresses
+    - name: Get already assigned RGW IP addresses
       ansible.builtin.set_fact:
         ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
       loop: "{{ _target_hosts }}"
 
-    # cifmw_cephadm_vip is the VIP reserved in the Storage network
+    # cifmw_cephadm_vip is the VIP reserved in the RGW network
     - name: Set VIP var as empty string
       ansible.builtin.set_fact:
         cifmw_cephadm_vip: ""
