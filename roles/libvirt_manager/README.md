@@ -42,6 +42,28 @@ Used for checking if:
 * `cifmw_libvirt_manager_firewalld_default_zone`: (String) Name of the default firewall zone. Defaults to `public`.
 * `cifmw_libvirt_manager_firewalld_default_zone_masquerade`: (Bool) Enable masquerading on the default firewall zone. Defaults to `true`.
 * `cifmw_libvirt_manager_attach_dummy_interface_on_bridges`: (Bool) Attach dummy interface on bridges. Defaults to `true`.
+* `cifmw_libvirt_manager_default_gw_nets`: (List[String]) List of networks used as default gateway. If not set, defaults to the `cifmw_libvirt_manager_pub_net`. Read bellow for more information about that parameter.
+
+### `cifmw_libvirt_manager_default_gw_nets` parameter usage
+
+By default, the routing is configured so that the default gateway is on the `cifmw_libvirt_manager_pub_net` network (usually `public`). In some cases (DCN for instance), this doesn't scale, leading to
+some hosts not properly reachable.
+
+By using this parameter, the user can instruct the CI Framework to use another network as default gateway. In DCN case, all of the created `ctlplane` can be listed in that parameter and, since the computes
+have only one `ctlplane` network associated, it means they'll use it as default gateway, without any conflict.
+
+#### Example
+
+```YAML
+# Use osp_trunk (ctlplane) as default gateway instead of the public network
+cifmw_libvirt_manager_default_gw_nets: osp_trunk
+
+# List all of the DCN ctlplane as "default gateway"
+cifmw_libvirt_manager_default_gw_nets:
+  - osp_trunk
+  - dcn1_tr
+  - dcn2_tr
+```
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 
