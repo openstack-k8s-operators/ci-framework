@@ -18,6 +18,12 @@ until the compliance scans complete or error out before moving on to the next pr
 
 * `cifmw_compliance_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/compliance` which defaults to `~/ci-framework-data/tests/compliance`
 * `cifmw_compliance_cleanup`: (Boolean) Delete all resources created by the role at the end of the testing. Default value: `false`
+* `cifmw_compliance_compute_profiles: (List of Strings) Profiles to use when scanning compute nodes. Default value:
+```
+  - pci-dss
+  - e8
+  - stig
+```
 * `cifmw_compliance_dry_run`: (Boolean) Whether the compliance-operator should and OpenSCAP scans should run or not.  Default value: `false`
 * `cifmw_compliance_namespace`: (String) Namespace inside which all the resources are created. Default value: `openshift-compliance`
 * `cifmw_compliance_plugin_image`: (String) Image to use to extract the oc compliance plugin. Default value: `registry.redhat.io/compliance/oc-compliance-rhel8:stable`
@@ -49,4 +55,14 @@ until the compliance scans complete or error out before moving on to the next pr
     - ocp4-stig-node
     - rhcos4-stig
 ```
-* `cifmw_compliance_suites`: (List of Strings) Scan settings to execute.  Default: `["cis", "e8", "high", "moderate", "nerc-cip", "pci-dss", "stig"]`
+* `cifmw_compliance_scap_content_file`: (String) File to get scap profile content in compute scans. Default value: `/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml`
+* `cifmw_compliance_suites`: (List of Strings) Scan settings to execute.  Default value:
+```
+  - cis
+  - e8
+  - high
+  - moderate
+  - nerc-cip
+  - pci-dss
+  - stig
+```
