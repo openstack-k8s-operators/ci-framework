@@ -150,7 +150,7 @@
 
 - name: Bootstrap devscript using baremetal provisioning
   when:
-    - not cifmw_devscripts_ocp_exists | bool
+    - not cifmw_devscripts_ocp_comply | bool
   vars:
     _bm_ironic_file: >-
       {{
@@ -161,6 +161,14 @@
     _domain: "{{ cifmw_devscripts_config.base_domain}}"
     _pxe_host: "pxe.{{ _cluster }}.{{ _domain }}"
   block:
+    ## Use a dedicated port, this instance will be removed
+    # once OCP cluster is deployed.
+    - name: Ensure VBMC is present
+      vars:
+        cifmw_virtualbmc_daemon_port: 51881
+      ansible.builtin.import_role:
+        name: "virtualbmc"
+
     - name: Create blank images for OCP cluster
       vars:
         cifmw_libvirt_manager_vol_prefix: 'base-'
@@ -289,19 +297,20 @@
 
         - name: Inject bootstrap VM mac and fixed IP
           vars:
-            cifmw_dnsmasq_host_network: "{{ cifmw_libvirt_manager_pub_net }}"
-            cifmw_dnsmasq_host_state: present
-            cifmw_dnsmasq_host_mac: "{{ _bootstrap_mac }}"
-            cifmw_dnsmasq_host_name: "ocp-bootstrap"
-            cifmw_dnsmasq_host_ips: >-
-              {%- set data = [] -%}
-              {%- if _pub_net_data.network_v4 is defined and _pub_net_data.network_v4 | length > 0 -%}
-              {%- set _ = data.append(_pub_net_data.network_v4 | ansible.utils.nthhost(4)) -%}
-              {%- endif -%}
-              {%- if _pub_net_data.network_v6 is defined and _pub_net_data.network_v6 | length > 0 -%}
-              {%- set _ = data.append(_pub_net_data.network_v6 | ansible.utils.nthhost(4)) -%}
-              {%- endif -%}
-              {{ data }}
+            cifmw_dnsmasq_dhcp_entries:
+              - network: "{{ cifmw_libvirt_manager_pub_net }}"
+                state: present
+                mac: "{{ _bootstrap_mac }}"
+                name: "ocp-bootstrap"
+                ips: >-
+                  {%- set data = [] -%}
+                  {%- if _pub_net_data.network_v4 is defined and _pub_net_data.network_v4 | length > 0 -%}
+                  {%- set _ = data.append(_pub_net_data.network_v4 | ansible.utils.nthhost(4)) -%}
+                  {%- endif -%}
+                  {%- if _pub_net_data.network_v6 is defined and _pub_net_data.network_v6 | length > 0 -%}
+                  {%- set _ = data.append(_pub_net_data.network_v6 | ansible.utils.nthhost(4)) -%}
+                  {%- endif -%}
+                  {{ data }}
           ansible.builtin.include_role:
             name: "dnsmasq"
             tasks_from: "manage_host.yml"

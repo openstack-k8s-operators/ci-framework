@@ -1,4 +1,4 @@
-# This job tests the functionality of the dataplane-operator to update values for a given
+# This job tests the functionality of the openstack-operator to update values for a given
 # openstackdataplanenodeset and have them applied to nodes within the cluster. Specifically,
 # we will update the value for hugepages, ensure it is applied to the node, and that the node
 # has been rebooted.
@@ -43,7 +43,21 @@
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_validations_basedir }}/artifacts"
     script: >-
-      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim }}" --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_kernel_args": "default_hugepagesz=1gb hugepagesz=1g hugepages=64 iommu=pt intel_iommu=on tsx=off isolcpus=2-11,14-23"}}}}}'
+      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim }}" --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_kernel_hugepages": {"2048": {"count": 10, "default": true}, "4048": {"count": 10}}}}}}}'
+
+# loop check the status of the openstackdataplanenodeset until it is either SetupReady,
+# or reaches a defined timeout value.
+- name: Wait for nodeset to be SetupReady again
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait osdpns "{{ deployed_nodeset_name.stdout | trim }}"
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=SetupReady
+      --timeout={{ cifmw_validations_timeout }}m
 
 # Define an ad-hoc reboot service for our node reboot
 - name: Create ad-hoc reboot service
@@ -104,7 +118,7 @@
       oc wait openstackdataplanedeployment edpm-hugepages-update
       --namespace={{ cifmw_validations_namespace }}
       --for=condition=ready
-      --timeout={{ cifmw_validations_timeout | default(100) }}m
+      --timeout={{ cifmw_validations_timeout }}m
 
 # Collect final confighash from the nodeset
 - name: Collecting final confighash from the nodeset

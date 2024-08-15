@@ -41,6 +41,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_firewalld_zone_libvirt_forward`: (Bool) Enable forwarding in the libvirt firewall zone. Defaults to: `true`
 * `cifmw_libvirt_manager_firewalld_default_zone`: (String) Name of the default firewall zone. Defaults to `public`.
 * `cifmw_libvirt_manager_firewalld_default_zone_masquerade`: (Bool) Enable masquerading on the default firewall zone. Defaults to `true`.
+* `cifmw_libvirt_manager_attach_dummy_interface_on_bridges`: (Bool) Attach dummy interface on bridges. Defaults to `true`.
 
 ### Structure for `cifmw_libvirt_manager_configuration`
 

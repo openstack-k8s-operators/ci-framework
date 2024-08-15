@@ -1,9 +1,12 @@
 ---
-
-- name: Reproducer Play
+- name: Reproducer prepare play
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: true
   pre_tasks:
+    - name: Inherit from parent scenarios if needed
+      ansible.builtin.include_tasks:
+        file: "ci/playbooks/tasks/inherit_parent_scenario.yml"
+
     - name: Include common architecture parameter file
       when:
         - cifmw_architecture_scenario is defined
@@ -53,14 +56,32 @@
       ansible.builtin.import_role:
         name: repo_setup
         tasks_from: rhos_release.yml
-
   roles:
     - role: ci_setup
-    - role: reproducer
 
+- name: Prepare switches
+  vars:
+    cifmw_configure_switches: "{{ 'switches' in groups }}"
+  ansible.builtin.import_playbook: playbooks/switches_config.yml
+
+- name: Reproducer run
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  roles:
+    - role: reproducer
   post_tasks:
     - name: Allow traffic from OSP VMs to OSP API (needed for shiftstack)
       become: true
       when: cifmw_allow_vms_to_reach_osp_api | default ('false') | bool
       ansible.builtin.command: # noqa: command-instead-of-module
         cmd: iptables -I LIBVIRT_FWI 1 -o ocpbm -j ACCEPT
+
+    - name: Run deployment if instructed to
+      when:
+        - cifmw_deploy_architecture | default(false) | bool
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
+      poll: 20
+      delegate_to: controller-0
+      ansible.builtin.command:
+        cmd: "/home/zuul/deploy-architecture.sh"

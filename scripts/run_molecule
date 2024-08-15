@@ -28,15 +28,21 @@ MOLECULE_CONFIG=${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 TEST_ALL_ROLES=${TEST_ALL_ROLES:-no}
 TEST_VERBOSITY=${TEST_VERBOSITY:-'--debug'}
 # Run local test
-(test -d ${ROLE_DIR} || (echo 'No such directory: ${ROLE_DIR}' && exit 1) ) || exit 1
+(test -d "${ROLE_DIR}" || (echo "No such directory: ${ROLE_DIR}" && exit 1) ) || exit 1
 
 pushd "${ROLE_DIR}"
 local_roledir=$(echo $ROLE_DIR | sed 's|\.\?\./||g')
 
-# Find what roles were modified
-ROLES_LIST=$(git diff --dirstat=files,0,cumulative HEAD^..HEAD | sed "s|^[ 0-9.]\+% \(${local_roledir}\)\?||g" | cut -d/ -f1 | sort -u )
-if [ ${TEST_ALL_ROLES} == 'yes' ]; then
+if [[ ${TEST_ALL_ROLES} == 'yes' ]]; then
     ROLES_LIST=$(ls -1)
+elif [[ -n ${TEST_SINGLE_ROLE} ]]; then
+    (test -d "${TEST_SINGLE_ROLE}" || (echo "No such directory: ${TEST_SINGLE_ROLE}" && exit 1) ) || exit 1
+    ROLES_LIST=${TEST_SINGLE_ROLE}
+fi
+
+# Find what roles were modified
+if [[ -z ${ROLES_LIST} ]]; then
+    ROLES_LIST=$(git diff --dirstat=files,0,cumulative HEAD^..HEAD | sed "s|^[ 0-9.]\+% \(${local_roledir}\)\?||g" | cut -d/ -f1 | sort -u )
 fi
 
 git clone https://github.com/openstack-k8s-operators/install_yamls /root/src/github.com/openstack-k8s-operators/install_yamls || true

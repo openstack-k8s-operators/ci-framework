@@ -37,15 +37,36 @@
     - >-
       (
         not (
-          (cifmw_devscripts_ocp_exists | bool) or
+          (cifmw_devscripts_ocp_comply | bool) or
           (cifmw_devscripts_ocp_online | bool)
         )
       )
-  community.general.make:
-    chdir: "{{ cifmw_devscripts_repo_dir }}"
-    target: "all"
-  async: "{{ cifmw_devscripts_installer_timeout }}"
-  poll: 30
+  vars:
+    _log_src: >-
+      {{
+        (cifmw_devscripts_repo_dir, 'logs' ) | path_join
+      }}
+  block:
+    - name: Run devscripts make all
+      cifmw.general.ci_script:
+        chdir: "{{ cifmw_devscripts_repo_dir }}"
+        output_dir: "{{ cifmw_devscripts_artifacts_dir }}"
+        script: "timeout {{ cifmw_devscripts_installer_timeout }} make all"
+  always:
+    - name: Gather logs
+      register: _deploy_logs
+      ansible.builtin.find:
+        paths: "{{ _log_src }}"
+        patterns: "*.log"
+
+    - name: Copy all generated logs
+      ansible.builtin.copy:
+        dest: "{{ cifmw_devscripts_logs_dir }}/{{ item.path | basename }}"
+        remote_src: true
+        src: "{{ item.path }}"
+      loop: "{{ _deploy_logs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
 
 - name: Executing dev-scripts post-install tasks.
   when:

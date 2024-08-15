@@ -337,15 +337,15 @@ class NetworkingInstanceMapper:
             )
         return skip_nm
 
-    @staticmethod
     def __map_instance_network_interface_mac(
+        self,
         interface_mac: typing.Optional[str],
         net_def: networking_definition.NetworkDefinition,
     ) -> typing.Optional[str]:
         if interface_mac:
             return interface_mac
         random_inst = random.Random()
-        random_inst.seed(a=net_def.name)
+        random_inst.seed(a=self.__instance_name + net_def.name)
         mac_bytes = [
             0x52,
             0x54,

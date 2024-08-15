@@ -1,0 +1,16 @@
+---
+# Cinder always creates the __DEFAULT__ volume type
+# This hook sets properties of this default volume type based on key-value from cifmw_cinder_default_type_properties
+- name: Add properties to default volume type
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Set all properties
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: |
+        oc project {{ namespace }}
+        oc rsh openstackclient \
+           openstack volume type set --property {{ cifmw_cinder_default_type_properties|items|map('join', '=')|join(' --property') }} __DEFAULT__
+      when: "cifmw_cinder_default_type_properties | default('') | length > 0"

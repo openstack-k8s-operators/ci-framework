@@ -1,15 +1,30 @@
 ---
 - name: "Push ssh jumper/configuration for {{ vm }}"
   vars:
+    _ocp_name: >-
+      {{
+        vm | replace('_', '-') |
+        replace('ocp-worker', 'worker') |
+        replace('ocp', 'master')
+      }}
+    _hostname: >-
+      {{
+        (vm is match('^ocp.*')) |
+        ternary(_ocp_name, vm)
+      }}
     _user: "{{ 'core' if vm is match('^(crc|ocp).*') else 'zuul' }}"
     dataset:
       ssh_dir: "{{ ansible_user_dir }}/.ssh"
       user: "{{ _user }}"
-      hostname: "{{ vm }}.utility"
+      hostname: "{{ _hostname }}.utility"
       patterns:
         - "{{ vm }}"
+        - "{{ _hostname }}"
+        - "{{ _hostname }}.utility"
         - "{{ vm }}.{{ inventory_hostname }}"
+        - "{{ _hostname }}.{{ inventory_hostname }}"
         - "cifmw-{{ vm }}"
+        - "cifmw-{{ _hostname }}"
     proxy_data:
       target: localhost
       proxy_host: "{{ ansible_host | default(inventory_hostname) }}"
@@ -33,21 +48,7 @@
   ansible.builtin.include_role:
     name: "ssh_jumper"
 
-- name: Inject nodes in the ansible inventory
-  delegate_to: localhost
-  when:
-    - (_cifmw_libvirt_manager_layout.vms[vm_type].amount | default(1) | int) > 0
-  ansible.builtin.add_host:
-    name: "{{ vm }}"
-    groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
-    ansible_host: "{{ vm }}.{{ inventory_hostname }}"
-    ansible_ssh_user: >-
-      {{
-        _cifmw_libvirt_manager_layout.vms[vm_type].admin_user |
-        default(_init_admin_user)
-      }}
-
-- name: "Configure ssh access on type {{ vm }}"
+- name: "Configure ssh access on VM {{ vm }}"
   vars:
     _user: >-
       {{
@@ -64,7 +65,7 @@
   register: _ssh_access
   until: _ssh_access.rc == 0
 
-- name: "Configure VMs type {{ vm }}"
+- name: "Configure VM {{ vm }}"
   when:
     - vm_type is not match('^(crc|ocp).*$')
   delegate_to: "{{ vm }}.{{ inventory_hostname }}"
@@ -81,6 +82,10 @@
       sudo -u zuul mkdir -p /home/zuul/.ssh /home/zuul/src/github.com/openstack-k8s-operators;
       sudo cp ${HOME}/.ssh/authorized_keys /home/zuul/.ssh/;
       chown -R zuul: /home/zuul/.ssh;
+  retries: 5
+  delay: 10
+  register: _vm_config
+  until: _vm_config.rc == 0
 
 # TODO: consider https://docs.fedoraproject.org/en-US/fedora-coreos/storage/#_sizing_the_root_partition
 - name: Ensure we grow volume for OCP cluster members
@@ -116,17 +121,3 @@
     owner: zuul
     group: zuul
     mode: "0444"
-
-- name: Update inventory to consume correct user
-  delegate_to: localhost
-  when:
-    - (_cifmw_libvirt_manager_layout.vms[vm_type].amount | default(1) | int) > 0
-  ansible.builtin.add_host:
-    name: "{{ vm }}"
-    groups: "{{ (vm_type == 'crc') | ternary('ocp', vm_type) }}s"
-    ansible_host: "{{ vm }}.{{ inventory_hostname }}"
-    ansible_ssh_user: >-
-      {{
-        _cifmw_libvirt_manager_layout.vms[vm_type].admin_user | default('zuul')
-      }}
-    host_ip: "{{ vm }}.utility"

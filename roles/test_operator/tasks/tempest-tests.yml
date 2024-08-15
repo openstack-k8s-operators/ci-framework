@@ -128,3 +128,37 @@
                     'whitebox_neutron_plugin_options.proxy_host_address ' + controller_ip
                   }}}, recursive=true)
       }}
+
+- name: Add controller IP to each workflow step overrides section
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - controller_ip != ""
+    - cifmw_test_operator_tempest_workflow | list | length > 0
+  vars:
+    controller_ip: >-
+      {{ cifmw_test_operator_controller_ip | default(ansible_default_ipv4.address) | default('') }}
+  block:
+    - name: Add controller IP to each workflow step overrides section - Create overriden_workflow
+      vars:
+        _overriden_workflow_step: >-
+          {{
+              item
+              if (item.tempestconfRun is not defined or item.tempestconfRun.overrides is not defined)
+              else
+              item |
+              combine({'tempestconfRun': {'overrides':
+                item.tempestconfRun.overrides + ' ' +
+                'whitebox_neutron_plugin_options.proxy_host_address ' + controller_ip
+              }}, recursive=true)
+          }}
+      ansible.builtin.set_fact:
+        overriden_workflow: "{{ overriden_workflow | default([]) + [_overriden_workflow_step] }}"
+      loop: "{{ cifmw_test_operator_tempest_workflow | list }}"
+
+    - name: Override the Tempest CR workflow
+      ansible.builtin.set_fact:
+        test_operator_cr: >-
+          {{
+              test_operator_cr |
+              combine({'spec': {'workflow': overriden_workflow}}, recursive=true)
+          }}

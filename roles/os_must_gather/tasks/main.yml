@@ -69,10 +69,25 @@
           SOS_DECOMPRESS=$SOS_DECOMPRESS
           gather &> {{ cifmw_os_must_gather_output_dir }}/logs/os_must_gather.log
 
+    # directory name will be generated starting from cifmw_os_must_gather_image
+    # variable e.g.:
+    # EXAMPLE 1
+    # original value: "quay.io/openstack-k8s-operators/openstack-must-gather:latest"
+    # pattern value: "quay-io-openstack-k8s-operators-openstack-must-gather*"
+    # EXAMPLE 2
+    # original value: "foo.bar.example.com/repofoo/openstack-must-gather-rhel9:1.0.0"
+    # patterns value: "foo-bar-example-com-repofoo-openstack-must-gather-rhel9*"
+    # TODO: add molecule testing
     - name: Get exact must-gather output folder name
       ansible.builtin.find:
         paths: "{{ cifmw_os_must_gather_output_dir }}/logs"
-        patterns: "quay-io-openstack-k8s-operators-openstack-must-gather*"
+        patterns: >-
+          {{
+            cifmw_os_must_gather_image |
+            ansible.builtin.split(':') |
+            first |
+            ansible.builtin.regex_replace('([.]|[/])', '-') ~ '*'
+          }}
         file_type: directory
       register: _must_gather_output_folder
 
@@ -97,7 +112,7 @@
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
         script: |
-            oc adm inspect namespace/{{ item }} --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
+          oc adm inspect namespace/{{ item }} --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
       loop: >-
         {{
           (

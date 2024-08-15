@@ -1,0 +1,42 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Try to ping hostnames from inside openstackclient pod
+  delegate_to: localhost
+  run_once: true
+  kubernetes.core.k8s_exec:
+    namespace: "{{ cifmw_external_dns_ns }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    pod: openstackclient
+    command: "ping -c 1 {{ item.value }}"
+  register: ping_result
+  loop: "{{ ip_to_name | dict2items }}"
+  loop_control:
+    label: "{{ item.value }}"
+  vars:
+    ip_to_name: "{{ cifmw_external_dns_vip_int |
+                    combine(cifmw_external_dns_vip_ext) |
+                    combine(cifmw_external_dns_extra_subj_alt_names) }}"
+
+- name: Show results of ping tests
+  run_once: true
+  ansible.builtin.debug:
+    msg: "{{ item.stdout | regex_search('(\\d+ packets transmitted, \\d+ received, \\d+% packet loss, time \\d+ms)') }}"
+  loop: "{{ ping_result.results }}"
+  loop_control:
+    label: "{{ item.invocation.module_args.command }}"

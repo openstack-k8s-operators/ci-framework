@@ -36,7 +36,7 @@ name:
 * `inventory`: (String) Refer to the `--inventory` option for `ansible-playbook`. Defaults to `inventory_file`.
 * `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `hooks/playbooks`. It can be an absolute path.
 * `type`: (String) Type of the hook. In this case, set it to `playbook`.
-* `extra_vars`: (Dict) Structure listing the extra variables you want to pass down
+* `extra_vars`: (Dict) Structure listing the extra variables you would like to pass down ([extra_vars explained](#extra_vars-explained))
 
 ##### About OpenShift namespaces and install_yamls
 
@@ -54,7 +54,7 @@ Since `install_yamls` might not be initialized, the `run_hook` is exposing two n
 * `name`: (String) Describe the hook.
 * `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `hooks/playbooks`. It can be an absolute path.
 * `type`: (String) Type of the hook. In this case, set it to `playbook`.
-* `extra_vars`: (Dict) Structure listing the extra variables you want to pass down
+* `extra_vars`: (Dict) Structure listing the extra variables you would like to pass down ([extra_vars explained](#extra_vars-explained))
 
 #### Hook callback
 
@@ -81,6 +81,36 @@ Note that `step` is fixed in the main playbooks, and are following the name of
 the various hook "timing" (`pre_infra`, `post_infra`, etc). The `hook_name` is
 a cleaned version of the `name` parameter you pass down in the hook description.
 
+#### extra_vars explained
+
+`playbook` type hooks support passing extra_vars either as a list of variables, in a variable file or both.
+
+The variable method should only be used for simple key/value variables:
+
+```yaml
+pre_deploy:
+    - name: My hook
+      source: ceph-deploy.yml
+      type: playbook
+      extra_vars:
+        UUID: <some generated UUID>
+```
+
+This will be passed to the resulting ansible-playbook command as an extra var argument `-e "UUID=<some generated UUID>"`
+
+When multiple extra_vars are passed or more complex variables like lists and dictionaries are required a variable file should be utilized:
+
+```yaml
+pre_deploy:
+    - name: My hook
+      source: ceph-deploy.yml
+      type: playbook
+      extra_vars:
+        file: "ceph_env.yml"
+```
+
+This will be passed to the resulting ansible-playbook command as an extra var file argument `-e "@ceph_env.yml"`
+
 #### Examples
 
 ```YAML
@@ -94,6 +124,16 @@ pre_deploy:
 pre_infra_my_nice_hook:
     source: noop.yml
     type: playbook
+    extra_vars:
+      file: "ceph_env.yml"
+
+pre_deploy:
+    - name: My hook
+      source: ceph-deploy.yml
+      type: playbook
+      extra_vars:
+        UUID: <some generated UUID>
+        file: "ceph_env.yml"
 ```
 
 ### CR

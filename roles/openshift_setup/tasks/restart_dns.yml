@@ -1,0 +1,40 @@
+- name: Check which dnsmasq config we must edit
+  register: _dnsmasq
+  ansible.builtin.stat:
+    path: '/srv/dnsmasq.conf'
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+
+- name: Restart dnsmasq service if used
+  become: true
+  when:
+    - not _dnsmasq.stat.exists
+  ansible.builtin.service:
+    name: dnsmasq
+    state: restarted
+
+- name: Manage old dnsmasq container
+  when:
+    - _dnsmasq.stat.exists
+  block:
+    # Avoid 'state: restarted' due to issues with IP not
+    # available when crc-dnsmasq starts
+    - name: Stop dnsmasq
+      become: true
+      ansible.builtin.systemd:
+        state: stopped
+        name: crc-dnsmasq
+
+    - name: Start dnsmasq
+      become: true
+      ansible.builtin.systemd:
+        state: started
+        name: crc-dnsmasq
+      register: _dnsmasq_start_reg
+      retries: 15
+      delay: 20
+      until:
+        - _dnsmasq_start_reg.failed is false
+        - _dnsmasq_start_reg.status is defined
+        - _dnsmasq_start_reg.status.ActiveState == "active"

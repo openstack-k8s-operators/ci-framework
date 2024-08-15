@@ -19,13 +19,45 @@
   gather_facts: true
   vars:
     cifmw_basedir: "/opt/basedir"
+    molecule_scenario: deploy_layout
   tasks:
+    - name: Ensure we have the destination directory
+      failed_when: false
+      ansible.builtin.file:
+        path: >-
+          {{
+            [ansible_user_dir,
+            'ci-framework-data',
+            'artifacts',
+            molecule_scenario] | path_join
+          }}
+        state: directory
+        mode: "0755"
+
+    - name: Copy generated content to proper location
+      failed_when: false
+      ansible.posix.synchronize:
+        src: "{{ item }}"
+        dest: >-
+          {{
+            [ansible_user_dir,
+            'ci-framework-data',
+            'artifacts',
+            molecule_scenario] | path_join
+          }}
+      loop:
+        - "{{ cifmw_basedir }}/artifacts"
+        - "{{ cifmw_basedir }}/logs"
+        - "/etc/cifmw-dnsmasq.conf"
+        - "/etc/cifmw-dnsmasq.d"
+
     - name: Clean layout
       ansible.builtin.import_role:
         name: libvirt_manager
         tasks_from: clean_layout.yml
 
-    - name: Copy generated content to proper location
-      ansible.posix.synchronize:
-        src: "{{ cifmw_basedir }}/"
-        dest: "{{ ansible_user_dir }}/ci-framework-data"
+    - name: Ensure work directory is removed
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}"
+        state: absent

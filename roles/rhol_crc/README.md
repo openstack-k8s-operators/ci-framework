@@ -11,8 +11,8 @@ Become - required for the tasks in `sudoers_grant.yml` and `sudoers_revoke.yml` 
 * `cifmw_rhol_crc_basedir`: (String) Directory where we will have the RHOL/CRC binary and the configuration (e.g. `artifacts/.rhol_crc_pull_secret.txt`). Default to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_rhol_crc_use_installyamls`: (Boolean) Mimic some steps of the install_yamls way to deploy CRC. Defaults to `False`.
 * `cifmw_rhol_crc_dryrun`: (Boolean) Toggle the `ci_make` `dry_run` parameter. Defaults to `False`.
-* `cifmw_rhol_crc_config`: (Dict) This structure is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Defaults to `{}`.
-* `cifmw_rhol_crc_version`: (String) RHOL/CRC binary version we want to use, set to `latest` to deploy latest CRC release. Default: `2.36.0`.
+* `cifmw_rhol_crc_config`: (Dict) This structure is merged with the `cifmw_rhol_crc_config_defaults` dictionary. We can add extra properties or override the existing one using this parameter. We can know the parameters that can be used with the output of the `crc config --help` command. Defaults to `{}`. You can also `patch` configuration by using `cifmw_rhol_crc_config_patch_*` pattern and providing the same kind of dict.
+* `cifmw_rhol_crc_version`: (String) RHOL/CRC binary version we want to use, set to `latest` to deploy latest CRC release. Default: `2.39.0`.
 * `cifmw_rhol_crc_tarball_name`: (String) RHOL/CRC tarball name depending on the architecture. Defaults to `crc-linux-amd64.tar.xz`.
 * `cifmw_rhol_crc_tarball_checksum_name`: (String) RHOL/CRC tarball file checksum name. Defaults to `crc-linux-amd64.tar.xz.sha256`.
 * `cifmw_rhol_crc_base_url`: (String) RHOL/CRC URL base. Defaults to `https://mirror.openshift.com/pub/openshift-v4/clients/crc/{{ cifmw_rhol_crc_version }}`.

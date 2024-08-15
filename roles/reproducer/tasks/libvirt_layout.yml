@@ -50,7 +50,7 @@
 
 - name: Run post tasks in OCP cluster case
   when:
-    - _cifmw_libvirt_manager_layout.vms.ocp is defined
+    - _use_ocp | bool
     - (
         _cifmw_libvirt_manager_layout.vms.ocp.target is defined and
         _cifmw_libvirt_manager_layout.vms.ocp.target == inventory_hostname
@@ -74,10 +74,7 @@
 
 - name: Configure CRC node if available
   when:
-    - _cifmw_libvirt_manager_layout.vms.crc is defined
-    - (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
-       (_cifmw_libvirt_manager_layout.vms.crc.amount | int) > 0) or
-      _cifmw_libvirt_manager_layout.vms.crc.amount is undefined
+    - _use_crc | bool
     - (
         _cifmw_libvirt_manager_layout.vms.crc.target is defined and
         _cifmw_libvirt_manager_layout.vms.crc.target == inventory_hostname
@@ -92,30 +89,6 @@
       tags:
         - bootstrap
         - bootstrap_layout
-
-- name: Ensure OCP cluster is stable
-  when:
-    - _wait_ocp_cluster is defined
-    - _wait_ocp_cluster | bool
-  tags:
-    - bootstrap
-    - bootstrap_layout
-  vars:
-    _auth_path: >-
-      {{
-        (
-          cifmw_devscripts_repo_dir,
-          'ocp',
-          cifmw_devscripts_config.cluster_name,
-          'auth'
-        ) | ansible.builtin.path_join
-      }}
-    _k8s_config: "{{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}"
-    cifmw_openshift_adm_op: "stable"
-    cifmw_openshift_kubeconfig: >-
-      {{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}
-  ansible.builtin.include_role:
-    name: openshift_adm
 
 # ctlplane network is configured for pre-provisioned edpm nodes.
 # In order to do this, we'll consume the generated networking_mapper
@@ -135,25 +108,3 @@
   loop_control:
     loop_var: compute
     label: "{{ compute.key }}"
-
-- name: Ensure rhos-release is configured
-  become: true
-  when:
-    - cifmw_reproducer_compute_set_repositories | bool
-    - _async_rhos_release.ansible_job_id is defined
-  block:
-    - name: Ensure async flag still exists
-      register: _async_flag
-      ansible.builtin.stat:
-        path: >-
-          /root/.ansible_async/{{ _async_rhos_release.ansible_job_id }}
-
-    - name: Ensure rhos-release task is over
-      when:
-        - _async_flag.stat.exists
-      ansible.builtin.async_status:
-        jid: "{{ _async_rhos_release.ansible_job_id }}"
-      register: _async_result
-      until: _async_result.finished
-      retries: 20
-      delay: 10

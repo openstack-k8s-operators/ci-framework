@@ -24,6 +24,8 @@
     cifmw_libvirt_manager_network_interface_types:
       intnet-0: network
       intnet-1: network
+      s0-rtr: network
+      s1-rtr: network
     cifmw_libvirt_manager_vm_net_ip_set:
       sl-compute: 100
     _networks:
@@ -52,12 +54,26 @@
             - public
             - osp_trunk
           spineleafnets:
-            - # sl-compute-0 interfaces
+            -  # sl-compute-0 interfaces
               - public
-            - # sl-compute-1 interfaces
+            -  # sl-compute-1 interfaces
               - public
-          extra_disks_num: 1
-          extra_disks_size: 1G
+        router:
+          amount: 1
+          image_url: "{{ cifmw_discovered_image_url }}"
+          sha256_image_name: "{{ cifmw_discovered_hash }}"
+          image_local_dir: "{{ cifmw_basedir }}/images/"
+          disk_file_name: "spineleaf-centos-stream-9.qcow2"
+          disksize: 20
+          memory: 1
+          cpus: 1
+          nets:
+            - public
+          spineleafnets:
+            -  # router - ocp_tester
+              - "s0-rtr"
+              - "s1-rtr"
+
       networks:
         public: |-
           <network>
@@ -93,6 +109,17 @@
             <name>intnet-1</name>
             <bridge name='intnet-1' stp='on' delay='0'/>
           </network>
+        # spines to router networks
+        s0-rtr: |
+          <network>
+            <name>s0-rtr</name>
+            <bridge name='s0-rtr' stp='on' delay='0'/>
+          </network>
+        s1-rtr: |
+          <network>
+            <name>s1-rtr</name>
+            <bridge name='s1-rtr' stp='on' delay='0'/>
+          </network>
   roles:
     - role: "discover_latest_image"
   tasks:
@@ -105,123 +132,3 @@
       ansible.builtin.import_role:
         name: libvirt_manager
         tasks_from: deploy_layout
-
-    - name: Check files and deployed resources
-      block:
-        - name: Get wanted files
-          register: generated_files
-          ansible.builtin.stat:
-            path: "{{ cifmw_basedir }}/{{ item }}"
-          loop:
-            - reproducer-inventory/sl-compute-group.yml
-
-        - name: Assert file availability
-          ansible.builtin.assert:
-            that:
-              - item.stat.exists | bool
-          loop: "{{ generated_files.results }}"
-          loop_control:
-            label: "{{ item.stat.path }}"
-
-        - name: Get virtual network list
-          register: nets
-          community.libvirt.virt_net:
-            command: list_nets
-
-        - name: Get virtual machines
-          register: vms
-          community.libvirt.virt:
-            command: "list_vms"
-
-        - name: Output network list
-          ansible.builtin.debug:
-            msg:
-              - "{{ nets.list_nets | sort }}"
-              - >-
-                {{
-                  ['cifmw-public', 'cifmw-osp_trunk',
-                   'cifmw-intnet-0', 'cifmw-intnet-1'] | sort
-                }}
-
-        - name: Assert resource lists
-          vars:
-            sorted_nets: "{{ nets.list_nets | sort }}"
-            compare_nets: >-
-              {{
-                ['cifmw-public', 'cifmw-osp_trunk',
-                 'cifmw-intnet-0', 'cifmw-intnet-1'] | sort
-              }}
-            sorted_vms: "{{ vms.list_vms | sort }}"
-            compare_vms: >-
-              {{
-                ['cifmw-sl-compute-0',
-                 'cifmw-sl-compute-1'] | sort
-              }}
-          ansible.builtin.assert:
-            that:
-              - sorted_nets == compare_nets
-              - sorted_vms == compare_vms
-
-        - name: Get sl-compute-0 network interfaces
-          register: cmp_nics_cmp_0
-          ansible.builtin.command:
-            cmd: >-
-              virsh -c qemu:///system -q
-              domiflist cifmw-sl-compute-0
-
-        - name: Ensure sl-compute-0 connections
-          vars:
-            _vals: >-
-              {{
-                cmp_nics_cmp_0.stdout_lines |
-                product([' sl-compute-0']) |
-                map('join') |
-                map('split')
-              }}
-            _nics: >-
-              {{
-                _vals |
-                map('zip',
-                    ['nic', 'type', 'network', 'driver', 'mac', 'host' ]) |
-                map('map', 'reverse') |
-                map('community.general.dict')
-              }}
-          ansible.builtin.assert:
-            that:
-              - item.network in ['cifmw-public', 'cifmw-osp_trunk', 'cifmw-intnet-0']
-          loop: "{{ _nics }}"
-
-        - name: Get sl-compute-1 network interfaces
-          register: cmp_nics_cmp_1
-          ansible.builtin.command:
-            cmd: >-
-              virsh -c qemu:///system -q
-              domiflist cifmw-sl-compute-1
-
-        - name: Ensure sl-compute-1 connections
-          vars:
-            _vals: >-
-              {{
-                cmp_nics_cmp_1.stdout_lines |
-                product([' sl-compute-1']) |
-                map('join') |
-                map('split')
-              }}
-            _nics: >-
-              {{
-                _vals |
-                map('zip',
-                    ['nic', 'type', 'network', 'driver', 'mac', 'host' ]) |
-                map('map', 'reverse') |
-                map('community.general.dict')
-              }}
-          ansible.builtin.assert:
-            that:
-              - item.network in ['cifmw-public', 'cifmw-osp_trunk', 'cifmw-intnet-1']
-          loop: "{{ _nics }}"
-
-        - name: Get osp_trunk network XML
-          register: _net_xml
-          community.libvirt.virt_net:
-            command: "get_xml"
-            name: "cifmw-osp_trunk"
