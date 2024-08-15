@@ -6,8 +6,8 @@ DOCUMENTATION = """
     name: reproducer_refspec
     short_description: Maps repo information from zuul to a refspec.
     description:
-        - Maps repo information from zuul to a refspec that should be
-        used for pulling it with git.
+        - Maps repo information from zuul to a refspec that should be \
+            used for pulling it with git.
     options:
         _input:
             description:
