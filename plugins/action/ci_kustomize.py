@@ -10,90 +10,95 @@ __metaclass__ = type
 
 DOCUMENTATION = r"""
 ---
-action: ci_kustomize
+    action: ci_kustomize
 
-short_description: Applies a set of k8s Kustomizations to a set of manifests
+    short_description: Applies a set of k8s Kustomizations to a set of \
+        manifests
 
-description:
-- Allows applying a set of Kustomizations to a given set of manifests using
-  the kustomize or oc tools.
-- kustomize or oc should be discoverable by in the PATH.
-- This modules takes a set of manifest files pointed by I(target_path) and
-  applies to them the set of kustomizations, if available.
-- The kustomization result is always saved in a single file and passed to
-  the caller in the O(result) field if success.
-- Kustomizations can be passed by file and/or by I(kustomizations), they get
-  applied one by one.
-- Filesystem Kustomizations are searched by default in the I(target_path), but
-  more search paths can be added by passing I(kustomizations_paths).
-- Filesystem Kustomizations are applied by strictly alphabetical order.
-- Kustomizations passed by I(kustomizations) are applied by apparition order.
-- Kustomizations passed by I(kustomizations) are applied after the ones from
-  filesystem by default, if the contrary is not told so by
-  I(kustomization_files_goes_first).
-- I(kustomizations) accepts a wide range of input types. More precisly: plain
-  string, list of strings, dict with a single kustomization or list of dicts.
-- By contraints of the kustomize tool there is no way to apply the given
-  set of kustomizations to a set of more than one manifests, so, to avoid
-  diverging the behaviour between single kustomization runs and the rest
-  this module takes both sets of inputs and translates the result into
-  a single file.
+    description:
+    - Allows applying a set of Kustomizations to a given set of manifests \
+        using the kustomize or oc tools.
+    - kustomize or oc should be discoverable by in the PATH.
+    - This modules takes a set of manifest files pointed by I(target_path) \
+        and applies to them the set of kustomizations, if available.
+    - The kustomization result is always saved in a single file and passed to \
+        the caller in the O(result) field if success.
+    - Kustomizations can be passed by file and/or by I(kustomizations), they \
+        get applied one by one.
+    - Filesystem Kustomizations are searched by default in the \
+        I(target_path), but more search paths can be added by passing \
+        I(kustomizations_paths).
+    - Filesystem Kustomizations are applied by strictly alphabetical order.
+    - Kustomizations passed by I(kustomizations) are applied by apparition \
+        order.
+    - Kustomizations passed by I(kustomizations) are applied after the ones \
+        from the filesystem by default, if the contrary is not told so by \
+        I(kustomization_files_goes_first).
+    - I(kustomizations) accepts a wide range of input types. More precisly: \
+        plain string, list of strings, dict with a single kustomization or \
+        list of dicts.
+    - By contraints of the kustomize tool there is no way to apply the given \
+        set of kustomizations to a set of more than one manifests, so, to \
+        avoid diverging the behaviour between single kustomization runs and \
+        the rest this module takes both sets of inputs and translates the \
+        result into a single file.
 
-options:
-  target_path:
-    description:
-    - Path to the directory where the manifest exists or the specific manifest
-      to kustomize.
-    type: str
-    required: true
-  kustomizations:
-    description:
-    - Kustomizations to apply in list of dicts, list of strings, dict or
-      string format.
-    type: iterable
-  output_path:
-    description:
-    - The alternative path were Kustomization result should be copied.
-    - If not given I(target_path) is used if it points to a file.
-    - If I(target_path) points to a file 'cifmw-kustomization-result.yaml'
-      in I(target_path) will be used.
-    type: str
-  kustomizations_paths:
-    description:
-    - Additional paths where Kustomizations should be searched.
-    type: list
-    elements: str
-  preserve_workspace:
-    description:
-    - If true, the workspace is not deleted if success.
-    - If failure this option is ignored and the workspace is preserved.
-    type: bool
-    default: false
-  kustomization_files_goes_first:
-    description:
-    - If true, Kustomizations given by I(kustomizations) are applied before
-      the ones from filesystem.
-    type: bool
-    default: true
-  sort_ascending:
-    description:
-    - If true, file Kustomizations are ordered by ascending order of the file
-      name. Descnding orther oherwise.
-      the ones from filesystem.
-    type: bool
-    default: true
-  skip_regexes:
-    description:
-    - List of regexes to filter out the discovered manifests and kustomizations.
-    type: list
-    elements: str
-    default: []
-  include_regexes:
-    description:
-    - List of regexes to filter in the discovered manifests and kustomizations.
-    type: list
-    elements: str
-    default: []
+    options:
+    target_path:
+        description:
+        - Path to the directory where the manifest exists or the specific \
+            manifest to kustomize.
+        type: str
+        required: true
+    kustomizations:
+        description:
+        - Kustomizations to apply in list of dicts, list of strings, dict or \
+            string format.
+        type: iterable
+    output_path:
+        description:
+        - The alternative path were Kustomization result should be copied.
+        - If not given I(target_path) is used if it points to a file.
+        - If I(target_path) points to a file 'cifmw-kustomization-result.yaml'\
+            in I(target_path) will be used.
+        type: str
+    kustomizations_paths:
+        description:
+        - Additional paths where Kustomizations should be searched.
+        type: list
+        elements: str
+    preserve_workspace:
+        description:
+        - If true, the workspace is not deleted if success.
+        - If failure this option is ignored and the workspace is preserved.
+        type: bool
+        default: false
+    kustomization_files_goes_first:
+        description:
+          - If true, Kustomizations given by I(kustomizations) are  applied \
+                before the ones from filesystem.
+        type: bool
+        default: true
+    sort_ascending:
+        description:
+        - If true, file Kustomizations are ordered by ascending order of the \
+            filename. Descending order otherwise the ones from filesystem.
+        type: bool
+        default: true
+    skip_regexes:
+        description:
+        - List of regexes to filter out the discovered manifests and \
+            kustomizations.
+        type: list
+        elements: str
+        default: []
+    include_regexes:
+        description:
+        - List of regexes to filter in the discovered manifests and \
+            kustomizations.
+        type: list
+        elements: str
+        default: []
 """
 
 EXAMPLES = r"""

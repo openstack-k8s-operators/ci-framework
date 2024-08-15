@@ -4,16 +4,15 @@ __metaclass__ = type
 
 DOCUMENTATION = """
     name: reproducer_gerrit_infix
-    short_description: Maps a hostname to the infix needed for cloning a repo
-    for that hostname.
+    short_description: Maps a hostname to the infix needed for cloning a repo \
+        for that hostname.
     description:
-        - Maps a hostname to the infix needed for cloning a repo from that
-          hostname.Some gerrit instances add an infix like "gerrit", or "r"
-          to the repo clone url.
+    - Maps a hostname to the infix needed for cloning a repo from that \
+        hostname.Some gerrit instances add an infix like "gerrit", or "r" \
+        to the repo clone url.
     options:
         _input:
-            description:
-                - repo hostname where we want to clone from.
+            description: repo hostname where we want to clone from.
             type: str
             required: true
 """
