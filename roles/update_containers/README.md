@@ -17,6 +17,8 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_update_containers_tag`: The container tag. Default to "current-podified".
 * `cifmw_update_containers_cindervolumes`: The names of the cinder volumes prefix. Default to `[]`.
 * `cifmw_update_containers_manilashares`: The names of the manila shares prefix. Default to `[]`.
+* `cifmw_update_containers_agentimage`: Full Agent Image url for updating Agent Image.
+* `cifmw_update_containers_ceilometersgcoreImage`: Full Ceilometersgcore Image url for updating Ceilometersgcore Image.
 * `cifmw_update_containers_openstack`: Whether to generate CR for updating openstack containers. Default to `false`.
 * `cifmw_update_containers_ansibleee_image_url`: Full Ansibleee Image url for updating Ansibleee Image.
 * `cifmw_update_containers_edpm_image_url`: Full EDPM Image url for updating EDPM OS image.
