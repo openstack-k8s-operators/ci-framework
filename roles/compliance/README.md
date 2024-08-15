@@ -1,10 +1,10 @@
-Compliance Role
+# Compliance Role
 
 Execute compliance scans on the control plane via the [compliance-operator](https://github.com/openshift/compliance-operator)
 as well as OpenSCAP [scans](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/security_hardening/scanning-the-system-for-configuration-compliance-and-vulnerabilities_security-hardening#configuration-compliance-tools-in-rhel_scanning-the-system-for-configuration-compliance-and-vulnerabilities) against the compute nodes.  Retrieve compliance results and generate reports.
 
 The parameter `cifmw_compliance_suites` is used to specify the compliance suites to be scanned.  Each suite is related to specific
-comliance profiles through the `cifmw_compliance_scan_settings` parameter.
+compliance profiles through the `cifmw_compliance_scan_settings` parameter.
 
 When a suite is included, a scansettingbinding is created for each profile (`<suite>-<profile>-binding`).  This triggers
 various compliance scans associated with each profile.  The results are aggregated and are used to generate reports.  The results and

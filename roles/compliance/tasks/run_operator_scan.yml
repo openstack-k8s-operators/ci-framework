@@ -14,8 +14,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: set output directory
-  set_fact:
+- name: Set output directory
+  ansible.builtin.set_fact:
     scan_binding: "{{ scan_suite }}-{{ scan_profile }}-binding"
     out_dir: "{{ cifmw_compliance_artifacts_basedir }}/{{ scan_suite }}/{{ scan_profile }}"
 
@@ -25,19 +25,19 @@
   ansible.builtin.shell: "oc get scansettingbinding {{ scan_binding }} || oc compliance bind -N {{ scan_binding }} profile/{{ scan_profile }}"
   when: not cifmw_compliance_dry_run | bool
 
-- name: wait for scans to complete
-  command: oc get compliancescan --no-headers
+- name: Wait for scans to complete
+  ansible.builtin.command: oc get compliancescan --no-headers
   register: scan_result
   retries: 120
   delay: 10
   until: scan_result.stdout_lines| reject('search', 'DONE') | reject('search', 'ERROR') | list | count == 0
 
-- name: delete directory for scan results if it exists
+- name: Delete directory for scan results if it exists
   ansible.builtin.file:
     path: "{{ out_dir }}"
     state: absent
 
-- name: create directory for scan results
+- name: Create directory for scan results
   ansible.builtin.file:
     path: "{{ out_dir }}"
     state: directory
@@ -45,11 +45,11 @@
     owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
-- name: retrieve scan results
+- name: Retrieve scan results
   ansible.builtin.command: "oc compliance fetch-raw scansettingbindings {{ scan_binding }} -o {{ out_dir }}"
   when: not cifmw_compliance_dry_run | bool
 
-- name: find all the compressed scan results
+- name: Find all the compressed scan results
   ansible.builtin.find:
     paths: "{{ out_dir }}"
     patterns: '.*bzip2$'
@@ -57,7 +57,7 @@
     use_regex: true
   register: scan_result_files
 
-- name: process scan result files
+- name: Process scan result files
   ansible.builtin.include_tasks: create_scap_report.yml
   loop: "{{ scan_result_files.files }}"
   loop_control:
