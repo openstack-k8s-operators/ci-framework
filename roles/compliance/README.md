@@ -27,6 +27,9 @@ until the compliance scans complete or error out before moving on to the next pr
 * `cifmw_compliance_dry_run`: (Boolean) Whether the compliance-operator should and OpenSCAP scans should run or not.  Default value: `false`
 * `cifmw_compliance_namespace`: (String) Namespace inside which all the resources are created. Default value: `openshift-compliance`
 * `cifmw_compliance_plugin_image`: (String) Image to use to extract the oc compliance plugin. Default value: `registry.redhat.io/compliance/oc-compliance-rhel8:stable`
+* `cifmw_compliance_podman_password`: (String) password to log into registry to retrieve image for oc compliance plugin
+* `cifmw_compliance_podman_registry`: (String) registry to get image for oc compliance plugin.  Default value: registry.redhat.io
+* `cifmw_compliance_podman_username`: (String) user to log into registry to retrieve image for oc compliance plugin
 * `cifmw_compliance_scan_settings`: (Dictionary) Dictionary that maps compliance suites to compliance profiles.  Default value:
 ```
   cis:
