@@ -26,83 +26,77 @@
       when: "'switch_banner' in switch_vars"
 
     - name: Set VLANs
-      junipernetworks.junos.junos_vlan:
-        name: "vlan{{ item }}"
-        vlan_id: "{{ item }}"
-        state: present
-      loop: "{{ vlan_list }}"
+      vars:
+        vlans: |
+          {% for vlan in vlan_list %}
+            - name: "vlan{{ vlan }}"
+              vlan_id: "{{ vlan }}"
+          {% endfor %}
+      junipernetworks.junos.junos_vlans:
+        config: "{{ vlans | from_yaml }}"
+        state: merged
 
     - name: Configure interfaces - description, mode (access/trunk), vlans
-      vars:
-        iface_vlans: "{%- set iface_vlans = [] -%}
-                      {%- set helper_var = [] -%}
-                      {%- if item.iface_mode == 'trunk'-%}
-                      {%- if ',' in item.vlan -%}
-                      {%- for vlan in item.vlan.replace(' ', '').split(',') -%} {{ helper_var.append(vlan) }} {%- endfor -%}
-                      {%- else -%}
-                      {{ helper_var.append(item.vlan) }}
-                      {%- endif -%}
-                      {%- for vlan in helper_var -%}
-                      {%- if '-' in vlan -%}
-                      {%- for v in range(vlan.split('-')[0] | int, vlan.split('-')[1] | int + 1) -%}
-                      {{ iface_vlans.append(v) }}
-                      {%- endfor -%}
-                      {%- else -%}
-                      {{ iface_vlans.append(vlan | int) }}
-                      {%- endif -%}
-                      {%- endfor -%}
-                      {%- endif -%}
-                      {{ iface_vlans | unique }}"
-        vlans_string: "{%- if iface_vlans -%}
-                       {% for item in iface_vlans %}vlan{{ item }} {% endfor %}
-                       {%- elif item.vlan == 'all' -%}{{ item.vlan }}
-                       {%- else -%}vlan{{ item.vlan }}{% endif %}"
-        trunk_vlans_list: "{%- if vlans_string[0] is defined -%}
-                           {{ vlans_string.split() }}{% else %}{{ item.vlan }}{% endif %}"
-        access_vlan: "{%- if item.iface_mode == 'access' -%}
-                      {{ item.vlan |regex_replace('^(.*)$', 'vlan\\1') }}
-                      {%- endif -%}"
-      junipernetworks.junos.junos_l2_interface:
-        name: "{{ item.iface }}"
-        description: "{{ item.description }}"
-        mode: "{{ item.iface_mode }}"
-        access_vlan: "{%- if item.iface_mode == 'access' -%}
-                      {{ access_vlan }}{% else %}{{ omit }}{% endif %}"
-        trunk_vlans: "{%- if item.iface_mode == 'trunk' -%}
-                      {{ trunk_vlans_list }}{% else %}{{ omit }}{% endif %}"
-        native_vlan: "{%- if item.iface_mode == 'trunk' and 'native_vlan' in item -%}
-                      {{ item.native_vlan | int }}{% else %}{{ omit }}{% endif %}"
-        unit: 0
-        state: present
-      loop: "{{ switch_vars.interfaces }}"
       when: "'interfaces' in switch_vars"
+      vars:
+        interface_config: |
+          {% for interface in switch_vars['interfaces'] %}
+          {% set helper_var = interface['vlan'].split(',') %}
+          - name: "{{ interface.iface }}"
+            {{ interface.iface_mode }}:
+          {% if interface.iface_mode == 'trunk' and interface.native_vlan is defined %}
+              native_vlan: "{{ interface.native_vlan }}"
+          {% endif %}
+          {% if interface.iface_mode == 'trunk' %}
+              allowed_vlans:
+          {% for vlan_range in helper_var %}
+          {% if '-' in vlan_range %}
+          {% for vlan in range(vlan_range.split('-')[0] | int, vlan_range.split('-')[1] | int + 1) %}
+              - "vlan{{ vlan }}"
+          {% endfor %}
+          {% else %}
+              - "vlan{{ vlan_range }}"
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          {% if interface.iface_mode == 'access' %}
+              vlan: "{{ interface.vlan }}"
+          {% endif %}
+          {% endfor %}
+      junipernetworks.junos.junos_l2_interfaces:
+        config: "{{ interface_config | from_yaml }}"
+        state: merged
 
-    - name: Set MTU value on the interface
-      junipernetworks.junos.junos_interface:
-        name: "{{ item.iface }}"
-        mtu: "{{ item.mtu }}"
-        state: present
-      loop: "{{ switch_vars.interfaces }}"
-      when: item.mtu is defined
-
-    # LACP aggregation can't override existing configuration
-    # that is not LACP related on the memeber interfaces.
-    # Required to delete the config before setting the LACP dependency interface.
-    - name: Reset LACP member interface
-      junipernetworks.junos.junos_interface:
-        name: "{{ item.1 }}"
-        state: absent
-      loop: "{{ switch_vars.interfaces | subelements('aggr_members', 'skip_missing=True') }}"
-      when: item.0.aggr_members is defined
+    - name: Set MTU and description for the interfaces
+      vars:
+        interface_config: |
+          {% for interface in switch_vars['interfaces'] %}
+          - name: "{{ interface.iface }}"
+            description: "{{ interface.description }}"
+            mtu: "{{ interface.mtu | default(omit) }}"
+          {% endfor %}
+      junipernetworks.junos.junos_interfaces:
+        config: '{{ interface_config | from_yaml }}'
+        state: merged
 
     - name: Set aggregation for the interface
-      junipernetworks.junos.junos_linkagg:
-        name: "{{ item.iface }}"
-        description: "{{ item.description }}"
-        members: "{{ item.aggr_members }}"
-        mode: active
-      loop: "{{ switch_vars.interfaces }}"
-      when: item.aggr_members is defined
+      when: switch_vars['interfaces'] | selectattr('aggr_members', 'defined') != []
+      vars:
+        interface_config: |
+          {% for interface in switch_vars['interfaces'] %}
+          {% if interface.aggr_members is defined %}
+          - name: "{{ interface.iface }}"
+            members:
+          {% for member in interface.aggr_members %}
+              - member: "{{ member }}"
+          {% endfor %}
+            mode: active
+          {% endif %}
+          {% endfor %}
+      junipernetworks.junos.junos_lag_interfaces:
+        config: '{{ interface_config | from_yaml }}'
+        state: merged
+
 
     # For each vlan for which igmp snooping is configured, remove previous
     # configuration if it exists to ensure that applied configuration is
@@ -138,16 +132,34 @@
       when: "'layer3_interfaces' in switch_vars"
       block:
         - name: Ensure irb Interfae is configured
-          junipernetworks.junos.junos_l3_interface:
-            name: irb
-            unit: "{{ item['unit'] }}"
-            ipv4: "{{ item['ipv4_address'] }}"
-          loop: "{{ switch_vars['layer3_interfaces'] }}"
+          vars:
+            irb_interfaces: |
+              {% for interface in switch_vars['layer3_interfaces'] %}
+              - name: irb
+                unit: "{{ interface['unit'] }}"
+              {% if interface['ipv4_address'] is defined %}
+                ipv4:
+                  address:"{{ interface['ipv4_address'] }}"
+              {% endif %}
+              {% if interface['ipv6_address'] is defined %}
+                ipv6:
+                  address:"{{ interface['ipv4_address'] }}"
+              {% endif %}
+              {% endfor %}
+          junipernetworks.junos.junos_l3_interfaces:
+            config: "{{ irb_interfaces | from_yaml }}"
+            state: merged
+
         - name: Assign irb Interface To VLAN Interface
-          junipernetworks.junos.junos_vlan:
-            name: "{{ item['vlan_interface'] }}"
-            l3_interface: "irb.{{ item['unit'] }}"
-          loop: "{{ switch_vars['layer3_interfaces'] }}"
+          vars:
+            vlan_interfaces: |
+              {% for interface in switch_vars['layer3_interfaces'] %}
+              - name: "{{ interface['vlan_interface'] }}"
+                l3_interface: "irb.{{ interface['unit'] }}"
+              {% endfor %}
+          junipernetworks.junos.junos_vlans:
+            config: "{{ vlan_interfaces | from_yaml }}"
+            state: merged
 
     - name: Save configuration
       junipernetworks.junos.junos_config:
