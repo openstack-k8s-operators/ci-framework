@@ -27,12 +27,15 @@
     oc compliance bind -n {{ cifmw_compliance_namespace }} -N {{ scan_binding }} profile/{{ scan_profile }}
   when: not cifmw_compliance_dry_run | bool
 
-- name: Wait for scans to complete
-  ansible.builtin.command: "oc get compliancescan -n {{ cifmw_compliance_namespace }}--no-headers"
+- name: Wait for the scan to complete
+  ansible.builtin.command: >
+    oc get compliancescan -n {{ cifmw_compliance_namespace }} --no-headers -l "compliance.openshift.io/suite={{ scan_binding }}"
   register: scan_result
   retries: 120
   delay: 10
-  until: scan_result.stdout_lines| reject('search', 'DONE') | reject('search', 'ERROR') | list | count == 0
+  until:
+    - scan_result.stdout_lines| list | count > 0
+    - scan_result.stdout_lines| reject('search', 'DONE') | reject('search', 'ERROR') | list | count == 0
 
 - name: Delete directory for scan results if it exists
   ansible.builtin.file:

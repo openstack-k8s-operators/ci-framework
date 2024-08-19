@@ -32,7 +32,22 @@
     group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
 - name: Do compliance scans
-  ansible.builtin.command: "oscap xccdf eval --report {{ cifmv_compliance_compute_artifacts_basedir }}/{{ profile }}.html --profile {{ profile}}  {{ cifmw_compliance_scap_content_file }}"
+  ansible.builtin.command: >
+    oscap xccdf eval --report {{ cifmw_compliance_artifacts_basedir }}/{{ profile }}.html \
+    --profile {{ profile}}  /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+  become: true
+  failed_when: false
+  loop: "{{ cifmw_compliance_compute_profiles }}"
+  loop_control:
+    loop_var: profile
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Set ownership on report files
+  ansible.builtin.file:
+    path: "{{ cifmw_compliance_artifacts_basedir }}/{{ profile }}.html"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+  become: true
   loop: "{{ cifmw_compliance_compute_profiles }}"
   loop_control:
     loop_var: profile

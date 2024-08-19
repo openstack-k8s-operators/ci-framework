@@ -71,6 +71,50 @@
         installPlanApproval: Automatic
   when: not cifmw_compliance_dry_run | bool
 
+- name: Wait until the compliance-operator csv is present
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_compliance_namespace }}"
+    kind: ClusterServiceVersion
+    api_version: operators.coreos.com/v1alpha1
+  register: csv_list
+  delay: 10
+  retries: 20
+  until: >-
+    {{
+      csv_list.resources |
+      map(attribute='metadata.name') |
+      select('match', 'compliance-operator')
+    }}
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Get full name of the compliance-operator csv
+  ansible.builtin.set_fact:
+    compliance_operator_csv_name: >-
+      {{
+        csv_list.resources |
+        map(attribute='metadata.name') |
+        select('match', 'compliance-operator') | first
+      }}
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Wait for the compliance-operator csv to Succeed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_compliance_namespace }}"
+    kind: ClusterServiceVersion
+    api_version: operators.coreos.com/v1alpha1
+    name: "{{ compliance_operator_csv_name }}"
+  register: csv
+  retries: 20
+  delay: 10
+  until: csv.resources[0].status.phase | default(omit) == "Succeeded"
+  when: not cifmw_compliance_dry_run | bool
+
 # Install the compliance plugin
 - name: Install podman
   ansible.builtin.import_role:
