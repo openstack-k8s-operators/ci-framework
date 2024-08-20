@@ -1,14 +1,16 @@
 ---
-# source: bgp_dt01/network-values/values.yaml.j2
+# source: bgp_dt04_ipv6/network-values/values.yaml.j2
 {% set ns = namespace(interfaces={},
                       ocp_index=0,
                       lb_tools={}) %}
 data:
 {% for host in cifmw_networking_env_definition.instances.keys() -%}
+{# FIXEME: (hjensas/eolivare): We need to ensure the OCP cluster_name and base_domain is available here #}
+{#                    Because devscripts use fqdn for node names when ipv6                              #}
 {%   set hostname = cifmw_networking_env_definition.instances[host]['hostname'] %}
 {%   if host is match('^(ocp|crc).*') %}
   node_{{ ns.ocp_index }}:
-    name: {{ hostname }}
+    name: {{ hostname }}.ocp.openstack.lab
 {%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
 {%       set ns.interfaces = ns.interfaces |
                              combine({network.network_name: (network.parent_interface |
@@ -16,26 +18,20 @@ data:
                                                             )
                                      },
                                      recursive=true) %}
-    {{ network.network_name }}_ip: {{ network.ip_v4 }}
-{%       if 'worker-3' == hostname and 'ctlplane' == network.network_name %}
+    {{ network.network_name }}_ip: {{ network.ip_v6 }}
+{%       if 'ctlplane' == network.network_name %}
     base_if: {{ network.interface_name }}
 {%       endif %}
 {%     endfor %}
 {%     set node_bgp_orig_content = original_content.data.bgp.bgpdefs['node' ~ ns.ocp_index] %}
 {%     set node_bgp_net0 = node_bgp_orig_content.bgpnet0 %}
-{%     if 'worker-3' != hostname %}
-{%       set node_bgp_net1 = node_bgp_orig_content.bgpnet1 %}
-{%     endif %}
+{%     set node_bgp_net1 = node_bgp_orig_content.bgpnet1 %}
     bgp_peers:
       - {{ node_bgp_net0.bgp_peer }}
-{%     if 'worker-3' != hostname %}
       - {{ node_bgp_net1.bgp_peer }}
-{%     endif %}
     bgp_ip:
       - {{ node_bgp_net0.bgp_ip }}
-{%     if 'worker-3' != hostname %}
       - {{ node_bgp_net1.bgp_ip }}
-{%     endif %}
 {%     set subnet_index = (hostname | split('-'))[-1] | int %}
 {%     set ip_index = 1 if ('master-' in hostname or 'worker-3' == hostname) else 2  %}
 {%     set loopback_ip = original_content.data.bgp.subnets.bgpmainnet[subnet_index].allocationRanges[0].start |
@@ -52,6 +48,7 @@ data:
 {% endfor %}
 
 {% for network in cifmw_networking_env_definition.networks.values() %}
+{% if network.network_name != 'ctlplane_ocp_nad' %}
 {%  set ns.lb_tools = {} %}
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
@@ -64,13 +61,13 @@ data:
 {%    endfor %}
 {%    if network.network_name != 'ctlplane' %}
       - allocationRanges:
-{%      for range in network.tools.netconfig.ipv4_ranges %}
+{%      for range in network.tools.netconfig.ipv6_ranges %}
         - end: {{ range.end }}
           start: {{ range.start }}
 {%      endfor %}
-        cidr: {{ network.network_v4 }}
-{%      if network.gw_v4 is defined %}
-        gateway: {{ network.gw_v4 }}
+        cidr: {{ network.network_v6 }}
+{%      if network.gw_v6 is defined %}
+        gateway: {{ network.gw_v6 }}
 {%      endif %}
         name: subnet1
 {%      if network.vlan_id is defined  %}
@@ -80,13 +77,13 @@ data:
 {%      for rack in ['r0', 'r1', 'r2'] %}
 {%        set rack_subnet = cifmw_networking_env_definition.networks[network.network_name + rack] %}
       - allocationRanges:
-{%        for range in rack_subnet.tools.netconfig.ipv4_ranges %}
+{%        for range in rack_subnet.tools.netconfig.ipv6_ranges %}
         - end: {{ range.end }}
           start: {{ range.start }}
 {%        endfor %}
-        cidr: {{ rack_subnet.network_v4 }}
-{%        if rack_subnet.gw_v4 is defined %}
-        gateway: {{ rack_subnet.gw_v4 }}
+        cidr: {{ rack_subnet.network_v6 }}
+{%        if rack_subnet.gw_v6 is defined %}
+        gateway: {{ rack_subnet.gw_v6 }}
 {%        endif %}
         name: {{ 'subnet' ~ loop.index0 }}
 {%        if rack_subnet.vlan_id is defined  %}
@@ -97,7 +94,8 @@ data:
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
 {%      for tool in ns.lb_tools.keys() %}
-{%        for lb_range in network.tools[tool].ipv4_ranges %}
+{%      set lb_range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+{%        for lb_range in lb_range_network.tools[tool].ipv6_ranges %}
       - {{ lb_range.start }}-{{ lb_range.end }}
 {%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
 {%        endfor %}
@@ -108,7 +106,7 @@ data:
 {%      endfor %}
 {%    endif %}
 {%  endif %}
-    prefix-length: {{ network.network_v4 | ansible.utils.ipaddr('prefix') }}
+    prefix-length: {{ network.network_v6 | ansible.utils.ipaddr('prefix') }}
     mtu: {{ network.mtu | default(1500) }}
 {%  if network.vlan_id is defined  %}
     vlan: {{ network.vlan_id }}
@@ -116,10 +114,10 @@ data:
     iface: {{ network.network_name }}
     base_iface: {{ ns.interfaces[network.network_name] }}
 {%    endif %}
-{%  else %}
-{%    if ns.interfaces[network.network_name] is defined %}
+{%  elif network.network_name == "ctlplane" %}
+    iface: {{ ns.interfaces[network.network_name] }}
+{%  elif ns.interfaces[network.network_name] is defined %}
     iface: {{ network.network_name }}
-{%    endif %}
 {%  endif %}
 {%  if network.tools.multus is defined %}
     net-attach-def: |
@@ -141,34 +139,36 @@ data:
 {%  endif %}
         "ipam": {
           "type": "whereabouts",
-          "range": "{{ network.network_v4 }}",
-{%  if network.network_name == "octavia" and network.tools.multus.ipv4_routes | default([]) | length > 0 %}
+{%  if network.network_name == "octavia" and network.tools.multus.ipv6_routes | default([]) | length > 0 %}
           "routes": [
-{%  for route in network.tools.multus.ipv4_routes %}
+{%    for route in network.tools.multus.ipv6_routes %}
              {
                "dst": "{{ route.destination }}",
                "gw": "{{ route.gateway }}"
              }{% if not loop.last %},{% endif %}
-{%  endfor %}
+{%    endfor %}
            ],
 {%  endif %}
-          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
+{%  set range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+          "range": "{{ range_network.network_v6 }}",
+          "range_start": "{{ range_network.tools.multus.ipv6_ranges.0.start }}",
+          "range_end": "{{ range_network.tools.multus.ipv6_ranges.0.end }}",
+          "gateway": "{{ range_network.network_v6 |ansible.utils.nthhost(1) }}"
         }
       }
 {%  endif %}
+{% endif %}
 {% endfor %}
 
   dns-resolver:
     config:
       server:
-        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
+        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v6 }}"
       search: []
     options:
       - key: server
         values:
-          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}
+          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v6 }}
 {% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
       - key: server
         values:
@@ -182,11 +182,11 @@ data:
   rabbitmq:
     endpoint_annotations:
       metallb.universe.tf/address-pool: internalapi
-      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(85) }}
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v6 | ansible.utils.ipmath(85) }}
   rabbitmq-cell1:
     endpoint_annotations:
       metallb.universe.tf/address-pool: internalapi
-      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(86) }}
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v6 | ansible.utils.ipmath(86) }}
 
   lbServiceType: LoadBalancer
   storageClass: local-storage
