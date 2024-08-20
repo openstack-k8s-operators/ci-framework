@@ -1,29 +1,59 @@
 ---
-# source: uni04delta-ipv6/network-values/values.yaml.j2
+# source: bgp_dt03_ipv6/network-values/values.yaml.j2
 {% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
 {% set ns = namespace(interfaces={},
                       ocp_index=0,
                       lb_tools={}) %}
 data:
 {% for host in cifmw_networking_env_definition.instances.keys() -%}
+{%   set hostname = cifmw_networking_env_definition.instances[host]['hostname'] %}
 {%   for network in cifmw_networking_env_definition.instances[host]['networks'].values() -%}
-{%     set ns.interfaces = ns.interfaces |
-                           combine({network.network_name: (network.parent_interface |
-                                                           default(network.interface_name)
-                                                          )
-                                   },
-                                   recursive=true) -%}
+{%     if 'worker-3' != hostname %}
+{%       set ns.interfaces = ns.interfaces |
+                             combine({network.network_name: (network.parent_interface |
+                                                             default(network.interface_name)
+                                                            )
+                                     },
+                                     recursive=true) -%}
+{%     endif %}
 {%   endfor -%}
 {%   if host is match('^(ocp|crc).*') %}
   node_{{ ns.ocp_index }}:
-{%     set ns.ocp_index = ns.ocp_index+1 %}
-    name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}
-{# FIXEME: (hjensas): We need to ensure the OCP cluster_name and base_domain is available here #}
-{#                    Because devscripts use fqdn for node names when ipv6                     #}
-    node_name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}.ocp.openstack.lab
+    name: {{ hostname }}
+    node_name: {{ hostname }}.ocp.openstack.lab
 {%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
     {{ network.network_name }}_ip: {{ network[_ipv.ip_vX] }}
+{%       if 'worker-3' == hostname and 'ctlplane' == network.network_name %}
+    base_if: {{ network.interface_name }}
+{%       endif %}
 {%     endfor %}
+{%     set node_bgp_orig_content = original_content.data.bgp.bgpdefs['node' ~ ns.ocp_index] %}
+{%     set node_bgp_net0 = node_bgp_orig_content.bgpnet0 %}
+{%     if 'worker-3' != hostname %}
+{%       set node_bgp_net1 = node_bgp_orig_content.bgpnet1 %}
+{%     endif %}
+    bgp_peers:
+      - {{ node_bgp_net0.bgp_peer }}
+{%     if 'worker-3' != hostname %}
+      - {{ node_bgp_net1.bgp_peer }}
+{%     endif %}
+    bgp_ip:
+      - {{ node_bgp_net0.bgp_ip }}
+{%     if 'worker-3' != hostname %}
+      - {{ node_bgp_net1.bgp_ip }}
+{%     endif %}
+{%     set subnet_index = (hostname | split('-'))[-1] | int %}
+{%     set ip_index = 1 if ('master-' in hostname or 'worker-3' == hostname) else 2  %}
+{%     set loopback_ip = original_content.data.bgp.subnets.bgpmainnet[subnet_index].allocationRanges[0].start |
+                         ansible.utils.ipmath(ip_index) %}
+{%     set loopback_ipv6 = original_content.data.bgp.subnets.bgpmainnetv6[subnet_index].allocationRanges[0].start |
+                           ansible.utils.ipmath(ip_index) %}
+    loopback_ip: {{ loopback_ip }}
+    loopback_ipv6: {{ loopback_ipv6 }}
+{%     if node_bgp_orig_content.routes | default(false) %}
+    routes: {{ node_bgp_orig_content.routes }}
+{%     endif %}
+{%     set ns.ocp_index = ns.ocp_index+1 %}
 {%   endif %}
 {% endfor %}
 
@@ -135,6 +165,9 @@ data:
           - {{ nameserver }}
 {% endfor %}
 
+  routes:
+    config: []
+
 # Hardcoding the last IP bit since we don't have support for endpoint_annotations in the networking_mapper output
   rabbitmq:
     endpoint_annotations:
@@ -146,4 +179,4 @@ data:
       metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX] | ansible.utils.ipmath(86) }}
 
   lbServiceType: LoadBalancer
-  storageClass: {{ cifmw_ci_gen_kustomize_values_storage_class }}
+  storageClass: local-storage
