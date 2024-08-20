@@ -18,6 +18,7 @@ until the compliance scans complete or error out before moving on to the next pr
 
 * `cifmw_compliance_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/compliance` which defaults to `~/ci-framework-data/tests/compliance`
 * `cifmw_compliance_cleanup`: (Boolean) Delete all resources created by the role at the end of the testing. Default value: `false`
+* `cifmw_compliance_compute_artifacts_basedir`: (String) Directory for the results of compute node scans.  Default value: `~/compliance-scans`
 * `cifmw_compliance_compute_profiles: (List of Strings) Profiles to use when scanning compute nodes. Default value:
 ```
   - pci-dss
