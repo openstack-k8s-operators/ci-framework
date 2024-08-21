@@ -1,0 +1,21 @@
+- name: Get ceph_cli
+  ansible.builtin.include_tasks: ceph_cli.yml
+
+- name: Show the status of the resulting deployed Ceph cluster
+  become: true
+  block:
+    - name: Get Ceph {{ cmd_type }}
+      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} {{ cur_cmd }}"
+      register: out
+    - name: Show the output of the command  {{ cmd_type }}
+      when: cifmw_cephadm_verbose | bool
+      ansible.builtin.debug:
+        msg: "{{ out.stdout_lines }}"
+    # Dump logs on the ci-framework controller node
+    - name: Dump log command output to log file
+      when: cifmw_cephadm_log_dump | default(false)
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ out.stdout_lines }}"
+        dest: "{{ cifmw_cephadm_log_path }}/ceph_{{ cmd_type }}.log"
+        mode: "0644"

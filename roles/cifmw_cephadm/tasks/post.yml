@@ -17,64 +17,37 @@
 - name: Get ceph_cli
   ansible.builtin.include_tasks: ceph_cli.yml
 
+- name: Show and optionally dump Ceph logs
+  block:
+    - name: Get the ceph orchestrator status
+      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch status --format json"
+      register: ceph_orch_status
+      become: true
+    - name: Fail if ceph orchestrator is not available
+      ansible.builtin.fail:
+        msg: |
+          'ceph orch status' returned
+          {{ ceph_orch_status.stdout | from_json }}
+      when:
+        - not (ceph_orch_status.stdout | from_json).available
+    # create the log directory on ci-framework controller node
+    - name: Create ceph-logs directory
+      delegate_to: localhost
+      when: cifmw_cephadm_log_dump | default(false)
+      ansible.builtin.file:
+        path: "{{ cifmw_cephadm_log_path }}"
+        state: directory
+        mode: "0755"
+    - name: Dump Ceph logs
+      ansible.builtin.include_tasks: logs.yml
+      vars:
+        cmd_type: "{{ item.type }}"
+        cur_cmd: "{{ item.cmd }}"
+      loop: "{{ cifmw_cephadm_log_commands }}"
+
 - name: Configure ceph object store to use external ceph object gateway
   ansible.builtin.include_tasks: configure_object.yml
   when: cifmw_ceph_daemons_layout.rgw_enabled | default(true) | bool
-
-- name: Get the ceph orchestrator status
-  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch status --format json"
-  register: ceph_orch_status
-  become: true
-
-- name: Fail if ceph orchestrator is not available
-  ansible.builtin.fail:
-    msg: "'ceph orch status' returned {{ ceph_orch_status.stdout | from_json }}"
-  when:
-    - not (ceph_orch_status.stdout | from_json).available
-
-- name: Show the status of the resulting deployed Ceph cluster
-  block:
-    - name: Show the deployed daemons
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch ls --export"
-      become: true
-      register: ceph_orch_ls
-    - name: Deployed daemons
-      ansible.builtin.debug:
-        msg: "{{ ceph_orch_ls.stdout_lines }}"
-      when: cifmw_cephadm_verbose | bool
-
-    - name: Get ceph config dump
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} config dump"
-      become: true
-      register: ceph_config_dump
-    - name: Show config dump
-      ansible.builtin.debug:
-        msg: "{{ ceph_config_dump.stdout_lines }}"
-      when: cifmw_cephadm_verbose | bool
-
-    - name: Get ceph require-min-compat-client
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} osd get-require-min-compat-client"
-      become: true
-      register: ceph_min_compat_client
-    - name: Show ceph require-min-compat-client
-      ansible.builtin.debug:
-        msg: "{{ ceph_min_compat_client.stdout_lines }}"
-
-    - name: Get ceph version
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} -v"
-      become: true
-      register: ceph_version
-    - name: Ceph version
-      ansible.builtin.debug:
-        msg: "{{ ceph_version.stdout_lines }}"
-
-    - name: Print the status of the deployed Ceph cluster
-      ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} -s"
-      become: true
-      register: ceph_health
-    - name: Ceph cluster status
-      ansible.builtin.debug:
-        msg: "{{ ceph_health.stdout_lines }}"
 
 - name: Dashboard service validation
   ansible.builtin.include_tasks: dashboard/validation.yml
