@@ -65,7 +65,7 @@
           {% endfor %}
       junipernetworks.junos.junos_l2_interfaces:
         config: "{{ interface_config | from_yaml }}"
-        state: merged
+        state: replaced
 
     - name: Set MTU and description for the interfaces
       vars:
@@ -78,24 +78,55 @@
       junipernetworks.junos.junos_interfaces:
         config: '{{ interface_config | from_yaml }}'
         state: merged
+    - name: Configure AE
+      when: switch_vars['interfaces'] | selectattr('aggr_members', 'defined') | list != []
+      block:
+        - name: Empty nic config before adding to ae
+          vars:
+            interface_config: |
+              {% for interface in switch_vars['interfaces'] %}
+              {% if interface.aggr_members is defined %}
+              {% for member in interface.aggr_members %}
+              - name: "{{ member }}"
+                trunk: {}
+              {% endfor %}
+              {% endif %}
+              {% endfor %}
+          junipernetworks.junos.junos_l2_interfaces:
+            config: '{{ interface_config | from_yaml }}'
+            state: replaced
 
-    - name: Set aggregation for the interface
-      when: switch_vars['interfaces'] | selectattr('aggr_members', 'defined') != []
-      vars:
-        interface_config: |
-          {% for interface in switch_vars['interfaces'] %}
-          {% if interface.aggr_members is defined %}
-          - name: "{{ interface.iface }}"
-            members:
-          {% for member in interface.aggr_members %}
-              - member: "{{ member }}"
-          {% endfor %}
-            mode: active
-          {% endif %}
-          {% endfor %}
-      junipernetworks.junos.junos_lag_interfaces:
-        config: '{{ interface_config | from_yaml }}'
-        state: merged
+        # eshulman: Due to module issue resorted to commands :(
+        - name: Clear interfaces MTU before adding to ae
+          vars:
+            interface_config: |
+              {% for interface in switch_vars['interfaces'] %}
+              {% if interface.aggr_members is defined %}
+              {% for member in interface.aggr_members %}
+              - delete interfaces "{{ member }}" mtu
+              - delete interfaces "{{ member }}" unit 0
+              {% endfor %}
+              {% endif %}
+              {% endfor %}
+          junipernetworks.junos.junos_config:
+            lines: '{{ interface_config | from_yaml }}'
+
+        - name: Set aggregation for the interface
+          vars:
+            interface_config: |
+              {% for interface in switch_vars['interfaces'] %}
+              {% if interface.aggr_members is defined %}
+              - name: "{{ interface.iface }}"
+                members:
+              {% for member in interface.aggr_members %}
+                  - member: "{{ member }}"
+              {% endfor %}
+                mode: active
+              {% endif %}
+              {% endfor %}
+          junipernetworks.junos.junos_lag_interfaces:
+            config: '{{ interface_config | from_yaml }}'
+            state: replaced
 
 
     # For each vlan for which igmp snooping is configured, remove previous
@@ -144,7 +175,7 @@
               {% endfor %}
           junipernetworks.junos.junos_l3_interfaces:
             config: "{{ irb_interfaces | from_yaml }}"
-            state: merged
+            state: replaced
 
         - name: Assign irb Interface To VLAN Interface
           vars:
@@ -156,7 +187,7 @@
               {% endfor %}
           junipernetworks.junos.junos_vlans:
             config: "{{ vlan_interfaces | from_yaml }}"
-            state: merged
+            state: replaced
 
     - name: Save configuration
       junipernetworks.junos.junos_config:
