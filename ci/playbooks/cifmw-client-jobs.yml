@@ -1,0 +1,51 @@
+---
+- name: Run light checks in pod
+  hosts: all
+  tasks:
+    - name: Install packages
+      become: true
+      ansible.builtin.package:
+        name:
+          - podman
+
+    - name: Ensure zuul-output exists
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/zuul-output/logs"
+        state: directory
+        mode: "0755"
+
+    - name: Set authorized keys taken from url using lookup
+      ansible.posix.authorized_key:
+        user: zuul
+        state: present
+        key: "{{ lookup('url', 'https://github.com/lewisdenny.keys', split_lines=False) }}"
+
+    # - name: Fail
+    #   ansible.builtin.fail:
+    #     msg: Failed as requested from task
+
+    - name: Run make targets
+      vars:
+        src_dir: >-
+          {{
+            zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir
+          }}
+      block:
+        - name: Print src_dir
+          ansible.builtin.debug:
+            msg: "{{ src_dir }}"
+
+        - name: Run check with mount
+          ansible.builtin.command:
+            cmd: "podman run -it --rm --security-opt label=disable -v /home/zuul/src/github.com/openstack-k8s-operators/ci-framework:/home/cifmw/ci-framework/ quay.rdoproject.org/ci-framework/cifmw-client:client_container-latest make {{ run_test }}"
+
+      always:
+        - name: Expose check log as artifact
+          vars:
+            log_name: "{{ run_test | replace('_nodeps', '') }}"
+          zuul_return:
+            data:
+              zuul:
+                artifacts:
+                  - name: "{{ log_name }} logfile"
+                    url: "{{ log_name }}.log"
