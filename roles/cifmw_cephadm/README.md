@@ -12,7 +12,6 @@ to install Ceph with `cephadm`. The `cifmw_cephadm` role and
 Before this role is run the following roles should be run.
 
 - `cifmw_create_admin`: creates a user for `cephadm`
-- `cifmw_block_device`: creates a virtual disk to store data
 - `cifmw_ceph_spec`: defines the Ceph cluster layout
 
 After this role is run, the `cifmw_ceph_client` role can generate
@@ -170,7 +169,7 @@ and
 git repositories are in in $HOME and that EDPM nodes have been
 provisioned.
 
-The `cifmw_cephadm`, `cifmw_create_admin`, and `cifmw_block_device`
+The `cifmw_cephadm` and `cifmw_create_admin`
 roles need to be able to SSH into all EDPM nodes but the default
 inventory only has localhost. The devsetup process in
 [install_yamls](https://github.com/openstack-k8s-operators/install_yamls)

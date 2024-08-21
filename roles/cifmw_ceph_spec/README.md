@@ -24,8 +24,7 @@ None
 
 * `cifmw_ceph_spec_host_to_ip`: map of hostname to IP address (default `{"edpm-compute-0": "192.168.122.100"}`)
 * `cifmw_ceph_spec_data_devices`: YAML multi line string describing the
-  Ceph spec data devices (defaults to the path `/dev/ceph_vg/ceph_lv_data`
-  which is created by the `cifmw_block_device` role)
+  Ceph spec data devices (default: `{"data_devices": {"all": true}}`).
 * `cifmw_ceph_spec_path`: path of the rendered spec file (default
   `/tmp/ceph_spec.yml`)
 * `cifmw_ceph_spec_encryption`: Produce an initial Ceph configuration
@@ -128,8 +127,7 @@ service_name: mgr
 service_type: mgr
 ---
 data_devices:
-  paths:
-  - /dev/ceph_vg/ceph_lv_data
+  all: true
 placement:
   hosts:
 - edpm-compute-0

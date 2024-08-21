@@ -92,45 +92,6 @@
       cifmw_admin_distribute_private_key: true
       no_log: true
 
-- name: Create Block Device on target nodes
-  tags: block
-  hosts: "{{ cifmw_ceph_target | default('computes')  }}"
-  gather_facts: true
-  become: true
-  pre_tasks:
-    # end_play will end this current playbook and go the the next
-    # imported play.
-    - name: Early stop ceph related work
-      when:
-        - not _deploy_ceph | default(true)
-      ansible.builtin.meta: end_play
-  tasks:
-    - name: Set cifmw_num_osds_perhost
-    # By defualt 1 OSD is created per node in case of multinode.
-    # 3 OSDS will be created for single node env to accomodate
-    # more ceph resources and avoid PG errors.
-      ansible.builtin.set_fact:
-        cifmw_num_osds_perhost: |
-          {% if groups[cifmw_ceph_target | default('computes')] | length == 1 %}
-          {% set num_osds =  3 %}
-          {% else %}
-          {% set num_osds = 1 %}
-          {% endif %}
-          {{ num_osds }}
-    - name: Create Block Device on EDPM Nodes
-      vars:
-        ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY') }}"
-        cifmw_block_device_image_file: /var/lib/ceph-osd-{{ i }}.img
-        cifmw_block_device_loop: /dev/loop{{ i + 3 }}
-        cifmw_block_lv_name: ceph_lv{{ i }}
-        cifmw_block_vg_name: ceph_vg{{ i }}
-        cifmw_block_systemd_unit_file: /etc/systemd/system/ceph-osd-losetup-{{ i }}.service
-      ansible.builtin.include_role:
-        name: cifmw_block_device
-      loop_control:
-        loop_var: i
-      loop: "{{ range(0, cifmw_num_osds_perhost|int) }}"
-
 - name: Build Ceph spec and conf from gathered IPs of the target inventory group
   tags: spec
   hosts: localhost
@@ -163,6 +124,15 @@
         ms_bind_ipv4: false
         ms_bind_ipv6: true
 
+    - name: Debug ssh_network_range
+      ansible.builtin.debug:
+        var: ssh_network_range
+
+    - name: Debug all_addresses
+      ansible.builtin.debug:
+        msg: "{{ hostvars[item][all_addresses] }}"
+      loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
     - name: Build a dict mapping hostname to its IP which is in management network range
       ansible.builtin.set_fact:
         host_to_ip:
@@ -176,6 +146,10 @@
            }}"
       delegate_to: "{{ item }}"
       loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
+    - name: Debug host_to_ip
+      ansible.builtin.debug:
+        var: host_to_ip
 
     - name: Load network ranges from Networking Environment Definition if not provided
       when: >-
