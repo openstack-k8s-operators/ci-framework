@@ -1,0 +1,104 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  tasks:
+    - name: Deploy Local Registry
+      ansible.builtin.include_role:
+        name: registry_deploy
+
+    - name: Call and test cifmw_build_push_container with multi-arch scenario
+      block:
+        - name: Run cifmw_build_push_container multi-arch
+          vars:
+            cifmw_build_push_container_push: true
+            cifmw_build_push_container_build_context_path: ./
+            cifmw_build_push_container_git_sha: c4ee373c848aa16d1f0767117f61426f17f2a9f3
+            cifmw_build_push_container_patch_number: 123
+            cifmw_build_push_container_name: test_container_multi_arch
+            cifmw_build_push_container_containerfile_path: >-
+              /home/zuul/src/github.com/openstack-k8s-operators/ci-framework/roles/build_push_container/molecule/default/files/containerfile
+            cifmw_build_push_container_registry_name: 127.0.0.1:5001/cifmw-client/test_container_multi_arch
+            cifmw_build_push_container_registry_tls_verify: false
+            cifmw_build_push_container_supported_platform: [linux/amd64, linux/arm64]
+          ansible.builtin.include_role:
+            name: build_push_container
+
+        - name: Request tags from local registry
+          ansible.builtin.uri:
+            headers:
+              Accept: application/vnd.oci.image.index.v1+json
+            url: http://localhost:5001/v2/cifmw-client/test_container_multi_arch/tags/list
+          register: _registry_tag_output
+
+        - name: Check all tags exist
+          ansible.builtin.assert:
+            that: item is in _registry_tag_output.json.tags
+          loop:
+            - c4ee373c848aa16d1f0767117f61426f17f2a9f3
+            - 123-latest
+
+        - name: Request manifest from local registry
+          ansible.builtin.uri:
+            headers:
+              Accept: application/vnd.oci.image.index.v1+json
+            url: http://localhost:5001/v2/cifmw-client/test_container_multi_arch/manifests/123-latest
+          register: _registry_manifests_output
+
+        - name: Check manifest for multi-arch image
+          vars:
+            architectures: "{{ _registry_manifests_output.json.manifests | json_query('[].platform.architecture') }}"
+          ansible.builtin.assert:
+            that:
+              - "'arm64' in architectures"
+              - "'amd64' in architectures"
+
+    - name: Call and test cifmw_build_push_container with single-arch scenario
+      block:
+        - name: Run cifmw_build_push_container single-arch
+          vars:
+            cifmw_build_push_container_push: true
+            cifmw_build_push_container_build_context_path: ./
+            cifmw_build_push_container_git_sha: c4ee373c848aa16d1f0767117f61426f17f2a9f3
+            cifmw_build_push_container_patch_number: 123
+            cifmw_build_push_container_name: test_container_single_arch
+            cifmw_build_push_container_containerfile_path: >-
+              /home/zuul/src/github.com/openstack-k8s-operators/ci-framework/roles/build_push_container/molecule/default/files/containerfile
+            cifmw_build_push_container_registry_name: 127.0.0.1:5001/cifmw-client/test_container_single_arch
+            cifmw_build_push_container_registry_tls_verify: false
+          ansible.builtin.include_role:
+            name: build_push_container
+
+        - name: Request tags from local registry
+          ansible.builtin.uri:
+            headers:
+              Accept: application/vnd.oci.image.index.v1+json
+            url: http://localhost:5001/v2/cifmw-client/test_container_single_arch/tags/list
+          register: _registry_tag_output
+
+        - name: Check all tags exist
+          ansible.builtin.assert:
+            that: item is in _registry_tag_output.json.tags
+          loop:
+            - c4ee373c848aa16d1f0767117f61426f17f2a9f3
+            - 123-latest
+
+    - name: Call cleanup
+      ansible.builtin.include_role:
+        name: build_push_container
+        tasks_from: cleanup.yml
