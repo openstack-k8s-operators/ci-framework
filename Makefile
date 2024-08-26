@@ -248,3 +248,7 @@ plugin-development-disable: # Revert all changes and delete .env if no longer ne
 	grep -lEr --include=\*.py --exclude-dir=.venv 'from (?:plugins|tests)' | xargs gsed -i -e 's/from plugins/from ansible_collections\.cifmw\.general\.plugins/g' -e 's/from tests/from ansible_collections\.cifmw\.general\.tests/g'
 	gsed -i '/PYTHONPATH=/d' .env
 	[ -s .env ] || rm .env
+
+.PHONY: build-cifmw-client-container
+build-cifmw-client-container: # Locally build cifmw-client container
+		podman build --security-opt label=disable -t localhost/cifmw-client:latest -f containerfiles/Containerfile.client .
