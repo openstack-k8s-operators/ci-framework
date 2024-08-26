@@ -200,3 +200,50 @@ export ANSIBLE_HOST_KEY_CHECKING=False
 cd ~/ci-framework/
 ansible-playbook playbooks/ceph.yml
 ```
+
+## Regarding the disks used as OSDs
+
+By default the `ceph.yml` playbook assumes there are no block devices
+for Ceph to use and calls the `cifmw_block_device` role to create
+block devices and has the `cifmw_ceph_spec` role configure a spec
+to use the created block devices.
+
+If `cifmw_ceph_spec_data_devices` is passed to the `ceph.yml`
+playbook, then the `cifmw_block_device` role is not called and
+the spec created by the `cifmw_ceph_spec` role will use whatever
+block devices were passed by `cifmw_ceph_spec_data_devices`. Use
+of `cifmw_ceph_spec_data_devices` implies that the block devices
+are already exist on the nodes to be deployed.
+
+If the ci-framework is run in a reproducer scenario and the following
+parameter is passed, then the `libvirt_manager` role will deploy
+compute nodes with three 30G disks (`/dev/vd{b,c,d}`).
+
+```yaml
+cifmw_libvirt_manager_configuration_patch_01_add_compute_volumes:
+  vms:
+    compute:
+      extra_disks_num: 3
+      extra_disks_size: 30G
+```
+Assuming those disks are on the nodes as created by the above, the
+following parameter may be passed.
+```yaml
+cifmw_ceph_spec_data_devices: >-
+  data_devices:
+    all: true
+```
+The above sets the `cifmw_ceph_spec_data_devices` parameter. The `>-`
+is necessary so that the YAML block underneath it is treated as a
+string. This string is then passed to the `cifmw_ceph_spec` role
+which will create a Ceph spec containing the following:
+```
+service_type: osd
+service_id: default_drive_group
+data_devices:
+  all: true
+```
+The above will result in Ceph using all disks that it judges to be
+available. Other embedded YAML options may be passed for the
+`cifmw_ceph_spec_data_devices` as described in the
+[Advanced OSD Service Specifications](https://docs.ceph.com/en/octopus/cephadm/drivegroups).
