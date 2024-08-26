@@ -38,3 +38,76 @@
       run_test: "check_k8s_snippets_comment"
     files:
       - ^roles/ci_gen_kustomize_values/templates/.*
+
+#
+# cifmw-client container build and push jobs
+#
+- job:
+    name: build-push-container-build
+    description: |
+      Build container using build_push_container
+        role.
+      This is a base job that can be consumed by other projects.
+      pre-run:
+        molecule-prepare.yml - Copies required projects and installs dependencies.
+          dump_zuul_data.yml - Copies Zuul inventory and variables to disk for later use.
+      run:
+        build_push_container_runner.yml - Nested ansible-playbook call to run
+          build_push_container.yml on controller.
+      vars:
+        buildah_login & registry_login_enabled - Both used by build-push-container-base job
+          in config repo to trigger logging into quay.rdoproject.org for later use.
+    parent: build-push-container-base
+    nodeset: centos-stream-9
+    pre-run:
+      - ci/playbooks/molecule-prepare.yml
+      - ci/playbooks/dump_zuul_data.yml
+    run: ci/playbooks/build_push_container_runner.yml
+    post-run: ci/playbooks/collect-logs.yml
+    vars:
+      buildah_login: true
+      registry_login_enabled: true
+- job:
+    name: build-push-container-cifmw-client
+    description: |
+      Build and push cifmw-client container to
+        quay.rdoproject.com registry.
+      vars:
+        cifmw_build_push_container_push - Used by build_push_container role to trigger pushing to registry.
+        cifmw_build_push_container_name - Name of container being build and pushed.
+        cifmw_build_push_container_containerfile_path - Path to containerfile.
+        cifmw_build_push_container_registry_name - Registry built containers will be pushed too.
+      Runtime: ~30mins.
+    parent: build-push-container-build
+    vars:
+      ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+      cifmw_ci_framework_src: >-
+        {{
+          (ansible_user_dir,
+          zuul.project.src_dir) | ansible.builtin.path_join
+        }}
+      cifmw_build_push_container_push: true
+      cifmw_build_push_container_name: cifmw-client
+      cifmw_build_push_container_containerfile_path: >-
+        {{
+          (cifmw_ci_framework_src,
+          'containerfiles',
+          'Containerfile.client') | ansible.builtin.path_join
+        }}
+      cifmw_build_push_container_registry_name: >-
+        quay.rdoproject.org/openstack-k8s-operators/cifmw-client
+      cifmw_build_push_container_supported_platform: [linux/arm64, linux/amd64]
+    timeout: 5400
+
+- job:
+    name: build-push-container-cifmw-client-post
+    description: |
+      Build and push cifmw-client container to
+      quay.rdoproject.com registry and tag with latest
+      To be ran in post pipeline as it controls the 'latest' tag
+      vars:
+        cifmw_build_push_container_tag_override - If branch is main, add latest tag,
+          otherwise tag with <branch-name>-latest
+    parent: build-push-container-cifmw-client
+    vars:
+      cifmw_build_push_container_tag_override: "{{ ['latest'] if zuul.branch == 'main' else [zuul.branch ~ 'latest'] }}"
