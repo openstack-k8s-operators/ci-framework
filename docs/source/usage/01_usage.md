@@ -44,8 +44,6 @@ are shared among multiple roles:
 - `cifmw_ssh_keysize`: (Integer) Size of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to 521.
 - `cifmw_architecture_repo`: (String) Path of the architecture repository on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
-- `cifmw_arch_automation_file`: (String) Name of the workflow automation file
-  in the architecture repository. Defaults to `default.yaml`
 - `cifmw_architecture_scenario`: (String) The selected VA scenario to deploy.
 - `cifmw_architecture_wait_condition`: (Dict) Structure defining custom wait_conditions for the automation.
 - `cifmw_architecture_user_kustomize.*`: (Dict) Structures defining user provided kustomization for automation. All these variables are combined together.
