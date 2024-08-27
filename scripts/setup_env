@@ -20,6 +20,7 @@ set -o pipefail
 set -xeuo
 
 ## Vars ----------------------------------------------------------------------
+# shellcheck disable=SC2155,SC2046,SC2086
 export PROJECT_DIR="$(dirname $(dirname $(readlink -f ${BASH_SOURCE[0]})))"
 # NOTE(cloudnull): Disable ansible compat check, caters to the case where
 #                  system ansible may be installed.
@@ -29,13 +30,14 @@ USE_VENV=${USE_VENV:-'yes'}
 
 ## Main ----------------------------------------------------------------------
 # Source distribution information
+# shellcheck disable=SC1091
 source /etc/os-release || source /usr/lib/os-release
-RHT_PKG_MGR=$(command -v dnf)
+RHT_PKG_MGR=$(command -v dnf || command -v yum)
 PYTHON_EXEC=$(command -v python3)
-SYSTEM_PIP=$(dirname "$PYTHON_EXEC")/pip3
+SYSTEM_PIP=$(dirname "${PYTHON_EXEC}")/pip3
 
 # Install the requirements we need to run local tests
-command -v gcc || sudo dnf -y install gcc
+command -v gcc || sudo "${RHT_PKG_MGR}" -y install gcc
 
 PIP_INSTALL_ARGUMENTS="-U -r ${PROJECT_DIR}/common-requirements.txt"
 case ${USE_VENV} in
@@ -63,12 +65,12 @@ esac
 sudo -k
 
 # Ensure the required ci file is presnet
-mkdir -p ${HOME}/ci/yum.repos.d
-cp /etc/ci/mirror_info.sh ${HOME}/ci || touch ${HOME}/ci/mirror_info.sh
-cp -r /opt/yum.repos.d/* ${HOME}/ci/yum.repos.d || cp -r /etc/yum.repos.d/* ${HOME}/ci/yum.repos.d
+mkdir -p "${HOME}/ci/yum.repos.d"
+cp /etc/ci/mirror_info.sh "${HOME}/ci" || touch "${HOME}/ci/mirror_info.sh"
+cp -r /opt/yum.repos.d/* "${HOME}/ci/yum.repos.d" || cp -r /etc/yum.repos.d/* "${HOME}/ci/yum.repos.d"
 
 
-case ${USE_VENV} in
+case "${USE_VENV}" in
     y|yes|true):
         # Create a virtual env
         "${PYTHON_EXEC}" -m venv --upgrade-deps "${HOME}/test-python"
@@ -82,7 +84,7 @@ esac
 "${PIP}" install pip setuptools bindep --upgrade
 "${PROJECT_DIR}/scripts/bindep-install"
 
-${SYSTEM_PIP} install ${PIP_INSTALL_ARGUMENTS}
+${SYSTEM_PIP} install "${PIP_INSTALL_ARGUMENTS}"
 
 # Display list of installed packages with versions (debugging failures)
 "${SYSTEM_PIP}" freeze

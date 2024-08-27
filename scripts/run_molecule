@@ -21,6 +21,7 @@ set -o pipefail
 set -xeuo
 
 ## Vars ----------------------------------------------------------------------
+# shellcheck disable=SC2046,SC2086
 PROJECT_DIR="$(dirname $(readlink -f ${BASH_SOURCE[0]}))/../"
 ROLE_DIR=$1
 USE_VENV=${USE_VENV:-yes}
@@ -31,7 +32,8 @@ TEST_VERBOSITY=${TEST_VERBOSITY:-'--debug'}
 (test -d "${ROLE_DIR}" || (echo "No such directory: ${ROLE_DIR}" && exit 1) ) || exit 1
 
 pushd "${ROLE_DIR}"
-local_roledir=$(echo $ROLE_DIR | sed 's|\.\?\./||g')
+# shellcheck disable=SC2001,SC2086
+local_roledir="$(echo $ROLE_DIR | sed 's|\.\?\./||g')"
 
 if [[ ${TEST_ALL_ROLES} == 'yes' ]]; then
     ROLES_LIST=$(ls -1)
@@ -41,7 +43,7 @@ elif [[ -n ${TEST_SINGLE_ROLE} ]]; then
 fi
 
 # Find what roles were modified
-if [[ -z ${ROLES_LIST} ]]; then
+if [[ -z "${ROLES_LIST}" ]]; then
     ROLES_LIST=$(git diff --dirstat=files,0,cumulative HEAD^..HEAD | sed "s|^[ 0-9.]\+% \(${local_roledir}\)\?||g" | cut -d/ -f1 | sort -u )
 fi
 
@@ -49,16 +51,16 @@ git clone https://github.com/openstack-k8s-operators/install_yamls /root/src/git
 
 export ANSIBLE_ACTION_PLUGINS=./plugins/action:~/.ansible/plugins/action:/usr/share/ansible/plugins/actions
 for rolepath in ${ROLES_LIST}; do
-    role=$(echo $rolepath|sed "s|${local_roledir}||" | cut -f1 -d /)
-    test -d ${role} || continue
+    role=$(echo "${rolepath}" | sed "s|${local_roledir}||" | cut -f1 -d /)
+    test -d "${role}" || continue
     echo "Running molecule against: ${role}"
-    pushd $role
-    case ${USE_VENV} in
+    pushd "$role"
+    case "${USE_VENV}" in
         y|yes|true)
-            ${HOME}/test-python/bin/molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" ${TEST_VERBOSITY} test --all
+            "${HOME}/test-python/bin/molecule" -c "${PROJECT_DIR}${MOLECULE_CONFIG}" "${TEST_VERBOSITY}" test --all
             ;;
         *)
-            molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" ${TEST_VERBOSITY} test --all
+            molecule -c "${PROJECT_DIR}${MOLECULE_CONFIG}" "${TEST_VERBOSITY}" test --all
             ;;
     esac
     popd
