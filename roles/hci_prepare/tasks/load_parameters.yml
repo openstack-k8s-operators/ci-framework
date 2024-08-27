@@ -23,18 +23,42 @@
   loop_control:
     label: "{{ item }}"
 
-- name: Ensure we have needed bits for compute when needed
-  ansible.builtin.assert:
-    that:
-      - "'compute-0' in crc_ci_bootstrap_networks_out"
-      - "'storage-mgmt' in crc_ci_bootstrap_networks_out['compute-0']"
+- name: Try/catch pattern for debugging
+  block:
+    - name: Ensure we have needed bits for compute when needed
+      ansible.builtin.assert:
+        that:
+          - crc_ci_bootstrap_networks_out['compute-0'] is defined
+          - crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'] is defined or
+            crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'] is defined
+
+  rescue:
+    - name: Dump crc_ci_bootstrap_networks_out
+      ansible.builtin.debug:
+        var: crc_ci_bootstrap_networks_out
+
+    - name: Finally fail
+      ansible.builtin.fail:
+        msg: A failure was detected. Check debugging information above.
 
 - name: Set mtu value from crc_ci_bootstrap_networks_out
-  when: "'mtu' in crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt']"
+  when:
+    - crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu is defined or
+      crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].mtu is defined
   ansible.builtin.set_fact:
-    cifmw_hci_prepare_storage_mgmt_mtu: "{{ crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu }}"
+    cifmw_hci_prepare_storage_mgmt_mtu: >-
+      {{
+        crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu |
+        default(crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].mtu)
+      }}
 
 - name: Set vlan value from crc_ci_bootstrap_networks_out
-  when: "'vlan' in crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt']"
+  when:
+    - crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].vlan is defined or
+      crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].vlan is defined
   ansible.builtin.set_fact:
-    cifmw_hci_prepare_storage_mgmt_vlan: "{{ crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].vlan }}"
+    cifmw_hci_prepare_storage_mgmt_vlan: >-
+      {{
+        crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].vlan |
+        default(crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].vlan)
+      }}
