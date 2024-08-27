@@ -1,29 +1,32 @@
 ---
 # noqa: schema[playbook]
+# Note: content_provider_insecure_registries contains a list of insecure_registries
+# Like: content_provider_insecure_registries: 
+#         - 1.2.3.4:5001
+#         - 6.7.8.9:5001
 - name: Patch the image.config.openshift.io resource to include insecure registry
   ansible.builtin.shell: >-
     oc patch --type=merge --patch='{
     "spec": {
       "registrySources": {
-        "insecureRegistries": [
-        "{{ content_provider_registry_ip }}:5001"
-        ]
+        "insecureRegistries": "{{ content_provider_insecure_registries | default([content_provider_registry_ip ~ ':5001']) }}"
       }
     }
     }' image.config.openshift.io/cluster
 
 - name: Patch the image.config.openshift.io resource to allow registries
+  vars:
+    _default_registries:
+      - "quay.io"
+      - "gcr.io"
+      - "registry.redhat.io"
+      - "image-registry.openshift-image-registry.svc:5000"
+    _insecure_registries: "{{ _default_registries + content_provider_insecure_registries | default([content_provider_registry_ip ~ ':5001']) }}"
   ansible.builtin.shell: |
     oc patch --type=merge --patch='{
     "spec": {
       "registrySources": {
-        "allowedRegistries": [
-        "{{ content_provider_registry_ip }}:5001",
-        "quay.io",
-        "gcr.io",
-        "registry.redhat.io",
-        "image-registry.openshift-image-registry.svc:5000"
-        ]
+        "allowedRegistries": "{{ insecure_registries }}"
       }
     }
     }' image.config.openshift.io/cluster
@@ -39,7 +42,7 @@
   ansible.builtin.blockinfile:
     state: present
     insertafter: EOF
-    dest: /etc/containers/registries.conf.d/99-insecure-registry.conf
+    dest: "/etc/containers/registries.conf.d/{{ item.split('.') | last }}-insecure-registry.conf"
     create: true
     content: |-
       [[registry]]
@@ -48,6 +51,7 @@
       blocked = false
       mirror-by-digest-only = false
       prefix = ""
+  loop: "{{ content_provider_insecure_registries | default([content_provider_registry_ip ~ ':5001']) }}"
 
 - name: Restart crio
   become: true
