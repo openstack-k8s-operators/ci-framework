@@ -132,7 +132,7 @@ function generate_traffic {
 function prepare_env {
 
     export IMAGE_URL='{{ workload_image_url|default("http://download.cirros-cloud.net/0.5.2/cirros-0.5.2-x86_64-disk.img") }}'
-    export IMAGE_NAME="upgrade_workload_${SUFFIX}"
+    export IMAGE_NAME="{{ workload_image_name|default('upgrade_workload_${SUFFIX}')}}"
     export IMAGE_FILE="$(mktemp -d )/upgrade_workload_image.qcow2"
     export INSTANCE_NAME="instance_${SUFFIX}"
     export INSTANCE_USER='{{ workload_user|default("cirros") }}'
@@ -142,6 +142,7 @@ function prepare_env {
     export TENANT_NET_NAME="internal_net_${SUFFIX}"
     export EXTERNAL_NET_NAME='{{ external_network_name|default("public") }}'
     export SRIOV_PORT="sriov_port_${SUFFIX}"
+    export DPDK_PORT="dpdk_port_${SUFFIX}"
     export INSTANCE_FILE="${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}/vm_info.sh"
     export WORKLOAD_FILE="${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}/workload_suffix"
     export SSH_KEY_FILE="${HOME}/.ssh/${KEYPAIR_NAME}"
@@ -188,6 +189,8 @@ function sanity_teardown {
     local elapsed_seconds=0
     {% if workload_sriov|default(false) | bool -%}
     openstack port delete "${SRIOV_PORT}"
+    {% elif workload_dpdk|default(false) | bool -%}
+    openstack port delete "${DPDK_PORT}"
     {% else -%}
     if [ -n "${INSTANCE_FIP}" ]; then
         echo "Remove ${INSTANCE_FIP} from ${INSTANCE_NAME}"
@@ -281,6 +284,8 @@ function workload_launch {
     # create workload
     timeout_seconds=${1:-120}
     ssh_timeout_seconds=${1:-180}
+    local workload_sriov={{workload_sriov|default(false) | bool | ternary("True", "")}}
+    local workload_dpdk={{workload_dpdk|default(false) | bool | ternary("True", "")}}
 
     ## create image
     openstack image list | grep ${IMAGE_NAME}
@@ -315,11 +320,22 @@ function workload_launch {
     openstack flavor list | grep ${FLAVOR_NAME}
     if [ $? -ne 0 ]; then
         echo "Creating flavor ${FLAVOR_NAME}"
-        os_cmd flavor create --vcpus {{ workload_vcpu|default(1) }} \
-            --ram {{ workload_memory|default(512) }} \
-            --disk {{ workload_disk|default(10) }} \
-            --swap {{ workload_swap|default(1) }} \
-            $FLAVOR_NAME
+        if [ -n "${workload_dpdk}" ]; then
+            os_cmd flavor create --vcpus {{ workload_vcpu|default(1) }} \
+                --ram {{ workload_memory|default(512) }} \
+                --disk {{ workload_disk|default(10) }} \
+                --swap {{ workload_swap|default(1) }} \
+                --property hw:mem_page_size=large \
+                --property hw:cpu_policy=dedicated \
+                --property hw:emulator_threads_policy=share \
+                $FLAVOR_NAME
+        else
+            os_cmd flavor create --vcpus {{ workload_vcpu|default(1) }} \
+                --ram {{ workload_memory|default(512) }} \
+                --disk {{ workload_disk|default(10) }} \
+                --swap {{ workload_swap|default(1) }} \
+                $FLAVOR_NAME
+        fi
     fi
 
     ## create networking
@@ -330,7 +346,11 @@ function workload_launch {
         os_cmd router create ${TENANT_NET_NAME}_router
 
         echo "Creating network ${TENANT_NET_NAME}"
-        os_cmd network create ${TENANT_NET_NAME}
+        if [ -n "${workload_dpdk}" ]; then
+            os_cmd network create ${TENANT_NET_NAME} --provider-network-type geneve
+        else
+            os_cmd network create ${TENANT_NET_NAME}
+        fi
 
         echo "Creating subnet ${TENANT_NET_NAME}_subnet"
         os_cmd subnet create \
@@ -367,6 +387,10 @@ function workload_launch {
         --binding-profile trusted=true "${SRIOV_PORT}"
     {%- endif %}
 
+    ## create dpdk port
+    {% if workload_dpdk|default(false) | bool -%}
+    openstack port create --vnic-type normal --network "${TENANT_NET_NAME=}" "${DPDK_PORT}"
+    {%- endif %}
 
 
     ## create instance
