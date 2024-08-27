@@ -344,36 +344,67 @@
     # public network always exist because is provided by the ceph_spec role
     - name: Get Storage network range
       ansible.builtin.set_fact:
-        cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+        cifmw_cephadm_storage_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
 
     - name: Set IP address of first monitor
       ansible.builtin.set_fact:
-        cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
+        cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_storage_network) | first }}"
       vars:
         this_host: "{{ _target_hosts | first }}"
 
     - name: Assert if any EDPM nodes n/w interface is missing in storage network
       ansible.builtin.assert:
         that:
-          - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | length > 0
-        fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_rgw_network }}"
+          - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_storage_network) | length > 0
+        fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_storage_network }}"
       loop: "{{ _target_hosts }}"
 
-    - name: Get already assigned IP addresses
-      ansible.builtin.set_fact:
-        ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
-      loop: "{{ _target_hosts }}"
+    - name: Set NFS Network Properties
+      when:
+        - cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool
+      block:
+        - name: Set NFS network range to storage network only if it was not provided
+          ansible.builtin.set_fact:
+            cifmw_cephadm_nfs_network: "{{ cifmw_cephadm_storage_network }}"
+          when:
+            - cifmw_cephadm_nfs_network is not defined or
+              cifmw_cephadm_nfs_network | length == 0
 
-    # cifmw_cephadm_vip is the VIP reserved in the Storage network
-    - name: Set VIP var as empty string
-      ansible.builtin.set_fact:
-        cifmw_cephadm_vip: ""
+        - name: Assert if any EDPM nodes n/w interface is missing in NFS network
+          ansible.builtin.assert:
+            that:
+              - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_nfs_network) | length > 0
+            fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_nfs_network }}"
+          loop: "{{ _target_hosts }}"
+          when:
+            - cifmw_cephadm_nfs_network != cifmw_cephadm_storage_network
 
-    - name: Process VIP
-      ansible.builtin.include_role:
-        name: cifmw_cephadm
-        tasks_from: check_vip
-      loop: "{{ range(1, (ips | length) + 1) | list }}"
+        - name: Get already assigned NFS IP addresses
+          ansible.builtin.set_fact:
+            ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_nfs_network) | first ] }}"
+          loop: "{{ _target_hosts }}"
+
+        - name: Set VIP var as empty string
+          ansible.builtin.set_fact:
+            cifmw_cephadm_vip: ""
+          when:
+            - cifmw_cephadm_nfs_vip is undefined
+
+        - name: Get NFS VIP
+          ansible.builtin.include_role:
+            name: cifmw_cephadm
+            tasks_from: check_vip
+          loop: "{{ range(1, (ips | length) + 1) | list }}"
+          vars:
+            cifmw_cephadm_vip_network: "{{ cifmw_cephadm_nfs_network | default(storage_network_range, true) | default(ssh_network_range, true) }}"
+          when:
+            - cifmw_cephadm_nfs_vip is undefined
+
+        - name: Set NFS VIP
+          ansible.builtin.set_fact:
+            cifmw_cephadm_nfs_vip: "{{ cifmw_cephadm_vip }}"
+          when:
+            - cifmw_cephadm_nfs_vip is undefined
 
   tasks:
     - name: Satisfy Ceph prerequisites
@@ -407,8 +438,9 @@
         name: cifmw_cephadm
         tasks_from: rgw
       vars:
-        # cifmw_cephadm_vip is computed or passed as an override via -e @extra.yml
+        # cifmw_cephadm_vip may be passed as an override via -e @extra.yml
         cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}"
+        cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
 
     - name: Configure Monitoring Stack
       when: cifmw_ceph_daemons_layout.dashboard_enabled  | default(false) | bool
@@ -432,9 +464,6 @@
       ansible.builtin.import_role:
         name: cifmw_cephadm
         tasks_from: cephnfs
-      vars:
-        # we reuse the same VIP reserved for rgw
-        cifmw_cephadm_nfs_vip: "{{ cifmw_cephadm_vip }}/{{ cidr }}"
 
     - name: Create Cephx Keys for OpenStack
       ansible.builtin.import_role:
