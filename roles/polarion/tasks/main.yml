@@ -94,12 +94,27 @@
       ansible.builtin.debug:
         var: pylero_output.stdout_lines
 
-    - name: Merge result XML files
+    - name: Look for test result directories in artifacts directory
+      ansible.builtin.find:
+        paths: "{{ cifmw_polarion_jump_result_dir }}"
+        recurse: false
+        file_type: directory
+      register: result_dirs
+
+    - name: Merge result XML files of each directory
       ansible.builtin.shell:
         chdir: "{{ cifmw_polarion_jump_result_dir }}"
         cmd: >-
           source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" &&
-          junitparser merge {{ xml_files.files | json_query('[*].path') | join(' ') }} ./results_merged.xml
+          junitparser merge {{ item.path }}/*.xml {{item.path }}/results_merged.xml
+      loop: "{{ result_dirs.files }}"
+
+    - name: Look for test result XML files in artifacts directory
+      ansible.builtin.find:
+        paths: "{{ cifmw_polarion_jump_result_dir }}"
+        patterns: "results_merged.xml"
+        recurse: true
+      register: merged_xml_files
 
     - name: Update Test Runs
       ansible.builtin.shell:
@@ -108,10 +123,14 @@
           source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" &&
           {{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/python jump.py
           --testrun-id={{ cifmw_polarion_testrun_id }}
-          --xml-file={{ cifmw_polarion_jump_result_dir }}/results_merged.xml
+          --testrun-title={{ cifmw_polarion_testrun_title }}-{{ loop_idx }}
+          --xml-file={{ item.path }}
           --update_testcases={{ cifmw_polarion_update_testcases | default(false) }}
-          --custom-fields cijoburl={{ cifmw_zuul_url }}/{{ zuul.build }}
+          --custom-fields cijoburl={{ cifmw_zuul_url }}/{{ zuul.build }},jobteststage={{ result_dirs.files[ loop_idx ].path | basename }}
           {{ cifmw_polarion_jump_extra_vars | default ('') }}
+      loop: "{{ merged_xml_files.files }}"
+      loop_control:
+        index_var: loop_idx
       register: jump_script
 
     - name: Output of jump
