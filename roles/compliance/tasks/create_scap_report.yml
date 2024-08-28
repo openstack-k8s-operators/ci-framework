@@ -19,7 +19,13 @@
 
 - name: Set base name
   ansible.builtin.set_fact:
-    base_name: "{{ bzip_file.path[:-10] }}" # we expect files to end in ".xml.bzip2"
+    base_name: >-
+      {{
+        (
+          bzip_file.path | dirname,
+          bzip_file.path | basename | splitext | first | splitext | first
+        ) | path_join
+      }} # we expect files to end in ".xml.bzip2"
 
 - name: Copy the file to a file with a known extension
   ansible.builtin.copy:
@@ -28,6 +34,10 @@
 
 - name: Unzip the file
   ansible.builtin.command: "bunzip2 {{ base_name }}.xml.bz2"
+  args:
+    creates: "{{ base_name }}.xml"
 
 - name: Create the report
   ansible.builtin.command: "oscap xccdf generate report --output {{ base_name }}.html {{ base_name }}.xml"
+  args:
+    creates: "{{ base_name }}.html"
