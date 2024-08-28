@@ -9,13 +9,16 @@
   delegate_facts: true
   vars:
     _zuul: "{{ zuul_vars.zuul | default(zuul) }}"
+    # grab the depends-on patches from the current zuul run if exists,
+    # otherwise rely on the one from the job to reproduce
+    _depends_on_patches: "{{ zuul['items'] | default(_zuul['items']) }}"
   block:
     - name: Check if repository directories already exist
       when: job_id is defined
       ansible.builtin.stat:
         path: "{{ item.project.src_dir }}"
       register: repos_dir_stats
-      with_items: "{{ _zuul['items'] }}"
+      with_items: "{{ _depends_on_patches }}"
 
     - name: Ensure we are not in the job_id branch
       when:
@@ -27,7 +30,7 @@
         repo: "https://{{ item.0.project.canonical_name }}"
         version: "origin/main"
         force: true
-      loop: "{{ _zuul['items'] | zip(repos_dir_stats.results) | list }}"
+      loop: "{{ _depends_on_patches | zip(repos_dir_stats.results) | list }}"
 
     - name: Fetch zuul.items repositories
       block:
@@ -40,7 +43,7 @@
             refspec: "{{ omit if _skip_refspec else repo | reproducer_refspec ~ ':' ~ job_id }}"
             version: "{{ omit if _skip_refspec else job_id }}"
             force: true
-          loop: "{{ _zuul['items'] }}"
+          loop: "{{ _depends_on_patches }}"
           loop_control:
             loop_var: repo
             label: "{{ repo.project.name }}"
@@ -62,7 +65,7 @@
 
     - name: Fetch zuul.projects repositories for dependencies
       when:
-        - "repo.key not in (_zuul['items'] | map(attribute='project.canonical_name'))"
+        - "repo.key not in (_depends_on_patches | map(attribute='project.canonical_name'))"
       ansible.builtin.git:
         dest: "{{ repo.value.src_dir }}"
         repo: "https://{{ repo.value.canonical_hostname }}/{{ repo.value.canonical_hostname | reproducer_gerrit_infix }}{{ repo.value.name }}"
