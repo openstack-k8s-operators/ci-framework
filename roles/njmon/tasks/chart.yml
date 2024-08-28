@@ -1,0 +1,54 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create directories
+  ansible.builtin.file:
+    mode: "0755"
+    path: "{{ cifmw_njmon_basedir }}/tmp/njmonchart"
+    state: directory
+
+- name: Get njmonchart archive
+  ansible.builtin.unarchive:
+    dest: "{{ cifmw_njmon_basedir }}/tmp/njmonchart"
+    remote_src: true
+    src: "{{ cifmw_njmon_repository }}/{{ cifmw_njmon_chart_archive }}"
+
+- name: Gather existing JSONs
+  register: _njmon_jsons
+  ansible.builtin.find:
+    path: "{{ cifmw_njmon_output_dir }}"
+    pattern: "*.json"
+
+# We don't want to use the `creates` parameter here:
+# the JSON file is created once when njmon starts, and gets
+# updates during the whole lifetime of the application.
+# It means that, if we run multiple times the role, we'll
+# get updated charts every time.
+- name: Generate HTML from JSONs
+  ansible.builtin.command:
+    chdir: "{{ cifmw_njmon_basedir }}/tmp/njmonchart"
+    cmd: >-
+      python3 njmonchart_linux_{{ cifmw_njmon_chart_release }}.py
+      {{ item.path }}
+  loop: "{{ _njmon_jsons.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Output HTML location
+  ansible.builtin.debug:
+    msg: >-
+      You can find the generated HTML files in
+      {{ cifmw_njmon_output_dir }}

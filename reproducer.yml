@@ -59,6 +59,12 @@
         tasks_from: rhos_release.yml
   roles:
     - role: ci_setup
+  tasks:
+    - name: Deploy monitoring if requested
+      when:
+        - cifmw_monitoring | default(false) | bool
+      ansible.builtin.include_role:
+        name: njmon
 
 - name: Prepare switches
   vars:
@@ -77,12 +83,22 @@
       ansible.builtin.command: # noqa: command-instead-of-module
         cmd: iptables -I LIBVIRT_FWI 1 -o ocpbm -j ACCEPT
 
-    - name: Run deployment if instructed to
-      when:
-        - cifmw_deploy_architecture | default(false) | bool
-      no_log: "{{ cifmw_nolog | default(true) | bool }}"
-      async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
-      poll: 20
-      delegate_to: controller-0
-      ansible.builtin.command:
-        cmd: "/home/zuul/deploy-architecture.sh"
+    - name: Try/always pattern
+      block:
+        - name: Run deployment if instructed to
+          when:
+            - cifmw_deploy_architecture | default(false) | bool
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
+          poll: 20
+          delegate_to: controller-0
+          ansible.builtin.command:
+            cmd: "/home/zuul/deploy-architecture.sh"
+
+      always:
+        - name: Generate metrics if needed
+          when:
+            - cifmw_monitoring | default(false) | bool
+          ansible.builtin.include_role:
+            name: njmon
+            tasks_from: chart.yml
