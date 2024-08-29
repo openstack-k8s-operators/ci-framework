@@ -53,6 +53,8 @@ cifmw_baremetal_hosts:
     nmstate:
       # interfaces: # Sample nmstate state snippet
       #   - name: enp6s0f0.161
+    # Optional: (string) app label
+    label: openstack
 
   compute-1:
     # Another BM host
