@@ -1,0 +1,140 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Install the compliance operator
+- name: Create the compliance namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+    definition:
+      kind: Namespace
+      metadata:
+        name: "{{ cifmw_compliance_namespace }}"
+        labels:
+          openshift.io/cluster-monitoring: "true"
+          pod-security.kubernetes.io/enforce: privileged
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Ensure OperatorGroup for the compliance-operator is present
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1
+      kind: OperatorGroup
+      metadata:
+        name: compliance-operator
+        namespace: "{{ cifmw_compliance_namespace }}"
+      spec:
+        targetNamespaces:
+          - "{{ cifmw_compliance_namespace }}"
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Ensure Subscription for the compliance-operator is present
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: compliance-operator-sub
+        namespace: "{{ cifmw_compliance_namespace }}"
+      spec:
+        name: compliance-operator
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+        channel: "stable"
+        installPlanApproval: Automatic
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Wait until the compliance-operator csv is present
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_compliance_namespace }}"
+    kind: ClusterServiceVersion
+    api_version: operators.coreos.com/v1alpha1
+  register: csv_list
+  delay: 10
+  retries: 20
+  until: >-
+    {{
+      csv_list.resources |
+      map(attribute='metadata.name') |
+      select('match', 'compliance-operator')
+    }}
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Get full name of the compliance-operator csv
+  ansible.builtin.set_fact:
+    compliance_operator_csv_name: >-
+      {{
+        csv_list.resources |
+        map(attribute='metadata.name') |
+        select('match', 'compliance-operator') | first
+      }}
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Wait for the compliance-operator csv to Succeed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_compliance_namespace }}"
+    kind: ClusterServiceVersion
+    api_version: operators.coreos.com/v1alpha1
+    name: "{{ compliance_operator_csv_name }}"
+  register: csv
+  retries: 20
+  delay: 10
+  until: csv.resources[0].status.phase | default(omit) == "Succeeded"
+  when: not cifmw_compliance_dry_run | bool
+
+# Install the compliance plugin
+- name: Install podman
+  ansible.builtin.import_role:
+    name: podman
+
+- name: Log into registry
+  ansible.builtin.command:
+    cmd: "podman login -u {{ cifmw_compliance_podman_username }} -p {{ cifmw_compliance_podman_password }} {{ cifmw_compliance_podman_registry }}"
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Copy out the compliance plugin from the oc-compliance image
+  ansible.builtin.command:
+    cmd: "podman run --rm -v ~/.local/bin:/mnt/out:Z {{ cifmw_compliance_plugin_image }} /bin/cp /usr/bin/oc-compliance /mnt/out/"
+  when: not cifmw_compliance_dry_run | bool
+
+# Install packages to process results
+# bzip2 comes from @rhosp-rhel-9.4-baseos
+# openscap-utils from rhosp-rhel-9.4-appstream
+- name: Install packages to process results
+  become: true
+  ansible.builtin.dnf:
+    name:
+      - bzip2
+      - openscap-utils
+    state: present
