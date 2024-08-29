@@ -1,0 +1,43 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This could be a loop over a map of scans. In fact, has to be include_tasks
+# Also extract the results and create the report.
+
+- name: Set base name
+  ansible.builtin.set_fact:
+    base_name: >-
+      {{
+        (
+          bzip_file.path | dirname,
+          bzip_file.path | basename | splitext | first | splitext | first
+        ) | path_join
+      }} # we expect files to end in ".xml.bzip2"
+
+- name: Copy the file to a file with a known extension
+  ansible.builtin.copy:
+    src: "{{ bzip_file.path }}"
+    dest: "{{ base_name }}.xml.bz2"
+
+- name: Unzip the file
+  ansible.builtin.command: "bunzip2 {{ base_name }}.xml.bz2"
+  args:
+    creates: "{{ base_name }}.xml"
+
+- name: Create the report
+  ansible.builtin.command: "oscap xccdf generate report --output {{ base_name }}.html {{ base_name }}.xml"
+  args:
+    creates: "{{ base_name }}.html"

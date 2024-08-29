@@ -1,0 +1,71 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set output directory
+  ansible.builtin.set_fact:
+    scan_binding: "{{ scan_suite }}-{{ scan_profile }}-binding"
+    out_dir: "{{ cifmw_compliance_artifacts_basedir }}/{{ scan_suite }}/{{ scan_profile }}"
+
+- name: Create scan binding
+  ansible.builtin.shell: |
+    oc get scansettingbinding -n {{ cifmw_compliance_namespace }} {{ scan_binding }} || \
+    oc compliance bind -n {{ cifmw_compliance_namespace }} -N {{ scan_binding }} profile/{{ scan_profile }}
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Wait for the scan to complete
+  ansible.builtin.command: >
+    oc get compliancescan -n {{ cifmw_compliance_namespace }} --no-headers -l "compliance.openshift.io/suite={{ scan_binding }}"
+  register: scan_result
+  retries: 120
+  delay: 10
+  until:
+    - scan_result.stdout_lines| list | count > 0
+    - scan_result.stdout_lines| reject('search', 'DONE') | reject('search', 'ERROR') | list | count == 0
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Delete directory for scan results if it exists
+  ansible.builtin.file:
+    path: "{{ out_dir }}"
+    state: absent
+
+- name: Create directory for scan results
+  ansible.builtin.file:
+    path: "{{ out_dir }}"
+    state: directory
+    recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    mode: '755'
+
+- name: Retrieve scan results
+  ansible.builtin.command: >
+    oc compliance fetch-raw scansettingbindings {{ scan_binding }} \
+    -o {{ out_dir }} -n {{ cifmw_compliance_namespace }}
+  when: not cifmw_compliance_dry_run | bool
+
+- name: Find all the compressed scan results
+  ansible.builtin.find:
+    paths: "{{ out_dir }}"
+    patterns: '.*bzip2$'
+    recurse: true
+    use_regex: true
+  register: scan_result_files
+
+- name: Process scan result files
+  ansible.builtin.include_tasks: create_scap_report.yml
+  loop: "{{ scan_result_files.files }}"
+  loop_control:
+    loop_var: bzip_file
