@@ -1,0 +1,65 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure we have a PID file
+  register: _njmon_running
+  ansible.builtin.stat:
+    path: "{{ cifmw_njmon_basedir }}/tmp/njmon.pid"
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+
+- name: Manage service if we have a PID
+  when:
+    - _njmon_running.stat.exists
+  block:
+    - name: Get njmon PID
+      register: _njmon_pid
+      ansible.builtin.slurp:
+        path: "{{ cifmw_njmon_basedir }}/tmp/njmon.pid"
+
+    # It may happen the service is already dead. Let's not
+    # fail the playbook in case "kill" can't find the PID.
+    - name: Kill njmon using its PID
+      vars:
+        _pid: "{{ _njmon_pid.content | b64decode }}"
+      failed_when: false
+      ansible.builtin.command:
+        cmd: "kill {{ _pid }}"
+
+- name: Remove temporary directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ cifmw_njmon_basedir }}/tmp/njmon"
+    - "{{ cifmw_njmon_basedir }}/tmp/njmonchart"
+
+- name: Remove njmon binary
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/bin/njmon"
+    state: absent
+
+- name: Remove configuration and data (deepscrub only)
+  tags:
+    - never
+    - deepscrub
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ cifmw_njmon_basedir }}/artifacts/njmon_opts.txt"
+    - "{{ cifmw_njmon_output_dir }}"

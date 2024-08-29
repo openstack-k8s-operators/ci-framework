@@ -1,0 +1,86 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create directories
+  ansible.builtin.file:
+    mode: "0755"
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ cifmw_njmon_basedir }}/tmp/njmon"
+    - "{{ cifmw_njmon_output_dir }}"
+    - "{{ ansible_user_dir }}/bin"
+
+- name: Get njmon archive
+  ansible.builtin.unarchive:
+    dest: "{{ cifmw_njmon_basedir }}/tmp/njmon"
+    remote_src: true
+    src: "{{ cifmw_njmon_repository }}/{{ cifmw_njmon_archive }}"
+
+- name: Build njmon
+  community.general.make:
+    chdir: "{{ cifmw_njmon_basedir }}/tmp/njmon"
+    target: binary
+    params:
+      OSNAME: "{{ ansible_facts['distribution'] | lower }}"
+      OSVERSION: "{{ ansible_facts['distribution_version'] }}"
+      HW: "{{ ansible_facts['architecture'] }}"
+
+- name: Copy njmon
+  vars:
+    _binary: >-
+      {{
+        ['njmon_',
+         ansible_facts['distribution'] | lower,
+         ansible_facts['distribution_version'],
+        '_',
+        ansible_facts['architecture'],
+        '_',
+        cifmw_njmon_release] | join('')
+      }}
+  ansible.builtin.copy:
+    dest: "{{ ansible_user_dir }}/bin/njmon"
+    mode: "0755"
+    remote_src: true
+    src: "{{ cifmw_njmon_basedir }}/tmp/njmon/{{ _binary }}"
+
+- name: Prepare njmon options
+  vars:
+    _opts: "{{ cifmw_njmon_default_opts + cifmw_njmon_options }}"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_njmon_basedir }}/artifacts/njmon_opts.txt"
+    content: "{{ _opts | join(' ') }}\n"
+    mode: "0600"
+
+# While njmon has a `-m` option supposed to instruct it to change directory
+# when starting, it doesn't seem to work as expected, and the DB files are
+# created in the home directory.
+# Let's change directory, while ensuring we're passing the parameter.
+# About RC code: njmon returns 99 whenever it finds an already running PID.
+- name: Run njmon
+  register: _start_njmon
+  ansible.builtin.command:
+    chdir: "{{ cifmw_njmon_output_dir }}"
+    cmd: "njmon -a {{ cifmw_njmon_basedir }}/artifacts/njmon_opts.txt"
+  failed_when:
+    - _start_njmon.rc not in [0, 99]
+  changed_when: _start_njmon.rc != 99
+
+# At that point, we have a dangling njmon running. By default we have a PID file
+# we can then refer to whenever we want to kill it.
+# According to its help, njmon checks for the availability of the pidfile and
+# associated process, so we don't really need to use the `creates: ...` for the
+# command.
