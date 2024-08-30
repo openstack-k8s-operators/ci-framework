@@ -22,6 +22,8 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_storage_class_prefix`: (String) Prefix for `storageClass` in generated Tempest CRD file. Defaults to `"lvms-"` only if `cifmw_use_lvms` is True, otherwise it defaults to `""`. The prefix is prepended to the `cifmw_test_operator_storage_class`. It is not recommended to override this value, instead set `cifmw_use_lvms` True or False.
 * `cifmw_test_operator_storage_class`: (String) Value for `storageClass` in generated Tempest or Tobiko CRD file. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
 * `cifmw_test_operator_delete_logs_pod`: (Boolean) Delete tempest log pod created by the role at the end of the testing. Default value: `false`.
+* `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `true`
+
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
 * `cifmw_test_operator_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default value: `podified-antelope-centos9`
