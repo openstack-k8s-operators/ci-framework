@@ -1,0 +1,69 @@
+---
+# This playbook deploy OCP, both master and workers.
+# The main goal of this playbook is to be called as
+# a standalone piece of a bigger job, mostly in the
+# adoption context.
+#
+# You would typically run this playbook after the
+# "create-infra.yml" one, passing the exact same parameters.
+#
+# Make sure you passed the needed secrets to deploy OCP!
+
+- name: Parent scenario if needed
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Inherit from parent scenarios if needed
+      ansible.builtin.include_tasks:
+        file: "ci/playbooks/tasks/inherit_parent_scenario.yml"
+
+- name: Manage/generate unique ID
+  ansible.builtin.import_playbook: playbooks/unique-id.yml
+
+- name: Run consistency checks
+  ansible.builtin.import_playbook: "playbooks/adoption/pre.yml"
+
+- name: Prepare infrastructure datasets
+  ansible.builtin.import_playbook: "playbooks/adoption/infra.yml"
+
+- name: Amend infrastructure datasets
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    # Inject "start: false" in the layout to not start any VM yet.
+    # Starting the VM will be done later, either by the tool deploying
+    # OSP, or the one deploy RHOSO.
+    # VM initial configuration, when managed, is done using cloud-init.
+    - name: Ensure no VM is started when we create them during this run
+      vars:
+        _no_start: >-
+          {% set _vms = {}                                          -%}
+          {% for _type in _cifmw_libvirt_manager_layout.vms.keys()  -%}
+          {%   if _type is not match('^ocp.*')                      -%}
+          {%     set _ = _vms.update({_type: {'start': false}})     -%}
+          {%   endif                                                -%}
+          {% endfor                                                 -%}
+          {{ _vms }}
+      ansible.builtin.set_fact:
+        _cifmw_libvirt_manager_layout: >-
+          {{
+            _cifmw_libvirt_manager_layout |
+            combine({'vms': _no_start}, recursive=true)
+          }}
+
+- name: Prepare networking
+  ansible.builtin.import_playbook: "playbooks/adoption/network.yml"
+
+- name: OCP cluster
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Deploy OCP cluster
+      ansible.builtin.import_role:
+        name: "reproducer"
+        tasks_from: "ocp_layout.yml"
+
+    - name: Start OCP cluster based on its overlays
+      ansible.builtin.import_role:
+        name: "libvirt_manager"
+        tasks_from: "deploy_layout.yml"
