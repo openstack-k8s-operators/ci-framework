@@ -1,0 +1,56 @@
+---
+# Purpose: manage the unique ID used in the
+# VM hostname construction.
+
+- name: Manage/generate unique ID
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    _unique_id_file: >-
+      {{ ansible_user_dir }}/ci-framework-data/artifacts/run-id
+  tasks:
+    - name: Ensure needed directory tree is present on local node
+      ansible.builtin.file:
+        mode: "0755"
+        path: "{{ _unique_id_file | dirname }}"
+        state: directory
+
+    - name: Check if we have a unique ID already
+      register: _unique_id_stat
+      ansible.builtin.stat:
+        path: "{{ _unique_id_file }}"
+
+    # Here, we want to allow the user to provide their own run ID,
+    # or to fallback on a generated one.
+    # In any cases, we want to get the file in place with the correct value.
+    # The jinja[invalid] is triggered because ansible-lint doesn't seem to find
+    # the community.general.random_string lookup, and doesn't mock it...
+    - name: Generate current job unique ID if needed  # noqa: jinja[invalid]
+      when:
+        - (not _unique_id_stat.stat.exists and cifmw_run_id is undefined)
+          or cifmw_run_id is defined
+      vars:
+        _unique_id: >-
+          {{
+            lookup('community.general.random_string',
+                   special=false, upper=false)
+           }}
+      ansible.builtin.copy:
+        dest: "{{ _unique_id_file }}"
+        content: "{{ cifmw_run_id | default(_unique_id) | lower }}"
+
+    # Since the user might pass their own run ID, we can just consume it.
+    # If, for a subsequent run, the user doesn't pass the run ID, we will
+    # just get it from the file and consume it.
+    - name: Load existing run ID
+      when:
+        - cifmw_run_id is undefined
+      block:
+        - name: Slurp unique id file if needed
+          register: _unique_id_content
+          ansible.builtin.slurp:
+            path: "{{ _unique_id_file }}"
+
+        - name: Expose cifmw_run_id if needed
+          ansible.builtin.set_fact:
+            cifmw_run_id: "{{ _unique_id_content.content | b64decode }}"

@@ -1,0 +1,66 @@
+---
+# Purpose: Add consistency checks and build the needed
+# datasets for an adoption usecase.
+# This playbook should be imported in:
+# - create-infra.yml
+# - deploy-ocp.yml
+# (anything coming later in the adoption process to get OSP)
+
+- name: Prepare dataset
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    _default_scenario_dir: >-
+      {{
+        (playbook_dir, '../..',
+         'scenarios') |path_join
+      }}
+    _adoption_scenario_basedir: >-
+      {{
+        cifmw_adoption_scenario_path |
+        default((_default_scenario_dir, 'adoption') | path_join)
+      }}
+  tasks:
+    - name: Assert we have the needed parameters
+      ansible.builtin.assert:
+        that:
+          # Ensure we have a scenario name
+          - cifmw_architecture_scenario is defined
+          - cifmw_architecture_scenario | length > 0
+        msg: >-
+          Error: provide cifmw_architecture_scenario parameters.
+
+    # We allow to point to external resources if needed.
+    - name: Ensure the automation file exists
+      vars:
+        _scenario: >-
+          {{
+            [_adoption_scenario_basedir,
+             cifmw_architecture_scenario ~ '.yml'] | path_join
+          }}
+      ansible.builtin.assert:
+        that:
+          - _scenario is exists
+        msg: >-
+          Error: the automation file {{ _scenario }} does
+          not exist.
+
+    - name: Include common architecture parameter file if needed
+      ansible.builtin.include_vars:
+        file: "{{ _default_scenario_dir }}/reproducers/va-common.yml"
+
+    - name: Include the scenario automation file
+      vars:
+        _scenario: >-
+          {{
+            [_adoption_scenario_basedir,
+             cifmw_architecture_scenario ~ '.yml'] | path_join
+          }}
+      ansible.builtin.include_vars:
+        file: "{{ _scenario }}"
+        name: _adoption_scenario
+
+    - name: Run reproducer validations
+      ansible.builtin.import_role:
+        name: "reproducer"
+        tasks_from: "validations.yml"

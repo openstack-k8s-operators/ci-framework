@@ -1,0 +1,85 @@
+---
+# By default, the OSP VMs will run using a default image.
+# In upstream, it's usually latest centos-stream-9
+# For downstream, it's usually rhel-9.4 image, depending on
+# the job configuration.
+#
+# Since OSP infra must use an older RHEL image, you can override it
+# by setting "osp_base_img_url" to point to the downstream QCOW2 image,
+# and "osp_base_img_sha256" holding the SHA256SUM of the image.
+#
+# We can't automatically discover the image, the role/module sets the
+# value globally, and it would clash with the needs for RHOSO images.
+
+# Use anchor to avoid repetitions. This block is common to all of OSP nodes.
+_osp_img_data: &osp_base_conf
+  image_local_dir: "{{ cifmw_basedir }}/images/"
+  disk_file_name: osp-base.qcow2
+  image_url: "{{ osp_base_img_url | default(cifmw_discovered_image_url) }}"
+  sha256_image_name: >-
+    {{ osp_base_img_sha256 | default(cifmw_discovered_hash) }}
+
+
+libvirt_manager_patch_layout:
+  vms:
+    # Let's remove the default computes, since we want to adopt the
+    # OSP ones
+    compute:
+      amount: 0
+    osp-undercloud:
+      <<: *osp_base_conf
+      amount: 1
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - osp_trunk
+    osp-controller:
+      <<: *osp_base_conf
+      amount: 3
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - osp_trunk
+    osp-compute:
+      <<: *osp_base_conf
+      amount: 3
+      memory: 4
+      cpus: 4
+      disksize: 20
+      nets:
+        - ocpbm
+        - osp_trunk
+
+networking_mapper_definition_patch:
+  group-templates:
+    osp-controllers:
+      network-template:
+        range:
+          start: 200
+          length: 3
+      networks: &osp_nets
+        ctlplane: {}
+        internalapi:
+          trunk-parent: ctlplane
+        tenant:
+          trunk-parent: ctlplane
+        storage:
+          trunk-parent: ctlplane
+        storagemgmt:
+          trunk-parent: ctlplane
+    osp-computes:
+      network-template:
+        range:
+          start: 210
+          length: 3
+      networks: *osp_nets
+    osp-underclouds:
+      network-template:
+        range:
+          start: 199
+          length: 1
+      networks: *osp_nets
