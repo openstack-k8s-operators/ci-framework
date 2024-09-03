@@ -1,0 +1,217 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure needed logins
+  ansible.builtin.include_tasks: login_registries.yml
+  args:
+    apply:
+      delegate_to: "osp-undercloud-0"
+
+- name: Ensure repos are setup
+  become: true
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.command:
+    cmd: "subscription-manager repos --enable {{ cifmw_adoption_osp_deploy_repos | join(' --enable ') }}"
+
+- name: Install director packages
+  become: true
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.package:
+    name: python3-tripleoclient
+
+- name: Ensure ci-framework-data folder is created in undercloud
+  vars:
+    cifmw_ci_setup_basedir: "{{ cifmw_basedir }}"
+    directory_state: directory
+  ansible.builtin.include_role:
+    name: "ci_setup"
+    tasks_from: "directories.yml"
+    apply:
+      delegate_to: "osp-undercloud-0"
+
+- name: Create containers-prepare-parameters if needed
+  delegate_to: "osp-undercloud-0"
+  vars:
+    _container_prepare_cmd: >-
+      openstack tripleo container image prepare
+      default --output-env-file
+      {{ ansible_user_dir }}/containers-prepare-parameters.yaml
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_basedir }}/artifacts"
+    script: "{{ _container_prepare_cmd }}"
+  when: _adoption_source_scenario.container_prepare_params is not defined
+
+- name: Ensure os-net-config folder exists
+  become: true
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.file:
+    path: "/etc/os-net-config"
+    state: directory
+    mode: '0755'
+
+- name: Generate os-net-config file
+  become: true
+  delegate_to: "osp-undercloud-0"
+  vars:
+    _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
+    _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
+    ctlplane_ip: "{{ _undercloud_net.networks.ctlplane.ip_v4 }}"
+    ctlplane_vip: "{{ _adoption_source_scenario.undercloud.ctlplane_vip }}"
+    _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
+    dns_server: "{{ _ctlplane_net.dns_v4 }}"
+    gateway_ip: "{{ _ctlplane_net.gw_v4 }}"
+    interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
+    ctlplane_cidr: "{{ _undercloud_net.networks.ctlplane.prefix_length_v4 }}"
+  ansible.builtin.template:
+    src: "os_net_config_undercloud.yml.j2"
+    dest: /etc/os-net-config/tripleo_config.yaml
+
+- name: Copy undercloud.conf file to location to edit it
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.copy:
+    src: "/usr/share/python-tripleoclient/undercloud.conf.sample"
+    dest: "{{ ansible_user_dir }}/undercloud.conf"
+    remote_src: true
+
+- name: Add environment specific vars for undercloud
+  vars:
+    _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
+    _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
+    _undercloud_ip: "{{ _undercloud_net.networks.ctlplane.ip_v4 }}"
+    _undercloud_net_prefix: "{{ _undercloud_net.networks.ctlplane.prefix_length_v4 }}"
+    _ctlplane_cidr: "{{ cifmw_networking_env_definition.networks.ctlplane.network_v4 }}"
+    _interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
+    _env_undercloud:
+      config:
+        - section: DEFAULT
+          option: local_ip
+          value: "{{ _undercloud_ip }}/{{ _undercloud_net_prefix }}"
+        - section: DEFAULT
+          option: local_mtu
+          value: "{{ _interface_mtu }}"
+        - section: DEFAULT
+          option: undercloud_ntp_servers
+          value: "{{ cifmw_adoption_osp_deploy_ntp_server }}"
+        - section: DEFAULT
+          option: container_images_file
+          value: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
+        - section: DEFAULT
+          option: net_config_override
+          value: "/etc/os-net-config/tripleo_config.yaml"
+        - section: DEFAULT
+          option: undercloud_public_host
+          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(122) }}"
+        - section: DEFAULT
+          option: undercloud_admin_host
+          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(123) }}"
+        - section: "ctlplane-subnet"
+          option: "cidr"
+          value: "{{ _ctlplane_cidr }}"
+        - section: "ctlplane-subnet"
+          option: "dhcp_start"
+          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(110) }}"
+        - section: "ctlplane-subnet"
+          option: "dhcp_end"
+          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(130) }}"
+        - section: "ctlplane-subnet"
+          option: "gateway"
+          value: "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
+        - section: "ctlplane-subnet"
+          option: "inspection_iprange"
+          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(200) }},{{ _ctlplane_cidr | ansible.utils.nthhost(220) }}"
+        - section: "ctlplane-subnet"
+          option: "masquerade"
+          value: true
+  ansible.builtin.set_fact:
+    _undercloud_conf: >-
+      {{
+        _adoption_source_scenario.undercloud |
+        combine(_env_undercloud, recursive=true, list_merge="append_rp")
+      }}
+
+- name: Copy undercloud overrides file if present and amend undercloud conf
+  when: _adoption_source_scenario.undercloud.undercloud_parameters_override is defined
+  vars:
+    _undercloud_overrides_path: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _adoption_source_scenario.undercloud.undercloud_parameters_override
+        ] | path_join
+      }}
+    _filename: "{{ _undercloud_overrides_path | basename }}"
+    _dest_path: "{{ ansible_user_dir }}/{{ _filename }}"
+  block:
+    - name: Copy overrides file
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.copy:
+        src: "{{ _undercloud_overrides_path }}"
+        dest: "{{ _dest_path }}"
+
+    - name: Amend undercloud conf
+      vars:
+        _undercloud_overrides:
+          config:
+            - section: DEFAULT
+              option: hieradata_override
+              value: "{{ _dest_path }}"
+      ansible.builtin.set_fact:
+        _undercloud_conf: >-
+          {{
+            _undercloud_conf |
+            combine(_undercloud_overrides, recursive=true, list_merge="append_rp")
+          }}
+
+- name: Copy undercloud parameter defaults file if present and amend undercloud conf
+  when: _adoption_source_scenario.undercloud.undercloud_parameters_defaults is defined
+  vars:
+    _undercloud_defaults_path: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _adoption_source_scenario.undercloud.undercloud_parameters_defaults
+        ] | path_join
+      }}
+    _filename: "{{ _undercloud_defaults_path | basename }}"
+    _dest_path: "{{ ansible_user_dir }}/{{ _filename }}"
+  block:
+    - name: Copy defaults file
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.copy:
+        src: "{{ _undercloud_defaults_path }}"
+        dest: "{{ _dest_path }}"
+
+    - name: Amend undercloud conf
+      vars:
+        _undercloud_overrides:
+          config:
+            - section: DEFAULT
+              option: custom_env_files
+              value: "{{ _dest_path }}"
+      ansible.builtin.set_fact:
+        _undercloud_conf: >-
+          {{
+            _undercloud_conf |
+            combine(_undercloud_overrides, recursive=true, list_merge="append_rp")
+          }}
+
+- name: Generate undercloud.conf with scenario specific values
+  delegate_to: "osp-undercloud-0"
+  community.general.ini_file:
+    path: "{{ ansible_user_dir }}/undercloud.conf"
+    section: "{{ item.section }}"
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    state: "present"
+  loop: "{{ _undercloud_conf.config }}"

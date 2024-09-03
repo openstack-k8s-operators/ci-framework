@@ -1,0 +1,45 @@
+#jinja2: trim_blocks:True, lstrip_blocks:True
+network_config:
+- type: ovs_bridge
+  name: br-ctlplane
+  mtu: {{ interface_mtu }}
+  use_dhcp: false
+  dns_servers:
+  {% for dns_ip in dns_server | default([]) %}
+  - {{ dns_ip }}
+  {% endfor %}
+  - {{ gateway_ip }}
+  domain: []
+  addresses:
+  - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_cidr }}
+  - ip_netmask: {{ ctlplane_ip }}/32
+  - ip_netmask: {{ ctlplane_vip }}/32
+  {% if _adoption_source_scenario.undercloud.routes is defined %}
+  {%- for route in _adoption_source_scenario.undercloud.routes %}
+  routes:
+    - ip_netmask: {{ route.ip_netmask }}
+      next_hop: {{ route.next_hop }}
+      default: {{ route.default }}
+  {% endfor %}
+  {%- else %}
+  routes: []
+  {% endif %}
+  members:
+  - type: interface
+    name: {{ _adoption_source_scenario.undercloud.os_net_config_iface |
+             default('nic2') }}
+    mtu: {{ interface_mtu }}
+    # force the MAC address of the bridge to this interface
+    primary: true
+  {% for network_name, net in _undercloud_net.networks.items() %}
+  {% if 'vlan_id' in net %}
+  # {{ network_name }}
+  - type: vlan
+    mtu: {{ net.mtu }}
+    vlan_id: {{ net.vlan_id }}
+    addresses:
+    - ip_netmask: {{ net.ip_v4 }}/{{ net.prefix_length_v4 }}
+    - ip_netmask: {{ net.ip_v4.split('.')[:3] | join('.') }}.2/32
+    routes: []
+    {% endif %}
+  {% endfor %}

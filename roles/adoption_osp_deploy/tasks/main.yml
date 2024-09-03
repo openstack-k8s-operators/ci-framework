@@ -1,0 +1,151 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Generate configuration files
+  ansible.builtin.import_tasks: config_files.yml
+
+- name: Prepare undercloud enviornment
+  tags:
+    - undercloud
+  ansible.builtin.import_tasks: prepare_undercloud.yml
+
+- name: Stop before running pre undercloud hooks
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "before_pre_hook_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Run pre undercloud deploy hooks
+  tags:
+    - undercloud
+  vars:
+    hooks: "{{ _adoption_source_scenario.pre_uc_run | default([]) }}"
+    step: "pre_undercloud"
+  ansible.builtin.include_role:
+    name: run_hook
+
+- name: Stop before deploying undercloud
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "before_deploy_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Deploy undercloud
+  tags:
+    - undercloud
+  ansible.builtin.import_tasks: deploy_undercloud.yml
+
+- name: Stop after deploying undercloud
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "after_deploy_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Run post undercloud deploy hooks
+  tags:
+    - undercloud
+  vars:
+    hooks: "{{ _adoption_source_scenario.post_uc_run | default([]) }}"
+    step: "post_undercloud"
+  ansible.builtin.include_role:
+    name: run_hook
+
+- name: Stop after running post undercloud hooks
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "after_post_hook_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Overcloud preparation
+  tags:
+    - overcloud
+  ansible.builtin.import_tasks: prepare_overcloud.yml
+
+- name: Stop before running pre overcloud hooks
+  tags:
+    - overcloud
+  vars:
+    _stage_stopper: "before_pre_hook_overcloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Run pre overcloud deploy hooks
+  tags:
+    - overcloud
+  vars:
+    hooks: "{{ _adoption_source_scenario.pre_oc_run | default([]) }}"
+    step: "pre_undercloud"
+  ansible.builtin.include_role:
+    name: run_hook
+
+- name: Stop before deploying the overcloud
+  tags:
+    - overcloud
+  vars:
+    _stage_stopper: "before_deploy_overcloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Deploy overcloud
+  tags:
+    - overcloud
+  ansible.builtin.import_tasks: deploy_overcloud.yml
+
+- name: Stop after deploying the overcloud
+  tags:
+    - overcloud
+  vars:
+    _stage_stopper: "post_deploy_overcloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Run post overcloud deploy hooks
+  tags:
+    - overcloud
+  vars:
+    hooks: "{{ _adoption_source_scenario.post_oc_run | default([]) }}"
+    step: "post_overcloud"
+  ansible.builtin.include_role:
+    name: run_hook
