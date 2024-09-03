@@ -1,0 +1,141 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Deploy ceph for 17.1 deployment
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Gather ansible_user_dir from undercloud
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.setup:
+        gather_subset:
+          - user_dir
+
+    - name: Deploy 17.1 ceph
+      vars:
+        _roles_file: >-
+          {{
+            [cifmw_adoption_source_scenario_path,
+             _adoption_source_scenario.overcloud.roles_file
+            ] | path_join
+          }}
+        _roles_file_name: "{{ _roles_file | basename }}"
+        _roles_file_dest: "{{ ansible_user_dir }}/{{ _roles_file_name }}"
+        _network_data_file: >-
+          {{
+            [cifmw_adoption_source_scenario_path,
+             _adoption_source_scenario.overcloud.network_data_file
+            ] | path_join
+          }}
+        _network_data_file_name: "{{ _network_data_file | basename }}"
+        _network_data_file_dest: "{{ ansible_user_dir }}/{{ _network_data_file_name }}"
+        _ceph_osd_spec_file: >-
+          {{
+            [cifmw_adoption_source_scenario_path,
+             _adoption_source_scenario.overcloud.ceph_osd_spec_file
+            ] | path_join
+          }}
+        _ceph_osd_spec_file_name: "{{ _ceph_osd_spec_file | basename }}"
+        _ceph_osd_spec_file_dest: "{{ ansible_user_dir }}/{{ _ceph_osd_spec_file_name }}"
+        _cloud_domain: "{{ _adoption_source_scenario.cloud_domain }}"
+        _source_cmd: "source {{ ansible_user_dir }}/stackrc"
+      block:
+        - name: Copy network data file
+          delegate_to: "osp-undercloud-0"
+          ansible.builtin.copy:
+            src: "{{ _network_data_file }}"
+            dest: "{{ _network_data_file_dest }}"
+
+        - name: Copy roles file
+          delegate_to: "osp-undercloud-0"
+          ansible.builtin.copy:
+            src: "{{ _roles_file }}"
+            dest: "{{ _roles_file_dest }}"
+
+        - name: Copy ceph osd file
+          delegate_to: "osp-undercloud-0"
+          ansible.builtin.copy:
+            src: "{{ _ceph_osd_spec_file }}"
+            dest: "{{ _ceph_osd_spec_file_dest }}"
+
+        - name: Ensure ceph_spec file does not exist
+          delegate_to: "osp-undercloud-0"
+          ansible.builtin.file:
+            path: "{{ ansible_user_dir }}/ceph_spec.yaml"
+            state: absent
+
+        - name: Generate ceph_spec file
+          delegate_to: "osp-undercloud-0"
+          vars:
+            _ceph_spec_cmd: >-
+              openstack overcloud ceph spec {{ ansible_user_dir }}/config-download.yaml
+              --tld {{ _cloud_domain }}
+              --osd-spec {{ _ceph_osd_spec_file_dest }}
+              --roles-data {{ _roles_file_dest }}
+              -o {{ansible_user_dir}}/ceph_spec.yaml
+          cifmw.general.ci_script:
+            chdir: "{{ ansible_user_dir }}"
+            output_dir: "{{ cifmw_basedir }}/artifacts"
+            script: "{{ _source_cmd }}; {{ _ceph_spec_cmd }}"
+
+        - name: Ensure deployed_ceph file does not exist
+          delegate_to: "osp-undercloud-0"
+          ansible.builtin.file:
+            path: "{{ ansible_user_dir }}/deployed_ceph.yaml"
+            state: absent
+
+        - name: Gather overcloud tripleo nodes
+          when: group.key is in _hostname_map_translation
+          vars:
+            _hostname_map_translation: >-
+              {{
+                _adoption_source_scenario.hostname_groups_map
+              }}
+          ansible.builtin.set_fact:
+            _tripleo_nodes: >-
+              {{
+                 _tripleo_nodes | default([]) +
+                 group.value
+              }}
+          loop: "{{ _vm_groups | dict2items }}"
+          loop_control:
+            loop_var: group
+            label: "{{ group.key }}"
+
+        - name: Install packages needed for ceph deployment on the overcloud nodes
+          become: true
+          delegate_to: "{{ item }}"
+          ansible.builtin.dnf:
+            name:
+              - lvm2
+              - jq
+            state: present
+          loop: "{{ _tripleo_nodes }}"
+
+        - name: Deploy ceph
+          delegate_to: "osp-undercloud-0"
+          vars:
+            _ceph_deploy_cmd: >-
+              openstack overcloud ceph deploy
+              --tld {{ _cloud_domain }}
+              --ntp-server {{ cifmw_adoption_osp_deploy_ntp_server }}
+              --ceph-spec ceph_spec.yaml
+              --network-data {{ _network_data_file_dest }}
+              --cephadm-default-container
+              --output {{ ansible_user_dir }}/deployed_ceph.yaml
+          cifmw.general.ci_script:
+            chdir: "{{ ansible_user_dir }}"
+            output_dir: "{{ cifmw_basedir }}/artifacts"
+            script: "{{ _source_cmd }}; {{ _ceph_deploy_cmd }}"
