@@ -25,14 +25,24 @@
 
 - name: Try/catch pattern for debugging
   block:
+    - name: Extract first compute from inventory
+      ansible.builtin.set_fact:
+        _first_compute: >-
+          {{ groups['computes'] | select('match', '^compute.*0$') | first }}
+
     - name: Ensure we have needed bits for compute when needed
       ansible.builtin.assert:
         that:
-          - crc_ci_bootstrap_networks_out['compute-0'] is defined
-          - crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'] is defined or
-            crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'] is defined
+          - _first_compute | length != 0
+          - crc_ci_bootstrap_networks_out[_first_compute] is defined
+          - crc_ci_bootstrap_networks_out[_first_compute]['storage-mgmt'] is defined or
+            crc_ci_bootstrap_networks_out[_first_compute]['storagemgmt'] is defined
 
   rescue:
+    - name: Dump inventory hosts groups
+      ansible.builtin.debug:
+        var: groups
+
     - name: Dump crc_ci_bootstrap_networks_out
       ansible.builtin.debug:
         var: crc_ci_bootstrap_networks_out
@@ -43,22 +53,22 @@
 
 - name: Set mtu value from crc_ci_bootstrap_networks_out
   when:
-    - crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu is defined or
-      crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].mtu is defined
+    - crc_ci_bootstrap_networks_out[_first_compute]['storage-mgmt'].mtu is defined or
+      crc_ci_bootstrap_networks_out[_first_compute]['storagemgmt'].mtu is defined
   ansible.builtin.set_fact:
     cifmw_hci_prepare_storage_mgmt_mtu: >-
       {{
-        crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].mtu |
-        default(crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].mtu)
+        crc_ci_bootstrap_networks_out[_first_compute]['storage-mgmt'].mtu |
+        default(crc_ci_bootstrap_networks_out[_first_compute]['storagemgmt'].mtu)
       }}
 
 - name: Set vlan value from crc_ci_bootstrap_networks_out
   when:
-    - crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].vlan is defined or
-      crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].vlan is defined
+    - crc_ci_bootstrap_networks_out[_first_compute]['storage-mgmt'].vlan is defined or
+      crc_ci_bootstrap_networks_out[_first_compute]['storagemgmt'].vlan is defined
   ansible.builtin.set_fact:
     cifmw_hci_prepare_storage_mgmt_vlan: >-
       {{
-        crc_ci_bootstrap_networks_out['compute-0']['storage-mgmt'].vlan |
-        default(crc_ci_bootstrap_networks_out['compute-0']['storagemgmt'].vlan)
+        crc_ci_bootstrap_networks_out[_first_compute]['storage-mgmt'].vlan |
+        default(crc_ci_bootstrap_networks_out[_first_compute]['storagemgmt'].vlan)
       }}
