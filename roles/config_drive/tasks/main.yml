@@ -41,18 +41,21 @@
     mode: "0755"
 
 - name: Generate meta-data
+  register: _meta_data_change
   ansible.builtin.template:
     src: "meta-data.j2"
     dest: "{{ cifmw_config_drive_instancedir }}/meta-data"
     mode: '0644'
 
 - name: Generate user-data
+  register: _user_data_change
   ansible.builtin.template:
     src: "user-data.j2"
     dest: "{{ cifmw_config_drive_instancedir }}/user-data"
     mode: '0644'
 
 - name: Generate network-data
+  register: _net_data_change
   when:
     - "cifmw_config_drive_networkconfig is defined"
     - "cifmw_config_drive_networkconfig is not none"
@@ -61,13 +64,37 @@
     dest: "{{ cifmw_config_drive_instancedir }}/network-config"
     mode: '0644'
 
+- name: Check ISO availability
+  register: _iso_stat
+  ansible.builtin.stat:
+    path: "{{ cifmw_config_drive_iso_image }}"
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+
+- name: Assert we don't try to change an existing ISO
+  when:
+    - _iso_stat.stat.exists
+  ansible.builtin.assert:
+    that:
+      - _meta_data_change is not changed
+      - _user_data_change is not changed
+      - _net_data_change is not changed
+    msg: >-
+      You're trying to edit an existing ISO. This isn't possible,
+      since the ISO is usually attached to a virtual machine, and
+      you cannot dynamically edit it.
+
 - name: Generate nocloud iso image
   cifmw.general.ci_script:
     chdir: "{{ cifmw_config_drive_instancedir }}"
     output_dir: "{{ cifmw_config_drive_basedir }}/artifacts"
+    creates: "{{ cifmw_config_drive_iso_image }}"
     script: >-
-      genisoimage -output {{ cifmw_config_drive_iso_image }} -volid CIDATA -joliet \
-        -rock user-data meta-data \
-          {% if cifmw_config_drive_networkconfig is defined and cifmw_config_drive_networkconfig is not none -%}
-          network-config
-          {%- endif -%}
+      genisoimage -output {{ cifmw_config_drive_iso_image }} -volid CIDATA
+      -joliet
+      -rock user-data meta-data
+      {% if cifmw_config_drive_networkconfig is defined and
+            cifmw_config_drive_networkconfig is not none -%}
+       network-config
+      {%- endif -%}
