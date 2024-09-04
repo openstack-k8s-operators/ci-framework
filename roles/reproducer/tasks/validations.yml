@@ -83,3 +83,58 @@
       cifmw_network_dnsmasq_config is set and not empty. This feature is NOT
       supported anymore. Please contact the CI Framework team to check your
       configuration, and see if you really need to pass anything to dnsmasq.
+
+- name: Verify cifmw_arch_automation_file is undefined
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - cifmw_arch_automation_file is undefined
+    msg: >-
+      cifmw_arch_automation_file is defined. This parameter is NOT supported
+      anymore. You can use cifmw_architecture_automation_file instead, providing
+      the absolute path to the automation file. Note that you shouldn't need to
+      set it at all.
+
+# Ensure we don't mix upstream and midstream content
+- name: Ensure we're consuming consistent project sources
+  when:
+    - cifmw_reproducer_validate_project_sources | default(true) | bool
+  vars:
+    _custom_rep_dict: >-
+      {{
+        cifmw_reproducer_repositories |
+        items2dict(key_name='dest', value_name='src')
+      }}
+    # Don't consider local paths, only remotes.
+    # This should prevent failing whenver we sync local repositories
+    # while developping with the Framework.
+    _projects_src: >-
+      {{
+        cifmw_reproducer_default_repositories |
+        items2dict(key_name='dest', value_name='src') |
+        combine(_custom_rep_dict) |
+        dict2items |
+        map(attribute='value') |
+        select('match', '^http')
+      }}
+    _src_name: >-
+      {{
+        _projects_src | map('dirname') | unique
+      }}
+  block:
+    - name: Debug found sources
+      ansible.builtin.debug:
+        var: _projects_src
+
+    - name: Debug _src_name
+      ansible.builtin.debug:
+        var: _src_name
+
+    - name: Assert everything comes from the same source
+      ansible.builtin.assert:
+        that:
+          - _src_name | length == 1
+
+- name: End play
+  ansible.builtin.fail:
+    msg: on-demand
