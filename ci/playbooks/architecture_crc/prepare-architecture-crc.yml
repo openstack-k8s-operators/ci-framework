@@ -1,0 +1,61 @@
+---
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    # jgilaber: we need to make sure nncp does not touch the vlans, otherwise
+    # it'll create them with the same MAC address as the ospbr bridge and that
+    # causes problems when trying to reach the dnsmasq service from the compute
+    # node. Changing the interface and connnection name to what is used in the
+    # nncp CR avoids the issue
+    - name: Change vlan interface and connection names
+      delegate_to: "crc"
+      become: true
+      vars:
+        old_connn_name: "ci-{{ item.name }}-{{ item.vlan }}"
+      ansible.builtin.shell: |
+        nmcli con down {{ old_connn_name }}
+        nmcli con modify {{ old_connn_name }} connection.interface-name {{ item.name }}
+        nmcli con modify {{ old_connn_name }} connection.id {{ item.name }}
+        nmcli con up {{ item.name }}
+      loop:
+        - name: internalapi
+          vlan: 20
+        - name: storage
+          vlan: 21
+        - name: tenant
+          vlan: 22
+
+    - name: Read os-net-info file
+      ansible.builtin.slurp:
+        src: "/etc/ci/env/os-net-info.yml"
+      register: _ci_bootstrap_os_net_info
+
+    - name: Translate os_net_info into interfaces-info
+      vars:
+        _ci_bootstrap_os_parsed: "{{ _ci_bootstrap_os_net_info['content'] | b64decode | from_yaml }}"
+        _ci_bootstrap_macs: "{{ _ci_bootstrap_os_parsed.ci_bootstrap_os_mac_addr_map }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/parameters/interfaces-info.yml"
+        content: |
+          {% for node, net_list in _ci_bootstrap_macs.items() %}
+          {{ node }}:
+          {% for net, mac in net_list.items() %}
+          - network: {{ net }}
+            mac: {{ mac }}
+          {% endfor %}
+          {% endfor %}
+
+    - name: Call networking_mapper again to make sure interfaces names are set in the networking enviornment file
+      ansible.builtin.import_role:
+        name: networking_mapper
+
+- hosts: computes
+  tasks:
+    - name: Setup repos
+      ansible.builtin.include_role:
+        name: repo_setup
+
+    - name: Set hostname to inventory hostname for ceph deployment
+      become: true
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+        use: "systemd"

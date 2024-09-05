@@ -1,0 +1,164 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure directories are present
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+    recurse: true
+  loop:
+    - "{{ (cifmw_build_push_container_artifacts, 'scripts') | ansible.builtin.path_join }}"
+    - "{{ (cifmw_build_push_container_artifacts, 'logs') | ansible.builtin.path_join }}"
+
+- name: Install podman and configure session linger
+  ansible.builtin.import_role:
+    name: podman
+
+# Note(Lewis): Using Podman command over podman module:
+#   Can't do multi-arch builds.
+#   Module output is lacking.
+#   Very slow when pushing multiple tags
+- name: Render varibles and optionally print
+  vars:
+    _rendered_tags: >-
+      {% set out = [] -%}
+      {% if cifmw_build_push_container_git_sha is defined -%}
+        {% set _ = out.append(cifmw_build_push_container_git_sha) -%}
+      {% endif -%}
+      {% if cifmw_build_push_container_patch_number is defined -%}
+        {% set _ = out.append(cifmw_build_push_container_patch_number ~ '-latest') -%}
+      {% endif -%}
+      {{ out }}
+    _rendered_tags_with_overrides: >
+      {{
+        _rendered_tags +
+        (
+          cifmw_build_push_container_tag_override
+          if cifmw_build_push_container_tag_override
+          is not none else []
+        )
+      }}
+    _multi_arch_build: "{{ cifmw_build_push_container_supported_platform | length > 1 }}"
+    _container_manifest_name: "{{ 'localhost/' ~ cifmw_build_push_container_name ~ '-manifest' }}"
+    _podman_qemu_user_static_cmd: >-
+      sudo podman run
+      --rm
+      --privileged
+      {{ cifmw_build_push_container_qemu_user_static_image }}
+      --reset
+      -c yes
+      -p yes
+    _podman_build_cmd: >-
+      podman build
+      --security-opt="label=disable"
+      --platform={{ cifmw_build_push_container_supported_platform | join(',') }}
+      {% if _multi_arch_build -%}
+      --manifest={{ _container_manifest_name }}
+      {% endif -%}
+      --tag={{ cifmw_build_push_container_local_build_tag }}
+      --label="build_push_role=true"
+      --file={{ cifmw_build_push_container_containerfile_path }}
+      {{ cifmw_build_push_container_build_context_path }}
+    _podman_push_container_cmd: >-
+      podman push
+      {% if cifmw_build_push_container_registry_username is not none -%}
+      {% if cifmw_build_push_container_registry_password is not none -%}
+      --creds {{ cifmw_build_push_container_registry_username }}:{{ cifmw_build_push_container_registry_password }}
+      {% endif -%}
+      {% endif -%}
+      {% if not cifmw_build_push_container_registry_tls_verify -%}
+      --tls-verify=false
+      {% endif -%}
+      {{ cifmw_build_push_container_local_build_tag }}
+      {{ cifmw_build_push_container_registry_name }}
+    _podman_push_manifest_cmd: >-
+      podman manifest push
+      {% if cifmw_build_push_container_registry_username is not none -%}
+      {% if cifmw_build_push_container_registry_password is not none -%}
+      --creds {{ cifmw_build_push_container_registry_username }}:{{ cifmw_build_push_container_registry_password }}
+      {% endif -%}
+      {% endif -%}
+      {% if not cifmw_build_push_container_registry_tls_verify -%}
+      --tls-verify=false
+      {% endif -%}
+      {{ _container_manifest_name }}
+      {{ cifmw_build_push_container_registry_name }}
+  block:
+    - name: Create manifest if multi-arch requested
+      when: _multi_arch_build
+      block:
+        - name: Install qemu-user-static for multi arch builds
+          cifmw.general.ci_script:
+            output_dir: "{{ (cifmw_build_push_container_artifacts, 'scripts') | ansible.builtin.path_join }}"
+            script: "{{ _podman_qemu_user_static_cmd }}"
+
+        - name: Ensure manifest doesn't exist
+          ansible.builtin.command:
+            cmd: podman manifest rm {{ _container_manifest_name }}
+          register: _podman_manifest_create_output
+          changed_when: _podman_manifest_create_output.rc == 0
+          failed_when:
+            - (_podman_manifest_create_output.rc != 0 and 'image not known' not in _podman_manifest_create_output.stderr)
+
+        - name: Create manifest
+          ansible.builtin.command:
+            cmd: podman manifest create {{ _container_manifest_name }}
+          register: _podman_manifest_create_output
+          changed_when: _podman_manifest_create_output.rc == 0
+
+    - name: Build container
+      block:
+        - name: Build container
+          cifmw.general.ci_script:
+            output_dir: "{{ (cifmw_build_push_container_artifacts, 'scripts') | ansible.builtin.path_join }}"
+            script: "{{ _podman_build_cmd }}"
+
+    - name: Push manifest
+      when:
+        - cifmw_build_push_container_push
+        - _multi_arch_build
+      cifmw.general.ci_script:
+        output_dir: "{{ (cifmw_build_push_container_artifacts, 'scripts') | ansible.builtin.path_join }}"
+        script: "{{ (_podman_push_manifest_cmd, item) | join(':') }}"
+      loop: "{{ _rendered_tags_with_overrides }}"
+
+    - name: Push container
+      when:
+        - cifmw_build_push_container_push
+        - not _multi_arch_build
+      cifmw.general.ci_script:
+        output_dir: "{{ (cifmw_build_push_container_artifacts, 'scripts') | ansible.builtin.path_join }}"
+        script: "{{ (_podman_push_container_cmd, item) | join(':') }}"
+      loop: "{{ _rendered_tags_with_overrides }}"
+
+  rescue:
+    - name: Failure detected, output varibles
+      ansible.builtin.debug:
+        msg:
+          - "_rendered_tags: {{ _rendered_tags }}"
+          - "_rendered_tags_with_overrides: {{ _rendered_tags_with_overrides }}"
+          - "_container_manifest_name: {{ _container_manifest_name }}"
+          - "_multi_arch_build: {{ _multi_arch_build }}"
+          - "{{ _podman_build_cmd }}"
+          - "{{ _podman_push_container_cmd }}"
+          - "{{ _podman_push_manifest_cmd }}"
+          - "{{ _podman_qemu_user_static_cmd }}"
+
+    - name: Re-trigger failure
+      ansible.builtin.fail:
+        msg: >-
+          Failure detected. Check the debug outputs above

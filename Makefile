@@ -191,7 +191,7 @@ run_ctx_ansible_test: ci_ctx ## Run molecule check in a container
 
 .PHONY: run_ctx_architecture_test
 run_ctx_architecture_test: export _DIR="${HOME}/ci-framework-data/validate-${SCENARIO_NAME}"
-run_ctx_architecture_test: ## Run architecture_test in a container. You can pass any ansible-playbook options using ANSIBLE_OPTS. Mandatory options are SCENARIO_NAME (such as hci), ARCH_REPO (architecture repository path) and NET_ENV_VILE (usually ./ci/playbooks/files/networking-env-definition.yml). Since this is running in container, be sure to prefix the paths with either "./" or "../" for relative paths.
+run_ctx_architecture_test: ## Run architecture_test in a container. You can pass any ansible-playbook options using ANSIBLE_OPTS. Mandatory options are SCENARIO_NAME (such as hci), ARCH_REPO (architecture repository path) and NET_ENV_FILE (usually ./ci/playbooks/files/networking-env-definition.yml). Since this is running in container, be sure to prefix the paths with either "./" or "../" for relative paths.
 	$(call check-var-defined,SCENARIO_NAME)
 	$(call check-var-defined,ARCH_REPO)
 	$(call check-var-defined,NET_ENV_FILE)
@@ -248,3 +248,7 @@ plugin-development-disable: # Revert all changes and delete .env if no longer ne
 	grep -lEr --include=\*.py --exclude-dir=.venv 'from (?:plugins|tests)' | xargs gsed -i -e 's/from plugins/from ansible_collections\.cifmw\.general\.plugins/g' -e 's/from tests/from ansible_collections\.cifmw\.general\.tests/g'
 	gsed -i '/PYTHONPATH=/d' .env
 	[ -s .env ] || rm .env
+
+.PHONY: build-cifmw-client-container
+build-cifmw-client-container: # Locally build cifmw-client container
+		podman build --security-opt label=disable -t localhost/cifmw-client:latest -f containerfiles/Containerfile.client .

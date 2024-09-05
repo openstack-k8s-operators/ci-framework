@@ -1,0 +1,78 @@
+- name: Fail if Ceph FSID is not set
+  ansible.builtin.fail:
+    msg: "Ceph FSID must be defined"
+  when: cifmw_cephadm_fsid is undefined
+
+- name: Get ceph_cli
+  ansible.builtin.include_tasks: ceph_cli.yml
+  vars:
+    mount_certs: true
+
+- name: Get Ceph Health
+  become: true
+  ansible.builtin.command:
+    cmd: "{{ cifmw_cephadm_ceph_cli }} -s -f json"
+  register: ceph
+
+- name: Load ceph data
+  ansible.builtin.set_fact:
+    ceph_health: "{{ ceph.stdout | from_json }}"
+
+- name: Fail if health is HEALTH_WARN || HEALTH_ERR
+  ansible.builtin.fail:
+    msg: Ceph is in {{ ceph_health.status }} state.
+  when:
+    - ceph_health.status == 'HEALTH_WARN' or
+      ceph_health.status == 'HEALTH_ERR'
+
+- name: Build container image target
+  ansible.builtin.set_fact:
+    cifmw_cephadm_update_target_image: >-
+      "{{ cifmw_cephadm_update_container_ns }}/{{ cifmw_cephadm_update_container_image }}:{{ cifmw_cephadm_update_container_tag }}"
+
+- name: Check if a Ceph update is required
+  become: true
+  ansible.builtin.command:
+    cmd: "{{ cifmw_cephadm_ceph_cli }} orch upgrade check {{ cifmw_cephadm_update_target_image }} -f json"
+  register: ceph_needs_update
+
+- name: Ceph upgrade
+  when: ceph_needs_update.stdout | from_json | community.general.json_query('needs_update') | default('') | length > 0
+  become: true
+  block:
+    - name: Rollout new container images using cephadm
+      ansible.builtin.command:
+        cmd: "{{ cifmw_cephadm_ceph_cli }} orch upgrade start --image {{ cifmw_cephadm_update_target_image }}"
+    - name: Wait while Ceph update is in progress
+      ansible.builtin.command:
+        cmd: "{{ cifmw_cephadm_ceph_cli }} orch upgrade status -f json"
+      register: ceph_upgrade_progress
+      retries: "{{ cifmw_cephadm_wait_update_retries }}"
+      delay: "{{ cifmw_cephadm_wait_update_delay }}"
+      until: not (ceph_upgrade_progress.stdout | from_json | community.general.json_query('in_progress') | bool | default(true))
+  rescue:
+    - name: Fail the execution
+      ansible.builtin.fail:
+        msg: Ceph update failed
+  always:
+    # append -update suffix to the log path and do not override a pre-existing
+    # log generated at deployment time by post.yml
+    - name: Set an update log path directory
+      ansible.builtin.set_fact:
+        cifmw_cephadm_log_path: "{{  cifmw_cephadm_log_path }}-update"
+    # create the log directory on ci-framework controller node
+    - name: Create ceph-logs directory
+      delegate_to: localhost
+      when: cifmw_cephadm_log_dump | default(false)
+      ansible.builtin.file:
+        path: "{{ cifmw_cephadm_log_path }}"
+        state: directory
+        mode: "0755"
+    - name: Dump default Ceph logs and update logs
+      ansible.builtin.include_tasks: logs.yml
+      vars:
+        cmd_type: "{{ item.type }}"
+        cur_cmd: "{{ item.cmd }}"
+      with_community.general.flattened:
+        - "{{ cifmw_cephadm_log_commands }}"
+        - "{{ cifmw_cephadm_update_log_commands }}"

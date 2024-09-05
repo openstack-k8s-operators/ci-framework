@@ -3,14 +3,19 @@
   vars:
     _ocp_name: >-
       {{
-        vm | replace('_', '-') |
-        replace('ocp-worker', 'worker') |
-        replace('ocp', 'master')
+        vm |
+        replace('ocp-', '')
       }}
     _hostname: >-
       {{
         (vm is match('^ocp.*')) |
         ternary(_ocp_name, vm)
+      }}
+    _type_id: >-
+      {{
+        vm |
+        regex_replace('^.*-([0-9]+)$',
+                      vm_type ~ '-\1')
       }}
     _user: "{{ 'core' if vm is match('^(crc|ocp).*') else 'zuul' }}"
     dataset:
@@ -19,12 +24,12 @@
       hostname: "{{ _hostname }}.utility"
       patterns:
         - "{{ vm }}"
+        - "{{ _type_id }}"
+        - "{{ _type_id }}.utility"
+        - "{{ _type_id }}.{{ inventory_hostname }}"
         - "{{ _hostname }}"
-        - "{{ _hostname }}.utility"
-        - "{{ vm }}.{{ inventory_hostname }}"
+        - "{{ vm_con_name }}"
         - "{{ _hostname }}.{{ inventory_hostname }}"
-        - "cifmw-{{ vm }}"
-        - "cifmw-{{ _hostname }}"
     proxy_data:
       target: localhost
       proxy_host: "{{ ansible_host | default(inventory_hostname) }}"
@@ -59,33 +64,11 @@
     cmd: >-
       set -o pipefail;
       cat ~/.ssh/authorized_keys |
-      ssh -v {{ _user }}@{{ vm }}.{{ inventory_hostname }} "cat >> ~/.ssh/authorized_keys"
+      ssh -v {{ _user }}@{{ vm_con_name }} "cat >> ~/.ssh/authorized_keys"
   retries: 5
   delay: 10
   register: _ssh_access
   until: _ssh_access.rc == 0
-
-- name: "Configure VM {{ vm }}"
-  when:
-    - vm_type is not match('^(crc|ocp).*$')
-  delegate_to: "{{ vm }}.{{ inventory_hostname }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.builtin.shell:
-    executable: /bin/bash
-    cmd: |-
-      test -d /home/zuul && exit 0;
-      set -xe -o pipefail;
-      echo "{{ vm }}" | sudo tee /etc/hostname;
-      sudo hostname -F /etc/hostname;
-      sudo useradd -m -d /home/zuul zuul;
-      echo "zuul ALL=(ALL)  NOPASSWD: ALL" | sudo tee /etc/sudoers.d/zuul;
-      sudo -u zuul mkdir -p /home/zuul/.ssh /home/zuul/src/github.com/openstack-k8s-operators;
-      sudo cp ${HOME}/.ssh/authorized_keys /home/zuul/.ssh/;
-      chown -R zuul: /home/zuul/.ssh;
-  retries: 5
-  delay: 10
-  register: _vm_config
-  until: _vm_config.rc == 0
 
 # TODO: consider https://docs.fedoraproject.org/en-US/fedora-coreos/storage/#_sizing_the_root_partition
 - name: Ensure we grow volume for OCP cluster members
@@ -95,13 +78,13 @@
     _root_part: "{{ vm_data.root_part_id | default('1') }}"
   ansible.builtin.shell:
     cmd: >-
-      ssh core@{{ vm }}.{{ inventory_hostname }}
+      ssh core@{{ vm_con_name }}
       "sudo growpart /dev/sda {{ _root_part }}; sudo xfs_growfs /;"
 
 - name: "Inject private key on hosts {{ vm }}"
   when:
     - vm_type is match('^controller.*$')
-  delegate_to: "{{ vm }}.{{ inventory_hostname }}"
+  delegate_to: "{{ vm_con_name }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
     dest: "/home/zuul/.ssh/id_cifw"
@@ -113,7 +96,7 @@
 - name: "Inject public key on hosts {{ vm }}"
   when:
     - vm_type is match('^controller.*$')
-  delegate_to: "{{ vm }}.{{ inventory_hostname }}"
+  delegate_to: "{{ vm_con_name }}"
   remote_user: "{{ _init_admin_user }}"
   ansible.builtin.copy:
     dest: "/home/zuul/.ssh/id_cifw.pub"

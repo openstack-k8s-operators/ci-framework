@@ -1,0 +1,165 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Test ocp_layout.yml tasks
+  hosts: instance
+  gather_facts: true
+  vars:
+    cifmw_run_id: aabbcc11
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_basedir: "/opt/basedir"
+    _cifmw_libvirt_manager_layout:
+      vms:
+        ocp:
+          amount: 3
+          uefi: true
+          root_part_id: 4
+          admin_user: core
+          image_local_dir: "{{ cifmw_basedir }}/images/"
+          disk_file_name: "ocp_master"
+          disksize: 10
+          cpus: 2
+          memory: 2
+          nets:
+            - public
+        ocp_worker:
+          amount: 1
+          uefi: true
+          root_part_id: 4
+          admin_user: core
+          image_local_dir: "{{ cifmw_basedir }}/images/"
+          disk_file_name: "ocp_worker"
+          disksize: 10
+          cpus: 2
+          memory: 2
+          nets:
+            - public
+      networks:
+        public: |-
+          <network>
+            <name>public</name>
+            <forward mode='nat'/>
+            <bridge name='public' stp='on' delay='0'/>
+            <dns enable="no"/>
+            <ip
+             family='ipv4'
+             address='192.168.110.1'
+             prefix='24'>
+            </ip>
+          </network>
+  tasks:
+    - name: Load networking definition
+      ansible.builtin.include_vars:
+        file: net-def.yml
+
+    - name: Generate networking data
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: generate_networking_data
+
+    - name: Inject ipmi.utility
+      become: true
+      ansible.builtin.lineinfile:
+        line: "host-record=ipmi.utility,{{ inventory_hostname }}.utility,192.168.110.1"
+        path: "/etc/cifmw-dnsmasq.d/host_records.conf"
+
+    - name: Restart cifmw-dnsmasq
+      become: true
+      ansible.builtin.systemd_service:
+        name: cifmw-dnsmasq
+        state: restarted
+
+    - name: Prepare OCP layout
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: ocp_layout.yml
+
+    - name: Run some assertions
+      vars:
+        _dns_checks:
+          master-0.utility: 192.168.140.10
+          master-0.instance: 192.168.140.10
+          ocp-0.utility: 192.168.140.10
+          ocp-0.instance: 192.168.140.10
+          master-0.ctlplane.local: 192.168.140.10
+          ocp-0.ctlplane.local: 192.168.140.10
+          master-0.public.local: 192.168.110.10
+          ocp-0.public.local: 192.168.110.10
+          master-0.storage.local: 172.18.0.10
+          ocp-0.storage.local: 172.18.0.10
+          master-0.tenant.local: 172.19.0.10
+          ocp-0.tenant.local: 172.19.0.10
+          master-1.utility: 192.168.140.11
+          master-2.utility: 192.168.140.12
+        _disks_name:
+          - ocp-master-0.qcow2
+          - ocp-master-1.qcow2
+          - ocp-master-2.qcow2
+          - ocp-worker-0.qcow2
+      block:
+        - name: Assert names are correct
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - item is match('^ocp-(master|worker)-[0-9]+$')
+          loop: "{{ _cifmw_libvirt_manager_ocp_cluster }}"
+
+        - name: Ensure DNS is properly resolving
+          vars:
+            _res: "{{ lookup('community.general.dig', item.key) }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _res == item.value
+            msg: >-
+              {{ item.key }} does not resolve to {{ item.value }} but
+              to {{ _res }}
+          loop: "{{ _dns_checks | dict2items }}"
+
+        - name: Ensure we have appropriate MAC data
+          vars:
+            _mac_hosts: "{{ cifmw_libvirt_manager_mac_map.keys() | sort}}"
+            _ocp_hosts: "{{ _cifmw_libvirt_manager_ocp_cluster | sort }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _mac_hosts == _ocp_hosts
+            msg: >-
+              OCP node list is {{ _ocp_hosts }} while MAC list is
+              {{ _mac_hosts }}
+
+        - name: Get existing disk images
+          register: _disk_imgs
+          ansible.builtin.find:
+            path: "{{ cifmw_basedir }}/images"
+            pattern: "*.qcow2"
+
+        - name: Ensure we have the expected base images
+          vars:
+            _existing_imgs: >-
+              {{
+                _disk_imgs.files |
+                map(attribute='path') |
+                map('basename') | sort
+              }}
+            _expected_imgs: "{{ _disks_name | sort }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _existing_imgs == _expected_imgs
+            msg: >-
+              Expected {{ _expected_imgs }} while found
+              {{ _existing_imgs }}

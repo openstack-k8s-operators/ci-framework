@@ -50,10 +50,12 @@
     - name: Ensure we have needed bits for compute when needed
       when:
         - computes_len | int > 0
+      vars:
+        _first_compute: "{{ groups['computes'] | sort | first }}"
       ansible.builtin.assert:
         that:
-          - "'compute-0' in crc_ci_bootstrap_networks_out"
-          - "'default' in crc_ci_bootstrap_networks_out['compute-0']"
+          - crc_ci_bootstrap_networks_out[_first_compute] is defined
+          - crc_ci_bootstrap_networks_out[_first_compute]['default'] is defined
 
     - name: Set facts for further usage within the framework
       ansible.builtin.set_fact:
@@ -71,6 +73,7 @@
       ansible.builtin.file:
         path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/{{ item }}"
         state: directory
+        mode: "0755"
       loop:
         - dataplane
         - controlplane
@@ -103,6 +106,8 @@
     - name: Prepare EDPM deploy related facts and keys
       when:
         - computes_len | int > 0
+      vars:
+        _first_compute: "{{ groups['computes'] | sort | first }}"
       block:
         - name: Set specific fact for compute accesses
           vars:
@@ -111,8 +116,8 @@
               SSH_KEY_FILE: "{{ ansible_user_dir }}/.ssh/id_cifw"
               DATAPLANE_COMPUTE_IP: >-
                 {{
-                  crc_ci_bootstrap_networks_out['compute-0'].default.ip4 |
-                  default(crc_ci_bootstrap_networks_out['compute-0'].default.ip) |
+                  crc_ci_bootstrap_networks_out[_first_compute].default.ip4 |
+                  default(crc_ci_bootstrap_networks_out[_first_compute].default.ip) |
                   ansible.utils.ipaddr('address')
                 }}
               DATAPLANE_SSHD_ALLOWED_RANGES: "['0.0.0.0/0']"
@@ -143,9 +148,9 @@
               {% endfor %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/neutron_public_interface_name
-                    value: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('') }}"
+                    value: "{{ crc_ci_bootstrap_networks_out[_first_compute].default.iface | default('') }}"
 
-              {% for compute_node in groups['computes'] if compute_node != 'compute-0' %}
+              {% for compute_node in groups['computes'] if compute_node != _first_compute %}
                   - op: replace
                     path: /spec/nodes/edpm-{{ compute_node }}/ansible/ansibleHost
                     value: >-
@@ -170,7 +175,7 @@
                     value:
                       net_config_data_lookup:
                         edpm-compute:
-                          nic2: "{{ crc_ci_bootstrap_networks_out['compute-0'].default.iface | default('ens7') }}"
+                          nic2: "{{ crc_ci_bootstrap_networks_out[_first_compute].default.iface | default('ens7') }}"
 
                   - op: add
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_debug
@@ -229,7 +234,7 @@
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleUser
-                    value: "{{ hostvars['compute-0'].ansible_user | default('zuul') }}"
+                    value: "{{ hostvars[_first_compute].ansible_user | default('zuul') }}"
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/ctlplane_dns_nameservers

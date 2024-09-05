@@ -44,8 +44,6 @@ are shared among multiple roles:
 - `cifmw_ssh_keysize`: (Integer) Size of ssh keys that will be injected into the controller in order to connect to the rest of the nodes. Defaults to 521.
 - `cifmw_architecture_repo`: (String) Path of the architecture repository on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
-- `cifmw_arch_automation_file`: (String) Name of the workflow automation file
-  in the architecture repository. Defaults to `default.yaml`
 - `cifmw_architecture_scenario`: (String) The selected VA scenario to deploy.
 - `cifmw_architecture_wait_condition`: (Dict) Structure defining custom wait_conditions for the automation.
 - `cifmw_architecture_user_kustomize.*`: (Dict) Structures defining user provided kustomization for automation. All these variables are combined together.
@@ -68,6 +66,11 @@ are shared among multiple roles:
 - `cifmw_nolog`: (Bool) Toggle `no_log` value for selected tasks. Defaults to `true` (hiding those logs by default).
 - `cifmw_parent_scenario`: (String or List(String)) path to existing scenario/parameter file to inherit from.
 - `cifmw_configure_switches`: (Bool) Specifies whether switches should be configured. Computes in `reproducer.yml` playbook. Defaults to `false`.
+- `cifmw_crc_default_network`: (String) name of the untagged network used to address DNS on the crc node. Default is `default`.
+- `cifmw_run_operators_compliance_scans`: (Bool) Specifies whether to run operator compliance scans.  Defaults to `false`.
+- `cifmw_run_compute_compliance_scans`: (Bool) Specifies whether to run compliance scans on the first compute.  Defaults to `false`.
+- `cifmw_run_id`: (String) CI Framework run identifier. This is used in libvirt_manager, to add some uniqueness to some types of virtual machines (anything that's not OCP, CRC nor controller).
+  If not set, the Framework will generate a random string for you, and store it on the target host, in `{{ cifmw_basedir }}/artifacts/run-id`
 
 ```{admonition} Words of caution
 :class: danger

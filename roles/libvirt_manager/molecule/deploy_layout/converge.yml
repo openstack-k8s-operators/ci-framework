@@ -18,6 +18,7 @@
   hosts: instance
   gather_facts: true
   vars:
+    cifmw_run_id: aabbcc11
     ansible_user_dir: "{{ lookup('env', 'HOME') }}"
     cifmw_basedir: "/opt/basedir"
     cifmw_libvirt_manager_vm_net_ip_set:
@@ -160,28 +161,31 @@
             sorted_vms: "{{ vms.list_vms | sort }}"
             compare_vms: >-
               {{
-                ['cifmw-compute-0',
-                 'cifmw-compute-1',
-                 'cifmw-baremetal-0'] | sort
+                ["cifmw-compute-" ~ cifmw_run_id ~ "-0",
+                 "cifmw-compute-" ~ cifmw_run_id ~ "-1",
+                 "cifmw-baremetal-" ~ cifmw_run_id ~ "-0"] | sort
               }}
           ansible.builtin.assert:
             that:
               - sorted_nets == compare_nets
               - sorted_vms == compare_vms
+            msg: |
+              Got {{ sorted_vms }} and {{ sorted_nets }}
+              Want {{ compare_vms }} and {{ compare_nets }}
 
         - name: Get compute-0 network interfaces
           register: cmp_nics
           ansible.builtin.command:
             cmd: >-
               virsh -c qemu:///system -q
-              domiflist cifmw-compute-0
+              domiflist cifmw-compute-{{ cifmw_run_id }}-0
 
         - name: Ensure compute-0 connections
           vars:
             _vals: >-
               {{
                 cmp_nics.stdout_lines |
-                product([' compute-0']) |
+                product([" compute-" ~ cifmw_run_id ~ "-0"]) |
                 map('join') |
                 map('split')
               }}
@@ -251,11 +255,13 @@
 
         - name: Verify the number of volumes attached match with the expected count.
           vars:
+            internal_disk_item: 1
+            attached_cdrom: 1
             expected_count: >-
               {{
                 (
                   cifmw_libvirt_manager_configuration.vms.compute.extra_disks_num | int
-                ) + 1
+                ) + internal_disk_item + attached_cdrom
               }}
             found_count: "{{ item.count | int }}"
           ansible.builtin.assert:

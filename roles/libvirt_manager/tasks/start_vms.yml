@@ -14,12 +14,8 @@
     - vm_data.start | default(true) | bool
     - vm_data.disk_file_name != 'blank'
   vars:
-    _matcher: >-
-      {{
-        '(cifmw-)?' ~
-        '([a-z0-9]+)-[0-9]+'
-      }}
-    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm: "{{ _vm.key }}"
+    vm_type: "{{ _vm.value }}"
     vm_data: >-
       {{
         _cifmw_libvirt_manager_layout.vms[vm_type]
@@ -28,9 +24,9 @@
     state: running
     name: "cifmw-{{ vm }}"
     uri: "qemu:///system"
-  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop: "{{ cifmw_libvirt_manager_all_vms | dict2items }}"
   loop_control:
-    loop_var: vm
+    loop_var: _vm
     pause: 1
 
 - name: "Wait for SSH on started VMs"
@@ -39,21 +35,16 @@
     - vm_data.start | default(true) | bool
     - vm_data.disk_file_name != 'blank'
   vars:
-    _matcher: >-
-      {{
-        '(cifmw-)?' ~
-        '([a-z0-9]+)-[0-9]+'
-      }}
-    vm_type: "{{ vm | regex_replace(_matcher, '\\2') }}"
+    vm: "{{ _vm.key }}"
+    vm_type: "{{ _vm.value }}"
     vm_data: >-
       {{
         _cifmw_libvirt_manager_layout.vms[vm_type]
       }}
     _ocp_name: >-
       {{
-        vm | replace('_', '-') |
-        replace('ocp-worker', 'worker') |
-        replace('ocp', 'master')
+        vm |
+        replace('ocp-', '')
       }}
     _hostname: >-
       {{
@@ -64,9 +55,10 @@
     host: "{{ _hostname }}.utility"
     port: 22
     delay: 2
-  loop: "{{ cifmw_libvirt_manager_all_vms }}"
+  loop: "{{ cifmw_libvirt_manager_all_vms | dict2items}}"
   loop_control:
-    loop_var: vm
+    loop_var: _vm
+    label: "{{ _hostname }}.utility"
   async: 120
   poll: 0
 
