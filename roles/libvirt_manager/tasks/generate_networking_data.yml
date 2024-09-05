@@ -37,29 +37,33 @@
 
     - name: Generate VM list
       vars:
-        _run_id: "{{ cifmw_run_id | lower }}"
+        _run_id: >-
+          {%- if cifmw_architecture_scenario is defined and
+                 cifmw_architecture_scenario | length > 0   -%}
+          -{{ cifmw_run_id | lower }}
+          {%- endif                                         -%}
         vm_list: >-
-          {% set _vm_list = {} -%}
-          {% set _range = [] -%}
-          {% for _type in _cifmw_libvirt_manager_layout.vms.keys() -%}
+          {% set _vm_list = {}                                      -%}
+          {% set _range = []                                        -%}
+          {% for _type in _cifmw_libvirt_manager_layout.vms.keys()  -%}
           {%   set _amount = _cifmw_libvirt_manager_layout.vms[_type].amount |
-                             default(1) | int -%}
-          {%   set _range = range(0, _amount) -%}
-          {%     if _type is not match('^(controller|ocp|crc).*') -%}
-          {%       set _name = _type ~ '-' ~ _run_id          -%}
-          {%     else                                         -%}
-          {%       if _type == 'ocp'                          -%}
-          {%         set _name = 'ocp-master'                 -%}
-          {%       else                                       -%}
-          {%         set _name = _type                        -%}
-          {%       endif                                      -%}
-          {%     endif                                        -%}
+                             default(1) | int                       -%}
+          {%   set _range = range(0, _amount)                       -%}
+          {%     if _type is not match('^(controller|ocp|crc).*')   -%}
+          {%       set _name = _type ~ _run_id                      -%}
+          {%     else                                               -%}
+          {%       if _type == 'ocp'                                -%}
+          {%         set _name = 'ocp-master'                       -%}
+          {%       else                                             -%}
+          {%         set _name = _type                              -%}
+          {%       endif                                            -%}
+          {%     endif                                              -%}
           {%   set _vms = [_name | replace('_', '-')] |
                           product(_range) |
-                          map('join', '-')                    -%}
-          {%   set _map = dict(_vms | zip([_type] * _amount)) -%}
-          {%   set _ = _vm_list.update(_map)                  -%}
-          {% endfor -%}
+                          map('join', '-')                          -%}
+          {%   set _map = dict(_vms | zip([_type] * _amount))       -%}
+          {%   set _ = _vm_list.update(_map)                        -%}
+          {% endfor                                                 -%}
           {{ _vm_list }}
       ansible.builtin.set_fact:
         cifmw_libvirt_manager_all_vms: "{{ vm_list }}"
