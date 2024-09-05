@@ -128,7 +128,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_ansibletest_openstack_config_secret`: (String) The name of the Secret containing the secure.yaml. Default value: "openstack-config-secret"
 * `cifmw_test_operator_ansibletest_debug`: (Bool) Run ansible playbook with -vvvv. Default value: `false`
 * `cifmw_test_operator_ansibletest_workflow`: (List) A parameter that contains a workflow definition. Default value: `[]`
-* `cifmw_test_operator_ansibletest_extra_mounts`: (List) Extra configmaps for mounting in the pod. Default value: `[]`
+* `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: (List) Extra configmaps for mounting in the pod. Default value: `[]`
 * `cifmw_test_operator_ansibletest_config`: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value:
 ```
   apiVersion: test.openstack.org/v1beta1
@@ -138,7 +138,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_ansibletest_image }}:{{ cifmw_test_operator_ansibletest_image_tag }}"
-    extraMounts: "{{ cifmw_test_operator_ansibletest_extra_mounts }}"
+    extraConfigmapsMounts: "{{ cifmw_test_operator_ansibletest_extra_configmaps_mounts }}"
     storageClass: "{{ cifmw_test_operator_storage_class }}"
     computeSSHKeySecretName: "{{ cifmw_test_operator_ansibletest_compute_ssh_key_secret_name }}"
     workloadSSHKeySecretName: "{{ cifmw_test_operator_ansibletest_workload_ssh_key_secret_name }}"
