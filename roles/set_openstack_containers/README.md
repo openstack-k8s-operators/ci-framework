@@ -16,6 +16,7 @@ The role will generate two 2 files in ~/ci-framework-data/artifacts/ directory a
 * `cifmw_set_openstack_containers_dlrn_md5_path`: Full path of delorean.repo.md5. Defaults to `/etc/yum.repos.d/delorean.repo.md5`.
 * `cifmw_set_openstack_containers_overrides`: Extra container overrides. Defaults to `{}`
 * `cifmw_set_openstack_containers_prefix`: Update container containing. Defaults to `openstack`
+* `cifmw_set_openstack_containers_new_prefix`: Override existing container prefix name.
 * `cifmw_set_openstack_containers_openstack_version_change`: (Boolean) Set environment variables for openstack services containers for specific OPENSTACK_RELEASE_VERSION defined in cifmw_set_openstack_containers_update_target_version. It should be used only for meta openstack operator in prepare for openstack minor update. Defaults to `false`.
 * `cifmw_set_openstack_containers_update_target_version`: Value of OPENSTACK_RELEASE_VERSION env in openstack operator that should be set. Defaults to `0.0.2`.
 * `cifmw_set_openstack_containers_openstack_final_env`: File name to store the operator env in a file. Default to `operator_env.txt`.
