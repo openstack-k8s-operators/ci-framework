@@ -131,6 +131,28 @@
           --config --persistent;
           {% endfor -%}
 
+- name: Extract UUID
+  block:
+    - name: Get VM UUID
+      register: _uuid
+      vars:
+        _vm_name: "cifmw-{{ vm }}"
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system
+          domuuid {{ _vm_name }}
+
+    - name: Inject UUID in dataset
+      vars:
+        _vm_name: "cifmw-{{ vm }}"
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_uuids: >-
+          {{
+            cifmw_libvirt_manager_uuids |
+            default({}) |
+            combine({_vm_name: _uuid.stdout | trim})
+          }}
+
 - name: Create and attach ISO
   when:
     - vm_data.disk_file_name != 'blank'
