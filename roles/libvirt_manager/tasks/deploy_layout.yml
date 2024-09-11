@@ -81,6 +81,29 @@
     - cifmw_libvirt_manager_mac_map is undefined
   ansible.builtin.include_tasks: generate_networking_data.yml
 
+- name: Create group inventories
+  when:
+    - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
+    - _cifmw_libvirt_manager_layout.vms[item].amount | default(1) | int > 0
+  vars:
+    hosts: >-
+      {{
+        cifmw_libvirt_manager_all_vms |
+        dict2items |
+        selectattr('value', 'equalto', item)
+      }}
+  ansible.builtin.template:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/{{ item }}-group.yml"
+    src: inventory.yml.j2
+  loop: "{{ _cifmw_libvirt_manager_layout.vms.keys() }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create "all" group inventory file
+  ansible.builtin.template:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+    src: "all-inventory.yml.j2"
+
 - name: Ensure storage pool is present.
   when:
     - (require_extra_disks | int) > 0
@@ -232,29 +255,6 @@
   loop_control:
     index_var: index
     label: "{{ item.key }}"
-
-- name: Create group inventories
-  when:
-    - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
-    - _cifmw_libvirt_manager_layout.vms[item].amount | default(1) | int > 0
-  vars:
-    hosts: >-
-      {{
-        _libvirt_manager_networking.instances |
-        dict2items |
-        selectattr('key', 'match', item)
-      }}
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/{{ item }}-group.yml"
-    src: inventory.yml.j2
-  loop: "{{ _cifmw_libvirt_manager_layout.vms.keys() }}"
-  loop_control:
-    label: "{{ item }}"
-
-- name: Create "all" group inventory file
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
-    src: "all-inventory.yml.j2"
 
 - name: List running virtual machines.
   community.libvirt.virt:
