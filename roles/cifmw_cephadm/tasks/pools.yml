@@ -47,8 +47,9 @@
 
 - name: Configure the RBD trash purge scheduler
   when:
-    - cifmw_enabled_services | default([]) | intersect(['cinder_volume'])
     - cifmw_cephadm_enable_trash_scheduler | default(false)
+    - cifmw_cephadm_pools is defined
+    - cifmw_cephadm_pools | length > 0
   block:
     - name: Get the RBD ceph_cli
       ansible.builtin.include_tasks: ceph_cli.yml
@@ -56,10 +57,11 @@
         ceph_command: rbd
 
     - name: Set trash interval
+      when: item.trash_purge_enabled | default(false)
       ansible.builtin.command:
-        cmd: |
-          {{ cifmw_cephadm_ceph_cli }} trash purge schedule add \
-          {{ cifmw_cephadm_rbd_trash_interval | default(15) }} --pool {{ item }}
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }} trash purge schedule add
+          {{ cifmw_cephadm_rbd_trash_interval | default(15) }} --pool {{ item.name }}
       changed_when: false
       become: true
-      loop: "{{ [ cinder_pool.name | default('volumes') ] + cinder_pool.cinder_extra_pools | default([]) }}"
+      loop: "{{ cifmw_cephadm_pools | default([]) }}"
