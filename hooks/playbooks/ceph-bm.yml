@@ -1,0 +1,39 @@
+- name: Deploy ceph on OSP BMO deployed nodes
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Fetch OSP BMO nodesets
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get OpenStackBaremetalSet -n "{{ namespace|default('openstack') }}"  -o yaml
+      register: _osp_bmo_nodsets_oc_out
+
+    - name: Add OSP BMO nodesets to Ansible
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: "{{ item.group }}"
+        ansible_ssh_user: "{{ item.user }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.ssh/id_cifw"
+        ansible_ssh_extra_args: '-o StrictHostKeyChecking=no'
+      loop: >-
+        {% set hosts = [] -%}
+        {% set nodesets = (_osp_bmo_nodsets_oc_out.stdout | from_yaml)['items'] | default([]) -%}
+        {% for spec in nodesets | map(attribute='spec') -%}
+        {%   for host_key, host_val in spec.baremetalHosts.items() -%}
+        {%     set _ = hosts.append(
+          {
+          'name': host_key,
+          'ip': host_val['ctlPlaneIP'] | ansible.utils.ipaddr('address'),
+          'user': spec.cloudUserName,
+          'group': host_key | split('-') | first + 's'
+        }) -%}
+        {%   endfor -%}
+        {% endfor -%}
+        {{ hosts }}
+
+- name: Deploy Ceph on target nodes
+  ansible.builtin.import_playbook: ../../playbooks/ceph.yml
