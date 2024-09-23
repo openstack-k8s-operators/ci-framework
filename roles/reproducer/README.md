@@ -27,6 +27,7 @@ Those parameters shouldn't be used, unless the user is able to understand potent
 
 * `cifmw_reproducer_validate_network`: (Bool) Toggle network validations. Those validations ensure all of listed networks in VMs are defined. Defaults to `true`.
 * `cifmw_reproducer_validate_ocp_layout`: (Bool) Toggle OCP layout validations. Those validations ensure volumes, amounts and resources are properly defined for OCP cluster members (masters and workers). Defaults to `true`.
+* `cifmw_reproducer_validate_network_host`: (String) Specify the hostname that should be pinged in order to validate network connectivity from the ctlplane network. Default value is `controller-0.utility`
 
 ### run_job and run_content_provider booleans and risks.
 
