@@ -98,10 +98,20 @@
     - >-
       (compute.key in (groups['computes'] | default([]))) or
       (compute.key in (groups['cephs'] | default([]))) or
-      (compute.key in (groups['networkers'] | default([])))
+      (compute.key in (groups['networkers'] | default([]))) or
+      (compute.key in (groups['dcn1-computes'] | default([]))) or
+      (compute.key in (groups['dcn2-computes'] | default([])))
   vars:
     _host: "{{ compute.key }}"
-    _prefix: "{{cifmw_networking_env_definition.networks.ctlplane.network_v4 | ansible.utils.ipaddr('prefix') }}"
+    _prefix: >-
+      {% set ctlplane_variants = ['ctlplane', 'ctlplanedcn1', 'ctlplanedcn2'] %}
+      {{
+        cifmw_networking_env_definition.networks
+        | selectattr('key', 'in', ctlplane_variants)
+        | map(attribute='value.network_v4')
+        | first
+        | ansible.utils.ipaddr('prefix')
+      }}
   ansible.builtin.include_tasks: configure_computes.yml
   loop: >-
     {{ cifmw_networking_env_definition.instances | dict2items }}
