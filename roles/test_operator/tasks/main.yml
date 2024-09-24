@@ -23,13 +23,6 @@
     owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
-- name: Set run_tempest and run_tobiko bool values
-  ansible.builtin.set_fact:
-    run_tempest: "{{ cifmw_run_tempest | default('true') | bool }}"
-    run_tobiko: "{{ cifmw_run_tobiko | default('false') | bool }}"
-    run_ansibletest: "{{ cifmw_run_ansibletest | default('false') | bool }}"
-    run_horizontest: "{{ cifmw_run_horizontest | default('false') | bool }}"
-
 - name: Ensure OperatorGroup for the test-operator is present
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -132,52 +125,12 @@
   until: csv.resources[0].status.phase | default(omit) == "Succeeded"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Run tempest job
-  vars:
-    run_test_fw: tempest
-    test_operator_config: "{{ cifmw_test_operator_tempest_config }}"
-    test_operator_job_name: "{{ cifmw_test_operator_tempest_name }}"
-    test_operator_kind_name: "{{ cifmw_test_operator_tempest_kind_name }}"
-    test_operator_crd_name: "{{ cifmw_test_operator_tempest_crd_name }}"
-    test_operator_workflow: "{{ cifmw_test_operator_tempest_workflow }}"
-    test_operator_config_playbook: tempest-tests.yml
-  ansible.builtin.include_tasks: run-test-operator-job.yml
-  when: run_tempest
-
-- name: Run ansibletest job
-  vars:
-    run_test_fw: ansibletest
-    test_operator_config: "{{ cifmw_test_operator_ansibletest_config }}"
-    test_operator_job_name: "{{ cifmw_test_operator_ansibletest_name }}"
-    test_operator_kind_name: "{{ cifmw_test_operator_ansibletest_kind_name }}"
-    test_operator_crd_name: "{{ cifmw_test_operator_ansibletest_crd_name }}"
-    test_operator_workflow: "{{ cifmw_test_operator_ansibletest_workflow }}"
-  ansible.builtin.include_tasks: run-test-operator-job.yml
-  when: run_ansibletest
-
-- name: Run horizontest job
-  vars:
-    run_test_fw: horizontest
-    test_operator_config: "{{ cifmw_test_operator_horizontest_config }}"
-    test_operator_job_name: "{{ cifmw_test_operator_horizontest_name }}"
-    test_operator_kind_name: "{{ cifmw_test_operator_horizontest_kind_name }}"
-    test_operator_crd_name: "{{ cifmw_test_operator_horizontest_crd_name }}"
-    test_operator_workflow: []
-  ansible.builtin.include_tasks: run-test-operator-job.yml
-  when: run_horizontest
-
-# Since Tobiko may include disruptive tests (faults), it is better to execute it at the end
-- name: Run tobiko job
-  vars:
-    run_test_fw: tobiko
-    test_operator_config: "{{ cifmw_test_operator_tobiko_config }}"
-    test_operator_job_name: "{{ cifmw_test_operator_tobiko_name }}"
-    test_operator_kind_name: "{{ cifmw_test_operator_tobiko_kind_name }}"
-    test_operator_crd_name: "{{ cifmw_test_operator_tobiko_crd_name }}"
-    test_operator_workflow: "{{ cifmw_test_operator_tobiko_workflow }}"
-    test_operator_config_playbook: tobiko-tests.yml
-  ansible.builtin.include_tasks: run-test-operator-job.yml
-  when: run_tobiko
+- name: Call test stages loop
+  when: not cifmw_test_operator_dry_run | bool
+  ansible.builtin.include_tasks: stages.yml
+  loop: "{{ cifmw_test_operator_stages }}"
+  loop_control:
+    loop_var: _stage_vars
 
 - name: Delete all resources created by the role
   ansible.builtin.include_tasks: cleanup.yml
