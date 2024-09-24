@@ -3,7 +3,6 @@
 Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/test-operator/).
 
 ## Parameters
-
 * `cifmw_test_operator_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/test_operator` which defaults to `~/ci-framework-data/tests/test_operator`
 * `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
 * `cifmw_test_operator_index`: (String) Full name of container image with index that contains the test-operator. Default value: `quay.io/openstack-k8s-operators/test-operator-index:latest`
@@ -24,6 +23,19 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_storage_class`: (String) Value for `storageClass` in generated Tempest or Tobiko CRD file. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
 * `cifmw_test_operator_delete_logs_pod`: (Boolean) Delete tempest log pod created by the role at the end of the testing. Default value: `false`.
 * `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `true`
+* `cifmw_test_operator_stages`: (List) List of dictionaries defining the stages that should be used in the test operator role. List items options are:
+  * `name`: (String) The name of the stage. The name must be unique.
+  * `type`: (String) The framework name you would like to call, currently the options are: tempest, ansibletest, horizontest, tobiko.
+  * `test_vars_file`: (String) Path to the file used for testing, this file should contain the testing params for this stage. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
+  * `test_vars`: (String) Testing params for this specific stage if a `test_vars_file` is used the specified parameters would override the ones in the `test_vars_file`. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
+  * `pre_test_stage_hooks`: (List) List of pre hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
+  * `post_test_stage_hooks`: (List) List of post hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
+ Default value:
+```
+cifmw_test_operator_stages:
+  - name: tempest
+    type: tempest
+```
 
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_name`: (String) Value used in the `Tempest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tempest-tests`
