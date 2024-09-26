@@ -37,23 +37,27 @@
 - name: Set common facts for the role
   ansible.builtin.set_fact:
     operator_name: "{{ cifmw_set_openstack_containers_operator_name }}"
+    operator_namespace: >-
+      {{
+        cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] |
+        default(cifmw_set_openstack_containers_operators_namespace)
+      }}
     cifmw_set_openstack_containers_common_env: >-
       {{
-        cifmw_install_yamls_environment |
+        ( cifmw_install_yamls_environment |
         combine({'PATH': cifmw_path}) |
         combine(cifmw_set_openstack_containers_extra_vars | default({}))
+        ) if cifmw_install_yamls_environment is defined else omit
       }}
     cacheable: true
 
 - name: Get meta operator environment variable
-  vars:
-    _operator_ns: "{{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}"
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
-    script: "oc set env $(oc get pods -n {{ _operator_ns }} -o name -l openstack.org/operator-name={{ operator_name }}) -n {{ _operator_ns }} --list"
+    script: "oc set env $(oc get pods -n {{ operator_namespace }} -o name -l openstack.org/operator-name={{ operator_name }}) -n {{ operator_namespace }} --list"
   register: containers_env_list
 
 - name: Generate update_env_vars.sh script
@@ -86,7 +90,7 @@
     cmd: |
       set -o pipefail
       oc get csv -l operators.coreos.com/openstack-operator.openstack-operators \
-      --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} \
+      --namespace={{ operator_namespace }} \
       --no-headers=true | grep -i "succeeded"
   register: operator_status
   until: operator_status.rc == 0
@@ -105,6 +109,9 @@
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_wait'
+  when:
+    - operator_name != 'openstack'
+    - not cifmw_architecture_scenario is defined
 
 - name: Retrieve operator pods
   environment:
@@ -112,7 +119,7 @@
     PATH: "{{ cifmw_path }}"
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
-    script: "oc get pods -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} -o name"
+    script: "oc get pods -n {{ operator_namespace }} -o name"
   register: operator_pod_name
 
 - name: Get the operator pod name
@@ -131,6 +138,6 @@
     PATH: "{{ cifmw_path }}"
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
-    script: "oc set env {{ operator_pod_name }} -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} --list > {{ cifmw_set_openstack_containers_openstack_final_env }}"
+    script: "oc set env {{ operator_pod_name }} -n {{ operator_namespace }} --list > {{ cifmw_set_openstack_containers_openstack_final_env }}"
     chdir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
     creates: "{{ cifmw_set_openstack_containers_openstack_final_env }}"
