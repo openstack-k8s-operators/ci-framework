@@ -69,20 +69,30 @@
   when:
     - cifmw_libvirt_manager_uuids is not defined
   block:
+    - name: "Ensure file exists: {{ _uuid_file }}"
+      register: _uuid_file_status
+      ansible.builtin.stat:
+        path: "{{ _uuid_file }}"
+
     - name: "Slurp content of: {{ _uuid_file }}"
-      ansible.builtin.slurp:
-        src: "{{ _uuid_file }}"
-      register: _libvirt_uuids_file
+      when: _uuid_file_status.stat.exists
+      block:
+        - name: "Slurp content of: {{ _uuid_file }}"
+          ansible.builtin.slurp:
+            src: "{{ _uuid_file }}"
+            register: _libvirt_uuids_file
 
-    - name: "Set cifmw_libvirt_manager_uuids fact from {{ _uuid_file }}"
-      vars:
-        _yaml: "{{ _libvirt_uuids_file.content | b64decode | from_yaml }}"
-      ansible.builtin.set_fact:
-        cifmw_libvirt_manager_uuids: "{{ _yaml.libvirt_uuid }}"
+        - name: "Set cifmw_libvirt_manager_uuids fact from {{ _uuid_file }}"
+          vars:
+            _yaml: "{{ _libvirt_uuids_file.content | b64decode | from_yaml }}"
+          ansible.builtin.set_fact:
+            cifmw_libvirt_manager_uuids: "{{ _yaml.libvirt_uuid }}"
 
-- name: Set fact related to Libvirt driver
+- name: Set _cifmw_sushy_emulator_instance fact
   when:
     - cifmw_sushy_emulator_driver == 'libvirt'
+    - (cifmw_libvirt_manager_uuids is defined and
+       cifmw_libvirt_manager_uuids | length > 0)
   block:
     - name: Generate list of filtered VMs
       vars:
