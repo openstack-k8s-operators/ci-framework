@@ -26,6 +26,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `true`
 
 ## Tempest specific parameters
+* `cifmw_test_operator_tempest_name`: (String) Value used in the `Tempest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tempest-tests`
 * `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
 * `cifmw_test_operator_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default value: `podified-antelope-centos9`
 * `cifmw_test_operator_tempest_container`: (String) Name of the tempest container. Default value: `openstack-tempest`
@@ -49,7 +50,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   apiVersion: test.openstack.org/v1beta1
   kind: Tempest
   metadata:
-    name: tempest-tests
+    name: "{{ cifmw_test_operator_tempest_name }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_tempest_image }}:{{ cifmw_test_operator_tempest_image_tag }}"
@@ -70,6 +71,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ```
 
 ## Tobiko specific parameters
+* `cifmw_test_operator_tobiko_name`: (String) Value used in the `Tobiko.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tobiko-tests`
 * `cifmw_test_operator_tobiko_registry`: (String) The registry where to pull tobiko container. Default value: `quay.io`
 * `cifmw_test_operator_tobiko_namespace`: (String) Registry's namespace where to pull tobiko container. Default value: `podified-antelope-centos9`
 * `cifmw_test_operator_tobiko_container`: (String) Name of the tobiko container. Default value: `openstack-tobiko`
@@ -91,7 +93,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   apiVersion: test.openstack.org/v1beta1
   kind: Tobiko
   metadata:
-    name: tobiko-tests
+    name: "{{ cifmw_test_operator_tobiko_name }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     kubeconfigSecretName: "{{ cifmw_test_operator_tobiko_kubeconfig_secret }}"
@@ -112,6 +114,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ```
 
 ## AnsibleTest specific parameters
+* `cifmw_test_operator_ansibletest_name`: (String) Value used in the `Ansibletest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `ansibletest`
 * `cifmw_test_operator_ansibletest_registry`: (String) The registry where to pull ansibletests container. Default value: `quay.io`
 * `cifmw_test_operator_ansibletest_namespace`: (String) Registry's namespace where to pull ansibletests container. Default value:podified-antelope-centos9
 * `cifmw_test_operator_ansibletest_container`: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
@@ -135,7 +138,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   apiVersion: test.openstack.org/v1beta1
   kind: AnsibleTest
   metadata:
-    name: horizontest-sample
+    name: "{{ cifmw_test_operator_ansibletest_name }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_ansibletest_image }}:{{ cifmw_test_operator_ansibletest_image_tag }}"
@@ -156,6 +159,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ```
 
 ## Horizontest specific parameters
+* `cifmw_test_operator_horizontest_name`: (String) Value used in the `Horizontest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `horizontest-tests`
 * `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `quay.io`
 * `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `podified-antelope-centos9`
 * `cifmw_test_operator_horizontest_container`: (String) Name of the horizontest container. Default value: `openstack-horizontest`
@@ -179,7 +183,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   apiVersion: test.openstack.org/v1beta1
   kind: HorizonTest
   metadata:
-    name: horizontest
+    name: "{{ cifmw_test_operator_horizontest_name }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_horizontest_image }}:{{ cifmw_test_operator_horizontest_image_tag }}"
@@ -196,4 +200,16 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
     flavorName: "{{ cifmw_test_operator_horizontest_flavor_name }}"
     logsDirectoryName: "{{ cifmw_test_operator_horizontest_logs_directory_name }}"
     horizonTestDir: "{{ cifmw_test_operator_horizontest_horizon_test_dir }}"
+```
+
+## Examples
+
+### Execute the `test-operator` role multiple times within a single job
+
+If you want to run the `test-operator` role twice within a single job, make sure
+that for the second run, you specify a value for the `cifmw_test_operator_*_name`
+other than the default one (e.g., `tempest-tests`, `tobiko-tests`, ...):
+
+```
+cifmw_test_operator_tempest_name: "post-update-tempest-tests"
 ```
