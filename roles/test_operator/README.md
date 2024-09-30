@@ -26,6 +26,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
+* `cifmw_test_operator_tempest_name`: (String) Name of the tempest CR name. Default value: `tempest-tests`
 * `cifmw_test_operator_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default value: `podified-antelope-centos9`
 * `cifmw_test_operator_tempest_container`: (String) Name of the tempest container. Default value: `openstack-tempest`
 * `cifmw_test_operator_tempest_image`: (String) Tempest image to be used. Default value: `{{ cifmw_test_operator_tempest_registry }}/{{ cifmw_test_operator_tempest_namespace }}/{{ cifmw_test_operator_tempest_container }}`
@@ -70,6 +71,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 
 ## Tobiko specific parameters
 * `cifmw_test_operator_tobiko_registry`: (String) The registry where to pull tobiko container. Default value: `quay.io`
+* `cifmw_test_operator_tobiko_name`: (String) Name of the tobiko CR name. Default value: `tobiko-tests`
 * `cifmw_test_operator_tobiko_namespace`: (String) Registry's namespace where to pull tobiko container. Default value: `podified-antelope-centos9`
 * `cifmw_test_operator_tobiko_container`: (String) Name of the tobiko container. Default value: `openstack-tobiko`
 * `cifmw_test_operator_tobiko_image`: (String) Tobiko image to be used. Default value: `{{ cifmw_test_operator_tobiko_registry }}/{{ cifmw_test_operator_tobiko_namespace }}/{{ cifmw_test_operator_tobiko_container }}`
@@ -112,6 +114,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 
 ## AnsibleTest specific parameters
 * `cifmw_test_operator_ansibletest_registry`: (String) The registry where to pull ansibletests container. Default value: `quay.io`
+* `cifmw_test_operator_ansibletest_name`: (String) Name of the Ansibletests CR name. Default value: `ansibletest`
 * `cifmw_test_operator_ansibletest_namespace`: (String) Registry's namespace where to pull ansibletests container. Default value:podified-antelope-centos9
 * `cifmw_test_operator_ansibletest_container`: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
 * `cifmw_test_operator_ansibletest_image`: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_ansibletest_registry }}/{{ cifmw_test_operator_ansibletest_namespace }}/{{ cifmw_test_operator_ansibletest_container }}`
@@ -156,6 +159,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 
 ## Horizontest specific parameters
 * `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `quay.io`
+* `cifmw_test_operator_horizontest_name`: (String) Name of the horizontest CR name. Default value: `horizontest-tests`
 * `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `podified-antelope-centos9`
 * `cifmw_test_operator_horizontest_container`: (String) Name of the horizontest container. Default value: `openstack-horizontest`
 * `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: `{{ cifmw_test_operator_horizontest_registry }}/{{ cifmw_test_operator_horizontest_namespace }}/{{ cifmw_test_operator_horizontest_container }}`
