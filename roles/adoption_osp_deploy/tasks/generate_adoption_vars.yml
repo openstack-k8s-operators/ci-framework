@@ -1,0 +1,39 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Gather ansible_user_id from controller
+  delegate_to: "controller-0"
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Generate adoption vars file
+  delegate_to: "controller-0"
+  vars:
+    _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
+    _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
+    _undercloud_ip: "{{ _undercloud_net.networks.ctlplane.ip_v4 }}"
+    _controller_1_name: "{{ _vm_groups['osp-controllers'] | first }}"
+    _controller_1_net: "{{ cifmw_networking_env_definition.instances[_controller_1_name] }}"
+    _controller_1_internalapi_ip: "{{ _controller_1_net.networks.internalapi.ip_v4 }}"
+    _compute_1_name: "{{ _vm_groups['osp-computes'] | first }}"
+    _compute_1_net: "{{ cifmw_networking_env_definition.instances[_compute_1_name] }}"
+    _compute_1_ip: "{{ _compute_1_net.networks.ctlplane.ip_v4 }}"
+  ansible.builtin.template:
+    src: "adoption_vars.yaml.j2"
+    dest: "{{ ansible_user_dir }}/adoption_vars.yaml"
+    mode: "0644"
