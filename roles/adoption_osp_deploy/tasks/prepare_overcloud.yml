@@ -14,31 +14,72 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Gather ansible_user_id from undercloud
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
 - name: Prepare enviornment for 17.1 overcloud deployment
   vars:
+    _overcloud_name: >-
+      {{
+        _stack.stackname |
+        default('overcloud')
+      }}
+    _hostname_map_translation: >-
+      {{
+        cifmw_adoption_osp_deploy_scenario.hostname_groups_map |
+        ansible.utils.keep_keys(target=_stack.stack_nodes)
+      }}
     _network_data_file: >-
       {{
         [cifmw_adoption_source_scenario_path,
-         _adoption_source_scenario.overcloud.network_data_file
+         _stack.network_data_file
         ] | path_join
       }}
-    _network_data_file_name: "{{ _network_data_file | basename }}"
-    _network_data_file_dest: "{{ ansible_user_dir }}/{{ _network_data_file_name }}"
+    _network_data_file_dest: >-
+      {{
+        [ansible_user_dir,
+         'network_data_' ~  _overcloud_name ~'.yaml'
+        ] | path_join
+      }}
+    _network_data_extension: "{{ _network_data_file | splitext | last }}"
     _vips_data_file: >-
       {{
         [cifmw_adoption_source_scenario_path,
-         _adoption_source_scenario.overcloud.vips_data_file
+         _stack.vips_data_file
         ] | path_join
       }}
-    _vips_data_file_name: "{{ _vips_data_file | basename }}"
-    _vips_data_file_dest: "/home/zuul/{{ _vips_data_file_name }}"
+    _vips_data_file_dest: >-
+      {{
+        [ansible_user_dir,
+         'vips_data_' ~ _overcloud_name ~ '.yaml'
+        ] | path_join
+      }}
     _source_cmd: "source {{ ansible_user_dir }}/stackrc"
+    _network_provision_output: "network_provision_{{ _overcloud_name }}_out.yaml"
+    _vips_provision_output: "vips_provision_{{ _overcloud_name }}_out.yaml"
   block:
+    - name: "Gather nodes for stack {{ _overcloud_name }}"
+      when: group.key is in _hostname_map_translation
+      ansible.builtin.set_fact:
+        _tripleo_nodes_stack: >-
+          {{
+             _tripleo_nodes_stack | default([]) +
+             group.value
+          }}
+      loop: "{{ _vm_groups | dict2items }}"
+      loop_control:
+        loop_var: group
+        label: "{{ group.key }}"
+
     - name: Ensure overcloud vms are started
       vars:
         _cifmw_libvirt_manager_layout: >-
           {%- set layout = {'vms': {}} -%}
-          {%- for group in _adoption_source_scenario.hostname_groups_map -%}
+          {%- for group in _stack.stack_nodes -%}
           {%- set _ = layout['vms'].update({
             group: {'start': true, 'disk_file_name': 'dummy'}})
           -%}
@@ -46,7 +87,7 @@
           {{ layout }}
         cifmw_libvirt_manager_all_vms: >-
           {%- set vms = {} -%}
-          {%- for group in _adoption_source_scenario.hostname_groups_map -%}
+          {%- for group in _stack.stack_nodes -%}
           {%- for vm in _vm_groups[group] -%}
             {%- set _ = vms.update({vm: group}) -%}
           {%- endfor -%}
@@ -64,32 +105,46 @@
       args:
         apply:
           delegate_to: "{{ _vm }}"
-      loop: "{{ _tripleo_nodes }}"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: _vm
         pause: 1
 
     - name: Ensure repos are setup in overcloud nodes
-      when: "'undercloud' not in _vm"
       delegate_to: "{{ _vm }}"
       become: true
       ansible.builtin.command:
         cmd: "subscription-manager repos --enable {{ cifmw_adoption_osp_deploy_repos | join(' --enable ') }}"
-      loop: "{{ _tripleo_nodes }}"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: _vm
         pause: 1
 
-    - name: Copy network data file
+    - name: Copy network data file if it's not a template
+      when: _network_data_extension != '.j2'
       delegate_to: "osp-undercloud-0"
       ansible.builtin.copy:
         src: "{{ _network_data_file }}"
         dest: "{{ _network_data_file_dest }}"
+        mode: "0644"
+
+    - name: Template network data file if needed
+      when: _network_data_extension == '.j2'
+      delegate_to: "osp-undercloud-0"
+      vars:
+        cloud_domain: >-
+          {{
+            cifmw_adoption_osp_deploy_scenario.cloud_domain
+          }}
+      ansible.builtin.template:
+        src: "{{ _network_data_file }}"
+        dest: "{{ _network_data_file_dest }}"
+        mode: "0644"
 
     - name: Ensure network_provision_out file does not exist
       delegate_to: "osp-undercloud-0"
       ansible.builtin.file:
-        path: "{{ ansible_user_dir }}/network_provision_out.yaml"
+        path: "{{ ansible_user_dir }}/{{ _network_provision_output }}"
         state: absent
 
     - name: Provision openstack networks
@@ -97,7 +152,7 @@
       vars:
         _network_provision_cmd: >-
           openstack overcloud network provision
-          --output {{ ansible_user_dir }}/network_provision_out.yaml
+          --output {{ ansible_user_dir }}/{{ _network_provision_output }}
           {{ _network_data_file_dest }}
       cifmw.general.ci_script:
         chdir: "{{ ansible_user_dir }}"
@@ -109,25 +164,21 @@
       ansible.builtin.copy:
         src: "{{ _vips_data_file }}"
         dest: "{{ _vips_data_file_dest }}"
+        mode: "0644"
 
-    - name: Ensure network_provision_out file does not exist
+    - name: Ensure vips_provision_out file does not exist
       delegate_to: "osp-undercloud-0"
       ansible.builtin.file:
-        path: "{{ ansible_user_dir }}/vips_provision_out.yaml"
+        path: "{{ ansible_user_dir }}/{{ _vips_provision_output }}"
         state: absent
 
     - name: Provision virtual ips
       delegate_to: "osp-undercloud-0"
       vars:
-        _overcloud_name: >-
-          {{
-            _adoption_source_scenario.overcloud.stackname |
-            default('overcloud')
-          }}
         _vip_provision_cmd: >-
           openstack overcloud network vip provision
           --stack {{ _overcloud_name }}
-          --output {{ansible_user_dir}}/vips_provision_out.yaml
+          --output {{ansible_user_dir}}/{{ _vips_provision_output }}
           {{ _vips_data_file_dest }}
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_basedir }}/artifacts"
@@ -137,7 +188,8 @@
       delegate_to: "osp-undercloud-0"
       ansible.builtin.template:
         src: "tripleo-ansible-inventory.yaml.j2"
-        dest: "{{ ansible_user_dir }}/overcloud-deploy/overcloud/tripleo-ansible-inventory.yaml"
+        dest: "{{ ansible_user_dir }}/overcloud-deploy/{{ _overcloud_name }}/tripleo-ansible-inventory.yaml"
+        mode: "0644"
 
     - name: Ensure os-net-config and openvswitch is installed in overcloud nodes
       become: true
@@ -147,7 +199,7 @@
           - os-net-config
           - openvswitch
         state: present
-      loop: "{{ _tripleo_nodes }}"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -158,7 +210,7 @@
         path: "/etc/os-net-config"
         state: directory
         mode: '0755'
-      loop: "{{ _tripleo_nodes }}"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -167,16 +219,17 @@
       delegate_to: "{{ overcloud_vm }}"
       vars:
         _node_net: "{{ cifmw_networking_env_definition.instances[overcloud_vm] }}"
-        ctlplane_ip: "{{ _node_net.networks.ctlplane.ip_v4 }}"
+        _ctlplane_ip: "{{ _node_net.networks.ctlplane.ip_v4 }}"
         _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
-        dns_server: "{{ _ctlplane_net.dns_v4 }}"
-        gateway_ip: "{{ _ctlplane_net.gw_v4 }}"
-        interface_mtu: "{{ _node_net.networks.ctlplane.mtu }}"
-        ctlplane_cidr: "{{ _node_net.networks.ctlplane.prefix_length_v4 }}"
+        _dns_server: "{{ _ctlplane_net.dns_v4 }}"
+        _gateway_ip: "{{ _ctlplane_net.gw_v4 }}"
+        _interface_mtu: "{{ _node_net.networks.ctlplane.mtu }}"
+        _ctlplane_cidr: "{{ _node_net.networks.ctlplane.prefix_length_v4 }}"
       ansible.builtin.template:
         src: "os_net_config_overcloud.yml.j2"
         dest: /etc/os-net-config/tripleo_config.yaml
-      loop: "{{ _tripleo_nodes }}"
+        mode: "0644"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -185,7 +238,7 @@
       delegate_to: "{{ overcloud_vm }}"
       ansible.builtin.command:
         cmd: "os-net-config -c /etc/os-net-config/tripleo_config.yaml"
-      loop: "{{ _tripleo_nodes }}"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -195,12 +248,11 @@
         path: "{{ ansible_user_dir }}/.ssh/id_rsa.pub"
       register: undercloud_ssh_pub
 
-
     - name: Place undercloud public key in authorized_keys for zuul and root
       delegate_to: "{{ overcloud_vm }}"
       ansible.posix.authorized_key:
         user: "{{ ansible_user_id }}"
         key: "{{ undercloud_ssh_pub['content'] | b64decode | trim }}"
-      loop: "{{ _tripleo_nodes }}"
+      loop: "{{ _tripleo_nodes_stack }}"
       loop_control:
         loop_var: overcloud_vm

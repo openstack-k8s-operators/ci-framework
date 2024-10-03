@@ -1,0 +1,81 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+- name: Overcloud preparation
+  tags: "{{ overcloud_tags }}"
+  ansible.builtin.import_tasks: prepare_overcloud.yml
+
+- name: Stop before running pre overcloud hooks
+  tags: "{{ overcloud_tags }}"
+  vars:
+    _stage_stopper: "before_pre_hook_overcloud_{{ _stack.stackname }}"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Gather ansible_user_id from controller for hooks
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Run pre overcloud deploy hooks
+  tags: "{{ overcloud_tags }}"
+  vars:
+    hooks: "{{ _stack.pre_oc_run | default([]) }}"
+    step: "prepare_overcloud_{{ _stack.stackname }}"
+  ansible.builtin.include_role:
+    name: run_hook
+
+- name: Stop before deploying the overcloud
+  tags: "{{ overcloud_tags }}"
+  vars:
+    _stage_stopper: "before_deploy_overcloud_{{ _stack.stackname }}"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Deploy overcloud
+  tags: "{{ overcloud_tags }}"
+  ansible.builtin.import_tasks: deploy_overcloud.yml
+
+- name: Stop after deploying the overcloud
+  tags: "{{ overcloud_tags }}"
+  vars:
+    _stage_stopper: "post_deploy_overcloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Gather ansible_user_id from controller for hooks
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Run post overcloud deploy hooks
+  tags: "{{ overcloud_tags }}"
+  vars:
+    hooks: "{{ _stack.post_oc_run | default([]) }}"
+    step: "post_overcloud_{{ _stack.stackname }}"
+  ansible.builtin.include_role:
+    name: run_hook

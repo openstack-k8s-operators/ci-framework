@@ -14,77 +14,76 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Ensure needed logins
-  ansible.builtin.include_tasks: login_registries.yml
-  args:
-    apply:
-      delegate_to: "osp-undercloud-0"
-
-- name: Ensure repos are setup
-  become: true
+- name: Run prepration tasks on undercloud
   delegate_to: "osp-undercloud-0"
-  ansible.builtin.command:
-    cmd: "subscription-manager repos --enable {{ cifmw_adoption_osp_deploy_repos | join(' --enable ') }}"
+  block:
+    - name: Ensure needed logins
+      ansible.builtin.include_tasks: login_registries.yml
+      args:
+        apply:
+          delegate_to: "osp-undercloud-0"
 
-- name: Install director packages
-  become: true
-  delegate_to: "osp-undercloud-0"
-  ansible.builtin.package:
-    name: python3-tripleoclient
+    - name: Ensure repos are setup
+      become: true
+      ansible.builtin.command:
+        cmd: "subscription-manager repos --enable {{ cifmw_adoption_osp_deploy_repos | join(' --enable ') }}"
 
-- name: Ensure ci-framework-data folder is created in undercloud
-  vars:
-    cifmw_ci_setup_basedir: "{{ cifmw_basedir }}"
-    directory_state: directory
-  ansible.builtin.include_role:
-    name: "ci_setup"
-    tasks_from: "directories.yml"
-    apply:
-      delegate_to: "osp-undercloud-0"
+    - name: Install director packages
+      become: true
+      ansible.builtin.package:
+        name: python3-tripleoclient
 
-- name: Create containers-prepare-parameters if needed
-  delegate_to: "osp-undercloud-0"
-  vars:
-    _container_prepare_cmd: >-
-      openstack tripleo container image prepare
-      default --output-env-file
-      {{ ansible_user_dir }}/containers-prepare-parameters.yaml
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_basedir }}/artifacts"
-    script: "{{ _container_prepare_cmd }}"
-  when: _adoption_source_scenario.container_prepare_params is not defined
+    - name: Ensure ci-framework-data folder is created in undercloud
+      vars:
+        cifmw_ci_setup_basedir: "{{ cifmw_basedir }}"
+        directory_state: directory
+      ansible.builtin.include_role:
+        name: "ci_setup"
+        tasks_from: "directories.yml"
+        apply:
+          delegate_to: "osp-undercloud-0"
 
-- name: Ensure os-net-config folder exists
-  become: true
-  delegate_to: "osp-undercloud-0"
-  ansible.builtin.file:
-    path: "/etc/os-net-config"
-    state: directory
-    mode: '0755'
+    - name: Create containers-prepare-parameters if needed
+      vars:
+        _container_prepare_cmd: >-
+          openstack tripleo container image prepare
+          default --output-env-file
+          {{ ansible_user_dir }}/containers-prepare-parameters.yaml
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        script: "{{ _container_prepare_cmd }}"
+      when: cifmw_adoption_osp_deploy_scenario.container_prepare_params is not defined
 
-- name: Generate os-net-config file
-  become: true
-  delegate_to: "osp-undercloud-0"
-  vars:
-    _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
-    _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
-    ctlplane_ip: "{{ _undercloud_net.networks.ctlplane.ip_v4 }}"
-    ctlplane_vip: "{{ _adoption_source_scenario.undercloud.ctlplane_vip }}"
-    _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
-    dns_server: "{{ _ctlplane_net.dns_v4 }}"
-    gateway_ip: "{{ _ctlplane_net.gw_v4 }}"
-    interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
-    ctlplane_cidr: "{{ _undercloud_net.networks.ctlplane.prefix_length_v4 }}"
-  ansible.builtin.template:
-    src: "os_net_config_undercloud.yml.j2"
-    dest: /etc/os-net-config/tripleo_config.yaml
+    - name: Ensure os-net-config folder exists
+      become: true
+      ansible.builtin.file:
+        path: "/etc/os-net-config"
+        state: directory
+        mode: '0755'
 
-- name: Copy undercloud.conf file to location to edit it
-  delegate_to: "osp-undercloud-0"
-  ansible.builtin.copy:
-    src: "/usr/share/python-tripleoclient/undercloud.conf.sample"
-    dest: "{{ ansible_user_dir }}/undercloud.conf"
-    remote_src: true
+    - name: Generate os-net-config file
+      become: true
+      vars:
+        _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
+        _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
+        _ctlplane_ip: "{{ _undercloud_net.networks.ctlplane.ip_v4 }}"
+        _ctlplane_vip: "{{ cifmw_adoption_osp_deploy_scenario.undercloud.ctlplane_vip }}"
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
+        _dns_server: "{{ _ctlplane_net.dns_v4 }}"
+        _gateway_ip: "{{ _ctlplane_net.gw_v4 }}"
+        _interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
+        _ctlplane_cidr: "{{ _undercloud_net.networks.ctlplane.prefix_length_v4 }}"
+      ansible.builtin.template:
+        src: "os_net_config_undercloud.yml.j2"
+        dest: /etc/os-net-config/tripleo_config.yaml
+        mode: "0644"
+
+    - name: Copy undercloud.conf file to location to edit it
+      ansible.builtin.copy:
+        src: "/usr/share/python-tripleoclient/undercloud.conf.sample"
+        dest: "{{ ansible_user_dir }}/undercloud.conf"
+        remote_src: true
+        mode: "0644"
 
 - name: Add environment specific vars for undercloud
   vars:
@@ -138,17 +137,17 @@
   ansible.builtin.set_fact:
     _undercloud_conf: >-
       {{
-        _adoption_source_scenario.undercloud |
+        cifmw_adoption_osp_deploy_scenario.undercloud |
         combine(_env_undercloud, recursive=true, list_merge="append_rp")
       }}
 
 - name: Copy undercloud overrides file if present and amend undercloud conf
-  when: _adoption_source_scenario.undercloud.undercloud_parameters_override is defined
+  when: cifmw_adoption_osp_deploy_scenario.undercloud.undercloud_parameters_override is defined
   vars:
     _undercloud_overrides_path: >-
       {{
         [cifmw_adoption_source_scenario_path,
-         _adoption_source_scenario.undercloud.undercloud_parameters_override
+         cifmw_adoption_osp_deploy_scenario.undercloud.undercloud_parameters_override
         ] | path_join
       }}
     _filename: "{{ _undercloud_overrides_path | basename }}"
@@ -159,6 +158,7 @@
       ansible.builtin.copy:
         src: "{{ _undercloud_overrides_path }}"
         dest: "{{ _dest_path }}"
+        mode: "0644"
 
     - name: Amend undercloud conf
       vars:
@@ -175,12 +175,12 @@
           }}
 
 - name: Copy undercloud parameter defaults file if present and amend undercloud conf
-  when: _adoption_source_scenario.undercloud.undercloud_parameters_defaults is defined
+  when: cifmw_adoption_osp_deploy_scenario.undercloud.undercloud_parameters_defaults is defined
   vars:
     _undercloud_defaults_path: >-
       {{
         [cifmw_adoption_source_scenario_path,
-         _adoption_source_scenario.undercloud.undercloud_parameters_defaults
+         cifmw_adoption_osp_deploy_scenario.undercloud.undercloud_parameters_defaults
         ] | path_join
       }}
     _filename: "{{ _undercloud_defaults_path | basename }}"
@@ -191,6 +191,7 @@
       ansible.builtin.copy:
         src: "{{ _undercloud_defaults_path }}"
         dest: "{{ _dest_path }}"
+        mode: "0644"
 
     - name: Amend undercloud conf
       vars:

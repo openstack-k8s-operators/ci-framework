@@ -1,12 +1,12 @@
 #jinja2: trim_blocks:True, lstrip_blocks:True
-{% for group, role in _adoption_source_scenario.roles_groups_map.items() %}
+{% for group, role in cifmw_adoption_osp_deploy_scenario.roles_groups_map.items() %}
 {{ role }}:
   hosts:
     {% for node in _vm_groups[group] %}
     {% set node_nets = cifmw_networking_env_definition.instances[node] %}
     {{ node }}:
       ansible_host: {{ node_nets.networks.ctlplane.ip_v4 }}
-      canonical_hostname: {{ node }}.{{ _adoption_source_scenario.cloud_domain }}
+      canonical_hostname: {{ node }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
       ctlplane_ip: {{ node_nets.networks.ctlplane.ip_v4 }}
       {% for network_name, net in node_nets.networks.items() %}
       {% if 'vlan_id' in net %}
@@ -28,9 +28,19 @@ Undercloud:
     ansible_host: localhost
 allovercloud:
   children:
-    {% for _, role in _adoption_source_scenario.roles_groups_map.items() %}
+    {% for _, role in cifmw_adoption_osp_deploy_scenario.roles_groups_map.items() %}
     {{ role }}: {}
     {% endfor %}
 computes:
   children:
-    {{ _adoption_source_scenario.roles_groups_map['osp-computes'] }}: {}
+    {{ cifmw_adoption_osp_deploy_scenario.roles_groups_map['osp-computes'] }}: {}
+{{ _overcloud_name }}:
+  hosts:
+    {% for group in ['osp-controllers', 'osp-computes'] %}
+    {% for node in _vm_groups[group] %}
+    {% set node_nets = cifmw_networking_env_definition.instances[node] %}
+    {{ node }}:
+      ansible_user: tripleo-admin
+      ansible_host: {{ node_nets.networks.ctlplane.ip_v4 }}
+    {% endfor %}
+    {% endfor %}

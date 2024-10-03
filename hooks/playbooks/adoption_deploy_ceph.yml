@@ -25,50 +25,67 @@
 
     - name: Deploy 17.1 ceph
       vars:
+        _cifmw_basedir_undercloud: >-
+          {{
+            [ansible_user_dir,
+            'ci-framework-data'
+            ] | path_join
+          }}
+        stack: >-
+          {{
+            cifmw_adoption_osp_deploy_scenario.stacks[stack_index | int]
+          }}
+        _overcloud_name: >-
+          {{
+            stack.stackname
+          }}
         _roles_file: >-
           {{
             [cifmw_adoption_source_scenario_path,
-             _adoption_source_scenario.overcloud.roles_file
+             stack.roles_file
             ] | path_join
           }}
-        _roles_file_name: "{{ _roles_file | basename }}"
-        _roles_file_dest: "{{ ansible_user_dir }}/{{ _roles_file_name }}"
-        _network_data_file: >-
+        _roles_file_dest: >-
           {{
-            [cifmw_adoption_source_scenario_path,
-             _adoption_source_scenario.overcloud.network_data_file
+            [ansible_user_dir,
+             'roles_' ~ _overcloud_name ~ '.yaml'
             ] | path_join
           }}
-        _network_data_file_name: "{{ _network_data_file | basename }}"
-        _network_data_file_dest: "{{ ansible_user_dir }}/{{ _network_data_file_name }}"
+        _network_data_file_dest: >-
+          {{
+            [ansible_user_dir,
+             'network_data_' ~ _overcloud_name ~ '.yaml'
+            ] | path_join
+          }}
         _ceph_osd_spec_file: >-
           {{
             [cifmw_adoption_source_scenario_path,
-             _adoption_source_scenario.overcloud.ceph_osd_spec_file
+             stack.ceph_osd_spec_file
             ] | path_join
           }}
         _ceph_osd_spec_file_name: "{{ _ceph_osd_spec_file | basename }}"
-        _ceph_osd_spec_file_dest: "{{ ansible_user_dir }}/{{ _ceph_osd_spec_file_name }}"
-        _cloud_domain: "{{ _adoption_source_scenario.cloud_domain }}"
+        _ceph_osd_spec_file_dest: >-
+          {{
+            [ansible_user_dir,
+            _ceph_osd_spec_file_name
+            ] | path_join
+          }}
+        _cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
         _source_cmd: "source {{ ansible_user_dir }}/stackrc"
       block:
-        - name: Copy network data file
+        - name: Copy ceph osd file
           delegate_to: "osp-undercloud-0"
           ansible.builtin.copy:
-            src: "{{ _network_data_file }}"
-            dest: "{{ _network_data_file_dest }}"
+            src: "{{ _ceph_osd_spec_file }}"
+            dest: "{{ _ceph_osd_spec_file_dest }}"
+            mode: "0644"
 
         - name: Copy roles file
           delegate_to: "osp-undercloud-0"
           ansible.builtin.copy:
             src: "{{ _roles_file }}"
             dest: "{{ _roles_file_dest }}"
-
-        - name: Copy ceph osd file
-          delegate_to: "osp-undercloud-0"
-          ansible.builtin.copy:
-            src: "{{ _ceph_osd_spec_file }}"
-            dest: "{{ _ceph_osd_spec_file_dest }}"
+            mode: "0644"
 
         - name: Ensure ceph_spec file does not exist
           delegate_to: "osp-undercloud-0"
@@ -80,14 +97,15 @@
           delegate_to: "osp-undercloud-0"
           vars:
             _ceph_spec_cmd: >-
-              openstack overcloud ceph spec {{ ansible_user_dir }}/config-download.yaml
+              openstack overcloud ceph spec
+              {{ ansible_user_dir }}/config_download_{{ _overcloud_name }}.yaml
               --tld {{ _cloud_domain }}
               --osd-spec {{ _ceph_osd_spec_file_dest }}
               --roles-data {{ _roles_file_dest }}
               -o {{ansible_user_dir}}/ceph_spec.yaml
           cifmw.general.ci_script:
             chdir: "{{ ansible_user_dir }}"
-            output_dir: "{{ cifmw_basedir }}/artifacts"
+            output_dir: "{{ _cifmw_basedir_undercloud }}/artifacts"
             script: "{{ _source_cmd }}; {{ _ceph_spec_cmd }}"
 
         - name: Ensure deployed_ceph file does not exist
@@ -96,12 +114,13 @@
             path: "{{ ansible_user_dir }}/deployed_ceph.yaml"
             state: absent
 
-        - name: Gather overcloud tripleo nodes
+        - name: Gather nodes for stack {{ _overcloud_name }}
           when: group.key is in _hostname_map_translation
           vars:
             _hostname_map_translation: >-
               {{
-                _adoption_source_scenario.hostname_groups_map
+                cifmw_adoption_osp_deploy_scenario.hostname_groups_map |
+                ansible.utils.keep_keys(target=stack.stack_nodes)
               }}
           ansible.builtin.set_fact:
             _tripleo_nodes: >-
@@ -137,5 +156,5 @@
               --output {{ ansible_user_dir }}/deployed_ceph.yaml
           cifmw.general.ci_script:
             chdir: "{{ ansible_user_dir }}"
-            output_dir: "{{ cifmw_basedir }}/artifacts"
+            output_dir: "{{ _cifmw_basedir_undercloud }}/artifacts"
             script: "{{ _source_cmd }}; {{ _ceph_deploy_cmd }}"
