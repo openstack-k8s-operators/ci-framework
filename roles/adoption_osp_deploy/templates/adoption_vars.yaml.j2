@@ -1,0 +1,46 @@
+#jinja2: trim_blocks:True, lstrip_blocks:True
+source_mariadb_ip: {{ _controller_1_internalapi_ip }}
+source_ovndb_ip: {{ _controller_1_internalapi_ip }}
+edpm_node_hostname: {{ _compute_1_name }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
+edpm_node_ip: {{ _compute_1_ip }}
+edpm_computes: |
+  {% for compute in _vm_groups['osp-computes'] %}
+  {% set node_nets = cifmw_networking_env_definition.instances[compute] %}
+  ["{{ compute }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"]="{{ node_nets.networks.ctlplane.ip_v4 }}"
+  {% endfor %}
+
+source_galera_members: |
+  {% for controller in _vm_groups['osp-controllers'] %}
+  {% set node_nets = cifmw_networking_env_definition.instances[controller] %}
+  ["{{ controller }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"]="{{ node_nets.networks.internalapi.ip_v4 }}"
+  {% endfor %}
+
+edpm_nodes:
+  {% for compute in _vm_groups['osp-computes'] %}
+  {% set node_nets = cifmw_networking_env_definition.instances[compute] %}
+  {{ compute }}:
+    hostName: {{ compute }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
+    ansible:
+      ansibleHost: {{ node_nets.networks.ctlplane.ip_v4 }}
+    networks:
+      - defaultRoute: true
+        fixedIP: {{ node_nets.networks.ctlplane.ip_v4 }}
+        name: ctlplane
+        subnetName: subnet1
+      - name: internalapi
+        fixedIP: {{ node_nets.networks.internalapi.ip_v4 }}
+        subnetName: subnet1
+      - name: storage
+        fixedIP: {{ node_nets.networks.storage.ip_v4 }}
+        subnetName: subnet1
+      - name: storagemgmt
+        fixedIP: {{ node_nets.networks.storagemgmt.ip_v4 }}
+        subnetName: subnet1
+      - name: tenant
+        fixedIP: {{ node_nets.networks.tenant.ip_v4 }}
+        subnetName: subnet1
+    {% endfor %}
+
+upstream_dns: {{ cifmw_networking_env_definition.networks.ctlplane.dns_v4 | first }}
+os_cloud_name: {{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}
+standalone_ip: {{ _undercloud_ip }}

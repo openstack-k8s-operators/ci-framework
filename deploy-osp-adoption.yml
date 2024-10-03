@@ -18,6 +18,7 @@
         [cifmw_adoption_source_scenario_path,
          cifmw_architecture_scenario ~ '.yaml'] | path_join
       }}
+    _target_host: "{{ cifmw_target_host | default('localhost') }}"
   tasks:
     - name: Inherit from parent scenarios if needed
       ansible.builtin.include_tasks:
@@ -28,22 +29,22 @@
         name: networking_mapper
         tasks_from: load_env_definition.yml
         apply:
-          delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+          delegate_to: "{{ _target_host }}"
 
     - name: Load source adoption scenario
       ansible.builtin.include_vars:
         file: "{{ _adoption_source_scenario_file }}"
-        name: _adoption_source_scenario
+        name: cifmw_adoption_osp_deploy_scenario
 
-    - name: Gather ansible_user_id from {{ cifmw_target_host }}
-      delegate_to: "{{ cifmw_target_host }}"
+    - name: Gather ansible_user_id from {{ _target_host }}
+      delegate_to: "{{ _target_host }}"
       ansible.builtin.setup:
         gather_subset:
           - user_id
           - user_dir
 
     - name: Read inventory groups
-      delegate_to: "{{ cifmw_target_host }}"
+      delegate_to: "{{ _target_host }}"
       ansible.builtin.slurp:
         path: "{{ ansible_user_dir }}/ci-framework-data/reproducer-inventory/all-group.yml"
       register: "_all_groups"
@@ -53,7 +54,7 @@
         _parsed_all_groups: "{{ _all_groups['content'] | b64decode | from_yaml }}"
       block:
         - name: Read groups inventory
-          delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+          delegate_to: "{{ _target_host }}"
           vars:
             _group_name: "{{ item.key[:-1] }}"
             _path_inventories: "{{ ansible_user_dir }}/ci-framework-data/reproducer-inventory"
@@ -82,6 +83,12 @@
           loop_control:
             loop_var: "_inventory_file"
 
+    - name: Gather ansible_user_id from controller for hooks
+      ansible.builtin.setup:
+        gather_subset:
+          - user_id
+          - user_dir
+
     - name: Ensure parameters folder exists
       ansible.builtin.file:
         path: "{{ cifmw_basedir }}/artifacts/parameters"
@@ -94,14 +101,14 @@
           ---
           cifmw_adoption_osp_deploy_ntp_server: {{ cifmw_adoption_osp_deploy_ntp_server }}
           cifmw_adoption_source_scenario_path: {{ cifmw_adoption_source_scenario_path }}
-          _adoption_source_scenario:
-            {{ _adoption_source_scenario | to_nice_yaml(indent=2) | indent(width=2) }}
+          cifmw_adoption_osp_deploy_scenario:
+            {{ cifmw_adoption_osp_deploy_scenario | to_nice_yaml(indent=2) | indent(width=2) }}
           _vm_groups:
             {{ _vm_groups | to_nice_yaml(indent=2) | indent(width=2) }}
 
     - name: Set inventory_file for localhost to use with hooks
       ansible.builtin.set_fact:
-        inventory_file: "{{ hostvars[cifmw_target_host]['inventory_file'] }}"
+        inventory_file: "{{ hostvars[_target_host]['inventory_file'] }}"
 
     - name: Deploy source osp environment
       ansible.builtin.import_role:
