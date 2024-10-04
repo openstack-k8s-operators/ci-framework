@@ -96,6 +96,13 @@ with a message.
 
 ## Automation specificities
 
+### Timeouts
+
+Some tasks uses timeouts when applying or waiting for resources. Those timeouts can be controlled by:
+
+* `cifmw_kustomize_deploy_delay`: (Int) Ansible `delay` passed to tasks that waits for a resource to reach a target state (default `10`)
+* `cifmw_kustomize_deploy_retries_install_plan`: (Int) Ansible `retries` passed to tasks that wait for the InstallPlan (default `60`)
+
 ### Task tagging
 
 Tags are dynamically associated to each stage of the automated deployment.
