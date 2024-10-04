@@ -16,7 +16,6 @@
 
 - name: Create the support files for test
   ansible.builtin.include_tasks: create_test_files.yml
-  when: cifmw_update_ping_test | bool
 
 - name: Trigger the ping test
   when:
@@ -29,6 +28,14 @@
 
     - name: Start ping test
       ansible.builtin.include_tasks: l3_agent_connectivity_check_start.yml
+
+- name: Trigger the continuous control plane test
+  when:
+    - cifmw_update_control_plane_check | bool
+    - not cifmw_update_run_dryrun | bool
+  ansible.builtin.shell: |
+    {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
+
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
@@ -60,3 +67,10 @@
   when:
     - cifmw_update_ping_test | bool
     - not cifmw_update_run_dryrun | bool
+
+- name: Stop the continuous control plane test
+  when:
+    - cifmw_update_control_plane_check | bool
+    - not cifmw_update_run_dryrun | bool
+  ansible.builtin.shell: |
+    {{ cifmw_update_artifacts_basedir }}/control_plane_test_stop.sh

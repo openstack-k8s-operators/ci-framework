@@ -29,12 +29,12 @@
     _workload: "{{ cifmw_libvirt_manager_basedir }}/workload"
     _img_dir: "{{ cifmw_libvirt_manager_basedir }}/images"
     _chdir: >-
-      {{ (is_base_img | default(false) | bool) | ternary(_img_dir, _workload) }}
+      {{
+        (_is_base_img | default(false) | bool) |
+        ansible.builtin.ternary(_img_dir, _workload)
+      }}
   block:
     - name: "Create VM image for {{ vm }}"
-      vars:
-        _vm_img: >-
-          {{ vm }}.qcow2
       ansible.builtin.command:
         cmd: >-
           qemu-img create
@@ -48,9 +48,6 @@
         chdir: "{{ _chdir }}"
 
     - name: "Ensure file ownership and rights for {{ vm }}"
-      vars:
-        _vm_img: >-
-          {{ vm }}.qcow2
       ansible.builtin.file:
         path: "{{ (_chdir, _vm_img) | path_join }}"
         group: "qemu"
@@ -131,11 +128,32 @@
           --config --persistent;
           {% endfor -%}
 
+- name: Extract UUID
+  block:
+    - name: Get VM UUID
+      register: _uuid
+      vars:
+        _vm_name: "cifmw-{{ vm }}"
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system
+          domuuid {{ _vm_name }}
+
+    - name: Inject UUID in dataset
+      vars:
+        _vm_name: "cifmw-{{ vm }}"
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_uuids: >-
+          {{
+            cifmw_libvirt_manager_uuids |
+            default({}) |
+            combine({_vm_name: _uuid.stdout | trim})
+          }}
+
 - name: Create and attach ISO
   when:
     - vm_data.disk_file_name != 'blank'
     - vm is not match('^(crc|ocp).*$')
-    - vm_data.start | default(true) | bool
     - vm_data.manage | default(true) | bool
   vars:
     _img_dir: "{{ cifmw_libvirt_manager_basedir }}/workload"

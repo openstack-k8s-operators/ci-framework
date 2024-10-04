@@ -1,0 +1,77 @@
+---
+# Purpose of this playbook:
+# - Create a virtual infrastructure consisting in
+#   virtual machines, related storage, and virtual networks.
+#
+# - Create a dnsmasq instance with the appropriate records to provide
+#   fixed IPs, proper DNS resolution
+#
+# - Expose at least one inventory file showing the various resources
+#
+# This playbook is meant to run for architecture driven deployment only.
+
+- name: Parent scenario if needed
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Inherit from parent scenarios if needed
+      ansible.builtin.include_tasks:
+        file: "ci/playbooks/tasks/inherit_parent_scenario.yml"
+
+- name: Manage/generate unique ID
+  ansible.builtin.import_playbook: playbooks/unique-id.yml
+
+- name: Run consistency checks
+  ansible.builtin.import_playbook: "playbooks/adoption/pre.yml"
+
+- name: Prepare infrastructure datasets
+  ansible.builtin.import_playbook: "playbooks/adoption/infra.yml"
+
+- name: Amend infrastructure datasets
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    # Inject "start: false" in the layout to not start any VM yet.
+    # Starting the VM will be done later, either by the tool deploying
+    # OSP, or the one deploy RHOSO.
+    # VM initial configuration, when managed, is done using cloud-init.
+    - name: Ensure no VM is started when we create them during this run
+      vars:
+        _no_start: >-
+          {% set _vms = {}                                          -%}
+          {% for _type in _cifmw_libvirt_manager_layout.vms.keys()  -%}
+          {%   set _ = _vms.update({_type: {'start': false}})       -%}
+          {% endfor                                                 -%}
+          {{ _vms }}
+      ansible.builtin.set_fact:
+        _cifmw_libvirt_manager_layout: >-
+          {{
+            _cifmw_libvirt_manager_layout |
+            combine({'vms': _no_start}, recursive=true)
+          }}
+    - name: Set amount for OCP cluster members to 0
+      vars:
+        _0_ocp:
+          vms:
+            ocp:
+              amount: 0
+            ocp_worker:
+              amount: 0
+      ansible.builtin.set_fact:
+        _cifmw_libvirt_manager_layout: >-
+          {{
+            _cifmw_libvirt_manager_layout | combine(_0_ocp, recursive=true)
+          }}
+
+- name: Prepare networking
+  ansible.builtin.import_playbook: "playbooks/adoption/network.yml"
+
+- name: Deploy infrastructure
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    # Create all the VMs
+    - name: Deploy layout
+      ansible.builtin.import_role:
+        name: "libvirt_manager"
+        tasks_from: "deploy_layout.yml"

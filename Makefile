@@ -53,11 +53,11 @@ new_role: create_new_role role_molecule ## Create a new Ansible role and related
 ##@ Setup steps
 .PHONY: setup_tests
 setup_tests: ## Setup the environment
-	bash scripts/setup_env
+	bash scripts/setup_env 2>&1 | tee $(LOG_DIR)/setup_env.log
 
 .PHONY: setup_molecule
 setup_molecule: setup_tests ## Setup molecule environment
-	bash scripts/setup_molecule
+	bash scripts/setup_molecule 2>&1 | tee $(LOG_DIR)/setup_molecule.log
 
 ##@ General testing
 .PHONY: tests

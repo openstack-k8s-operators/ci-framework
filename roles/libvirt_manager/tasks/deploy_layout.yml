@@ -81,6 +81,29 @@
     - cifmw_libvirt_manager_mac_map is undefined
   ansible.builtin.include_tasks: generate_networking_data.yml
 
+- name: Create group inventories
+  when:
+    - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
+    - _cifmw_libvirt_manager_layout.vms[item].amount | default(1) | int > 0
+  vars:
+    hosts: >-
+      {{
+        cifmw_libvirt_manager_all_vms |
+        dict2items |
+        selectattr('value', 'equalto', item)
+      }}
+  ansible.builtin.template:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/{{ item }}-group.yml"
+    src: inventory.yml.j2
+  loop: "{{ _cifmw_libvirt_manager_layout.vms.keys() }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create "all" group inventory file
+  ansible.builtin.template:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+    src: "all-inventory.yml.j2"
+
 - name: Ensure storage pool is present.
   when:
     - (require_extra_disks | int) > 0
@@ -175,6 +198,8 @@
       }}
     pub_key: "{{ pub_ssh_key.content | b64decode }}"
     priv_key: "{{ priv_ssh_key.content | b64decode }}"
+    _vm_img: >-
+      {{ vm }}.qcow2
   ansible.builtin.include_tasks:
     file: create_vms.yml
   loop: "{{ cifmw_libvirt_manager_all_vms | dict2items }}"
@@ -188,7 +213,6 @@
 - name: "Configure managed VMs"
   when:
     - vm_data.manage | default(true) | bool
-    - vm_data.start | default(true) | bool
     - vm_data.disk_file_name != 'blank'
   vars:
     vm_type: "{{ _vm.value }}"
@@ -234,80 +258,23 @@
     index_var: index
     label: "{{ item.key }}"
 
-- name: Create group inventories
-  when:
-    - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
-    - _cifmw_libvirt_manager_layout.vms[item].amount | default(1) | int > 0
-  vars:
-    hosts: >-
-      {{
-        _libvirt_manager_networking.instances |
-        dict2items |
-        selectattr('key', 'match', item)
-      }}
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/{{ item }}-group.yml"
-    src: inventory.yml.j2
-  loop: "{{ _cifmw_libvirt_manager_layout.vms.keys() }}"
-  loop_control:
-    label: "{{ item }}"
-
-- name: Create "all" group inventory file
-  ansible.builtin.template:
-    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
-    src: "all-inventory.yml.j2"
-
 - name: List running virtual machines.
   community.libvirt.virt:
     command: list_vms
     uri: "qemu:///system"
   register: _vms
 
-- name: Extract VM UUIDs from libvirt
-  block:
-    - name: Get all XMLs
-      register: _all_xmls
-      community.libvirt.virt:
-        command: get_xml
-        name: "{{ item }}"
-      loop: "{{ _vms.list_vms }}"
-
-    - name: Extract UUIDs from all XMLs
-      register: _extracted_uuids
-      community.general.xml:
-        xmlstring: "{{ vm.get_xml }}"
-        xpath: "/domain/uuid"
-        content: text
-      loop: "{{ _all_xmls.results }}"
-      loop_control:
-        label: "{{ vm.item }}"
-        loop_var: vm
-
-    - name: Build UUIDs fact
-      vars:
-        vm_uuid: "{{ xml.matches | first }}"
-      ansible.builtin.set_fact:
-        cifmw_libvirt_manager_uuids: >-
-          {{
-            cifmw_libvirt_manager_uuids | default({}) |
-            combine({xml.vm.item: vm_uuid.uuid})
-          }}
-      loop: "{{ _extracted_uuids.results }}"
-      loop_control:
-        label: "{{ xml.vm.item }}"
-        loop_var: xml
-
-    - name: Dump UUIDs
-      when:
-        - cifmw_libvirt_manager_uuids is defined
-        - cifmw_libvirt_manager_uuids | length > 0
-      vars:
-        _content:
-          libvirt_uuid: "{{ cifmw_libvirt_manager_uuids }}"
-      ansible.builtin.copy:
-        dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/libvirt-uuids.yml"
-        content: "{{ _content | to_nice_yaml }}"
-        mode: "0644"
+- name: Dump UUIDs
+  when:
+    - cifmw_libvirt_manager_uuids is defined
+    - cifmw_libvirt_manager_uuids | length > 0
+  vars:
+    _content:
+      libvirt_uuid: "{{ cifmw_libvirt_manager_uuids }}"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/artifacts/libvirt-uuids.yml"
+    content: "{{ _content | to_nice_yaml }}"
+    mode: "0644"
 
 - name: Refresh and dump vbmc hosts
   when:

@@ -10,12 +10,12 @@
     - cifmw_libvirt_manager_vm_users is not defined or
       cifmw_libvirt_manager_vm_users | length == 0
   vars:
-    _ssh_authorized_keys: |-
-      [
-      {% for ssh_key in (_authorized_keys_b64.content | b64decode).split('\n') | select() %}
-        "{{ ssh_key | trim }}",
-      {% endfor %}
-      ]
+    _ssh_authorized_keys: "{{
+        (_authorized_keys_b64.content | b64decode).split('\n') |
+        select() |
+        reject('match', '^.* cifmw-sushy_emulator$') |
+        map('trim')
+      }}"
   ansible.builtin.set_fact:
     _users:
       - name: root
@@ -59,7 +59,8 @@
 - name: "Call the config_drive role"
   vars:
     cifmw_config_drive_iso_image: "{{ _iso_path }}"
-    cifmw_config_drive_uuid: "{{ 99999999 | random(seed=vm) | to_uuid | lower }}"
+    _default_uuid: "{{ 99999999 | random(seed=vm) | to_uuid | lower }}"
+    cifmw_config_drive_uuid: "{{ _uuid.stdout | default(_default_uuid) | trim}}"
     cifmw_config_drive_hostname: "{{ vm }}"
     cifmw_config_drive_networkconfig: "{{ _network_config | default(None) }}"
     cifmw_config_drive_userdata: "{{ _user_data }}"

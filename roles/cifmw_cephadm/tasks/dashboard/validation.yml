@@ -1,15 +1,47 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Update urischeme based on cert/key
+  ansible.builtin.set_fact:
+    cifmw_cephadm_urischeme_dashboard: "https"
+  when:
+    - cifmw_cephadm_dashboard_crt | default("") | length > 0
+    - cifmw_cephadm_dashboard_key | default("") | length > 0
+
 - name: Validate connection to dashboard service
   ansible.builtin.get_url:
-    url: "http://{{ grafana_server_addr }}:{{ cifmw_cephadm_dashboard_port }}"
+    url: "{{ cifmw_cephadm_urischeme_dashboard | default('http') }}://{{ grafana_server_addr }}:{{ cifmw_cephadm_dashboard_port }}"
     dest: "/tmp/dash_response"
+    validate_certs: false
   register: dashboard_response
   failed_when: dashboard_response.failed == true
+  until: dashboard_response.failed == false
+  retries: "{{ cifmw_cephadm_wait_for_dashboard_retries }}"
+  delay: "{{ cifmw_cephadm_wait_for_dashboard_delay }}"
+
 
 - name: Check http response code from dashboard service with login
   ansible.builtin.get_url:
-    url: "http://{{ grafana_server_addr }}:{{ cifmw_cephadm_dashboard_port }}"
+    url: "{{ cifmw_cephadm_urischeme_dashboard | default('http') }}://{{ grafana_server_addr }}:{{ cifmw_cephadm_dashboard_port }}"
     dest: "/tmp/dash_http_response"
+    validate_certs: false
     username: admin
     password: admin
   register: dashboard_resp
   failed_when: dashboard_resp.status_code != 200
+  until: dashboard_resp.status_code == 200
+  retries: "{{ cifmw_cephadm_wait_for_dashboard_retries }}"
+  delay: "{{ cifmw_cephadm_wait_for_dashboard_delay }}"
