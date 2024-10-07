@@ -4,5 +4,41 @@
 export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
 export PATH="{{ cifmw_path }}"
 
-cat "{{ cifmw_update_artifacts_basedir }}/workload_launch.sh" | \
-    oc rsh -n openstack openstackclient env WKL_MODE=sanityfast bash
+OS_POD_TIMEOUT={{ cifmw_update_openstackclient_pod_timeout }}
+WAIT=0
+
+# Temporary file where to put the error message, if any.
+ERROR_FILE=/tmp/cifmw_update_ctl_testing_current_ouput.txt
+rm -f "${ERROR_FILE}"
+
+while [[ $((WAIT++)) -lt ${OS_POD_TIMEOUT} ]]; do
+    cat "{{ cifmw_update_artifacts_basedir }}/workload_launch.sh" | \
+        oc rsh -n openstack --pod-running={{  }}s openstackclient env WKL_MODE=sanityfast bash 2>&1 | tee "${ERROR_FILE}"
+    RC=$?
+    if [ "${RC}" -ne 0 ]; then
+        if [ -e "${ERROR_FILE}" ]; then
+            # Fragile as it depends on the exact output message.
+            if grep -F 'error: unable to upgrade connection: container not found' \
+                    "${ERROR_FILE}"; then
+                sleep 1
+                continue
+            fi
+        fi
+        # Error is not related to the the openstackclient not being
+        # available. We rethrow it.
+        exit ${RC}
+    else
+        # No error.
+        exit 0
+    elif [ "${RC}" -eq 137 ]; then
+        # When the command is interupted by the restart of the
+        # OSclient we have this returns code.  We then sleep and
+        # retry.
+        sleep 1
+        continue
+    fi
+done
+
+# We only exit the loop if we reach the timeout.
+echo "OpenstackClient Pod unavalaible, giving up after ${OS_POD_TIMEOUT} seconds"
+exit 127
