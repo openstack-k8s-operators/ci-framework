@@ -64,6 +64,30 @@
     name: 'install_yamls_makes'
     tasks_from: 'make_edpm_baremetal_compute'
 
+- name: Pass through extra nova-compute config
+  when:
+    - cifmw_edpm_deploy_baremetal_nova_compute_extra_config is defined
+    - cifmw_edpm_deploy_baremetal_nova_compute_extra_config | length > 0
+  tags:
+    - always
+  vars:
+    _cifmw_edpm_deploy_baremetal_nova_extra_config_file: "{{ cifmw_edpm_deploy_baremetal_basedir }}/nova-extra-config.conf"
+  block:
+    - name: Create the config file
+      ansible.builtin.copy:
+        mode: "0644"
+        content: "{{ cifmw_edpm_deploy_baremetal_nova_compute_extra_config }}"
+        dest: "{{ _cifmw_edpm_deploy_baremetal_nova_extra_config_file }}"
+
+    - name: Define DATAPLANE_EXTRA_NOVA_CONFIG_FILE
+      ansible.builtin.set_fact:
+        cifmw_edpm_deploy_baremetal_common_env: >-
+          {{
+            cifmw_edpm_deploy_baremetal_common_env | default({}) |
+            combine({'DATAPLANE_EXTRA_NOVA_CONFIG_FILE': _cifmw_edpm_deploy_baremetal_nova_extra_config_file })
+          }}
+        cacheable: true
+
 - name: Prepare OpenStack Dataplane NodeSet CR
   vars:
     make_edpm_deploy_baremetal_prep_env: "{{ cifmw_edpm_deploy_baremetal_common_env |
