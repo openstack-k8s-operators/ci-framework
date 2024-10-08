@@ -66,6 +66,35 @@
         file: net-def.yml
 
     - name: Generate networking data
+      vars:
+        cifmw_libvirt_manager_extra_network_configuration:
+          interfaces:
+            - name: "vlan{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+              type: vlan
+              state: up
+              vlan:
+                base-iface: cifmw-public
+                id: "{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+                protocol: 802.1q
+              ipv4:
+                enabled: true
+                dhcp: false
+                address:
+                  - ip: "{{ cifmw_networking_definition.networks.internalapi.gateway }}"
+                    prefix-length: "{{ cifmw_networking_definition.networks.internalapi.network | ansible.utils.ipaddr('prefix') }}"
+            - name: "vlan{{ cifmw_networking_definition.networks.storage.vlan }}"
+              type: vlan
+              state: up
+              vlan:
+                base-iface: cifmw-public
+                id: "{{ cifmw_networking_definition.networks.storage.vlan }}"
+                protocol: 802.1q
+              ipv4:
+                enabled: true
+                dhcp: false
+                address:
+                  - ip: "{{ cifmw_networking_definition.networks.storage.gateway }}"
+                    prefix-length: "{{ cifmw_networking_definition.networks.storage.network | ansible.utils.ipaddr('prefix') }}"
       ansible.builtin.import_role:
         name: libvirt_manager
         tasks_from: generate_networking_data
@@ -163,3 +192,20 @@
             msg: >-
               Expected {{ _expected_imgs }} while found
               {{ _existing_imgs }}
+
+        - name: List all interfaces
+          register: _ip_link_show
+          ansible.builtin.command: ip -json link show
+
+        - name: Ensure the VLAN interfaces was created
+          vars:
+            _vlan_interfaces:
+              - "vlan{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+              - "vlan{{ cifmw_networking_definition.networks.storage.vlan }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _ip_link_show.stdout | from_json | selectattr('ifname', 'eq', item) | length > 0
+            msg: >-
+              Expected vlan {{ item }} not found
+          loop: "{{ _vlan_interfaces }}"
