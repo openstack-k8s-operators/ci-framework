@@ -14,6 +14,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Set error_count for polarion reporting
+  ansible.builtin.set_fact:
+    error_count: 0
 
 # Create data collection directories
 - name: Ensure directories exist
@@ -39,15 +42,11 @@
         recurse: true
         # We need to exclude this file from the list of found validations to avoid an infinite loop.
         excludes: "{{ cifmw_validations_default_path }}/main.yml"
-
-    - name: Run all found validations
-      ansible.builtin.include_tasks:
-        file: "{{ item.path }}"
-      loop: "{{ found_validations.files }}"
-      # We can ignore errors that come from each validation, as we will collate them
-      # and report on the overall status at the end.
-      ignore_errors: true
-
+    
+    - name: Set required validations list
+      ansible.builtin.set_fact:
+        required_validations: found_validations
+    
 - name: Run selected validations
   when: not cifmw_validations_run_all | bool
   block:
@@ -58,9 +57,26 @@
       register: validation_exists
       failed_when: not validation_exists.stat.exists
 
-    - name: Run validations
-      ansible.builtin.include_tasks: "{{ item }}"
-      loop: "{{ cifmw_validations_list }}"
-      # We can ignore errors that come from each validation, as we will collate them
-      # and report on the overall status at the end.
+    - name: Set required validations list
+      ansible.builtin.set_fact:
+        required_validations: cifmw_validations_list
+
+- name: Run validations
+  block:
+    - name: Update validations count
+      ansible.builtin.set_fact:
+        cifmw_validations_polarion_reporting:
+          tests: "{{ found_validations | length }}"
+    
+    - name: Run required validations
+      ansible.builtin.include_tasks: "{{ itme }}"
       ignore_errors: true
+      register: validation_result
+
+    - name: Increment error count as required
+      ansible.builtin.set_fact:
+        cifmw_validations_polarion_reporting:
+          failureCount: " {{ error_count | int +1 }}"
+      when: validation_result is failed
+    
+  loop: required_validations
