@@ -80,7 +80,7 @@ cifmw_test_operator_stages:
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
       extraRPMs: "{{ cifmw_test_operator_tempest_extra_rpms | default([]) }}"
       extraImages: "{{ cifmw_test_operator_tempest_extra_images | default([]) }}"
-    tempestconfRun: "{{ cifmw_tempest_tempestconf_config | default(omit) }}"
+    tempestconfRun: "{{ cifmw_test_operator_tempest_tempestconf_config | default(omit) }}"
     debug: "{{ cifmw_test_operator_tempest_debug }}"
 ```
 
