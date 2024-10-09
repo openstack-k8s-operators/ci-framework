@@ -28,5 +28,5 @@ if [ -z "$NODE_NAMES" ]; then
 fi
 
 for node in $NODE_NAMES; do
-    /usr/local/bin/oc debug $node -T -- chroot /host /usr/bin/bash -c "crictl stats -a -s $DURATION_TIME |  (sed -u 1q; sort -k 2 -h -r)"
+    /usr/local/bin/oc debug "${node}" -T -- chroot /host /usr/bin/bash -c "crictl stats -a -s ${DURATION_TIME} |  (sed -u 1q; sort -k 2 -h -r)"
 done
