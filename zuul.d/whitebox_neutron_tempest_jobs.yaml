@@ -65,6 +65,31 @@
                         igmp_snooping_enable=True
               target:
                 kind: OpenStackControlPlane
+            - patch: |-
+                apiVersion: core.openstack.org/v1beta1
+                kind: OpenStackControlPlane
+                metadata:
+                  name: unused
+                spec:
+                  telemetry:
+                    enabled: true
+                    template:
+                      logging:
+                        enabled: true
+              target:
+                kind: OpenStackControlPlane
+      # The second patch above, and the pre_deploy* hook below comes from https://github.com/openstack-k8s-operators/telemetry-operator/blob/main/ci/vars-logging.yml
+      # We can't import the vars file directly because it MIGHT override the existing cifmw_edpm_prepare_kustomizations var here (TBD, cifmw_extras might merge things nicely)
+      pre_deploy_deploy_logging_dependencies:
+        source: "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/telemetry-operator'].src_dir }}/ci/deploy-logging-dependencies.yml"
+        type: playbook
+      # If you want to make sure the logs are actually available in the Zuul log, you need to find where they live and move it to the appropriate output dir on the controller.
+      # (I need confirmation on this, as the centralised logs might actually already be available in the Zuul logs.)
+      # This hook will run pre_end (right before log collection) to do something
+      # TO run it earlier, try the post_tests_ prefix
+      pre_end_tests_collect_centralised_logs:
+        source: "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/ci/playbooks/gather-centralised-logs.yaml"
+        type: playbook
       cifmw_tempest_tempestconf_config:
         overrides: |
           compute-feature-enabled.vnc_console true
