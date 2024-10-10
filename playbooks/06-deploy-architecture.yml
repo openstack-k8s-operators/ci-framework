@@ -87,13 +87,47 @@
           block:
             - name: Generate needed facts out of local files
               vars:
+                _ctl_ifaces_vars: >-
+                  {{
+                    _ctl_data | dict2items | selectattr('key', 'in', _ifaces_vars)
+                  }}
                 _ipv4_network_data: >-
                   {{
-                    _ctl_data | dict2items |
-                    selectattr('key', 'in', _ifaces_vars) |
+                    _ctl_ifaces_vars |
                     selectattr('value.ipv4.address', 'defined') |
                     selectattr('value.ipv4.address', 'equalto', _controller_host) |
                     map(attribute='value.ipv4') | first | default({})
+                  }}
+                _ipv6_network_data: >-
+                  {{
+                    _ctl_ifaces_vars |
+                    selectattr('value.ipv6.address', 'defined') |
+                    selectattr('value.ipv6.address', 'equalto', _controller_host) |
+                    map(attribute='value.ipv6') | first | default({})
+                  }}
+                _ipv4_sshd_ranges: >-
+                  {{
+                    (
+                      [cifmw_networking_env_definition.networks.ctlplane.network_v4]
+                      if cifmw_networking_env_definition.networks.ctlplane.network_v4 is defined else []
+                    ) +
+                    (
+                      [
+                        _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
+                      ]
+                    ) if (_ipv4_network_data | length > 0) else []
+                  }}
+                _ipv6_sshd_ranges: >-
+                  {{
+                    (
+                      [cifmw_networking_env_definition.networks.ctlplane.network_v6]
+                      if cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined else []
+                    ) +
+                    (
+                      [
+                        _ipv6_network_data.network + '/' + _ipv6_network_data.prefix
+                      ]
+                    ) if (_ipv6_network_data | length > 0) else []
                   }}
               ansible.builtin.set_fact:
                 cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: >-
@@ -108,12 +142,7 @@
                   {{ lookup('file', _ssh_file, rstrip=False) }}
                 cifmw_ci_gen_kustomize_values_sshd_ranges: >-
                   {{
-                    [cifmw_networking_env_definition.networks.ctlplane.network_v4] +
-                    (
-                      [
-                        _ipv4_network_data.network + '/' + _ipv4_network_data.prefix
-                      ]
-                    ) if (_ipv4_network_data | length > 0) else []
+                    _ipv4_sshd_ranges + _ipv6_sshd_ranges
                   }}
           rescue:
             - name: Debug _ctl_data
