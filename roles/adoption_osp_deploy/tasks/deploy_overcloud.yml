@@ -1,0 +1,80 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Gather ansible_user_id from undercloud
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Deploy 17.1 overcloud
+  vars:
+    _overcloud_name: >-
+      {{
+        _stack.stackname |
+        default('overcloud')
+      }}
+    _roles_file: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _stack.roles_file
+        ] | path_join
+      }}
+    _roles_file_dest: "{{ ansible_user_dir }}/roles_{{ _overcloud_name }}.yaml"
+    _network_data_file_dest: "{{ ansible_user_dir }}/network_data_{{ _overcloud_name }}.yaml"
+    _overcloud_args: >-
+      {{
+        _stack.args | join(' ')
+      }}
+    _overcloud_vars: >-
+      {{
+        _stack.vars | join(' -e ')
+      }}
+    _network_provision_output: "network_provision_{{ _overcloud_name }}_out.yaml"
+    _vips_provision_output: "vips_provision_{{ _overcloud_name }}_out.yaml"
+  block:
+    - name: Copy roles file
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.copy:
+        src: "{{ _roles_file }}"
+        dest: "{{ _roles_file_dest }}"
+
+    - name: Run overcloud deploy
+      delegate_to: "osp-undercloud-0"
+      vars:
+        _overcloud_deploy_cmd: >-
+          openstack overcloud deploy
+          --stack {{ _overcloud_name }}
+          {{ _overcloud_args }}
+          --roles-file {{ _roles_file_dest }}
+          -n {{ _network_data_file_dest }}
+          --ntp-server {{ cifmw_adoption_osp_deploy_ntp_server }}
+          -e {{ _overcloud_vars }}
+          -e {{ ansible_user_dir }}/containers-prepare-parameters.yaml
+          -e {{ ansible_user_dir }}/config_download_{{ _overcloud_name }}.yaml
+          -e {{ ansible_user_dir }}/{{ _vips_provision_output }}
+          -e {{ ansible_user_dir }}/{{ _network_provision_output }}
+        _source_cmd: "source {{ ansible_user_dir }}/stackrc"
+        _default_overcloud_deploy_cmd: "{{ _source_cmd }}; {{ _overcloud_deploy_cmd }}"
+      cifmw.general.ci_script:
+        chdir: "{{ ansible_user_dir }}"
+        output_dir: "{{ ansible_user_dir }}/ci-framework-data/artifacts"
+        script: >
+          {{
+            _stack.deploy_command |
+            default(_default_overcloud_deploy_cmd)
+          }}

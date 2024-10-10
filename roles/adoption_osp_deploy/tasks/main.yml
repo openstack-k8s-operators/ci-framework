@@ -1,0 +1,159 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+- name: Validate 17.1 scenario definition
+  ansible.builtin.import_tasks: validate_scenario.yml
+
+- name: Ensure controller and undercloud vms are started and reachable
+  vars:
+    _cifmw_libvirt_manager_layout:
+      vms:
+        controllers:
+          start: true
+          disk_file_name: "dummy"
+        osp-underclouds:
+          start: true
+          disk_file_name: "dummy"
+    cifmw_libvirt_manager_all_vms: >-
+      {%- set vms = {} -%}
+      {%- for vm in _vm_groups['osp-underclouds'] -%}
+        {%- set _ = vms.update({vm: 'osp-underclouds'}) -%}
+      {%- endfor -%}
+      {%- for vm in _vm_groups['controllers'] -%}
+        {%- set _ = vms.update({vm: 'controllers'}) -%}
+      {%- endfor -%}
+      {{ vms }}
+    ansible_libvirt_pools: {}
+  ansible.builtin.include_role:
+    name: "libvirt_manager"
+    tasks_from: "start_vms.yml"
+    apply:
+      delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+
+- name: Generate configuration files
+  ansible.builtin.include_tasks: config_files.yml
+  vars:
+    _stack: "{{ overcloud_vars }}"
+  loop: "{{ cifmw_adoption_osp_deploy_scenario.stacks }}"
+  loop_control:
+    loop_var: overcloud_vars
+
+- name: Prepare undercloud enviornment
+  tags:
+    - undercloud
+  ansible.builtin.import_tasks: prepare_undercloud.yml
+
+- name: Stop before running pre undercloud hooks
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "before_pre_hook_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Gather ansible_user_id from controller for hooks
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Run pre undercloud deploy hooks
+  tags:
+    - undercloud
+  vars:
+    hooks: "{{ cifmw_adoption_osp_deploy_scenario.pre_uc_run | default([]) }}"
+    step: "pre_undercloud"
+  ansible.builtin.include_role:
+    name: run_hook
+
+- name: Stop before deploying undercloud
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "before_deploy_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Gather ansible_user_id from undercloud
+  delegate_to: "osp-undercloud-0"
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Deploy 17.1 undercloud
+  delegate_to: "osp-undercloud-0"
+  tags:
+    - undercloud
+  cifmw.general.ci_script:
+    chdir: "{{ ansible_user_dir }}"
+    output_dir: "{{ cifmw_basedir }}/artifacts"
+    script: "openstack undercloud install"
+
+- name: Stop after deploying undercloud
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "after_deploy_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Gather ansible_user_id from controller for hooks
+  ansible.builtin.setup:
+    gather_subset:
+      - user_id
+      - user_dir
+
+- name: Run post undercloud deploy hooks
+  tags:
+    - undercloud
+  vars:
+    hooks: "{{ cifmw_adoption_osp_deploy_scenario.post_uc_run | default([]) }}"
+    step: "post_undercloud"
+  ansible.builtin.include_role:
+    name: run_hook
+
+- name: Stop after running post undercloud hooks
+  tags:
+    - undercloud
+  vars:
+    _stage_stopper: "after_post_hook_undercloud"
+  when:
+    - cifmw_adoption_osp_deploy_stopper is defined
+    - cifmw_adoption_osp_deploy_stopper in _stage_stopper
+  ansible.builtin.fail:
+    msg: "Failing on demand {{ cifmw_adoption_osp_deploy_stopper }}"
+
+- name: Create required overcloud stacks
+  ansible.builtin.include_tasks: deploy_overcloud_stack.yml
+  vars:
+    _stack: "{{ overcloud_vars }}"
+    overcloud_tags: "overcloud_{{ _stack.stackname }}"
+  loop: "{{ cifmw_adoption_osp_deploy_scenario.stacks }}"
+  loop_control:
+    loop_var: overcloud_vars
+
+- name: Generate vars file to use for adoption tests
+  ansible.builtin.import_tasks: generate_adoption_vars.yml
