@@ -67,7 +67,6 @@ are shared among multiple roles:
 - `cifmw_parent_scenario`: (String or List(String)) path to existing scenario/parameter file to inherit from.
 - `cifmw_configure_switches`: (Bool) Specifies whether switches should be configured. Computes in `reproducer.yml` playbook. Defaults to `false`.
 - `cifmw_use_ocp_overlay`: (Boolean) Specifies whether OCP nodes deployed via devscripts should use overlay images. Using overlay images speeds up the redeployment when using the reproducer role locally but in CI each job is cleaned up and redeployed. Creating the overlay image takes time so should be disabled when not used. Defaults to `true`.
-- `cifmw_crc_default_network`: (String) name of the untagged network used to address DNS on the crc node. Default is `default`.
 - `cifmw_run_operators_compliance_scans`: (Bool) Specifies whether to run operator compliance scans.  Defaults to `false`.
 - `cifmw_run_compute_compliance_scans`: (Bool) Specifies whether to run compliance scans on the first compute.  Defaults to `false`.
 - `cifmw_run_id`: (String) CI Framework run identifier. This is used in libvirt_manager, to add some uniqueness to some types of virtual machines (anything that's not OCP, CRC nor controller).
