@@ -1,0 +1,164 @@
+---
+# source: dcn/edpm-pre-ceph/nodeset/values.yaml.j2
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edpm-nodeset-values
+  annotations:
+    config.kubernetes.io/local-config: "true"
+data:
+  nodeset_name: {{ _group_name }}-edpm
+  ssh_keys:
+    # Authorized keys that will have access to the dataplane computes via SSH
+    authorized: {{ _ssh_authorizedkeys | b64encode }}
+    # The private key that will have access to the dataplane computes via SSH
+    private: {{ _ssh_private_key | b64encode }}
+    # The public key that will have access to the dataplane computes via SSH
+    public: {{ _ssh_public_key | b64encode }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      ansiblePort: 22
+      ansibleVars:
+        timesync_ntp_servers:
+          - hostname: clock.redhat.com
+        # CHANGEME -- see https://access.redhat.com/solutions/253273
+        # edpm_bootstrap_command: |
+        #       subscription-manager register --username <subscription_manager_username> \
+        #         --password <subscription_manager_password>
+        #       podman login -u <registry_username> -p <registry_password> registry.redhat.io
+        edpm_network_config_hide_sensitive_logs: false
+        edpm_network_config_os_net_config_mappings:
+{% for _host_name in _edpm_hosts.keys() %}
+          edpm-{{ _host_name }}:
+{% for  nic in _edpm_hosts[_host_name].nics %}
+            nic{{ loop.index }}: "{{ nic.mac }}"
+{% endfor %}
+{% endfor %}
+{% raw %}
+        edpm_network_config_template: |
+          ---
+          {% set mtu_list = [ctlplane_mtu] %}
+          {% for network in nodeset_networks %}
+          {{ mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) }}
+          {%- endfor %}
+          {% set min_viable_mtu = mtu_list | max %}
+          network_config:
+          - type: ovs_bridge
+            name: br-ex
+            use_dhcp: false
+            members:
+            - type: interface
+              name: nic1
+              primary: false
+          - type: ovs_bridge
+            name: {{ neutron_physical_bridge_name }}
+            mtu: {{ min_viable_mtu }}
+            use_dhcp: false
+            dns_servers: {{ ctlplane_dns_nameservers }}
+            domain: {{ dns_search_domains }}
+            addresses:
+            - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_cidr }}
+            routes: {{ ctlplane_host_routes }}
+            members:
+            - type: interface
+              name: nic2
+              mtu: {{ min_viable_mtu }}
+              # force the MAC address of the bridge to this interface
+              primary: true
+          {% for network in nodeset_networks %}
+            - type: vlan
+              mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
+              vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+              addresses:
+              - ip_netmask:
+                  {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+              routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
+          {% endfor %}
+{% endraw %}
+        edpm_bootstrap_release_version_package: []
+        edpm_nodes_validation_validate_controllers_icmp: false
+        edpm_nodes_validation_validate_gateway_icmp: false
+        edpm_sshd_allowed_ranges:
+          - 192.168.111.0/24
+{% for network_name, network_data in _edpm_network_dict.items() %}
+{% if network_name.startswith('ctlplane') %}
+          - {{ network_data.network_v4 }}
+{% endif %}
+{% endfor %}
+        edpm_sshd_configure_firewall: true
+        gather_facts: false
+{% if 'dcn1' in _group_name %}
+        edpm_ovn_bridge_mappings: ["leaf1:br-ex"]
+{% elif 'dcn2'in _group_name %}
+        edpm_ovn_bridge_mappings: ["leaf2:br-ex"]
+{%endif %}
+        neutron_physical_bridge_name: br-ctl
+        neutron_public_interface_name: eth0
+        edpm_ceph_hci_pre_enabled_services:
+          - ceph_mon
+          - ceph_mgr
+          - ceph_osd
+          - ceph_rgw
+          - ceph_nfs
+          - ceph_rgw_frontend
+          - ceph_nfs_frontend
+        storage_mtu: 9000
+        storage_mgmt_mtu: 9000
+        storage_mgmt_vlan_id: 23
+        storage_mgmt_cidr: "24"
+        storage_mgmt_host_routes: []
+    networks:
+      - defaultRoute: true
+        name: ctlplane
+        subnetName: {{ _subnet }}
+      - name: internalapi
+        subnetName: {{ _subnet }}
+      - name: storage
+        subnetName: {{ _subnet }}
+      - name: tenant
+        subnetName: {{ _subnet }}
+    nodes:
+{% for _host_name in _edpm_hosts.keys() %}
+{% for network_name, network_data in _edpm_instance_dict[_host_name].networks.items() %}
+{% if network_name.startswith('ctlplane') %}
+      edpm-{{ _host_name }}:
+        ansible:
+          ansibleHost: {{ network_data['ip_v4'] }}
+        hostName: edpm-{{ _host_name }}
+        networks:
+          - defaultRoute: true
+            fixedIP: {{ network_data['ip_v4'] }}
+            name: ctlplane
+            subnetName: {{ _subnet }}
+          - name: internalapi
+            subnetName: {{ _subnet }}
+          - name: storage
+            subnetName: {{ _subnet }}
+          - name: storagemgmt
+            subnetName: {{ _subnet }}
+          - name: tenant
+            subnetName: {{ _subnet }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+    services:
+      - bootstrap
+      - configure-network
+      - validate-network
+      - install-os
+      - ceph-hci-pre
+      - configure-os
+      - ssh-known-hosts
+      - run-os
+      - reboot-os
+      - install-certs
+      - ceph-client
+      - ovn
+      - neutron-metadata
+      - libvirt
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ _migration_priv_key | b64encode }}
+        public: {{ _migration_pub_key | b64encode }}

@@ -1,0 +1,48 @@
+---
+- name: Deploy DCN environment
+  hosts: localhost
+  vars:
+    _arch_repo_path: /home/zuul/src/github.com/openstack-k8s-operators/architecture
+    _cifmw_repo_path: /home/zuul/src/github.com/openstack-k8s-operators/ci-framework
+    _jinja_template_src: "{{ _cifmw_repo_path }}/roles/ci_gen_kustomize_values/templates/dcn"
+    _arch_deployment_path: "{{ _arch_repo_path }}/examples/dt/dcn"
+  tasks:
+    - name: Load reproducer-variables
+      ansible.builtin.include_vars:
+        file: "~/reproducer-variables.yml"
+
+    - name: Load networking-environment-definition
+      ansible.builtin.include_vars:
+        file: "/etc/ci/env/networking-environment-definition.yml"
+        name: cifmw_networking_env_definition
+
+    - name: Get OpenShift access token
+      kubernetes.core.k8s_auth:
+        host: "{{ cifmw_openshift_api }}"
+        username: "{{ cifmw_openshift_user }}"
+        password: "{{ cifmw_openshift_password }}"
+        validate_certs: no
+      register: _auth_results
+
+    - name: Create a network subnet list
+      ansible.builtin.set_fact:
+        _network_ranges: >-
+          {{
+            cifmw_networking_env_definition.networks
+            | dict2items
+            | selectattr('key', 'search', '^ctlplane')
+            | map(attribute='value.network_v4')
+            | list
+          }}
+
+    - name: Deploy EDPM
+      include_tasks: deploy-edpm.yml
+      with_items: "{{ groups | dict2items | selectattr('key', 'search', 'compute') | list }}"
+      loop_control:
+        index_var: idx
+        loop_var: item
+      vars:
+        _subnet: "subnet{{ idx + 1 }}"
+        _group_name: "{{ item.key }}"
+        _az: "az{{ idx }}"
+        _subnet_network_range: "{{ _network_ranges[idx] }}"

@@ -1,0 +1,237 @@
+---
+- name: Initialize vars
+  set_fact:
+    _ceph_vars_list: []
+    _group_hosts: "{{ groups[_group_name] }}"
+    _edpm_hosts: "{{ cifmw_baremetal_hosts | dict2items | selectattr('key', 'in', groups[_group_name]) | items2dict }}"
+    search_storage_network_names:
+      - "storage"
+      - "storagedcn1"
+      - "storagedcn2"
+    search_storagemgmt_network_names:
+      - "storagemgmt"
+      - "storagemgmtdcn1"
+      - "storagemgmtdcn2"
+
+- name: Find storage network parameters
+  set_fact:
+    selected_storage_network: >-
+      {{ cifmw_networking_env_definition.instances[_group_hosts | first]['networks']
+      | dict2items
+      | selectattr('key', 'in', search_storage_network_names)
+      | map(attribute='value')
+      | first }}
+
+- name: Find storagemgmt network parameters
+  set_fact:
+    selected_storagemgmt_network: >-
+      {{ cifmw_networking_env_definition.instances[_group_hosts | first]['networks']
+      | dict2items
+      | selectattr('key', 'in', search_storagemgmt_network_names)
+      | map(attribute='value')
+      | first }}
+
+- name: Calculate storage network CIDR
+  set_fact:
+    _storage_network_range: >-
+      {{ selected_storage_network.ip_v4 }}/{{ selected_storage_network.prefix_length_v4 }}
+
+- name: Calculate storagemgmt network CIDR
+  set_fact:
+    _storage_mgmt_network_range: >-
+      {{ selected_storagemgmt_network.ip_v4 }}/{{ selected_storagemgmt_network.prefix_length_v4 }}
+
+- name: Render the pre-ceph NodeSet values.yaml
+  vars:
+    _edpm_instance_dict: "{{ cifmw_networking_env_definition.instances }}"
+    _edpm_network_dict: "{{ cifmw_networking_env_definition.networks }}"
+    _ssh_authorizedkeys: "{{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}"
+    _ssh_private_key: "{{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}"
+    _ssh_public_key: "{{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}"
+    _migration_priv_key: "{{ lookup('file', '~/ci-framework-data/artifacts/nova_migration_key', rstrip=False) }}"
+    _migration_pub_key: "{{ lookup('file', '~/ci-framework-data/artifacts/nova_migration_key.pub', rstrip=False) }}"
+  ansible.builtin.template:
+    backup: true
+    src: "{{ _jinja_template_src }}/edpm-pre-ceph/nodeset/values.yaml.j2"
+    dest: "{{ _arch_deployment_path }}/edpm-pre-ceph/nodeset/values.yaml"
+
+- name: Render the pre-ceph DataPlaneDeployment values.yaml
+  ansible.builtin.template:
+    backup: true
+    src: "{{ _jinja_template_src }}/edpm-pre-ceph/deployment/values.yaml.j2"
+    dest: "{{ _arch_deployment_path }}/edpm-pre-ceph/deployment/values.yaml"
+
+- name: Kustomize pre-ceph {{ _group_name }} NodeSet
+  ansible.builtin.set_fact:
+    nodeset_cr: >-
+      {{ lookup('kubernetes.core.kustomize',
+      dir=_arch_deployment_path + '/edpm-pre-ceph/nodeset') }}
+
+- name: Save the pre-ceph {{ _group_name }} NodeSet CR
+  ansible.builtin.copy:
+    dest: "{{ _arch_deployment_path }}/dataplane-nodeset-pre-ceph_{{ _az }}.yaml"
+    content: "{{ nodeset_cr }}"
+    backup: true
+
+- name: Kustomize pre-ceph {{ _group_name }} DataPlaneDeployment
+  ansible.builtin.set_fact:
+    deployment_cr: >-
+      {{ lookup('kubernetes.core.kustomize',
+      dir=_arch_deployment_path + '/edpm-pre-ceph/deployment') }}
+
+- name: Save the pre-ceph {{ _group_name }} DataPlaneDeployment CR
+  ansible.builtin.copy:
+    dest: "{{ _arch_deployment_path }}/dataplane-deployment-pre-ceph_{{ _az }}.yaml"
+    content: "{{ deployment_cr }}"
+    backup: true
+
+- name: Apply pre-ceph {{ _group_name }} NodeSet CR
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    apply: true
+    src: "{{ _arch_deployment_path }}/dataplane-nodeset-pre-ceph_{{ _az }}.yaml"
+
+- name: Apply pre-ceph {{ _group_name }} DataPlaneDeployment
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    apply: true
+    src: "{{ _arch_deployment_path }}/dataplane-deployment-pre-ceph_{{ _az }}.yaml"
+    wait: yes
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 2400
+
+- name: Deploy Ceph {{ _az }}
+  ansible.builtin.command:
+    chdir: "{{ _cifmw_repo_path }}"
+    cmd: >-
+      ansible-playbook
+      -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+      -e ssh_network_range={{ _subnet_network_range }}
+      -e @~/ci-framework-data/parameters/reproducer-variables.yml
+      -e cifmw_ceph_client_service_values_post_ceph_path_dst=/tmp/edpm_service_values_post_ceph_{{ _az }}.yaml
+      -e cifmw_ceph_client_values_post_ceph_path_dst="{{ _arch_deployment_path }}/values.yaml"
+      -e cifmw_ceph_target={{ _group_name }}
+      -e cifmw_ceph_client_vars=/tmp/ceph_client_{{_az}}.yml
+      -e cifmw_cephadm_cluster={{ _az }}
+      -e storage_network_range={{ _storage_network_range | ansible.utils.ipaddr('network/prefix') }}
+      -e storage_mgmt_network_range={{ _storage_mgmt_network_range |  ansible.utils.ipaddr('network/prefix') }}
+      playbooks/ceph.yml
+
+- name: Load the Ceph cluster variables
+  ansible.builtin.include_vars:
+    file: "/tmp/ceph_client_{{_az}}.yml"
+
+- name: Find all ceph .conf and .keyring files
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "ceph*.conf,ceph*.keyring,az*.conf,az*.keyring"
+    recurse: no
+  register: _ceph_conf_files
+
+- name: Load ceph configuration files
+  ansible.builtin.set_fact:
+    _ceph_files: "{{ _ceph_conf_files.files | map(attribute='path') | list }}"
+
+- name: Render the post-ceph values.yaml
+  ansible.builtin.template:
+    backup: true
+    src: "{{ _jinja_template_src }}/values.yaml.j2"
+    dest: "{{ _arch_deployment_path }}/values.yaml"
+
+- name: Find all ceph vairable files
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "ceph_client_az*.yml"
+    recurse: no
+  register: _ceph_vars_files
+
+- name: Load all ceph vars from files
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  with_items: "{{ _ceph_vars_files.files | map(attribute='path') | list }}"
+  register: _ceph_vars
+
+- name: Combine ceph variables into a list of dictionaries
+  set_fact:
+    _ceph_vars_list: "{{ _ceph_vars_list | union([item.ansible_facts]) }}"
+  with_items: "{{ _ceph_vars.results }}"
+
+- name: Render the post-ceph service-values.yaml
+  ansible.builtin.template:
+    backup: true
+    src: "{{ _jinja_template_src }}/service-values.yaml.j2"
+    dest: "{{ _arch_deployment_path }}/service-values.yaml"
+
+- name: Kustomize post-ceph {{ _group_name }} NodeSet
+  ansible.builtin.set_fact:
+    post_ceph_nodeset_cr: >-
+      {{ lookup('kubernetes.core.kustomize',
+      dir=_arch_deployment_path) }}
+
+- name: Save the post-ceph {{ _group_name }} NodeSet CR
+  ansible.builtin.copy:
+    dest: "{{ _arch_deployment_path }}/dataplane-nodeset-post-ceph_{{ _az }}.yaml"
+    content: "{{ post_ceph_nodeset_cr }}"
+    backup: true
+
+- name: Render the post-ceph DataPlaneDeployment values.yaml
+  ansible.builtin.template:
+    backup: true
+    src: "{{ _jinja_template_src }}/deployment/values.yaml.j2"
+    dest: "{{ _arch_deployment_path }}/deployment/values.yaml"
+
+- name: Kustomize post-ceph {{ _group_name }} DataPlaneDeployment
+  ansible.builtin.set_fact:
+    post_ceph_deployment_cr: >-
+      {{ lookup('kubernetes.core.kustomize',
+      dir=_arch_deployment_path + '/deployment') }}
+
+- name: Save the post-ceph {{ _group_name }} DataPlaneDeployment CR
+  ansible.builtin.copy:
+    dest: "{{ _arch_deployment_path }}/dataplane-deployment-post-ceph_{{ _az }}.yaml"
+    content: "{{ post_ceph_deployment_cr }}"
+    backup: true
+
+- name: Apply post-ceph {{ _group_name }} NodeSet CR
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    apply: true
+    src: "{{ _arch_deployment_path }}/dataplane-nodeset-post-ceph_{{ _az }}.yaml"
+
+- name: Apply post-ceph {{ _group_name }} DataPlaneDeployment CR
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    apply: true
+    src: "{{ _arch_deployment_path }}/dataplane-deployment-post-ceph_{{ _az }}.yaml"
+    wait: yes
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 3200
+
+- name: Run nova cell discovery
+  kubernetes.core.k8s_exec:
+    namespace: openstack
+    pod: nova-cell0-conductor-0
+    command: nova-manage cell_v2 discover_hosts --verbose
+
+- name: Create AZ
+  kubernetes.core.k8s_exec:
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate create {{ _az }} --zone {{ _az }}
+
+- name: Add hosts to AZ
+  kubernetes.core.k8s_exec:
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate add host {{ _az }} edpm-{{ item.key }}.ctlplane.example.com
+  loop: "{{ _edpm_hosts | dict2items }}"
