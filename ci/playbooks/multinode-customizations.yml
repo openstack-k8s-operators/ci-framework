@@ -108,15 +108,31 @@
                 validate: "{{ _validate }}"
 
             # Note(Lewis): Only needed for CRC => 2.32.0-4.14.8
+            - name: Wipe listen-address parameters from config to avoid duplication
+              when:
+                - not _dnsmasq.stat.exists
+              become: true
+              ansible.builtin.lineinfile:
+                path: "{{ _dnsmasq_config }}"
+                regexp: '^listen-address'
+                state: absent
+
             - name: Configure dnsmasq listen-address to listen on both br-ex and ci-private-network
               when:
                 - not _dnsmasq.stat.exists
               become: true
               ansible.builtin.lineinfile:
                 path: "{{ _dnsmasq_config }}"
-                insertafter: '^listen-address='
-                line: "listen-address={{ _crc_default_net_ip | ansible.utils.ipaddr('address') }}"
+                insertbefore: '^expand-hosts'
+                line: |
+                  listen-address=0.0.0.0
+                  listen-address=::
                 validate: "{{ _validate }}"
+
+            - name: Print current config
+              become: true
+              ansible.builtin.command: |
+                cat {{ _dnsmasq_config }}
 
           rescue:
             - name: Debug _dnsmasq_config
