@@ -1,0 +1,160 @@
+---
+# source: dcn/service-values.yaml.j2
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-values
+  annotations:
+    config.kubernetes.io/local-config: "true"
+data:
+  preserveJobs: false
+  cinderAPI:
+    replicas: 3
+    customServiceConfig: |
+      [DEFAULT]
+      default_availability_zone = az0
+  cinderBackup:
+    replicas: 3
+    customServiceConfig: |
+      [DEFAULT]
+      backup_driver = cinder.backup.drivers.ceph.CephBackupDriver
+      backup_ceph_pool = backups
+      backup_ceph_user = openstack
+  cinderVolumes:
+{% for _ceph in _ceph_vars_list %}
+    {{ _ceph.cifmw_ceph_client_cluster }}:
+      customServiceConfig: |
+        [DEFAULT]
+        enabled_backends = ceph
+{% if 'az0' not in _ceph.cifmw_ceph_client_cluster %}
+        glance_api_servers = https://glance-{{ _ceph.cifmw_ceph_client_cluster }}-internal.openstack.svc:9292
+{% endif %}
+        [ceph]
+        volume_backend_name = ceph
+        volume_driver = cinder.volume.drivers.rbd.RBDDriver
+        rbd_ceph_conf = /etc/ceph/{{ _ceph.cifmw_ceph_client_cluster }}.conf
+        rbd_user = openstack
+        rbd_pool = volumes
+        rbd_flatten_volume_from_snapshot = False
+        rbd_secret_uuid = {{ _ceph.cifmw_ceph_client_fsid }}
+        rbd_cluster_name = {{ _ceph.cifmw_ceph_client_cluster }}
+        backend_availability_zone = {{ _ceph.cifmw_ceph_client_cluster }}
+{% endfor %}
+  glance:
+    customServiceConfig: |
+        [DEFAULT]
+        enabled_backends = default_backend:rbd
+        [glance_store]
+        default_backend = default_backend
+        [default_backend]
+        rbd_store_ceph_conf = /etc/ceph/az0.conf
+        store_description = "RBD backend"
+        rbd_store_pool = images
+        rbd_store_user = openstack
+        rbd_thin_provisioning = True
+    glanceAPIs:
+{% set backends = [] %}
+{% for _ceph in _ceph_vars_list %}
+{% if _ceph.cifmw_ceph_client_cluster not in backends %}
+{% set _ = backends.append(_ceph.cifmw_ceph_client_cluster + ':rbd') %}
+{% endif %}
+{% endfor %}
+{% for _ceph in _ceph_vars_list %}
+{% if 'az0' in _ceph.cifmw_ceph_client_cluster %}
+      default:
+{% else %}
+      {{ _ceph.cifmw_ceph_client_cluster }}:
+{% endif %}
+        customServiceConfig: |
+          [DEFAULT]
+          enabled_import_methods = [web-download,copy-image,glance-direct]
+          enabled_backends = {{ backends | join(',') }}
+          [glance_store]
+          default_backend = {{ _ceph.cifmw_ceph_client_cluster }}
+          [{{ _ceph.cifmw_ceph_client_cluster }}]
+          rbd_store_ceph_conf = /etc/ceph/{{ _ceph.cifmw_ceph_client_cluster }}.conf
+          store_description = "{{ _ceph.cifmw_ceph_client_cluster }} RBD backend"
+          rbd_store_pool = images
+          rbd_store_user = openstack
+          rbd_thin_provisioning = True
+{% for _ceph_az in _ceph_vars_list %}
+{% if _ceph_az.cifmw_ceph_client_cluster != _ceph.cifmw_ceph_client_cluster %}
+          [{{ _ceph_az.cifmw_ceph_client_cluster }}]
+          rbd_store_ceph_conf = /etc/ceph/{{ _ceph_az.cifmw_ceph_client_cluster }}.conf
+          store_description = "{{ _ceph_az.cifmw_ceph_client_cluster }} RBD backend"
+          rbd_store_pool = images
+          rbd_store_user = openstack
+          rbd_thin_provisioning = True
+{% endif %}
+{% endfor %}
+        networkAttachments:
+          - storage
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: 172.17.0.8{{ loop.index0 }}
+              spec:
+                type: LoadBalancer
+        replicas: 3
+{% if _ceph.cifmw_ceph_client_cluster == 'az0' %}
+        type: split
+{% else %}
+        type: edge
+{% endif %}
+{% endfor %}
+  manila:
+    enabled: false
+    manilaAPI:
+      customServiceConfig: |
+        [DEFAULT]
+        enabled_share_protocols=nfs,cephfs
+    manilaShares:
+      share1:
+        customServiceConfig: |
+          [DEFAULT]
+          enabled_share_backends = cephfs
+          enabled_share_protocols = cephfs
+          [cephfs]
+          driver_handles_share_servers = False
+          share_backend_name = cephfs
+          share_driver = manila.share.drivers.cephfs.driver.CephFSDriver
+          cephfs_conf_path = /etc/ceph/ceph.conf
+          cephfs_cluster_name = ceph
+          cephfs_auth_id=openstack
+          cephfs_volume_mode = 0755
+          cephfs_protocol_helper_type = CEPHFS
+  neutron:
+      template:
+        customServiceConfig: |
+          [ml2_type_vlan]
+          network_vlan_ranges = datacentre:1:1000,leaf1:1:1000,leaf2:1:1000
+          [neutron]
+          physnets = datacentre,leaf1,leaf2
+  nova:
+      customServiceConfig: |
+        [DEFAULT]
+        default_schedule_zone=az0
+  extraMounts:
+    - name: v1
+      region: r1
+      extraVol:
+        - propagation:
+            - CinderVolume
+            - CinderBackup
+            - GlanceAPI
+            - ManilaShare
+          extraVolType: Ceph
+          volumes:
+            - name: ceph
+              projected:
+                sources:
+                  - secret:
+                      name: ceph-conf-files
+          mounts:
+            - name: ceph
+              mountPath: /etc/ceph
+              readOnly: true
