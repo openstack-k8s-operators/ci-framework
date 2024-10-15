@@ -1,0 +1,55 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if AZ exists has hosts
+  register: az_hosts
+  ignore_errors: true
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate show {{ _az }} -c hosts -f value
+
+- name: Convert az_hosts string to list and remove extra text
+  ansible.builtin.set_fact:
+    az_hosts_list: >
+      {{ az_hosts.stdout
+         | default([])
+         | from_yaml
+         | map('regex_replace', 'edpm-compute-(.*?)\\..*', 'compute-\\1')
+         | list }}
+
+- name: Create AZ if it does not exist
+  when:
+    - az_hosts.rc == 1
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate create {{ _az }} --zone {{ _az }}
+
+- name: Add only the missing edpm hosts to AZ
+  loop: "{{ _edpm_hosts | dict2items }}"
+  when:
+    - item.key not in az_hosts_list
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate add host {{ _az }} edpm-{{ item.key }}.ctlplane.example.com
