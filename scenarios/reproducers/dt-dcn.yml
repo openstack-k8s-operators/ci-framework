@@ -120,7 +120,7 @@ cifmw_libvirt_manager_configuration:
       memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
       cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
       extra_disks_num: 3
-      extra_disks_size: 30G
+      extra_disks_size: 15G
       nets:
         - ocpbm
         - osp_trunk
@@ -145,6 +145,8 @@ cifmw_libvirt_manager_configuration:
       sha256_image_name: "{{ cifmw_discovered_hash }}"
       image_local_dir: "{{ cifmw_basedir }}/images/"
       disk_file_name: "base-os.qcow2"
+      extra_disks_num: 3
+      extra_disks_size: 15G
       disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
       memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
       cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
@@ -159,6 +161,8 @@ cifmw_libvirt_manager_configuration:
       sha256_image_name: "{{ cifmw_discovered_hash }}"
       image_local_dir: "{{ cifmw_basedir }}/images/"
       disk_file_name: "base-os.qcow2"
+      extra_disks_num: 3
+      extra_disks_size: 15G
       disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
       memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
       cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
@@ -232,6 +236,7 @@ cifmw_networking_definition:
               end: 90
     internalapi:
       network: "172.17.0.0/24"
+      gateway: "172.17.0.1"
       vlan: 20
       mtu: 1496
       tools:
@@ -249,6 +254,7 @@ cifmw_networking_definition:
               end: 70
     internalapidcn1:
       network: "172.17.10.0/24"
+      gateway: "172.17.10.1"
       vlan: 30
       mtu: 1496
       tools:
@@ -266,6 +272,7 @@ cifmw_networking_definition:
               end: 70
     internalapidcn2:
       network: "172.17.20.0/24"
+      gateway: "172.17.20.1"
       vlan: 40
       mtu: 1496
       tools:
@@ -283,6 +290,7 @@ cifmw_networking_definition:
               end: 70
     storage:
       network: "172.18.0.0/24"
+      gateway: "172.18.0.1"
       vlan: 21
       mtu: 1496
       tools:
@@ -300,6 +308,7 @@ cifmw_networking_definition:
               end: 70
     storagedcn1:
       network: "172.18.10.0/24"
+      gateway: "172.18.10.1"
       vlan: 31
       mtu: 1496
       tools:
@@ -317,6 +326,7 @@ cifmw_networking_definition:
               end: 70
     storagedcn2:
       network: "172.18.20.0/24"
+      gateway: "172.18.20.1"
       vlan: 41
       mtu: 1496
       tools:
@@ -334,6 +344,7 @@ cifmw_networking_definition:
               end: 70
     storagemgmt:
       network: "172.20.0.0/24"
+      gateway: "172.20.0.1"
       vlan: 23
       tools:
         netconfig:
@@ -344,6 +355,7 @@ cifmw_networking_definition:
         mtu: 1500
     storagemgmtdcn1:
       network: "172.20.10.0/24"
+      gateway: "172.20.10.1"
       vlan: 33
       mtu: 1500
       tools:
@@ -353,6 +365,7 @@ cifmw_networking_definition:
               end: 250
     storagemgmtdcn2:
       network: "172.20.20.0/24"
+      gateway: "172.20.20.1"
       vlan: 43
       mtu: 1500
       tools:
@@ -362,6 +375,7 @@ cifmw_networking_definition:
               end: 250
     tenant:
       network: "172.19.0.0/24"
+      gateway: "172.19.0.1"
       tools:
         metallb:
           ranges:
@@ -379,6 +393,7 @@ cifmw_networking_definition:
       mtu: 1496
     tenantdcn1:
       network: "172.19.10.0/24"
+      gateway: "172.19.10.1"
       vlan: 32
       mtu: 1496
       tools:
@@ -396,6 +411,7 @@ cifmw_networking_definition:
               end: 70
     tenantdcn2:
       network: "172.19.20.0/24"
+      gateway: "172.19.20.1"
       vlan: 42
       mtu: 1496
       tools:
@@ -484,3 +500,122 @@ cifmw_networking_definition:
       networks:
         ctlplane:
           ip: "192.168.122.9"
+cifmw_libvirt_manager_extra_network_configuration:
+  interfaces:
+    - name: "vlan{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-osp_trunk
+        id: "{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.internalapi.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.internalapi.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.internalapidcn1.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-dcn1_tr
+        id: "{{ cifmw_networking_definition.networks.internalapidcn1.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.internalapidcn1.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.internalapidcn1.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.internalapidcn2.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-dcn2_tr
+        id: "{{ cifmw_networking_definition.networks.internalapidcn2.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.internalapidcn2.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.internalapidcn2.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.storage.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-osp_trunk
+        id: "{{ cifmw_networking_definition.networks.storage.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.storage.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.storage.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.storagedcn1.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-dcn1_tr
+        id: "{{ cifmw_networking_definition.networks.storagedcn1.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.storagedcn1.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.storagedcn1.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.storagedcn2.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-dcn2_tr
+        id: "{{ cifmw_networking_definition.networks.storagedcn2.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.storagedcn2.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.storagedcn2.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.storagemgmt.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-osp_trunk
+        id: "{{ cifmw_networking_definition.networks.tenant.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.tenant.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.tenant.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.tenantdcn1.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-dcn1_tr
+        id: "{{ cifmw_networking_definition.networks.tenantdcn1.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.tenantdcn1.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.tenantdcn1.network | ansible.utils.ipaddr('prefix') }}"
+    - name: "vlan{{ cifmw_networking_definition.networks.tenantdcn2.vlan }}"
+      type: vlan
+      state: up
+      vlan:
+        base-iface: cifmw-dcn2_tr
+        id: "{{ cifmw_networking_definition.networks.tenantdcn2.vlan }}"
+        protocol: 802.1q
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+          - ip: "{{ cifmw_networking_definition.networks.tenantdcn2.gateway }}"
+            prefix-length: "{{ cifmw_networking_definition.networks.tenantdcn2.network | ansible.utils.ipaddr('prefix') }}"
