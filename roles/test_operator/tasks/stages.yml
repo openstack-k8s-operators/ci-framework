@@ -13,32 +13,25 @@
   ansible.builtin.import_role:
     name: run_hook
 
+- name: Set empty stage vars dict
+  ansible.builtin.set_fact:
+    stage_vars_dict: {}
+
 - name: Include stage var file
   ansible.builtin.include_vars:
     file: "{{ _stage_vars.test_vars_file | default('/dev/null') }}"
     name: _stage_var_file
 
-- name: Set stage var fact
+- name: Overwrite global variables with stage variables (cifmw_test_operator_stages)
   vars:
     file_vars: "{{ _stage_var_file }}"
     test_vars: "{{ _stage_vars.test_vars | default({}) }}"
-  ansible.builtin.set_fact:
     _stage_test_vars: "{{ file_vars | combine(test_vars) }}"
-
-- name: Overwrite global variables with stage variables (cifmw_test_operator_stages)
-  with_dict: "{{ vars | combine(_stage_test_vars) }}"
-  when: item.key.startswith('cifmw_test_operator')
   ansible.builtin.set_fact:
-    "{{ item.key | replace('cifmw', '') }}": "{{ _stage_test_vars[item.key] | default(item.value) | default(omit) }}"
+    stage_vars_dict: "{{ vars | combine(_stage_test_vars) }}"
 
 - name: "Call runner {{ _stage_vars.type }}"
   ansible.builtin.include_tasks: "runners/{{ _stage_vars.type }}_runner.yml"
-
-# - name: Undefine stage variables
-#   with_dict: "{{ vars }}"
-#   when: item.key.startswith('_test_operator')
-#   ansible.builtin.set_fact:
-#     "{{ item.key }}": "{{ undef() }}"
 
 - name: "Call post stage hooks for test operator stage {{ _stage_vars.name }}"
   when:

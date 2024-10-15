@@ -8,7 +8,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_index`: (String) Full name of container image with index that contains the test-operator. Default value: `quay.io/openstack-k8s-operators/test-operator-index:latest`
 * `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
-* `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. Default value: `8`
+* `cifmw_test_operator_tempest_concurrency`: (Integer) Tempest concurrency value. Default value: `8`
 * `cifmw_test_operator_cleanup`: (Bool) Delete all resources created by the role at the end of the testing. Default value: `false`
 * `cifmw_test_operator_tempest_cleanup`: (Bool) Run tempest cleanup after test execution (tempest run) to delete any resources created by tempest that may have been left out.
 * `cifmw_test_operator_default_groups`: (List) List of groups in the include list to search for tests to be executed. Default value: `[ 'default' ]`
@@ -28,6 +28,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   * `type`: (String) The framework name you would like to call, currently the options are: tempest, ansibletest, horizontest, tobiko.
   * `test_vars_file`: (String) Path to the file used for testing, this file should contain the testing params for this stage. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
   * `test_vars`: (String) Testing params for this specific stage if a `test_vars_file` is used the specified parameters would override the ones in the `test_vars_file`. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
+  >🔴 Important note! 🔴 Only variables with the following structure can be used to override inside a stage: `cifmw_test_operator_[test-operator CR name]_[parameter name]`
   * `pre_test_stage_hooks`: (List) List of pre hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
   * `post_test_stage_hooks`: (List) List of post hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
  Default value:
@@ -76,7 +77,7 @@ cifmw_test_operator_stages:
         {{ cifmw_test_operator_tempest_include_list | default('') }}
       excludeList: |
         {{ cifmw_test_operator_tempest_exclude_list | default('') }}
-      concurrency: "{{ cifmw_test_operator_concurrency }}"
+      concurrency: "{{ cifmw_test_operator_tempest_concurrency }}"
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
       extraRPMs: "{{ cifmw_test_operator_tempest_extra_rpms | default([]) }}"
       extraImages: "{{ cifmw_test_operator_tempest_extra_images | default([]) }}"
@@ -226,4 +227,22 @@ other than the default one (e.g., `tempest-tests`, `tobiko-tests`, ...):
 
 ```
 cifmw_test_operator_tempest_name: "post-update-tempest-tests"
+```
+
+### Use test operator stages
+```
+cifmw_test_operator_stages:
+  - name: best-tempest
+    type: tempest
+    test_vars:
+      cifmw_test_operator_tempest_name: 'best-tests'
+  - name: ansibletest
+    type: ansibletest
+  - name: not-the-best-tempest
+    type: tempest
+    test_vars:
+      cifmw_test_operator_tempest_name: 'not-so-best-tests'
+  - name: tobiko
+    type: tobiko
+    test_vars_file: /path/to/tobiko/override/test/file
 ```
