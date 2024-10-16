@@ -36,8 +36,12 @@ data:
     subnets:
       - name: subnet1
         cidr: {{ network[_ipv.network_vX] }}
-        gateway: {{ omit if network[_ipv.gw_vX] is not defined else network[_ipv.gw_vX] }}
-        vlan: {{ omit if network.vlan_id is not defined else network.vlan_id }}
+{%      if network[_ipv.gw_vX] is defined  %}
+        gateway: {{ network[_ipv.gw_vX] }}
+{%      endif %}
+{%      if network.vlan_id is defined  %}
+        vlan: {{ network.vlan_id }}
+{%      endif %}
         allocationRanges:
 {%    for range in network.tools.netconfig[_ipv.ipvX_ranges] %}
           - end: {{ range.end }}
@@ -62,12 +66,14 @@ data:
     mtu: {{ network.mtu | default(1500) }}
 {%  if network.vlan_id is defined  %}
     vlan: {{ network.vlan_id }}
-    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
-    base_iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
-{%  elif network.network_name != "ironic" %}
-    iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
-{% else %}
-    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
+    iface: {{ network.network_name }}
+{%    if ns.interfaces[network.network_name] is defined  %}
+    base_iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
+{%  elif network.network_name != "ironic" and ns.interfaces[network.network_name] is defined %}
+    iface: {{ ns.interfaces[network.network_name] }}
+{%  else %}
+    iface: {{ network.network_name }}
 {%  endif %}
 {%  if network.tools.multus is defined and network.network_name == "ctlplane" %}
     net-attach-def: |
