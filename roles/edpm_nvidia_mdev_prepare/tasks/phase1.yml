@@ -1,0 +1,87 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Blacklist nouveau
+  become: true
+  ansible.builtin.copy:
+    dest: "/etc/modprobe.d/blacklist-nouveau.conf"
+    mode: "0644"
+    content: |-
+      blacklist nouveau
+      options nouveau modeset=0
+    force: false
+  when:
+    - cifmw_edpm_nvidia_mdev_prepare_disable_nouveau | bool
+  register: _blacklist_nouveau
+
+- name: Make sure that we defined the driver URL
+  ansible.builtin.assert:
+    that:
+      - cifmw_edpm_nvidia_mdev_prepare_driver_url is defined
+      - cifmw_edpm_nvidia_mdev_prepare_driver_url | length > 0
+    msg: "You need to set cifmw_edpm_nvidia_mdev_prepare_driver_url"
+
+- name: Gather the package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Install nvidia driver RPM either from path or URL
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ cifmw_edpm_nvidia_mdev_prepare_driver_url }}"
+    state: present
+    disable_gpg_check: true
+  when: cifmw_edpm_nvidia_mdev_prepare_package_name not in ansible_facts.packages
+  register: _nvidia_driver_install
+
+- name: Check if grub2-mkconfig has --update-bls-cmdline option
+  ansible.builtin.shell:
+    cmd: grub2-mkconfig --help | grep '\-\-update-bls-cmdline'
+  ignore_errors: true
+  register: check_update_bls_cmdline
+  changed_when: false
+
+- name: Regenerate initramfs
+  become: true
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - 'dracut --force'
+    - >-
+      grub2-mkconfig -o /boot/grub2/grub.cfg
+      {{ '--update-bls-cmdline'
+      if check_update_bls_cmdline.rc == 0
+      else '' }}
+  when: _blacklist_nouveau.changed or _nvidia_driver_install.changed
+
+- name: Enforce a reboot to ensure that we have the driver loaded
+  block:
+    - name: Create directory required by edpm-reboot role
+      become: true
+      ansible.builtin.file:
+        path: /var/lib/openstack/reboot_required/
+        state: directory
+        mode: "0755"
+    - name: Create required file to enforce a reboot
+      become: true
+      ansible.builtin.file:
+        path: /var/lib/openstack/reboot_required/nvidia_mdev_reboot
+        state: touch
+        mode: "0600"
+    # Since the EDPM role isn't installed, we can't call it
+    # Removing it for now
+    # - name: Call edpm_reboot role
+      # ansible.builtin.include_role:
+      #   name: edpm_reboot
