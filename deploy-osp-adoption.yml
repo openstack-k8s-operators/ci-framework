@@ -45,43 +45,35 @@
 
     - name: Read inventory groups
       delegate_to: "{{ _target_host }}"
-      ansible.builtin.slurp:
-        path: "{{ ansible_user_dir }}/ci-framework-data/reproducer-inventory/all-group.yml"
+      ansible.builtin.find:
+        paths: "{{ ansible_user_dir }}/ci-framework-data/reproducer-inventory/"
+        file_type: file
+        patterns: '*.yml,*.yaml'
       register: "_all_groups"
 
-    - name: Generate groups
-      vars:
-        _parsed_all_groups: "{{ _all_groups['content'] | b64decode | from_yaml }}"
-      block:
-        - name: Read groups inventory
-          delegate_to: "{{ _target_host }}"
-          vars:
-            _group_name: "{{ item.key[:-1] }}"
-            _path_inventories: "{{ ansible_user_dir }}/ci-framework-data/reproducer-inventory"
-          ansible.builtin.slurp:
-            path: "{{ _path_inventories }}/{{ _group_name }}-group.yml"
-          register: _reproducer_inventory_files
-          loop: >-
-            {{
-              _parsed_all_groups.all.children | dict2items
-            }}
+    - name: Read groups inventory
+      delegate_to: "{{ _target_host }}"
+      ansible.builtin.slurp:
+        path: "{{ item.path }}"
+      register: _reproducer_inventory_files
+      loop: "{{ _all_groups.files }}"
 
-        - name: Set groups fact
-          when: "'all' != _group_name"
-          vars:
-            _content: "{{ _inventory_file.content | b64decode | from_yaml }}"
-            _group_name: "{{ _content | list | first }}"
-            _nodes: "{{ _content[_group_name]['hosts'].keys() }}"
-            _group_nodes: >-
-              {%- set group = {} -%}
-              {%- set _ = group.update({_group_name: _nodes}) -%}
-              {{ group }}
-          ansible.builtin.set_fact:
-            _vm_groups: >-
-              {{ _vm_groups | default({}) | combine(_group_nodes) }}
-          loop: "{{ _reproducer_inventory_files.results }}"
-          loop_control:
-            loop_var: "_inventory_file"
+    - name: Set groups fact
+      when: "'all' != _group_name"
+      vars:
+        _content: "{{ _inventory_file.content | b64decode | from_yaml }}"
+        _group_name: "{{ _content | list | first }}"
+        _nodes: "{{ _content[_group_name]['hosts'].keys() }}"
+        _group_nodes: >-
+          {%- set group = {} -%}
+          {%- set _ = group.update({_group_name: _nodes}) -%}
+          {{ group }}
+      ansible.builtin.set_fact:
+        _vm_groups: >-
+          {{ _vm_groups | default({}) | combine(_group_nodes) }}
+      loop: "{{ _reproducer_inventory_files.results }}"
+      loop_control:
+        loop_var: "_inventory_file"
 
     - name: Gather ansible_user_id from playbook target for hooks
       ansible.builtin.setup:
