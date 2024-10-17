@@ -14,6 +14,7 @@ None.
 * `cifmw_hci_prepare_enable_repo_setup_service`: (Boolean) Optionally adds `repo-setup` service to OpenStackDataPlaneNodeSet in both phase1 and phase2. Defaults to `True`.
 * `cifmw_hci_prepare_storage_mgmt_mtu`: (Int) Storage-Management network MTU. Defaults to `1500`.
 * `cifmw_hci_prepare_storage_mgmt_vlan`: (Int) Storage-Management network VLAn. Defaults to `23`.
+* `cifmw_hci_prepare_namespace`: (String) Namespace to use to apply resources if install-yamls is not used. Defaults to `openstack`.
 
 ## Examples
 ### 1 - How to deploy HCI using hci_prepare and edpm_deploy
