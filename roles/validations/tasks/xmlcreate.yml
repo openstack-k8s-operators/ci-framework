@@ -1,0 +1,58 @@
+---
+- name: Get validation start time from system
+  ansible.builtin.command:
+    cmd: date +%Y-%m-%d-%H:%M:%S.%3N
+  register: individual_validation_start_time
+
+- name: Run a validation
+  ansible.builtin.include_tasks: "{{ item }}"
+
+- name: Get validation end time from system
+  ansible.builtin.command:
+    cmd: date +%Y-%m-%d-%H:%M:%S.%3N
+  register: individual_validation_end_time
+
+- name: Calculate validation total run time
+  ansible.builtin.set_fact:
+    individual_validator_run_time: "{{((individual_validation_end_time.stdout | to_datetime('%Y-%m-%d-%H:%M:%S.%f')) - (individual_validation_start_time.stdout | to_datetime('%Y-%m-%d-%H:%M:%S.%f'))).total_seconds()}}"
+
+- name: Increment test count after validation execution
+  ansible.builtin.set_fact:
+    validations_executed: "{{ validations_executed | int + 1 }}"
+
+- name: Make new xml line list entry
+  ansible.builtin.set_fact:
+    new_xml_line_list_entry: ['  <testcase classname="validations.{{item | dirname}}" name="{{item | basename}}" time="{{ individual_validator_run_time }}"/>']
+  when: '"passed" in validator_status'
+
+- name: Add new line to xml line list
+  ansible.builtin.set_fact:
+    xml_line_list: "{{ xml_line_list + new_xml_line_list_entry }}"
+  when: '"passed" in validator_status'
+
+- name: Add testcase and failure reason to xml line list when a validation fails
+  when: '"failed" in validator_status'
+  block:
+    - name: Make new xml line list entry
+      ansible.builtin.set_fact:
+        new_xml_line_list_entry: ['  <testcase classname="validations.{{item | dirname}}" name="{{item | basename}}" time="{{ individual_validator_run_time }}">']
+
+    - name: Add new line to xml line list
+      ansible.builtin.set_fact:
+        xml_line_list: "{{ xml_line_list + new_xml_line_list_entry }}"
+
+    - name: Make a new failure reason xml line list entry
+      ansible.builtin.set_fact:
+        new_xml_line_list_entry: ['    <failure message="{{validator_status}}" </failure>']
+
+    - name: Add new failure reason line to xml line list
+      ansible.builtin.set_fact:
+        xml_line_list: "{{ xml_line_list + new_xml_line_list_entry }}"
+
+    - name: Add testcase end to xml line list
+      ansible.builtin.set_fact:
+        xml_line_list: "{{ xml_line_list + ['  </testcase>'] }}"
+
+    - name: Increment failure count
+      ansible.builtin.set_fact:
+        validations_failed: "{{ validations_failed | int + 1 }}"
