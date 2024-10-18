@@ -45,34 +45,15 @@
       }}
     cacheable: true
 
-- name: Get all openstack pods
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
-    script: "oc get pods -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} -o name"
-  register: operator_pod
-
-- name: List all pods
-  ansible.builtin.debug:
-    var: operator_pod
-
-- name: Get the operator pod name
-  ansible.builtin.set_fact:
-    operator_pod: "{{ '\n'.join(operator_pod.stdout_lines) |regex_search('^pod/' ~ operator_name ~ '-operator-controller-manager-.*$', multiline=True) }}"
-
-- name: List all pods
-  ansible.builtin.debug:
-    var: operator_pod
-
 - name: Get meta operator environment variable
+  vars:
+    _operator_ns: "{{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}"
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
-    script: "oc set env {{ operator_pod }} -n {{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }} --list"
+    script: "oc set env $(oc get pods -n {{ _operator_ns }} -o name -l openstack.org/operator-name={{ operator_name }}) -n {{ _operator_ns }} --list"
   register: containers_env_list
 
 - name: Generate update_env_vars.sh script
