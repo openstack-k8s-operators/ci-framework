@@ -1,4 +1,5 @@
 # ci_nmstate
+
 Configures Ansible hosts networks by applying nmstate configurations
 generated from the content of the CI Networking Env. Definition.
 
@@ -8,6 +9,7 @@ It needs sudo access to install nmstate packages and apply
 nmstate changes as they manipulate networking.
 
 ## Parameters
+
 * `cifmw_ci_nmstate_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_ci_nmstate_manifests_dir`: (String) Directory in where OCP manifests will be placed. Defaults to `"{{ cifmw_manifests | default(cifmw_ci_nmstate_basedir ~ '/artifacts/manifests') }}"`.
 * `cifmw_ci_nmstate_configs_dir`: (String) Directory in where nmstate target states for non OCP nodes will be placed. Defaults to `"{{ cifmw_ci_nmstate_basedir ~ '/artifacts/nmstate' }}"`.
@@ -27,7 +29,16 @@ input to generate the needed NMstate configurations for each instance. The Netwo
 is read from `cifmw_networking_env_definition`, and if not present, it's read from its default
 location, `/etc/ci/env/networking-environment-definition.yml`.
 
+## OLM CRs patching
+
+This role uses `cifmw_ci_nmstate_olm_operator_group` and `cifmw_ci_nmstate_olm_subscription` as CR content
+for the `OperatorGroup` and `Subscription` respectively. The user can override the values of those default
+CRs by passing them as variables or by using the dedicated patching variables.
+All the variables named like `^cifmw_ci_nmstate_olm_operator_group_patch.*` or `^cifmw_ci_nmstate_olm_subscription_patch.*`
+will be combined on top of the original ones after sorting them by name.
+
 ## The custom instance config dict
+
 In case the generated nmstate configuration is not enough for the given purpose it is possible
 to directly pass the configuration to be applied to each instance (OCP and/or unmanaged) by placing
 it in the `cifmw_ci_nmstate_instance_config` dict like this:
