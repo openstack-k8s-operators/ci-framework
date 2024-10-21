@@ -1,0 +1,73 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Gather the list of EDPM computes
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Fetch OSP BMO nodesets
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get OpenStackBaremetalSet -n "{{ namespace|default('openstack') }}"  -o yaml
+      register: _osp_bmo_nodsets_oc_out
+
+    - name: Craft the BM hosts list
+      ansible.builtin.set_fact:
+        _bmo_provisioned_hosts: >-
+          {% set hosts = [] -%}
+          {% set nodesets = (_osp_bmo_nodsets_oc_out.stdout | from_yaml)['items'] | default([]) -%}
+          {% for spec in nodesets | map(attribute='spec') -%}
+          {%   for host_key, host_val in spec.baremetalHosts.items() -%}
+          {%     set _ = hosts.append(
+            {
+            'name': host_key,
+            'ip': host_val['ctlPlaneIP'] | ansible.utils.ipaddr('address'),
+            'user': spec.cloudUserName,
+            'group': host_key | split('-') | first + 's'
+          }) -%}
+          {%   endfor -%}
+          {% endfor -%}
+          {{ hosts }}
+
+    - name: Add OSP BMO nodesets to Ansible
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: "{{ item.group }}"
+        ansible_ssh_user: "{{ item.user }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.ssh/id_cifw"
+        ansible_ssh_extra_args: '-o StrictHostKeyChecking=no'
+      loop: "{{ _bmo_provisioned_hosts }}"
+
+    - name: Wait for the instance to boot
+      delegate_to: "{{ item.name }}"
+      ansible.builtin.wait_for_connection:
+        sleep: 2
+        timeout: 600
+      loop: "{{ _bmo_provisioned_hosts }}"
+
+- name: Run the Nvidia phase 1 role
+  hosts: edpms
+  tasks:
+    - name: Run phase1
+      ansible.builtin.import_role:
+        name: edpm_nvidia_mdev_prepare
+        # As a reminder, at the end of phase1, the compute will reboot
+        tasks_from: phase1
