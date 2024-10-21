@@ -10,7 +10,7 @@ fi
 
 disk_str=''
 for disk in ${_disks}; do
-    pvcreate ${disk}
+    pvcreate "${disk}" -y -ff
     disk_str="${disk_str} ${disk}"
 done
 
