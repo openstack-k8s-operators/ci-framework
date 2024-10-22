@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -o pipefail
 
 exit_code=0
@@ -10,16 +10,17 @@ if [[ $missing_comment != '' ]]; then
     echo
     echo "${missing_comment}"
     echo
-    let "exit_code+=1"
+    (( exit_code+=1 ))  # bashate: ignore=E043
 fi
 
 set_path=$(grep -r '^# source: ' roles/ci_gen_kustomize_values/templates | sed 's!roles/ci_gen_kustomize_values/templates/!!')
+# shellcheck disable=SC2162
 while read match; do
     tmpl=$(echo -n "${match}" | cut -d ':' -f 1)
     comment=$(echo -n "${match}" | cut -d ':' -f 3 | tr -d '[:space:]')
     if [[ "${tmpl}" != "${comment}" ]]; then
-        let "exit_code+=1"
+        (( exit_code+=1 ))  # bashate: ignore=E043
         echo "${tmpl} doesn't have correct 'source': ${comment}"
     fi
-done <<< ${set_path}
+done <<< "${set_path}"
 exit $exit_code

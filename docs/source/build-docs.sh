@@ -6,8 +6,9 @@ VENV_DIR="${DOCS_DIR}/_venv"
 BUILD_TYPE="${BUILD_TYPE:=static}"
 
 # Create a virtual environment and activate it
-python -m venv ${VENV_DIR} && source ${VENV_DIR}/bin/activate
-pip3 install -r ${DOCS_DIR}/doc-requirements.txt
+# shellcheck disable=SC1091
+python -m venv "${VENV_DIR}" && source "${VENV_DIR}/bin/activate"
+pip3 install -r "${DOCS_DIR}/doc-requirements.txt"
 
 cd ${DOCS_DIR}/source
 
