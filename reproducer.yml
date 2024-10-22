@@ -78,8 +78,21 @@
     - name: Allow traffic from OSP VMs to OSP API (needed for shiftstack)
       become: true
       when: cifmw_allow_vms_to_reach_osp_api | default ('false') | bool
-      ansible.builtin.command: # noqa: command-instead-of-module
-        cmd: iptables -I LIBVIRT_FWI 1 -o ocpbm -j ACCEPT
+      block:
+        - name: Allow traffic from OSP VMs to OSP API for ipv4
+          ansible.builtin.command: # noqa: command-instead-of-module
+            cmd: iptables -I LIBVIRT_FWI 1 -o ocpbm -j ACCEPT
+
+        - name: Allow traffic from OSP VMs to OSP API for ipv6
+          ansible.builtin.lineinfile:
+            path: /etc/firewalld/firewalld.conf
+            regexp: '^IPv6_rpfilter='
+            line: 'IPv6_rpfilter=no'
+
+        - name: Restart firewalld.service
+          ansible.builtin.systemd_service:
+            name: firewalld
+            state: restarted
 
     - name: Run deployment if instructed to
       when:
