@@ -1,0 +1,124 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create working directories
+  delegate_to: localhost
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    recurse: true
+    mode: '755'
+  loop:
+    - "{{ cifmw_hsm_working_dir }}"
+    - "{{ cifmw_hsm_working_dir }}/bin"
+    - "{{ cifmw_hsm_working_dir }}/certs"
+    - "{{ cifmw_hsm_working_dir }}/client"
+    - "{{ cifmw_hsm_working_dir }}/barbican_operator"
+
+- name: Extract luna software
+  block:
+    - name: Fetch the linux minimal client
+      ansible.builtin.fetch:
+        src: "{{ cifmw_hsm_luna_minclient_src }}"
+        dest: "{{ cifmw_hsm_working_dir }}/"
+        flat: true
+
+    - name: Extract the minimal client
+      delegate_to: localhost
+      ansible.builtin.unarchive:
+        src: "{{ cifmw_hsm_working_dir }}/{{ cifmw_hsm_luna_minclient_src | basename }}"
+        dest: "{{ cifmw_hsm_working_dir }}/client/"
+
+    - name: Fetch the binaries
+      ansible.builtin.fetch:
+        src: "{{ cifmw_hsm_luna_binaries_src }}/{{ item}}"
+        dest: "{{ cifmw_hsm_working_dir }}/bin/"
+        flat: true
+      loop:
+        - "vtl"
+        - "lunacm"
+        - "multitoken"
+        - "ckdemo"
+
+    - name: Fetch the server cert
+      become: true
+      ansible.builtin.fetch:
+        src: "{{ cifmw_hsm_luna_server_cert_src }}/{{ cifmw_hsm_server_ip }}Cert.pem"
+        dest: "{{ cifmw_hsm_working_dir }}/certs/"
+        flat: true
+
+- name: Download build tools
+  delegate_to: localhost
+  become: true
+  ansible.builtin.dnf:
+    name:
+      - buildah
+      - podman
+    state: present
+
+- name: Clone barbican-operator to get buildah script
+  delegate_to: localhost
+  ansible.builtin.git:
+    repo: "{{ cifmw_hsm_barbican_operator_repo }}"
+    dest: "{{ cifmw_hsm_working_dir}}/barbican_operator"
+    version: "{{ cifmw_hsm_barbican_operator_version }}"
+
+# TODO(alee) Use the buildah script from the barbican-operator once it has merged
+- name: Create and store new images
+  delegate_to: localhost
+  # ansible.builtin.command: "{{ cifmw_hsm_working_dir}}/barbican_operator/hack/image_add_luna_minimal_client.sh"
+  ansible.builtin.script: "image_add_luna_minimal_client.sh"
+  environment:
+    BARBICAN_IMAGE_NAMESPACE: "{{ cifmv_hsm_barbican_image_namespace }}"
+    BARBICAN_IMAGE_TAG: "{{ cifmw_hsm_barbican_image_tag }}"
+    LUNA_LINUX_MINIMAL_CLIENT_DIR: "{{ cifmw_hsm_working_dir }}/client/linux-minimal"
+    LUNA_CLIENT_BIN: "{{ cifmw_hsm_working_dir }}/bin"
+
+- name: Get client certs and keys
+  become: true
+  block:
+    - name: Check if client cert exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_hsm_luna_client_cert_src }}/{{ cifmw_hsm_client_ip }}.pem"
+      register: client_cert_stat
+
+    - name: Check if client key exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_hsm_luna_client_cert_src }}/{{ cifmw_hsm_client_ip }}Key.pem"
+      register: client_key_stat
+
+    - name: Generate certs if they do not already exist
+      ansible.builtin.include_tasks: generate_luna_client_certs.yaml
+      when: not client_cert_stat.stat.exists or not client_key_stat.stat.exists
+
+    - name: Fetch the client cert and key
+      ansible.builtin.fetch:
+        src: "{{ cifmw_hsm_luna_client_cert_src }}/{{ item }}"
+        dest: "{{ cifmw_hsm_working_dir }}/certs/"
+        flat: true
+      loop:
+        - "{{ cifmw_hsm_client_ip }}.pem"
+        - "{{ cifmw_hsm_client_ip }}Key.pem"
+
+- name: Write out secret template file
+  delegate_to: localhost
+  ansible.builtin.template:
+    src: "secret.yml.j2"
+    dest: "{{ cifmw_hsm_working_dir }}/secret.yml"
+
+- name: Create the secret
+  delegate_to: localhost
+  ansible.builtin.command: "oc apply -f {{ cifmw_hsm_working_dir }}/secret.yml"

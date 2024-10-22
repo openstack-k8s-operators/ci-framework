@@ -1,0 +1,32 @@
+---
+- name: Add lunaclient VM to inventory
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  ansible.builtin.add_host:
+    name: "{{ cifmw_hsm_lunaclient_vm }}"
+    ansible_user: "{{ cifmw_hsm_lunaclient_user }}"
+
+- name: Create and store modified barbican images
+  hosts: "{{ cifmw_hsm_lunaclient_vm }}"
+  ansible.builtin.include_role:
+    name: hsm_prep 
+
+- name: Create kustomization to use updated barbican images
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_controlplane_kustomizations_path }}/92-barbican-luna.yaml"
+    content: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      namespace: {{ namespace }}
+      patches:
+      - target:
+          kind: OpenStackVersion
+          name: .*
+        patch: |-
+          - op: replace
+            path: /spec/customContainerImages/barbicanAPIImage 
+            value: {{ cifmw_update_containers_registry }}/{{ cifmw_update_containers_org }}/openstack-barbican-api:{{ cifmw_update_containers_tag }}-luna
+          - op: replace
+            path: /spec/customContainerImages/barbicanWorkerImage
+            value: {{ cifmw_update_containers_registry }}/{{ cifmw_update_containers_org }}/openstack-barbican-worker:{{ cifmw_update_containers_tag }}-luna
