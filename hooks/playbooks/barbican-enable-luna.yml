@@ -1,0 +1,89 @@
+---
+- name: Create modified barbican image and get secrets
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Check out the role git repo
+      ansible.builtin.git:
+        dest: "./rhoso_luna_hsm"
+        repo: "{{ cifmw_hsm_luna_ansible_role_repo | default('https://github.com/openstack-k8s-operators/ansible-role-rhoso-luna-hsm.git', true) }}"
+        version: "{{ cifmw_hsm_luna_ansible_role_version| default('main', true) }}"
+
+    - name: Create and upload the new barbican images
+      ansible.builtin.include_role:
+        name: rhoso_luna_hsm
+        tasks_from: create_image
+      vars:
+        barbican_src_image_registry: "{{ content_provider_registry_ip }}:5001"
+        barbican_src_image_namespace: "{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}"
+        barbican_src_image_tag: "{{ cifmw_update_containers_tag | default('component-ci-testing') }}"
+        barbican_dest_image_registry: "{{ content_provider_registry_ip }}:5001"
+        barbican_dest_image_namespace: "{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}"
+        barbican_dest_image_tag: "{{ cifmw_update_containers_barbican_custom_tag }}"
+        image_registry_verify_tls: "{{ cifmw_image_registry_verify_tls | default('false', true) }}"
+        luna_minclient_src: "{{ cifmw_hsm_luna_minclient_src }}"
+
+    - name: Create secrets with the HSM certs and hsm-login credentials
+      ansible.builtin.include_role:
+        name: rhoso_luna_hsm
+        tasks_from: create_secrets
+      vars:
+        luna_client_name: "{{ cifmw_hsm_client_name }}"
+        chrystoki_conf_src: "{{ cifmw_hsm_chrystoki_conf_src }}"
+        luna_server_cert_src: "{{ cifmw_hsm_luna_server_cert_src }}"
+        luna_client_cert_src: "{{ cifmw_hsm_luna_client_cert_src }}"
+        luna_partition_password: "{{ cifmw_hsm_partition_password }}"
+        kubeconfig_path: "{{ cifmw_openshift_kubeconfig }}"
+        oc_dir: "{{ cifmw_path }}"
+        luna_data_secret: "{{ cifmw_hsm_luna_client_data_secret | default('barbican-luna-client-data', true) }}"
+        login_secret: "{{ cifmw_hsm_login_secret | default('barbican-luna-login', true) }}"
+
+- name: Create kustomization to use update barbican to use luna
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Create file to customize barbican resource deployed in the control plane
+      vars:
+        client_data_secret: "{{ cifmw_hsm_luna_client_data_secret | default('barbican-luna-client-data', true) }}"
+        login_secret: "{{ cifmw_hsm_login_secret | default('barbican-luna-login', true) }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/93-barbican-luna.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/barbican/template/globalDefaultSecretStore
+                value: pkcs11
+              - op: add
+                path: /spec/barbican/template/enabledSecretStores
+                value:
+                  - pkcs11
+              - op: add
+                path: /spec/barbican/template/pkcs11
+                value:
+                  loginSecret: {{ login_secret }}
+                  clientDataSecret: {{ client_data_secret }}
+                  clientDataPath: /usr/local/luna/config
+              - op: add
+                path: /spec/barbican/template/customServiceConfig
+                value: |
+                  [p11_crypto_plugin]
+                  plugin_name = PKCS11
+                  library_path = {{ cifmw_hsm_luna_library_path | default('/usr/local/luna/libs/64/libCryptoki2.so', true) }}
+                  token_labels = {{ cifmw_hsm_luna_partition }}
+                  mkek_label = {{ cifm_hsm_mkek_label }}
+                  hmac_label = {{ cifm_hsm_hmac_label }}
+                  encryption_mechanism = CKM_AES_GCM
+                  aes_gcm_generate_iv = false
+                  hmac_key_type = CKK_GENERIC_SECRET
+                  hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
+                  hmac_mechanism = CKM_SHA256_HMAC
+                  key_wrap_mechanism = {{ cifmw_hsm_key_wrap_mechanism }}
+                  key_wrap_generate_iv = true
+                  always_set_cka_sensitive = true
+                  os_locking_ok = false
