@@ -25,6 +25,7 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_update_containers_edpm_image_url`: Full EDPM Image url for updating EDPM OS image.
 * `cifmw_update_containers_ipa_image_url`: Full Ironic Python Agent url needed in Ironic specific podified deployment
 * `cifmw_update_containers_rollback`: Rollback the container update changes. Default to `false`. It will be used with cleanup.
+* `cifmw_update_containers_barbican_custom_tag: Custom tag for barbican API and worker images.  Used for HSM deployments.
 
 ## Examples
 ### 1 - Update OpenStack container
