@@ -375,15 +375,12 @@
             mtu: 1500
           internal-api:
             network: "172.17.0.0/24"
-            gateway: "172.17.0.1"
             vlan: 20
           storage:
             network: "172.18.0.0/24"
-            gateway: "172.18.0.1"
             vlan: 21
           tenant:
             network: "172.19.0.0/24"
-            gateway: "172.19.0.1"
             vlan: 22
         routers:
           ci-router:
@@ -419,12 +416,15 @@
               internal-api:
                 ip: "172.17.0.5"
                 trunk-parent: default
+                skip-nm-configuration: true
               storage:
                 ip: "172.18.0.5"
                 trunk-parent: default
+                skip-nm-configuration: true
               tenant:
                 ip: "172.19.0.5"
                 trunk-parent: default
+                skip-nm-configuration: true
       cifmw_extras:
         - '@scenarios/centos-9/multinode-ci.yml'
     run:
@@ -445,23 +445,72 @@
     parent: podified-multinode-edpm-deployment-crc-bootstrap-staging
     vars:
       cifmw_enable_virtual_baremetal_support: true
+      cifmw_config_nmstate: true
+      cifmw_config_multus: true
+      cifmw_ci_nmstate_instance_config:
+        controller:
+          interfaces:
+            - name: "{{ cifmw_networking_env_definition.instances['controller'].networks['baremetal'].interface_name | default(omit) }}"
+              type: ethernet
+              state: up
+            - name: baremetal
+              type: linux-bridge
+              state: up
+              bridge:
+                options:
+                  stp:
+                    enabled: false
+                port:
+                  - name: "{{ cifmw_networking_env_definition.instances['controller'].networks['baremetal'].interface_name | default(omit) }}"
+                    stp-hairpin-mode: false
+                    stp-path-cost: 100
+                    stp-priority: 32
+              ipv4:
+                address:
+                  - ip: "{{ cifmw_networking_mapper_definition_patch_02_bmaas_net.instances.controller.networks.baremetal.ip }}"
+                    prefix-length: 24
+                enabled: true
+              ipv6:
+                enabled: false
+      cifmw_install_yamls_vars_patch_01_ironic_ci_base:
+        INSTALL_NMSTATE: false
       cifmw_networking_mapper_definition_patch_02_bmaas_net:
         networks:
           baremetal:
             network: "172.20.1.0/24"
-            gateway: "172.20.1.1"
             mtu: 1500
+            tools:
+              multus:
+                ranges:
+                  - start: 30
+                    end: 70
         instances:
           controller:
             networks:
               baremetal:
                 ip: "172.20.1.11"
-                skip-nm-configuration: true
           crc:
             networks:
               baremetal:
                 ip: "172.20.1.5"
-                skip-nm-configuration: true
+      cifmw_libvirt_manager_configuration:
+        vms:
+          compute:
+            uefi: true
+            amount: 2
+            root_part_id: 4
+            disk_file_name: "blank"
+            disksize: 30
+            memory: 4
+            cpus: 4
+            nets:
+              - baremetal
+        networks:
+          baremetal: |
+            <network>
+              <name>baremetal</name>
+              <forward mode='bridge' />
+              <bridge name='baremetal' />
+            </network>
     run:
       - ci/playbooks/edpm/run.yml
-      - ci/playbooks/edpm/fail.yml
