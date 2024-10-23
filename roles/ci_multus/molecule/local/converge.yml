@@ -1,0 +1,86 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_ci_multus_dryrun: true
+    cifmw_networking_env_definition:
+      instances:
+        crc:
+          name: crc
+          networks:
+            default:
+              interface_name: "eth1"
+              network_name: default
+      networks:
+        default:
+          gw_v4: 192.168.122.1
+          network_name: default
+          network_v4: 192.168.122.0/24
+          tools:
+            multus:
+              ipv4_ranges:
+                - start: 192.168.122.30
+                  end: 192.168.122.70
+
+  tasks:
+    - name: Call ci_multus role
+      ansible.builtin.include_role:
+        name: "ci_multus"
+
+    # Verify the run
+    - name: Fetch files stat results
+      ansible.builtin.stat:
+        path: >-
+          {{
+            [
+              ansible_user_dir,
+              'ci-framework-data',
+              'artifacts',
+              item
+            ] | ansible.builtin.path_join
+          }}
+      register: _ci_multus_molecule_stat_out
+      loop:
+        - manifests/ci_multus/ci_multus_nads.yml
+
+    - name: Assert that all expected files exist
+      ansible.builtin.assert:
+        that: >-
+          _ci_multus_molecule_stat_out.results |
+          map(attribute="stat.exists") |
+          select("equalto", true) |
+          length == (_ci_multus_molecule_stat_out.results | length)
+
+    - name: Fetch all files content
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      register: _ci_multus_molecule_slurp_out
+      loop: >-
+        {{
+          _ci_multus_molecule_stat_out.results |
+          map(attribute="stat.path")
+        }}
+
+    - name: Assert that all files contains proper YAML data
+      ansible.builtin.assert:
+        that: "item.content | b64decode | from_yaml_all | length > 0"
+      loop: "{{ _ci_multus_molecule_slurp_out.results }}"
+      loop_control:
+        label: "{{ item.source }}"

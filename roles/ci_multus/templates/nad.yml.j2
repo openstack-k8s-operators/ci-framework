@@ -1,24 +1,34 @@
-{% for nad in _cifmw_ci_multus_nad_list %}
+{% for network_name, network_details in cifmw_ci_multus_nad_list.items() %}
 ---
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   labels:
-    osp/net: {{ nad.name }}
-  name: {{ nad.name }}
+    osp/net: {{ network_name }}
+  name: {{ network_name }}
   namespace: {{ cifmw_ci_multus_namespace }}
 spec:
   config: |
     {
       "cniVersion": "{{ cifmw_ci_multus_cniversion }}",
-      "name": "{{ nad.name }}",
-      "type": "{{ nad.type | default(cifmw_ci_multus_default_nad_type) }}",
-      "master": "{{ nad.iface }}",
+      "name": "{{ network_name }}",
+{% if cifmw_ci_multus_default_nad_type == "macvlan" %}
+      "type": "macvlan",
+      "master": "{{ network_details.interface_name }}",
+{% endif %}
+{% if cifmw_ci_multus_default_nad_type == "bridge" %}
+      "type": "bridge",
+      "bridge": "{{ network_details.interface_name }}",
+{% endif %}
       "ipam": {
-        "type": "{{ nad.ipam.type | default(cifmw_ci_multus_default_nad_ipam_type) }}",
-        "range": "{{ nad.ipam.range }}",
-        "range_start": "{{ nad.ipam.range_start }}",
-        "range_end": "{{ nad.ipam.range_end }}"
+{% if cifmw_ci_multus_default_nad_ipam_type == "whereabouts" %}
+        "type": "whereabouts",
+        "range": "{{ network_details.network_v4 }}",
+{% for range in network_details.tools.multus.ipv4_ranges %}
+        "range_start": "{{ range.start }}",
+        "range_end": "{{ range.end }}"
+{% endfor %}
+{% endif %}
       }
     }
 {% endfor %}
