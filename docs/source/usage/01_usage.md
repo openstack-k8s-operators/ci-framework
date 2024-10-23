@@ -38,6 +38,7 @@ are shared among multiple roles:
 - `cifmw_set_openstack_containers`:  (Bool) Run set_openstack_containers role during deployment to update openstack containers. Defaults to `false`.
 - `cifmw_sushy_redfish_bmc_protocol`: (String) The RedFish BMC protocol you would like to use with Sushy Emulator, options are `redfish` or `redfish-virtualmedia`. Defaults to `redfish-virtualmedia`
 - `cifmw_config_nmstate`: (Bool) toggle NMstate networking deployment. Default to false.
+- `cifmw_config_multus`: (Bool) toggle Multus networking deployment. Default to false.
 - `cifmw_config_bmh`: (Bool) toggle Metal3 BareMetalHost CRs deployment. Default to false.
 - `cifmw_config_certmanager`: (Bool) toggle cert-manager deployment. Default to false.
 - `cifmw_skip_os_net_setup`: (bool) Specifies whether os_net_setup should be executed. Default to false.
