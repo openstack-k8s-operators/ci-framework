@@ -14,10 +14,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Clean OCP resources if available
+- name: Cleanup - Clean OCP resources if available
   when: cifmw_openshift_kubeconfig is defined
   block:
-    - name: Fetch NADs in multus namespace
+    - name: "Cleanup - Fetch NADs in namespace: {{ cifmw_ci_multus_namespace }}"
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -27,7 +27,7 @@
         kind: NetworkAttachmentDefinition
       register: _nads_info_cleanup_out
 
-    - name: Delete NADs
+    - name: Cleanup - Delete NADs
       kubernetes.core.k8s:
         state: absent
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -39,12 +39,7 @@
       loop_control:
         label: "{{ item.metadata.name}}"
 
-    - name: Remove ci-multus namespace
-      kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        name: "{{ cifmw_ci_multus_namespace }}"
-        kind: Namespace
-        state: absent
-        wait: true
+- name: Cleanup - Remove if artifact directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_ci_multus_manifests_dir }}"
+    state: absent
