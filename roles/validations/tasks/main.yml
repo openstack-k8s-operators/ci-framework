@@ -25,6 +25,18 @@
     - artifacts
     - logs
 
+- name: Initialize variables needed for generating polarion xml file
+  ansible.builtin.set_fact:
+    validations_executed: 0
+    validations_failed: 0
+    validations_errors: 0
+    xml_line_list: []
+
+- name: Get validations start time from system
+  ansible.builtin.command:
+    cmd: date +%Y-%m-%d-%H:%M:%S.%3N
+  register: validations_start_time
+
 # We can execute all defined validations when cifmw_validation_run_all is defined.
 # Else, we will skip this and run only the explicitly defined validations from
 # cifmw_validations_list
@@ -42,7 +54,7 @@
 
     - name: Run all found validations
       ansible.builtin.include_tasks:
-        file: "{{ item.path }}"
+        file: xmlcreate.yml
       loop: "{{ found_validations.files }}"
 
 - name: Run selected validations
@@ -56,5 +68,34 @@
       failed_when: not validation_exists.stat.exists
 
     - name: Run validations
-      ansible.builtin.include_tasks: "{{ item }}"
+      ansible.builtin.include_tasks:
+        file: xmlcreate.yml
       loop: "{{ cifmw_validations_list }}"
+
+- name: Get validations end time from system
+  ansible.builtin.command:
+    cmd: date +%Y-%m-%d-%H:%M:%S.%3N
+  register: validations_end_time
+
+- name: Calculate total validations run time
+  ansible.builtin.set_fact:
+    validations_run_time: "{{((validations_end_time.stdout | to_datetime('%Y-%m-%d-%H:%M:%S.%f')) - (validations_start_time.stdout | to_datetime('%Y-%m-%d-%H:%M:%S.%f'))).total_seconds()}}"
+
+- name: Write first line of xml results file
+  ansible.builtin.shell: |
+    mkdir -p "{{ cifmw_validations_xml_status_file_dir }}"
+    echo "<testsuite errors=\"{{ validations_errors }}\" failures=\"{{ validations_failed }}\" name=\"\" tests=\"{{ validations_executed }}\" time=\"{{ validations_run_time }}\">" >> {{ cifmw_validations_xml_status_file_dir }}/validations_results.xml
+
+- name: Write individual results to xml file
+  ansible.builtin.shell: |
+    echo '{{ item }}' >> {{ cifmw_validations_xml_status_file_dir }}/validations_results.xml
+  loop: '{{ xml_line_list }}'
+
+- name: Write last line to xml results file
+  ansible.builtin.shell: |
+    echo "</testsuite>" >> {{ cifmw_validations_xml_status_file_dir }}/validations_results.xml
+
+- name: Fail job when validations fail
+  ansible.builtin.fail:
+    msg: "One or more validations failed"
+  when: validations_failed | int  > 0
