@@ -1,0 +1,57 @@
+---
+# This hook is a workaround
+#
+# The openstackdataplane deployment can be marked as complete even if nova is
+# not fully running yet. Ideally edpm-ansible or the openstack dataplane
+# deployment should be able to detect this, and only set Ready status when the
+# compute service is fully up and registered.
+#
+# Until the operator/edpm-ansible can manage this, this hook can be used as a
+# workaround.
+#
+- name: Run compute service list until exptected compute count present
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _number_of_computes: 0
+    _retries: 25
+    _cell_conductor: null
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Wait for expected compute services
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          COMPUTES={{ _number_of_computes }}
+          RETRIES={{ _retries }}
+          COUNTER=0
+          oc project {{ namespace }}
+          until [ $(oc rsh openstackclient openstack compute service list --service nova-compute -f value | wc -l) -eq "$COMPUTES" ]; do
+            if [[ "$COUNTER" -ge "$RETRIES" ]]; then
+              exit 1
+            fi
+            COUNTER=$[$COUNTER +1]
+            sleep 10
+          done
+    - name: Run nova-manage discover_hosts and wait for host records
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        executable: "/bin/bash"
+        script: |
+          set -xe -o pipefail
+          COMPUTES={{ _number_of_computes | int + 4 }}
+          RETRIES={{ _retries }}
+          COUNTER=0
+          oc project {{ namespace }}
+          until [ $(oc rsh {{ _cell_conductor }} nova-manage cell_v2 list_hosts | wc -l) -eq "$COMPUTES" ]; do
+            if [[ "$COUNTER" -ge "$RETRIES" ]]; then
+              exit 1
+            fi
+            oc rsh {{ _cell_conductor }} nova-manage cell_v2 discover_hosts --verbose
+            COUNTER=$[$COUNTER +1]
+            sleep 10
+          done
