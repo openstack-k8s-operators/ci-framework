@@ -20,6 +20,7 @@
   vars:
     cifmw_install_yamls_vars:
       namespace: foobar
+      openstack_ctlplane: controlplane-yaml-file.yaml
     ansible_user_dir: "{{ lookup('env', 'HOME') }}"
     cifmw_install_yamls_repo: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
     zuul:
@@ -41,14 +42,29 @@
             short_name: service-telemetry-operator
             name: infrawatch/service-telemetry-operator
             src_dir: src/github.com/infrawatch/service-telemetry-operator
-  roles:
-    - role: "install_yamls"
-
   tasks:
+    - name: Add install_yamls vars overrides
+      ansible.builtin.set_fact:
+        cifmw_install_yamls_vars_patch_01_patch:
+          namespace: patched
+        cifmw_install_yamls_vars_patch_02_patch:
+          namespace: patched2
+          infra_img: quay.io/openstack-k8s-operators/infra-operator-index:dummy
+
+    - name: Call role under test
+      ansible.builtin.include_role:
+        name: "install_yamls"
+
     - name: Ensure we get cifmw_install_yamls_environment fact
       ansible.builtin.assert:
         that:
           - cifmw_install_yamls_environment is defined
+          - cifmw_install_yamls_environment.OPENSTACK_CTLPLANE is defined
+          - cifmw_install_yamls_environment.OPENSTACK_CTLPLANE == cifmw_install_yamls_vars.openstack_ctlplane
+          - cifmw_install_yamls_environment.NAMESPACE is defined
+          - cifmw_install_yamls_environment.NAMESPACE == cifmw_install_yamls_vars_patch_02_patch.namespace
+          - cifmw_install_yamls_environment.INFRA_IMG is defined
+          - cifmw_install_yamls_environment.INFRA_IMG == cifmw_install_yamls_vars_patch_02_patch.infra_img
 
     - name: Gather some file data
       register: make_files

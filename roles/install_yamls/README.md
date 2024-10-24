@@ -1,9 +1,11 @@
 # install_yamls
+
 An ansible role wrapper around [install_yamls](https://github.com/openstack-k8s-operators/install_yamls) Makefile. It dynamically creates `install_yamls_makes` role, which can be reused within [the CI Framework and other projects](https://github.com/rdo-infra/rdo-jobs/blob/39d0647cbb20abe3aaf2baad134a0e09473e1c54/playbooks/data_plane_adoption/ci_framework_install_yamls.yaml#L5-L24).
 
 It contains a set of playbooks to deploy podified control plane.
 
 ## Parameters
+
 * `cifmw_install_yamls_envfile`: (String) Environment file containing all the Makefile overrides. Defaults to `install_yamls`.
 * `cifmw_install_yamls_out_dir`: (String) `install_yamls` output directory to store generated output. Defaults to `{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"`.
 * `cifmw_install_yamls_vars`: (Dict) A dict containing Makefile overrides.
@@ -13,9 +15,17 @@ It contains a set of playbooks to deploy podified control plane.
 * `cifmw_install_yamls_checkout_openstack_ref`: (String) Enable the checkout from openstack-operator references
 when cloning operator's repository using install_yamls make targets. Defaults to `"true"`
 
+## cifmw_install_yamls_vars patching
+
+This role makes possible to define a base `cifmw_install_yamls_vars` and
+patch its values afterwards by defining variables named like `^cifmw_install_yamls_vars_patch.*`
+that will be combined on top of the original `cifmw_install_yamls_var` after sorting them by name.
+
 ## Use case
+
 This module uses [a custom plugin](https://github.com/openstack-k8s-operators/ci-framework/blob/main/plugins/modules/generate_make_tasks.py) created to generate the role with tasks from Makefile.
 The created role directory contains multiple task files, similar to
+
 ```YAML
 ---
 - name: Debug make_crc_storage_env
@@ -40,6 +50,7 @@ The created role directory contains multiple task files, similar to
 ```
 
 The role can be imported and tasks can be executed like this
+
 ```YAML
 - name: Prepare storage in CRC
   vars:
