@@ -44,7 +44,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_attach_dummy_interface_on_bridges`: (Bool) Attach dummy interface on bridges. Defaults to `true`.
 * `cifmw_libvirt_manager_default_gw_nets`: (List[String]) List of networks used as default gateway. If not set, defaults to the `cifmw_libvirt_manager_pub_net`. Read bellow for more information about that parameter.
 * `cifmw_libvirt_manager_vm_users`: (List[Dict]) Used to override the default list of users enabled in the vm. For its format, refers to cloud-init [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) about `users`. Defaults to `[]`.
-* `cifmw_libvirt_manager_extra_network_configuration`: (Dict) Extra network configuration in nmstate format for the hypervisor. This configuration is applied after creating the libvirt networks, so it can be used to create VLAN interfaces on the libvirt bridges. Defaults to: `{}`.
+* `cifmw_libvirt_manager_extra_network_configuration`: (Dict) Extra network configuration in nmstate format for the hypervisor. This configuration is applied after creating the libvirt networks, so it can be used to create VLAN interfaces on the libvirt bridges. In addition to nmstate, it also supports a `cifmw_firewall_zone` hint in nmstate interfaces.  Defaults to: `{}`.
 
 ### `cifmw_libvirt_manager_default_gw_nets` parameter usage
 
@@ -114,6 +114,7 @@ _networks:
 cifmw_libvirt_manager_extra_network_configuration:
   interfaces:
     - name: vlan10
+      cifmw_firewall_zone: libvirt
       type: vlan
       state: up
       vlan:
