@@ -90,10 +90,31 @@
   when: cifmw_libvirt_manager_extra_network_configuration | default({}) | length > 0
   vars:
     cifmw_ci_nmstate_unmanaged_host: "{{ inventory_hostname }}"
-    cifmw_ci_nmstate_unmanaged_node_config: "{{ cifmw_libvirt_manager_extra_network_configuration }}"
+    cifmw_ci_nmstate_unmanaged_node_config: >-
+      {{
+        cifmw_libvirt_manager_extra_network_configuration |
+        ansible.utils.remove_keys(target='cifmw_firewall_zone')
+      }}
   ansible.builtin.include_role:
     name: "ci_nmstate"
     tasks_from: "nmstate_unmanaged_provision_node.yml"
+
+- name: Ensure extra networks is in correct zone
+  when:
+    - cifmw_libvirt_manager_extra_network_configuration | default({}) | length > 0
+    - item.cifmw_firewall_zone is defined
+  become: true
+  notify: Restart firewalld
+  ansible.builtin.shell:
+    cmd: >-
+      firewall-cmd --zone {{ item.cifmw_firewall_zone }}
+      --change-interface={{ item.name }}
+      --permanent;
+  loop: "{{ cifmw_libvirt_manager_extra_network_configuration.interfaces | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  async: 120
+  poll: 0
 
 ## Ensure we get dnsmasq DHCP service for all created networks
 # Refreshing network facts will ensure we get the new interfaces.
