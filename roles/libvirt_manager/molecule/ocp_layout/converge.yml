@@ -70,6 +70,7 @@
         cifmw_libvirt_manager_extra_network_configuration:
           interfaces:
             - name: "vlan{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+              cifmw_firewall_zone: libvirt
               type: vlan
               state: up
               vlan:
@@ -83,6 +84,7 @@
                   - ip: "{{ cifmw_networking_definition.networks.internalapi.gateway }}"
                     prefix-length: "{{ cifmw_networking_definition.networks.internalapi.network | ansible.utils.ipaddr('prefix') }}"
             - name: "vlan{{ cifmw_networking_definition.networks.storage.vlan }}"
+              cifmw_firewall_zone: libvirt
               type: vlan
               state: up
               vlan:
@@ -197,6 +199,11 @@
           register: _ip_link_show
           ansible.builtin.command: ip -json link show
 
+        - name: List libvirt firewall zone interfaces
+          become: true
+          register: _libvirt_zone_interfaces
+          ansible.builtin.command: firewall-cmd --zone=libvirt --list-interfaces
+
         - name: Ensure the VLAN interfaces was created
           vars:
             _vlan_interfaces:
@@ -208,4 +215,17 @@
               - _ip_link_show.stdout | from_json | selectattr('ifname', 'eq', item) | length > 0
             msg: >-
               Expected vlan {{ item }} not found
+          loop: "{{ _vlan_interfaces }}"
+
+        - name: Ensure the VLAN interfaces is in the correct firewall zone
+          vars:
+            _vlan_interfaces:
+              - "vlan{{ cifmw_networking_definition.networks.internalapi.vlan }}"
+              - "vlan{{ cifmw_networking_definition.networks.storage.vlan }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - "item in _libvirt_zone_interfaces.stdout"
+            msg: >-
+              Expected vlan {{ item }} not found in libvirt firewall zone
           loop: "{{ _vlan_interfaces }}"
