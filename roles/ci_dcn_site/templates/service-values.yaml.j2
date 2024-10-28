@@ -26,9 +26,7 @@ data:
       customServiceConfig: |
         [DEFAULT]
         enabled_backends = ceph
-{% if 'az0' not in _ceph.cifmw_ceph_client_cluster %}
         glance_api_servers = https://glance-{{ _ceph.cifmw_ceph_client_cluster }}-internal.openstack.svc:9292
-{% endif %}
         [ceph]
         volume_backend_name = ceph
         volume_driver = cinder.volume.drivers.rbd.RBDDriver
@@ -41,51 +39,23 @@ data:
         backend_availability_zone = {{ _ceph.cifmw_ceph_client_cluster }}
 {% endfor %}
   glance:
-    customServiceConfig: |
-        [DEFAULT]
-        enabled_backends = default_backend:rbd
-        [glance_store]
-        default_backend = default_backend
-        [default_backend]
-        rbd_store_ceph_conf = /etc/ceph/az0.conf
-        store_description = "RBD backend"
-        rbd_store_pool = images
-        rbd_store_user = openstack
-        rbd_thin_provisioning = True
+    keystoneEndpoint: az0
     glanceAPIs:
-{% set backends = [] %}
 {% for _ceph in _ceph_vars_list %}
-{% if _ceph.cifmw_ceph_client_cluster not in backends %}
-{% set _ = backends.append(_ceph.cifmw_ceph_client_cluster + ':rbd') %}
-{% endif %}
-{% endfor %}
-{% for _ceph in _ceph_vars_list %}
-{% if 'az0' in _ceph.cifmw_ceph_client_cluster %}
-      default:
-{% else %}
       {{ _ceph.cifmw_ceph_client_cluster }}:
-{% endif %}
         customServiceConfig: |
           [DEFAULT]
           enabled_import_methods = [web-download,copy-image,glance-direct]
-          enabled_backends = {{ backends | join(',') }}
+          enabled_backends = {{ ci_dcn_site_glance_map[_ceph.cifmw_ceph_client_cluster] | join(':rbd,') + ':rbd'}}
           [glance_store]
           default_backend = {{ _ceph.cifmw_ceph_client_cluster }}
-          [{{ _ceph.cifmw_ceph_client_cluster }}]
-          rbd_store_ceph_conf = /etc/ceph/{{ _ceph.cifmw_ceph_client_cluster }}.conf
-          store_description = "{{ _ceph.cifmw_ceph_client_cluster }} RBD backend"
+{% for _ceph_az in ci_dcn_site_glance_map[_ceph.cifmw_ceph_client_cluster] %}
+          [{{ _ceph_az }}]
+          rbd_store_ceph_conf = /etc/ceph/{{ _ceph_az }}.conf
+          store_description = "{{ _ceph_az }} RBD backend"
           rbd_store_pool = images
           rbd_store_user = openstack
           rbd_thin_provisioning = True
-{% for _ceph_az in _ceph_vars_list %}
-{% if _ceph_az.cifmw_ceph_client_cluster != _ceph.cifmw_ceph_client_cluster %}
-          [{{ _ceph_az.cifmw_ceph_client_cluster }}]
-          rbd_store_ceph_conf = /etc/ceph/{{ _ceph_az.cifmw_ceph_client_cluster }}.conf
-          store_description = "{{ _ceph_az.cifmw_ceph_client_cluster }} RBD backend"
-          rbd_store_pool = images
-          rbd_store_user = openstack
-          rbd_thin_provisioning = True
-{% endif %}
 {% endfor %}
         networkAttachments:
           - storage
@@ -99,10 +69,11 @@ data:
                   metallb.universe.tf/loadBalancerIPs: 172.17.0.8{{ loop.index0 }}
               spec:
                 type: LoadBalancer
-        replicas: 3
 {% if _ceph.cifmw_ceph_client_cluster == 'az0' %}
+        replicas: 3
         type: split
 {% else %}
+        replicas: 1
         type: edge
 {% endif %}
 {% endfor %}
