@@ -39,6 +39,21 @@
   ansible.builtin.set_fact:
     _ceph_vars_list: "{{ _ceph_vars_list | union([item.ansible_facts]) }}"
 
+- name: Define _all_azs list for all Ceph backends
+  loop: "{{ _ceph_vars_list }}"
+  ansible.builtin.set_fact:
+    _all_azs: "{{ _all_azs | default([]) + [ item.cifmw_ceph_client_cluster ] }}"
+
+- name: The map for az0 contains all AZ backends
+  ansible.builtin.set_fact:
+    ci_dcn_site_glance_map: "{{ { 'az0': _all_azs } }}"
+
+- name: The map for AZs other than az0 contains backends for az0 and itself
+  loop: "{{ _all_azs }}"
+  when: item != "az0"
+  ansible.builtin.set_fact:
+    ci_dcn_site_glance_map: "{{ ci_dcn_site_glance_map | combine( { item: ['az0', item ] } ) }}"
+
 - name: Render the post-ceph service-values.yaml
   ansible.builtin.template:
     mode: "0644"
