@@ -8,6 +8,8 @@ metadata:
     config.kubernetes.io/local-config: "true"
 data:
   preserveJobs: false
+  cinder:
+    uniquePodNames: false
   cinderAPI:
     replicas: 3
     customServiceConfig: |
@@ -115,10 +117,8 @@ data:
       region: r1
       extraVol:
         - propagation:
-            - CinderVolume
+            - az0
             - CinderBackup
-            - GlanceAPI
-            - ManilaShare
           extraVolType: Ceph
           volumes:
             - name: ceph
@@ -130,3 +130,20 @@ data:
             - name: ceph
               mountPath: /etc/ceph
               readOnly: true
+{% for _ceph in _ceph_vars_list %}
+{% if _ceph.cifmw_ceph_client_cluster != 'az0' %}
+        - propagation:
+            - {{ _ceph.cifmw_ceph_client_cluster }}
+          extraVolType: Ceph
+          volumes:
+            - name: ceph-{{ _ceph.cifmw_ceph_client_cluster }}
+              projected:
+                sources:
+                  - secret:
+                      name: ceph-conf-files-{{ _ceph.cifmw_ceph_client_cluster }}
+          mounts:
+            - name: ceph-{{ _ceph.cifmw_ceph_client_cluster }}
+              mountPath: /etc/ceph
+              readOnly: true
+{% endif %}
+{% endfor %}
