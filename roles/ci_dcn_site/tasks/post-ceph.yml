@@ -54,12 +54,43 @@
   ansible.builtin.set_fact:
     ci_dcn_site_glance_map: "{{ ci_dcn_site_glance_map | combine( { item: ['az0', item ] } ) }}"
 
+- name: Render ceph secret for this _az
+  when: _az != "az0"
+  vars:
+    _head: "/tmp/"
+    _tail_key: ".client.openstack.keyring"
+    _tail_conf: ".conf"
+  ansible.builtin.template:
+    mode: "0644"
+    backup: false
+    src: "templates/ceph_secerts.yaml.j2"
+    dest: "{{ ci_dcn_site_arch_path }}/ceph_secrets_{{ _az }}.yaml"
+
+- name: Apply ceph secret for this _az
+  when: _az != "az0"
+  register: result
+  retries: 5
+  delay: 10
+  until: result is not failed
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    apply: true
+    src: "{{ ci_dcn_site_arch_path }}/ceph_secrets_{{ _az }}.yaml"
+
 - name: Render the post-ceph service-values.yaml
   ansible.builtin.template:
     mode: "0644"
     backup: true
     src: "templates/service-values.yaml.j2"
     dest: "{{ ci_dcn_site_arch_path }}/service-values.yaml"
+
+- name: Render EDPM extra_mounts.yaml for this _az
+  ansible.builtin.template:
+    mode: "0644"
+    backup: true
+    src: "templates/edpm_extra_mounts.yaml.j2"
+    dest: "{{ ci_dcn_site_arch_repo_path }}/dt/dcn/edpm-post-ceph/nodeset/extra_mounts.yaml"
 
 - name: Kustomize post-ceph NodeSet
   ansible.builtin.set_fact:
