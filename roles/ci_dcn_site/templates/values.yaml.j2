@@ -2,8 +2,6 @@
 # source: dcn/values.yaml.j2
 apiVersion: v1
 data:
-    customDataplanService:
-      name: nova-custom-ceph-{{ _az }}
     nodeset_name: {{ _group_name }}-edpm
     ceph_conf:
 {% for _file in _ceph_files %}
@@ -23,10 +21,12 @@ data:
             - install-certs
             - ceph-client
             - ovn
-            - neutron-metadata
+            - neutron-metadata-cell{{ _all_azs | length }}
             - libvirt
             - nova-custom-ceph-{{ _az }}
     nova:
+        customDataplaneService:
+          name: nova-custom-ceph-{{ _az }}
         ceph:
             conf: |
                 [libvirt]
@@ -49,9 +49,17 @@ data:
             - configMapRef:
                 name: ceph-nova-{{ _az }}
             - secretRef:
-                name: nova-cell1-compute-config
+                name: nova-cell{{ _all_azs | length }}-compute-config
             - secretRef:
                 name: nova-migration-ssh-key
+    neutron-metadata:
+        customDataplaneService:
+          name: neutron-metadata-cell{{ _all_azs | length }}
+        dataSources:
+            - secretRef:
+                name: neutron-ovn-metadata-agent-neutron-config
+            - secretRef:
+                name: nova-cell{{ _all_azs | length }}-metadata-neutron-config
 kind: ConfigMap
 metadata:
     annotations:
