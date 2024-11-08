@@ -41,6 +41,18 @@ data:
         rbd_cluster_name = {{ _ceph.cifmw_ceph_client_cluster }}
         backend_availability_zone = {{ _ceph.cifmw_ceph_client_cluster }}
 {% endfor %}
+  galera:
+    templates:
+      openstack:
+        replicas: 1
+        secret: osp-secret
+        storageRequest: 5G
+{% for index in range(1, _all_azs | length + 1) %}
+      openstack-cell{{ index }}:
+        replicas: 1
+        secret: osp-secret
+        storageRequest: 5G
+{% endfor %}
   glance:
     keystoneEndpoint: az0
     glanceAPIs:
@@ -112,6 +124,57 @@ data:
       customServiceConfig: |
         [DEFAULT]
         default_schedule_zone=az0
+      metadataServiceTemplate:
+        enabled: false
+      cellTemplates:
+        cell0:
+          cellDatabaseAccount: nova-cell0
+          hasAPIAccess: true
+{% for index in range(1, _all_azs | length + 1) %}
+        cell{{ index }}:
+          cellDatabaseInstance: openstack-cell{{ index }}
+          cellDatabaseAccount: nova-cell{{ index }}
+          cellMessageBusInstance: rabbitmq-cell{{ index }}
+          conductorServiceTemplate:
+            replicas: 1
+          hasAPIAccess: true
+          metadataServiceTemplate:
+            enabled: true
+            override:
+              service:
+                metadata:
+                  annotations:
+                    metallb.universe.tf/address-pool: internalapi
+                    metallb.universe.tf/allow-shared-ip: internalapi
+                    metallb.universe.tf/loadBalancerIPs: 172.17.0.8{{ index }}
+                spec:
+                  type: LoadBalancer
+            replicas: 3
+{% endfor %}
+  rabbitmq:
+    templates:
+      rabbitmq:
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/loadBalancerIPs: 172.17.0.85
+            spec:
+              type: LoadBalancer
+        replicas: 3
+{% for index in range(1, _all_azs | length + 1) %}
+      rabbitmq-cell{{ index }}:
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/loadBalancerIPs: 172.17.0.8{{ 5 + index }}
+            spec:
+              type: LoadBalancer
+        replicas: 3
+{% endfor %}
   extraMounts:
     - name: v1
       region: r1
