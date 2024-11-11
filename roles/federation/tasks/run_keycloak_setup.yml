@@ -1,0 +1,153 @@
+- name: Install openjdk for keytool util
+  ansible.builtin.dnf:
+    name: java-17-openjdk-headless
+    state: present
+
+- name: generate CA for oss keystore.jks
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -new -newkey rsa:4096 -x509 -keyout xpaas.key -out xpaas.crt -days 365 -subj "/CN=redhat-sso.ca" -passout pass:mycapasspass
+  register: federation_keystore_gen_ca
+
+- name: Generate a private key for the HTTPS keystore
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      keytool -genkeypair -keyalg RSA -keysize 2048 -dname "CN=secure-sso-openstack.apps.ocp.openstack.lab" -alias jboss -keystore keystore.jks  -storepass mykeystorepass
+  register: federation_keystore_gen_private_key
+  
+- name: Generate a certificate sign request for the HTTPS keystore
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      keytool -certreq -keyalg rsa -alias jboss -keystore keystore.jks -file sso.csr -storepass mykeystorepass
+  register: federation_keystore_cert_csr
+
+- name: Sign the certificate sign request with the CA certificate
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      openssl x509 -req -extfile  <(printf "subjectAltName=DNS:-passout pass:mycapasspass") -CA xpaas.crt -CAkey xpaas.key -in sso.csr -out sso.crt -days 365 -CAcreateserial -passin pass:mycapasspass
+  register: federation_keystore_sign_cert
+
+- name: Import the CA certificate into the HTTPS keystore
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      keytool -import -file xpaas.crt -alias xpaas.ca -keystore keystore.jks -storepass mykeystorepass -noprompt
+  register: federation_keystore_import_ca
+
+- name: Import the signed certificate sign request into the HTTPS keystore
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      keytool -import -file sso.crt -alias jboss -keystore keystore.jks -storepass mykeystorepass
+  register: federation_keystore_import_signed_cert
+
+- name: Generate a secure key for the JGroups keystore
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      keytool -genseckey -alias secret-key -storetype JCEKS -keystore jgroups.jceks -keyalg DESede -storepass password -keypass password
+  register: federation_keystore_gen_key_jgroups
+
+- name: Import the CA certificate into a new sso server truststore
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      keytool -import -file xpaas.crt -alias xpaas.ca -keystore truststore.jks -storepass mykeystorepass -noprompt
+  register: federation_keystore_import_truststore
+
+- name: Add the view role to the default service account
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc policy add-role-to-user view system:serviceaccount:$(oc project -q):default
+  register: federation_add_view_role
+
+- name: Create the secrets for the HTTPS and JGroups keystores, and sso server
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc create secret generic sso-app-secret --from-file=keystore.jks --from-file=jgroups.jceks --from-file=truststore.jks
+  register: federation_create_secret_store
+ 
+ - name: Link these secrets to the default service account
+   environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc secrets link default sso-app-secret
+  register: federation_create_secret_store
+ 
+  - name: update the core set of oss resources
+    environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      for resource in sso76-image-stream.json \
+        passthrough/ocp-4.x/sso76-ocp4-https.json \
+        passthrough/ocp-4.x/sso76-ocp4-postgresql.json \
+        passthrough/ocp-4.x/sso76-ocp4-postgresql-persistent.json \
+        reencrypt/ocp-4.x/sso76-ocp4-x509-https.json \
+        reencrypt/ocp-4.x/sso76-ocp4-x509-postgresql-persistent.json
+      do
+        oc replace -n openshift --force -f \
+        https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/${resource}
+      done
+   register: federation_create_resource_templates
+
+  - name: install the sso OpenShift image streams
+    environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc -n openshift import-image rh-sso-7/sso76-openshift-rhel8:7.6 --from=registry.redhat.io/rh-sso-7/sso76-openshift-rhel8:7.6 --confirm
+    register: federation_install_oss_image
+
+  - name: Deploy sso on OpenShift
+    environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc new-app --template=sso76-ocp4-https \
+       -p HTTPS_SECRET="sso-app-secret" \
+       -p HTTPS_KEYSTORE="keystore.jks" \
+       -p HTTPS_NAME="jboss" \
+       -p HTTPS_PASSWORD="mykeystorepass" \
+       -p JGROUPS_ENCRYPT_SECRET="sso-app-secret" \
+       -p JGROUPS_ENCRYPT_KEYSTORE="jgroups.jceks" \
+       -p JGROUPS_ENCRYPT_NAME="secret-key" \
+       -p JGROUPS_ENCRYPT_PASSWORD="password" \
+       -p SSO_ADMIN_USERNAME="admin" \
+       -p SSO_ADMIN_PASSWORD="nomoresecrets" \
+       -p SSO_REALM="OPENSTACK" \
+       -p SSO_TRUSTSTORE="truststore.jks" \
+       -p SSO_TRUSTSTORE_PASSWORD="mykeystorepass" \
+       -p SSO_TRUSTSTORE_SECRET="sso-app-secret"
+    register: federation_install_oss_image
