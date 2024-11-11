@@ -1,0 +1,100 @@
+- name: Download sso76-image-stream.json
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/sso76-image-stream.json
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-image-stream.json"
+
+- name: Download sso76-ocp4-https.json
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/passthrough/ocp-4.x/sso76-ocp4-https.json
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-https.json"
+
+- name: Download sso76-ocp4-postgresql.json
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/passthrough/ocp-4.x/sso76-ocp4-postgresql.json
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql.json"
+
+- name: Download sso76-ocp4-postgresql-persistent.json
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/passthrough/ocp-4.x/sso76-ocp4-postgresql-persistent.json
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql-persistent.json"
+
+- name: Download sso76-ocp4-x509-https.json
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/reencrypt/ocp-4.x/sso76-ocp4-x509-https.json
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-https.json"
+
+- name: Download sso76-ocp4-x509-postgresql-persistent.json
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/reencrypt/ocp-4.x/sso76-ocp4-x509-postgresql-persistent.json
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-postgresql-persistent.json"
+
+- name: Update the core set of SSO resources
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-image-stream.json
+      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-https.json
+      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql.json
+      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql-persistent.json
+      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-https.json
+      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-postgresql-persistent.json
+  register: federation_create_resource_templates
+
+- name: Install the sso OpenShift image streams
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc -n openshift import-image rh-sso-7/sso76-openshift-rhel8:7.6 --from=registry.redhat.io/rh-sso-7/sso76-openshift-rhel8:7.6 --confirm
+  register: federation_install_sso_image
+
+- name: Deploy SSO on OpenShift
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc new-app -n {{ cifmw_federation_run_osp_cmd_namespace }} --template=sso76-ocp4-x509-https -p SSO_ADMIN_USERNAME={{ cifmw_federation_keycloak_admin_username }} -p SSO_ADMIN_PASSWORD={{ cifmw_federation_keycloak_admin_password }}
+  register: federation_deploy_sso
+
+- name: Add CRC IP address to hosts
+  become: true
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    block: |
+      {{ hostvars['crc'].ansible_host }} api.crc.testing
+      {{ hostvars['crc'].ansible_host }} oauth-openshift.apps-crc.testing
+      {{ hostvars['crc'].ansible_host }} sso-openstack.apps-crc.testing
+  when: cifmw_federation_deploy_type == "crc"
+
+- name: Wait for SSO pod to be avalable
+  ansible.builtin.uri:
+    url: "{{ cifmw_federation_keycloak_url }}"
+    follow_redirects: none
+    method: GET
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+  register: _result
+  until: _result.status == 200
+  retries: 24 # wait at least 2 min for pod then fail
+  delay: 5
+
+- name: Get SSO pod CA cert
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get configmap kube-root-ca.crt -n {{ cifmw_federation_run_osp_cmd_namespace }} -o "jsonpath={ .data['ca\.crt']}"
+  register: federation_sso_ca
+
+- name: Write SSO pod CA cert to file for openstackclient pod
+  ansible.builtin.copy:
+    content: "{{ federation_sso_ca.stdout }}"
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso-service-ca.crt"
+
+- name: Setting SSO pod CA fact
+  ansible.builtin.set_fact:
+    cifmw_federation_sso_ca: "{{ federation_sso_ca.stdout }}"
