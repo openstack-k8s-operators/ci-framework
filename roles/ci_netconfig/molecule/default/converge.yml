@@ -1,0 +1,134 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
+  tasks:
+    - name: Add crc hostname with it's IP to /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "192.168.130.11 crc"
+
+    - name: Add the crc host dynamically
+      ansible.builtin.add_host:
+        name: crc
+        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.crc/machines/crc/id_ecdsa"
+        ansible_ssh_user: core
+
+    - name: Fetch crc network facts
+      ansible.builtin.setup:
+        gather_subset: network
+      delegate_to: crc
+      delegate_facts: true
+
+    - name: Prepare the network var for the role
+      ansible.builtin.set_fact:
+        cifmw_ci_netconfig_dict:
+          - ctlPlane:
+              network_v4: 192.168.122.0/24
+              gw_v4: 192.168.122.1
+              search_domain: ctlplane.example.com
+              tools:
+                netconfig:
+                  ranges:
+                    - end: 192.168.122.120
+                      start: 192.168.122.100
+                    - end: 192.168.122.200
+                      start: 192.168.122.150
+          - internalApi:
+              search_domain: internalapi.example.com
+              network_v4: 172.17.0.0/24
+              vlan: 20
+              tools:
+                netconfig:
+                  ranges:
+                    - end: 172.17.0.250
+                      start: 172.17.0.100
+          - external:
+              search_domain: external.example.com
+              network_v4: 10.0.0.0/24
+              gw_v4: 10.0.0.1
+              tools:
+                netconfig:
+                  ranges:
+                    - end: 10.0.0.250
+                      start: 10.0.0.100
+
+    - name: Call ci_netconfig role
+      ansible.builtin.include_role:
+        name: "ci_netconfig"
+
+    # Verify the run
+    - name: Fetch files stat results
+      ansible.builtin.stat:
+        path: >-
+          {{
+            [
+              ansible_user_dir,
+              'ci-framework-data',
+              'artifacts',
+              'manifests/netconfig/ci_netconfig.yml'
+            ] | ansible.builtin.path_join
+          }}
+      register: _ci_netconfig_molecule_stat_out
+
+    - name: Assert that file exist
+      ansible.builtin.assert:
+        that: _ci_netconfig_molecule_stat_out.stat.exists
+
+    - name: Fetch all files content
+      ansible.builtin.slurp:
+        path: "{{ _ci_netconfig_molecule_stat_out.stat.path }}"
+      register: _ci_netconfig_molecule_slurp_out
+
+    - name: Assert that all files contains proper YAML data
+      ansible.builtin.assert:
+        that: "_ci_netconfig_molecule_slurp_out.content | b64decode | from_yaml | length > 0"
+
+    - name: Check if NetConfig resources were created
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ cifmw_ci_netconfig_namespace }}"
+        api_version: network.openstack.org/v1beta1
+        kind: NetConfig
+      register: _ci_netconfig_molecule_out
+      failed_when: >-
+        (_ci_netconfig_molecule_out is not defined) or
+        (_ci_netconfig_molecule_out is failed) or
+        (_ci_netconfig_molecule_out.resources | length == 0)
+
+    - name: Call cleanup
+      ansible.builtin.import_role:
+        name: ci_netconfig
+        tasks_from: cleanup.yml
+
+    - name: Check if netconfig resources were deleted
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ cifmw_ci_netconfig_namespace }}"
+        api_version: network.openstack.org/v1beta1
+        kind: NetConfig
+      register: _ci_netconfig_molecule_cleanup_out
+      failed_when: >-
+        (_ci_netconfig_molecule_cleanup_out is not defined) or
+        (_ci_netconfig_molecule_cleanup_out is failed) or
+        (_ci_netconfig_molecule_cleanup_out.resources | length > 0)

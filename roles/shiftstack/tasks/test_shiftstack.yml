@@ -17,7 +17,7 @@
 - name: Clone the repository '{{ cifmw_shiftstack_qa_repo }}'
   vars:
     namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
-    pod_name: "{{ cifmw_shiftstack_client_pod_name }}"
+    pod: "{{ cifmw_shiftstack_client_pod_name }}"
     command: >-
       git clone {{ cifmw_shiftstack_qa_repo }}
     log_file_name: "clone_shiftstack_qa_repo.log"
@@ -26,7 +26,7 @@
 - name: Fetch the gerrithub change '{{ cifmw_shiftstack_qa_gerrithub_change }}'
   vars:
     namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
-    pod_name: "{{ cifmw_shiftstack_client_pod_name }}"
+    pod: "{{ cifmw_shiftstack_client_pod_name }}"
     command: >-
       cd shiftstack-qa &&
       git fetch {{ cifmw_shiftstack_qa_repo }} {{ cifmw_shiftstack_qa_gerrithub_change }} &&
@@ -40,40 +40,61 @@
 - name: Install the ansible collections
   vars:
     namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
-    pod_name: "{{ cifmw_shiftstack_client_pod_name }}"
+    pod: "{{ cifmw_shiftstack_client_pod_name }}"
     command: >-
       cd shiftstack-qa && ansible-galaxy collection install -f -r requirements.yaml
     log_file_name: "install_collections.log"
   ansible.builtin.include_tasks: exec_command_in_pod.yml
 
-- name: Initialize a dictionary to store the result of the test configs
-  ansible.builtin.set_fact:
-    testconfig_result_dict: {}
-
-- name: Include test config tasks and loop over '{{ cifmw_run_test_shiftstack_testconfig }}'
-  ansible.builtin.include_tasks: test_config.yml
-  loop: "{{ cifmw_run_test_shiftstack_testconfig }}"
-  loop_control:
-    loop_var: testconfig
-    index_var: current_index
-
-- name: Initialize a list to store failed test configs
-  ansible.builtin.set_fact:
-    failed_test_configs: []
-
-- name: Find failed test configurations
-  ansible.builtin.set_fact:
-    failed_test_configs: "{{ failed_test_configs + [{item.key: test_config_name}] }}"
-  loop: "{{ testconfig_result_dict | dict2items }}"
+- name: Check the playbook to be run exists in the repository
   vars:
-    test_config_name: "{{ item.value.keys() | list | first }}"
-  when: "'FAIL' in item.value[test_config_name]"
+    namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
+    pod: "{{ cifmw_shiftstack_client_pod_name }}"
+    command: >-
+      test -f shiftstack-qa/playbooks/{{ cifmw_shiftstack_run_playbook }}
+    log_file_name: "find_playbook.log"
+  ansible.builtin.include_tasks: exec_command_in_pod.yml
 
-- name: Print test configs result
-  ansible.builtin.debug:
-    msg: "{{ testconfig_result_dict | to_nice_json }}"
+- name: Check the test configuration file exists in the repository
+  vars:
+    namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
+    pod: "{{ cifmw_shiftstack_client_pod_name }}"
+    command: >-
+      test -f shiftstack-qa/jobs_definitions/{{ cifmw_run_test_shiftstack_testconfig }}
+    log_file_name: "find_test_config.log"
+  ansible.builtin.include_tasks: exec_command_in_pod.yml
 
-- name: Fail if there is any failed test config
-  ansible.builtin.fail:
-    msg: "There are FAILED test configs: {{ failed_test_configs }}"
-  when: failed_test_configs | length > 0
+- name: OCP install and test block
+  block:
+    - name: Test Openshift on Openstack with the test configuration '{{ cifmw_run_test_shiftstack_testconfig }}'
+      vars:
+        namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
+        pod: "{{ cifmw_shiftstack_client_pod_name }}"
+        command: >-
+          cd shiftstack-qa &&
+          ansible-navigator run playbooks/{{ cifmw_shiftstack_run_playbook }} -e @jobs_definitions/{{ cifmw_run_test_shiftstack_testconfig }} -e ocp_cluster_name={{ cifmw_shiftstack_cluster_name }} -e user_cloud={{ cifmw_shiftstack_project_name }}
+      ansible.builtin.include_tasks: exec_command_in_pod.yml
+
+  rescue:
+    - name: Fail task when OCP installation/test fails
+      ansible.builtin.fail:
+        msg: "OCP install/test block failed, see logs for more information."
+
+  always:
+    - name: Retrieve artifacts from the pod
+      block:
+        - name: Create the directory for the artifacts
+          ansible.builtin.file:
+            path: "{{ cifmw_shiftstack_artifacts_dir }}"
+            state: directory
+            mode: "0755"
+
+        - name: Copy the artifacts from the pod '{{ cifmw_shiftstack_client_pod_name }}'
+          environment:
+            PATH: "{{ cifmw_path }}"
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+          ansible.builtin.command:
+            cmd: >
+              oc rsync -n {{ cifmw_shiftstack_client_pod_namespace }}
+              {{ cifmw_shiftstack_client_pod_name }}:{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/
+              {{ cifmw_shiftstack_artifacts_dir }}/

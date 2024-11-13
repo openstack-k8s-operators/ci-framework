@@ -30,24 +30,25 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: true
   tasks:
-    # Filter out non-ocp vms, that are created, but not started by the
-    # create-infra plabyook.
-    # The rest are created by the create-infra playbook, and managing
-    # them from here can cause problems in some environments, e.g
-    # when running each playbook from a different zuul vm
-    - name: Filter out non ocp vms from libvirt layout
+    # Inject "start: false" in the layout to not start any VM yet.
+    # Starting the VM will be done later, either by the tool deploying
+    # OSP, or the one deploy RHOSO.
+    # VM initial configuration, when managed, is done using cloud-init.
+    - name: Ensure no VM is started when we create them during this run
       vars:
-        _non_ocp_vms: >-
-          {{
-            _cifmw_libvirt_manager_layout.vms |
-            list | reject('match', '^ocp.*')
-
-          }}
+        _no_start: >-
+          {% set _vms = {}                                          -%}
+          {% for _type in _cifmw_libvirt_manager_layout.vms.keys()  -%}
+          {%   if _type is not match('^ocp.*')                      -%}
+          {%     set _ = _vms.update({_type: {'start': false}})     -%}
+          {%   endif                                                -%}
+          {% endfor                                                 -%}
+          {{ _vms }}
       ansible.builtin.set_fact:
         _cifmw_libvirt_manager_layout: >-
           {{
             _cifmw_libvirt_manager_layout |
-            ansible.utils.remove_keys(target=_non_ocp_vms)
+            combine({'vms': _no_start}, recursive=true)
           }}
 
 - name: Prepare networking

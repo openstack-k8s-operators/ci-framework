@@ -2,7 +2,6 @@
 Role for triggering Openshift on Openstack QA automation (installation and tests).
 
 ## Parameters
-* `cifmw_shiftstack_ansible_command_logs_dir`: (*string*) Directory name for the ansible command module output. Defaults to `"{{ cifmw_shiftstack_basedir }}/ansible_command_logs"`.
 * `cifmw_shiftstack_artifacts_dir`: (*string*) Directory name for the role artifacts. Defaults to `"{{ cifmw_shiftstack_basedir }}/artifacts"`.
 * `cifmw_shiftstack_basedir`: (*string*) Base directory for the role artifacts and logs. Defaults to `{{ cifmw_basedir }}/tests/shiftstack` (which defaults to `~/ci-framework-data/tests/shiftstack`.
 * `cifmw_shiftstack_client_pod_name`: (*string*) Pod name for the pod running the Openshift installer and tests. Defaults to `shiftstackclient`.
@@ -12,7 +11,6 @@ Role for triggering Openshift on Openstack QA automation (installation and tests
 * `cifmw_shiftstack_client_pvc_manifest`: (*string*) The file name for the shiftstackclient pvc manifest. Defaults to `"{{ cifmw_shiftstack_client_pod_name }}_pvc.yml"`.
 * `cifmw_shiftstack_cluster_name`: (*string*) The Openshift cluster name. Defaults to `ostest`.
 * `cifmw_shiftstack_installation_dir`: (*string*) Directory to place installation files. Defaults to `"{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/installation"`.
-* `cifmw_shiftstack_manifests_dir`: (*string*) Directory name for the role generated Openshift manifests. Defaults to `"{{ cifmw_shiftstack_basedir }}/manifests"`.
 * `cifmw_shiftstack_project_name`: (*string*) The Openstack project name. Defaults to `shiftstack`.
 * `cifmw_shiftstack_qa_gerrithub_change`: (*string*) The gerrithub change to fetch from the `cifmw_shiftstack_qa_repo` repository (i.e. 'refs/changes/29/1188429/50)'. Defaults to ''.
 * `cifmw_shiftstack_qa_repo`: (*string*) The repository containing the Openshift on Openstack QA automation. Defaults to `https://review.gerrithub.io/shiftstack/shiftstack-qa`.
@@ -26,10 +24,8 @@ The role is imported in the test playbook, i.e. when:
 cifmw_run_tests: true
 cifmw_run_tempest: false
 cifmw_run_test_role: shiftstack
-cifmw_run_test_shiftstack_testconfig:
-  - 4.17_ovnkubernetes_ipi.yaml
-  - 4.17_ovnkubernetes_upi.yaml
+cifmw_run_test_shiftstack_testconfig: 4.15_ovnkubernetes_ipi_va1.yaml
 cifmw_shiftstack_qa_gerrithub_change: refs/changes/29/1188429/50 #optional
 
-$ ansible-playbook deploy-edpm.yml -e 'cifmw_run_tests=true cifmw_run_tempest=false cifmw_run_test_role=shiftstack cifmw_openshift_kubeconfig={{ ansible_user_dir }}/.kube/config cifmw_shiftstack_qa_gerrithub_change=refs/changes/29/1188429/50' -e 'cifmw_run_test_shiftstack_testconfig=["4.17_ovnkubernetes_ipi.yaml","4.17_ovnkubernetes_upi.yaml"]'
+$ ansible-playbook deploy-edpm.yml --extra-vars "cifmw_run_tests=true cifmw_run_tempest=false cifmw_run_test_role=shiftstack cifmw_openshift_kubeconfig={{ ansible_user_dir }}/.kube/config cifmw_run_test_shiftstack_testconfig=4.15_ovnkubernetes_ipi_va1.yaml cifmw_shiftstack_qa_gerrithub_change=refs/changes/29/1188429/50"
 ```

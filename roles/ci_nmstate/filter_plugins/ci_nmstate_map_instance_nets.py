@@ -199,10 +199,6 @@ class FilterModule:
             net_search_domain = network_data.get("search_domain", None)
             if net_search_domain and net_search_domain not in nmstate_search_domains:
                 nmstate_search_domains.append(net_search_domain)
-
-        # If not DNS servers configured for the instance skip DNS config
-        if not nmstate_nameservers:
-            return {}
         return {
             "search": nmstate_search_domains,
             "server": nmstate_nameservers,
@@ -277,22 +273,23 @@ class FilterModule:
             if not bool(net_data.get("skip_nm", False))
         ]
 
-        result = {}
         interfaces = [
             cls.__map_instance_net_interface(net_data) for net_data in intance_nets_defs
         ]
-        if interfaces:
-            result.update({"interfaces": interfaces})
 
+        if not interfaces:
+            return {}
         routes = cls.__map_instance_net_routes(net_env_def, intance_nets_defs)
-        if routes:
-            result.update({"routes": {"config": routes}})
-
         dns = cls.__map_instance_net_dnss(net_env_def, intance_nets_defs)
-        if dns:
-            result.update({"dns-resolver": {"config": dns}})
-
-        return result
+        return {
+            "interfaces": interfaces,
+            "routes": {
+                "config": routes,
+            },
+            "dns-resolver": {
+                "config": dns,
+            },
+        }
 
     def filters(self):
         return {

@@ -21,13 +21,13 @@
         PATH: "{{ cifmw_path }}"
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
       ansible.builtin.command:
-        cmd: "oc rsh -n {{ namespace }} {{ pod_name }} bash -c '{{ command }}'"
-      register: pod_command_result
+        cmd: "oc rsh -n {{ namespace }} {{ pod }} bash -c '{{ command }}'"
+      register: command_result
 
   rescue:
     - name: Fail when the command module fails
       ansible.builtin.fail:
-        msg: '"{{ command }}" command execution failed with exit code "{{ pod_command_result.rc }}" and error: "{{ pod_command_result.stderr }}".'
+        msg: "'{{ command }}' command execution failed, see logs for more information."
 
   always:
     - name: Command execution log saving block
@@ -38,14 +38,14 @@
             cmd: date +"%Y_%m_%d-%H_%M_%S"
           register: current_date
 
-        - name: Save the command execution information in the log file in '{{ cifmw_shiftstack_ansible_command_logs_dir }}'
+        - name: Save the command execution information in the log file in '{{ cifmw_shiftstack_basedir }}'
           vars:
             command_info:
               namespace: "{{ namespace }}"
-              pod_name: "{{ pod_name }}"
+              pod: "{{ pod }}"
               command: "{{ command }}"
-              pod_command_result: "{{ pod_command_result }}"
+              command_result: "{{ command_result }}"
           ansible.builtin.copy:
             content: "{{ command_info | to_nice_yaml }}"
-            dest: "{{ cifmw_shiftstack_ansible_command_logs_dir }}/{{ current_date.stdout }}.{{ log_file_name }}"
+            dest: "{{ cifmw_shiftstack_basedir }}/{{ current_date.stdout }}.{{ log_file_name }}"
             mode: "0644"

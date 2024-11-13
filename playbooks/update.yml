@@ -14,6 +14,12 @@
         - name: Prepare install_yamls make targets
           ansible.builtin.include_role:
             name: install_yamls
+        - name: Make a viable cifmw_install_yamls_environment
+          ansible.builtin.set_fact:
+            cifmw_install_yamls_environment: "{{ cifmw_install_yamls_environment | default({}) }}"
+        - name: Add a default value cifmw_install_yamls_defaults
+          ansible.builtin.set_fact:
+            cifmw_install_yamls_defaults: "{{ cifmw_install_yamls_defaults | default({'OPERATOR_NAMESPACE': 'openstack-operators'}) }}"
 
 - name: Update repos and openstack services containers
   hosts: "{{ cifmw_target_host | default('localhost') }}"
@@ -48,42 +54,6 @@
       ansible.builtin.copy:
         dest: "/etc/yum.repos.d/"
         src: "{{ cifmw_basedir }}/artifacts/repositories/"
-
-- name: Run Ceph update if part of the deployment
-  hosts: "{{ (groups[cifmw_ceph_target | default('computes')] | default([]))[:1] }}"
-  gather_facts: true
-  tasks:
-    - name: Update Ceph
-      when: cifmw_ceph_update | default(false) | bool
-      tags:
-        - update
-        - ceph_update
-      block:
-        - name: Get ceph.conf to inspect
-          become: true
-          ansible.builtin.slurp:
-            src: "{{ cifmw_ceph_conf }}"
-          vars:
-            cifmw_ceph_conf: "/etc/ceph/ceph.conf"
-          register: cephconf
-
-        - name: Save /ceph.conf and inspect content
-          become: true
-          delegate_to: localhost
-          ansible.builtin.copy:
-            content: "{{ cephconf['content'] | b64decode }}"
-            dest: "/tmp/ceph.conf"
-
-        - name: Extract the CephFSID from ceph.conf
-          ansible.builtin.set_fact:
-            ceph_fsid: "{{ lookup('ansible.builtin.ini', 'fsid', section='global', file='/tmp/ceph.conf') }}"
-
-        - name: Perform a Ceph Update
-          ansible.builtin.import_role:
-            name: cifmw_cephadm
-            tasks_from: ceph_upgrade
-          vars:
-            cifmw_cephadm_fsid: "{{ ceph_fsid }}"
 
 - name: Run update role
   hosts: "{{ cifmw_target_host | default('localhost') }}"

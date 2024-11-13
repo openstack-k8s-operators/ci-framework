@@ -12,6 +12,4 @@ Role to run update
 * `cifmw_update_ping_loss_second` : (Integer) Number of seconds that the ping test is allowed to fail. Default to `0`. Note that 1 packet loss is always accepted to avoid false positive.
 * `cifmw_update_ping_loss_percent` : (Integer) Maximum percentage of ping loss accepted.  Default to `0`. Only relevant when `cifmw_update_ping_loss_second` is not 0.
 * `cifmw_update_control_plane_check`: (Boolean) Activate a continuous control plane testing. Default to `False`
-* `cifmw_update_openstackclient_pod_timeout`: (Integer) Maximum number of seconds to wait for the openstackclient Pod to be available during control plane testing, as it is being restarted during update.  Default to `10` seconds.
-
 ## Examples

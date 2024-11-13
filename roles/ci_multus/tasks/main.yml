@@ -19,121 +19,31 @@
     path: "{{ cifmw_ci_multus_manifests_dir }}"
     state: directory
 
-- name: Build list of networks from cifmw_networking_env_definition
-  block:
-    - name: Load Networking Environment Definition
-      ansible.builtin.import_role:
-        name: networking_mapper
-        tasks_from: load_env_definition.yml
+- name: Build NetAttDef list from ci environment
+  when:
+    - cifmw_ci_multus_nad_list | length == 0
+  ansible.builtin.include_tasks: extract_ci_data.yml
 
-    - name: Gather network layout from OCP host or default networks
-      ansible.builtin.set_fact:
-        _cifmw_ci_multus_net_info: >-
-          {{
-            (
-              cifmw_networking_env_definition.instances[cifmw_ci_multus_ocp_hostname].networks | default({})|
-              combine(cifmw_networking_env_definition['networks'], recursive=true)
-            )
-          }}
-
-    - name: Merge any available multus net info patches
-      vars:
-        _net_info_patches: >-
-          {{
-            hostvars[inventory_hostname] |
-            dict2items |
-            selectattr("key", "match",
-                       "^cifmw_ci_multus_net_info_patch.*") |
-            sort(attribute='key') |
-            map(attribute='value') |
-            list
-          }}
-      when: _net_info_patches | default([]) | length > 0
-      ansible.builtin.set_fact:
-        _cifmw_ci_multus_net_info: >-
-          {{
-            _cifmw_ci_multus_net_info | default({}) |
-            combine(item, recursive=True)
-          }}
-      loop: "{{ [_cifmw_ci_multus_net_info] + _net_info_patches }}"
-
-    - name: Remove any networks without Multus networking defined
-      vars:
-        _networks_without_multus_config: >-
-          {% set _networks_without_multus_config = [] -%}
-          {% for name, data in _cifmw_ci_multus_net_info.items()  -%}
-            {% if data.tools.multus is not defined -%}
-              {% set _ = _networks_without_multus_config.append(name) -%}
-            {% endif -%}
-          {% endfor -%}
-          {{ _networks_without_multus_config }}
-      ansible.builtin.set_fact:
-        _cifmw_ci_multus_net_info: >-
-          {{
-            _cifmw_ci_multus_net_info |
-            ansible.utils.remove_keys(
-             target=_networks_without_multus_config)
-          }}
-
-    - name: Remove any networks not in cifmw_ci_multus_allow_list if defined
-      when: cifmw_ci_multus_allow_list | length > 0
-      vars:
-        _networks_not_present_in_allow_list: >-
-          {% set _networks_not_present_in_allow_list = [] -%}
-          {% for name, data in _cifmw_ci_multus_net_info.items()  -%}
-            {% if name not in cifmw_ci_multus_allow_list -%}
-              {% set _ = _networks_not_present_in_allow_list.append(name) -%}
-            {% endif -%}
-          {% endfor -%}
-          {{ _networks_not_present_in_allow_list }}
-      ansible.builtin.set_fact:
-        _cifmw_ci_multus_net_info: >-
-          {{
-            _cifmw_ci_multus_net_info |
-            ansible.utils.remove_keys(
-             target=_networks_not_present_in_allow_list)
-          }}
-
-    - name: Remove any networks in cifmw_ci_multus_deny_list if defined
-      when: cifmw_ci_multus_deny_list | length > 0
-      vars:
-        _networks_present_in_deny_list: >-
-          {% set _networks_present_in_deny_list = [] -%}
-          {% for name, data in _cifmw_ci_multus_net_info.items()  -%}
-            {% if name in cifmw_ci_multus_deny_list -%}
-              {% set _ = _networks_present_in_deny_list.append(name) -%}
-            {% endif -%}
-          {% endfor -%}
-          {{ _networks_present_in_deny_list }}
-      ansible.builtin.set_fact:
-        _cifmw_ci_multus_net_info: >-
-          {{
-            _cifmw_ci_multus_net_info |
-            ansible.utils.remove_keys(
-             target=_networks_present_in_deny_list)
-          }}
-
-- name: Render NetworkAttachmenktDefinition manifests
+- name: Create network attachment definitions in manifest dir
+  vars:
+    _cifmw_ci_multus_nad_list: "{{ cifmw_ci_multus_nad_list + cifmw_ci_multus_nad_extra_list }}"
   ansible.builtin.template:
     src: "nad.yml.j2"
     dest: "{{ cifmw_ci_multus_manifests_dir }}/ci_multus_nads.yml"
 
-- name: Create resources in OCP
-  when: not cifmw_ci_multus_dryrun
-  block:
-    - name: Create the multus namespace
-      kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        name: "{{ cifmw_ci_multus_namespace }}"
-        kind: Namespace
-        state: present
+- name: Create the multus namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    name: "{{ cifmw_ci_multus_namespace }}"
+    kind: Namespace
+    state: present
 
-    - name: Apply network attachment definition manifests
-      kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit)  }}"
-        state: present
-        definition: "{{ lookup('file', cifmw_ci_multus_manifests_dir+'/ci_multus_nads.yml') | from_yaml_all  }}"
+- name: Apply network attachment definitions
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig  }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit)  }}"
+    state: present
+    definition: "{{ lookup('file', cifmw_ci_multus_manifests_dir+'/ci_multus_nads.yml') | from_yaml_all  }}"
