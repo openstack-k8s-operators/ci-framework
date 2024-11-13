@@ -1,0 +1,32 @@
+---
+- name: Get validation start time
+  ansible.builtin.set_fact:
+    _cifmw_validations_run_start_time: "{{ now(fmt='%s.%f') }}"
+    _cifmw_validations_status: ""
+
+- name: Run validation and catch errors
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  block:
+    - name: Run a validation
+      ansible.builtin.include_tasks: "{{ item }}"
+  rescue:
+    - name: Flag the validation as failed
+      ansible.builtin.set_fact:
+        _cifmw_validations_status: "Validator failed task: {{ ansible_failed_task.name }}, Validator failed reason: {{ ansible_failed_result.msg}}"
+
+- name: Add testcase name and time to generate xml script
+  ansible.builtin.set_fact:
+    _cifmw_validations_results: >-
+      {{
+        _cifmw_validations_results |
+        combine(
+          {
+            (item | basename): {
+              'time': (now(fmt='%s.%f')| float - _cifmw_validations_run_start_time | float),
+              'error': _cifmw_validations_status if 'failed' in _cifmw_validations_status else omit
+            }
+          }
+        )
+      }}

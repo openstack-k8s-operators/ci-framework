@@ -25,6 +25,10 @@
     - artifacts
     - logs
 
+- name: Initialize variables needed for generating polarion xml file
+  ansible.builtin.set_fact:
+    _cifmw_validations_results: {}
+
 # We can execute all defined validations when cifmw_validation_run_all is defined.
 # Else, we will skip this and run only the explicitly defined validations from
 # cifmw_validations_list
@@ -42,7 +46,7 @@
 
     - name: Run all found validations
       ansible.builtin.include_tasks:
-        file: "{{ item.path }}"
+        file: run_validation.yml
       loop: "{{ found_validations.files }}"
 
 - name: Run selected validations
@@ -56,5 +60,25 @@
       failed_when: not validation_exists.stat.exists
 
     - name: Run validations
-      ansible.builtin.include_tasks: "{{ item }}"
+      ansible.builtin.include_tasks:
+        file: run_validation.yml
       loop: "{{ cifmw_validations_list }}"
+
+- name: Create validations directory
+  ansible.builtin.file:
+    path: "{{ cifmw_validations_xml_status_file_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Create the XML file
+  ansible.builtin.copy:
+    content: "{{ _cifmw_validations_results | cifmw_validations_xml_filter }}"
+    dest: "{{ cifmw_validations_xml_status_file_dir }}/validations_results.xml"
+    mode: "0644"
+
+- name: Fail job when validations fail
+  ansible.builtin.assert:
+    that:
+      - _cifmw_validations_results.values() |
+        selectattr('error', 'defined') | length == 0
+    msg: "One or more validations failed"
