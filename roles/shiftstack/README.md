@@ -19,6 +19,7 @@ Role for triggering Openshift on Openstack QA automation (installation and tests
 * `cifmw_shiftstack_run_playbook`: (*string*) The playbook to be run from the `cifmw_shiftstack_qa_repo` repository. Defaults to `ocp_testing.yaml`.
 * `cifmw_shiftstack_sc`: (*string*) The storage class to be used for PVC for the shiftstackclient pod. Defaults to `local-storage`.
 * `cifmw_shiftstack_shiftstackclient_artifacts_dir`: (*string*) The artifacts directory path for the shiftstackclient pod. Defaults to `/home/cloud-admin/artifacts`.
+* `cifmw_shiftstack_proxy`: (*string*) The proxy url that should be used to reach the underlying OCP. Defaults to omit.
 
 ## Examples
 The role is imported in the test playbook, i.e. when:
