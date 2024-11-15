@@ -107,7 +107,7 @@
         - _cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | length == 1
         - (_cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | first)['status']['installPlanRef'] is defined
 
-    - name: Wait for the openstack operators InstallPlan to be finish
+    - name: Wait for the openstack operators InstallPlan to be finished
       vars:
         _install_plan: >-
           {{
@@ -319,8 +319,69 @@
           status: "True"
         wait_timeout: 300
 
-- name: Wait until OpenStack operators are deployed and ready
-  when: not cifmw_kustomize_deploy_generate_crs_only
+- name: Check if the OpenStack initialization CRD exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: CustomResourceDefinition
+    name: openstacks.operator.openstack.org
+  register: _cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out
+
+- name: Handle OpenStack initialization, if necessary
+  when: (_cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out.resources | length) > 0
+  block:
+    - name: Generate OpenStack initialization kustomization file
+      ansible.builtin.copy:
+        content: >-
+          {{
+            lookup(
+              'kubernetes.core.kustomize',
+              dir=cifmw_kustomize_deploy_openstack_source_files
+            )
+          }}
+        dest: "{{ cifmw_kustomize_deploy_openstack_dest_file }}"
+        mode: "0644"
+
+    - name: Openstack initialization resources
+      when: not cifmw_kustomize_deploy_generate_crs_only
+      block:
+        - name: Apply the kustomized OpenStack initialization CRs
+          kubernetes.core.k8s:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            api_key: "{{ cifmw_openshift_token | default(omit) }}"
+            context: "{{ cifmw_openshift_context | default(omit) }}"
+            state: present
+            wait: true
+            src: "{{ cifmw_kustomize_deploy_openstack_dest_file }}"
+          check_mode: >-
+            {{
+              cifmw_kustomize_deploy_check_mode |
+              default(false, true)
+            }}
+
+    - name: Wait until OpenStack operators are deployed and ready (new install paradigm)
+      when: not cifmw_kustomize_deploy_generate_crs_only
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Openstack
+        namespace: openstack-operators
+        name: openstack
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 600
+      check_mode: >-
+        {{
+          cifmw_kustomize_deploy_check_mode |
+          default(false, true)
+        }}
+
+- name: Wait until OpenStack operators are deployed and ready (old install paradigm)
+  when:
+    - not cifmw_kustomize_deploy_generate_crs_only
+    - (_cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out.resources | length) == 0
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     kind: Deployment
