@@ -8,14 +8,22 @@
         paths: "{{ cifmw_architecture_user_kustomize_base_dir }}"
         patterns: "*.yml,*.yaml"
         recurse: true
+        file_type: "{{ item }}"
       register: _cifmw_kustomize_deploy_yaml_patches_find
+      loop:
+        - file
+        - link
       delegate_to: localhost
 
     - name: Fetch the content of the kustomize patches
       ansible.builtin.slurp:
         path: "{{ item.path }}"
       register: _cifmw_kustomize_deploy_yaml_patches_slurp
-      loop: "{{ _cifmw_kustomize_deploy_yaml_patches_find.files | default([]) }}"
+      loop: >-
+        {{
+          _cifmw_kustomize_deploy_yaml_patches_find.results | default([]) |
+          map(attribute='files') | flatten
+        }}
       delegate_to: localhost
       loop_control:
         label: "{{ item.path | ansible.builtin.relpath(cifmw_architecture_user_kustomize_base_dir) }}"
