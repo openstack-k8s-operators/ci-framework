@@ -110,6 +110,18 @@
       register: merged_xml_files
 
     - name: Update Test Runs
+      vars:
+        _opts:
+          cijoburl: "{{ cifmw_zuul_url }}/{{ zuul.build }}"
+          jobteststage: "{{ merged_xml_files.files[ loop_idx ].path | dirname | basename }}"
+        _custom_fields: "{{ _opts | combine(cifmw_polarion_jump_custom_fields) }}"
+        _custom_fields_string: >-
+          {{
+            _custom_fields.keys() |
+            zip(_custom_fields.values()) |
+            map('join', '=') |
+            join(',')
+          }}
       ansible.builtin.shell:
         chdir: "{{ cifmw_polarion_jump_repo_dir }}"
         cmd: >-
@@ -119,7 +131,7 @@
           --testrun-title={{ cifmw_polarion_testrun_title }}-{{ loop_idx }}
           --xml-file={{ item.path }}
           --update_testcases={{ cifmw_polarion_update_testcases | default(false) }}
-          --custom-fields cijoburl={{ cifmw_zuul_url }}/{{ zuul.build }},jobteststage={{ merged_xml_files.files[ loop_idx ].path | dirname | basename }}
+          --custom-fields {{ _custom_fields_string }}
           {{ cifmw_polarion_jump_extra_vars | default ('') }}
       loop: "{{ merged_xml_files.files }}"
       loop_control:
