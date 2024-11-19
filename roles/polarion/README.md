@@ -10,6 +10,7 @@ Role to setup jump tool and upload XML test results to Polarion.
 * `cifmw_polarion_testrun_id`: (String) A test run identification provided by Polarion test case or `create-new-test-run` if polarion should generate a random test run ID. A value other than `create-new-test-run` will force this role to upload all test results found in all directories under `cifmw_polarion_jump_repo_url` to one test run identified by the given ID. The default behavior of this role is to treat the directories in `cifmw_polarion_jump_repo_url` as separate test runs.
 * `cifmw_polarion_update_testcases`: (Boolean) A value of True/False to create missing testcases (which should normally _not_ be enabled).
 * `cifmw_polarion_jump_extra_vars`: (String) A list of extra_vars that are being passed to the jump script. Defaults to empty.
+* `cifmw_polarion_jump_custom_fields`: (Dict) Structure listing the fields for --custom-fields argument of jump tool.
 * `cifmw_polarion_use_stage`: (Bool) Flag for using the staging instance of Polarion. Default is False meaning the production instance gets updated. Don't forget to change for testing on stage instance.
 
 
