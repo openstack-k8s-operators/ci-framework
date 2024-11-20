@@ -63,3 +63,29 @@
         - _ceph_bootstrap_node != ''
       ansible.builtin.include_role:
         name: ci_dcn_site
+
+    - name: Find all created CRs
+      ansible.builtin.find:
+        paths: >-
+          {{
+            (ansible_user_dir,
+            'src',
+            'github.com',
+            'openstack-k8s-operators',
+            'architecture',
+            'examples',
+            'dt',
+            cifmw_architecture_scenario) | path_join
+          }}
+        file_type: file
+        patterns:
+          - "control*.yaml"
+          - "dataplane*.yaml"
+      register: dcn_crs
+
+    - name: Copy found CR files to the manifests folder
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "/home/zuul/ci-framework-data/artifacts/manifests/openstack/cr"
+      loop: "{{ dcn_crs.files }}"
+      when: dcn_crs.matched > 0
