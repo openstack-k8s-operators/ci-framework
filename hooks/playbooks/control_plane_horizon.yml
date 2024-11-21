@@ -1,0 +1,28 @@
+---
+- name: Kustomize ControlPlane for horizon service
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane"
+        state: directory
+        mode: "0755"
+
+    - name: Create kustomize yaml to enable Horizon
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/80-horizon-kustomization.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          namespace: {{ namespace }}
+          patches:
+          - target:
+                kind: OpenStackControlPlane
+            patch: |-
+              - op: add
+                path: /spec/horizon/enabled
+                value: true
+              - op: add
+                path: /spec/horizon/template/memcachedInstance
+                value: memcached
