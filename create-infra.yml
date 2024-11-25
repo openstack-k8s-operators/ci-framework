@@ -75,3 +75,66 @@
       ansible.builtin.import_role:
         name: "libvirt_manager"
         tasks_from: "deploy_layout.yml"
+
+    - name: Gather ansible_user_id
+      ansible.builtin.setup:
+        gather_subset:
+          - user_id
+          - user_dir
+
+    - name: Ensure controllers vms are started and reachable
+      when: groups.controllers | default([]) | length > 0
+      vars:
+        _cifmw_libvirt_manager_layout:
+          vms:
+            controllers:
+              start: true
+              disk_file_name: "dummy"
+        cifmw_libvirt_manager_all_vms: >-
+          {%- set vms = {} -%}
+          {%- for vm in groups.controllers | default([]) -%}
+            {%- set _ = vms.update({vm: 'controllers'}) -%}
+          {%- endfor -%}
+          {{ vms }}
+        ansible_libvirt_pools: {}
+      ansible.builtin.include_role:
+        name: "libvirt_manager"
+        tasks_from: "start_vms.yml"
+        apply:
+          delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+
+    # This bootstraps the controller-0 node, and RedFish virtual BMC is
+    # spawned if cifmw_use_sushy_emulator is enabled.
+    - name: Bootstrap sushy-emulator (RedFish Virtual BMC) on controller-0
+      when:
+        - "'controllers' in groups"
+        - "'controllers' in group_names"
+        - cifmw_use_sushy_emulator | default(false) | bool
+      delegate_to: controller-0
+      become: true
+      vars:
+        cifmw_sushy_emulator_hypervisor_target: "{{ cifmw_target_host }}"
+        cifmw_sushy_emulator_hypervisor_address: "{{ cifmw_target_host }}.utility"
+        cifmw_sushy_emulator_install_type: podman
+        cifmw_podman_user_linger: "zuul"
+      block:
+        - name: Run reproducer roles rhos_release tasks on controller-0
+          ansible.builtin.include_role:
+            name: reproducer
+            tasks_from: rhos_release.yml
+
+        - name: Include role sushy_emulator
+          ansible.builtin.include_role:
+            name: sushy_emulator
+
+        - name: Generate baremetal-info fact
+          vars:
+            cifmw_sushy_emulator_uri: 'http://sushy.utility:8000'
+          ansible.builtin.include_role:
+            name: reproducer
+            tasks_from: generate_bm_info.yml
+
+        - name: Verify connection to baremetal VMs via Sushy Emulator
+          ansible.builtin.include_role:
+            name: sushy_emulator
+            tasks_from: verify.yml
