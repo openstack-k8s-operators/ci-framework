@@ -3,11 +3,23 @@
   ansible.builtin.include_vars:
     dir: "{{ cifmw_basedir }}/artifacts/parameters"
 
+- name: Use the locally built operators if any
+  ansible.builtin.set_fact:
+    _local_operators_indexes:
+      "{{ _local_operators_indexes|default({}) |
+      combine({ item.key.split('-')[0]|upper+'_IMG':
+              cifmw_operator_build_output['operators'][item.key].image_catalog}) }}"
+  loop: "{{ cifmw_operator_build_output['operators'] | dict2items }}"
+  when:
+    - cifmw_operator_build_output is defined
+    - "'operators' in cifmw_operator_build_output"
+
 - name: Set environment vars for kuttl test
   ansible.builtin.set_fact:
     cifmw_kuttl_tests_env: >-
       {{
-        cifmw_install_yamls_environment |
+        _local_operators_indexes | default({}) |
+        combine(cifmw_install_yamls_environment) |
         combine(cifmw_kuttl_tests_env_vars | default({})) |
         combine(cifmw_kuttl_openstack_prep_vars | default({})) |
         combine({'PATH': cifmw_path})
