@@ -31,6 +31,7 @@
         namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
         pod_name: "{{ cifmw_shiftstack_client_pod_name }}"
         command: >-
+          source .bashrc &&
           cd shiftstack-qa &&
           ansible-navigator run playbooks/{{ cifmw_shiftstack_run_playbook }} -e @jobs_definitions/{{ testconfig }} -e ocp_cluster_name={{ cifmw_shiftstack_cluster_name }} -e user_cloud={{ cifmw_shiftstack_project_name }}
       ansible.builtin.include_tasks: exec_command_in_pod.yml
@@ -48,12 +49,19 @@
 
   always:
     - name: "Copy the artifacts from the pod '{{ cifmw_shiftstack_client_pod_name }}'"
+      vars:
+        _exclude_options: >-
+          {{
+            '--exclude=' ~ cifmw_shiftstack_exclude_artifacts_regex
+            if cifmw_shiftstack_exclude_artifacts_regex | default('') != ''
+            else ''
+          }}
       environment:
         PATH: "{{ cifmw_path }}"
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
       ansible.builtin.command:
         cmd: >
-          oc rsync -n {{ cifmw_shiftstack_client_pod_namespace }}
+          oc rsync -n {{ cifmw_shiftstack_client_pod_namespace }} {{ _exclude_options }}
           {{ cifmw_shiftstack_client_pod_name }}:{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/
           {{ testconfig_artifacts_dir }}/
       failed_when: false
