@@ -1,0 +1,31 @@
+- hosts: controller
+  vars:
+    project_name: "github.com/openstack-k8s-operators/{{ operator_name }}"
+    operator_basedir: >-
+      {{
+        zuul.projects[project_name].src_dir
+        }}
+    kuttl_log_dir: "{{ local_log_dir | default(ansible_user_dir + '/zuul-output/logs/controller') }}"
+  tasks:
+    - name: run kuttl test suite from operator Makefile
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.command:
+        cmd: make kuttl-test-run
+        chdir: "{{ ansible_user_dir }}/{{ operator_basedir }}"
+      changed_when: true
+      register: kuttl_test_run
+
+    - name: Create log dir
+      ansible.builtin.file:
+        path: "{{ kuttl_log_dir }}"
+        state: directory
+        mode: "0755"
+        recurse: yes
+
+    - name: save output to file
+      ansible.builtin.copy:
+        content: "{{ kuttl_test_run.stdout }}"
+        dest: "{{ kuttl_log_dir }}/kuttl-test-run.out"
+      when: kuttl_test_run.stdout is defined
