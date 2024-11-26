@@ -1,0 +1,136 @@
+---
+- name: Run ci_framework bootstrap playbook
+  ansible.builtin.import_playbook: "../../../playbooks/01-bootstrap.yml"
+
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  name: Install dev tools
+  tasks:
+    - name: Assert that operator_name is set
+      ansible.builtin.assert:
+        that:
+          - operator_name is defined
+
+    - name: Download install_yamls deps
+      ansible.builtin.include_role:
+        name: 'install_yamls_makes'
+        tasks_from: 'make_download_tools'
+
+- name: Run ci_framework infra playbook
+  ansible.builtin.import_playbook: "../../../playbooks/02-infra.yml"
+
+- name: Build dataset hook
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Load parameters
+      ansible.builtin.include_vars:
+        dir: "{{ item }}"
+      loop:
+        - "{{ cifmw_basedir }}/artifacts/parameters"
+        - "/etc/ci/env"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Ensure that the isolated net was configured for crc
+      ansible.builtin.assert:
+        that:
+          - crc_ci_bootstrap_networks_out is defined
+          - "'crc' in crc_ci_bootstrap_networks_out"
+          - "'default' in crc_ci_bootstrap_networks_out['crc']"
+
+    - name: Set facts for further usage within the framework
+      ansible.builtin.set_fact:
+        cifmw_edpm_prepare_extra_vars:
+          NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out.crc.default.iface }}"
+          NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out.crc.default.mtu }}"
+
+- hosts: "{{ cifmw_target_host | default('localhost') }}"
+  name: Deploy Openstack Operators
+  tasks:
+
+    - name: Use the locally built operators if any
+      ansible.builtin.set_fact:
+        _local_operators_indexes: >-
+          {{
+            _local_operators_indexes|default({}) |
+            combine({ item.key.split('-')[0]|upper+'_IMG':
+            cifmw_operator_build_output['operators'][item.key].image_catalog})
+          }}
+      loop: "{{ cifmw_operator_build_output['operators'] | dict2items }}"
+      when:
+        - cifmw_operator_build_output is defined
+        - "'operators' in cifmw_operator_build_output"
+
+    - name: Set install_yamls Makefile environment variables
+      vars:
+        operators_build_output: "{{ (cifmw_operator_build_output | default({'operators':{}})).operators }}"
+        _openstack_operator_images:
+          OPENSTACK_IMG: "{{ cifmw_operator_build_output.operators['openstack-operator']['image_catalog'] | default(omit) }}"
+          OPENSTACK_BUNDLE_IMG: "{{ cifmw_operator_build_output.operators['openstack-operator']['image_bundle'] | default(omit) }}"
+      ansible.builtin.set_fact:
+        cifmw_edpm_prepare_common_env: >-
+          {{
+            cifmw_install_yamls_environment |
+            combine({'PATH': cifmw_path}) |
+            combine(cifmw_edpm_prepare_extra_vars | default({}))
+          }}
+        cifmw_edpm_prepare_operators_build_output: "{{ operators_build_output }}"
+        cifmw_edpm_prepare_make_openstack_env: "{{ _local_operators_indexes | combine(_openstack_operator_images) }}"
+
+    - name: Deploy openstack Operators
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      block:
+        - name: detect if openstack operator is installed
+          ansible.builtin.command:
+            cmd: "oc get sub --ignore-not-found=true -n openstack-operators -o name openstack-operator"
+          ignore_errors: true
+          register: openstack_operator_subscription
+
+        - name: Install openstack operator
+          when: openstack_operator_subscription.stdout == ""
+          vars:
+            make_openstack_env: "{{ cifmw_edpm_prepare_common_env |
+              combine(cifmw_edpm_prepare_make_openstack_env) }}"
+            make_openstack_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+          ansible.builtin.include_role:
+            name: 'install_yamls_makes'
+            tasks_from: 'make_openstack'
+
+        - name: Wait for OpenStack subscription creation
+          when: openstack_operator_subscription.stdout == ""
+          ansible.builtin.command:
+            cmd: >-
+              oc get sub openstack-operator
+              --namespace=openstack-operators
+              -o=jsonpath='{.status.installplan.name}'
+          register: cifmw_edpm_prepare_wait_installplan_out
+          until: cifmw_edpm_prepare_wait_installplan_out.rc == 0 and cifmw_edpm_prepare_wait_installplan_out.stdout != ""
+          retries: 30
+          delay: 10
+
+        - name: Wait for OpenStack operator to get installed
+          when: openstack_operator_subscription.stdout == ""
+          ansible.builtin.command:
+            cmd: >-
+              oc wait InstallPlan {{ cifmw_edpm_prepare_wait_installplan_out.stdout }}
+              --namespace=openstack-operators
+              --for=jsonpath='{.status.phase}'=Complete --timeout=20m
+
+        - name: install kuttl test_suite dependencies
+          vars:
+            project_name: "github.com/openstack-k8s-operators/{{ operator_name }}"
+            operator_basedir: >-
+              {{
+                zuul.projects[project_name].src_dir
+              }}
+          ansible.builtin.command:
+            cmd: make kuttl-test-prep
+            chdir: "{{ ansible_user_dir }}/{{ operator_basedir }}"
+          register: result
+          until: result.rc == 0
+          retries: 3
+          delay: 10
+          changed_when: true
