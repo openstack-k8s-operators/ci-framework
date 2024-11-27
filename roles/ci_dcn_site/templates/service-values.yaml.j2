@@ -102,26 +102,36 @@ data:
 {% endif %}
 {% endfor %}
   manila:
-    enabled: false
+    customServiceConfig: |
+      [DEFAULT]
+      storage_availability_zone = az0
+    enabled: true
     manilaAPI:
       customServiceConfig: |
         [DEFAULT]
         enabled_share_protocols=nfs,cephfs
     manilaShares:
-      share1:
+{% for _ceph in _ceph_vars_list %}
+{% if _ceph.cifmw_ceph_client_cluster != _az_to_scaledown %}
+      {{ _ceph.cifmw_ceph_client_cluster }}:
         customServiceConfig: |
           [DEFAULT]
-          enabled_share_backends = cephfs
+          enabled_share_backends = cephfs_{{ _ceph.cifmw_ceph_client_cluster }}
           enabled_share_protocols = cephfs
-          [cephfs]
+          [cephfs_{{ _ceph.cifmw_ceph_client_cluster }}]
           driver_handles_share_servers = False
-          share_backend_name = cephfs
+          share_backend_name = cephfs_{{ _ceph.cifmw_ceph_client_cluster }}
           share_driver = manila.share.drivers.cephfs.driver.CephFSDriver
-          cephfs_conf_path = /etc/ceph/ceph.conf
-          cephfs_cluster_name = ceph
+          cephfs_conf_path = /etc/ceph/{{ _ceph.cifmw_ceph_client_cluster }}.conf
+          cephfs_cluster_name = {{ _ceph.cifmw_ceph_client_cluster }}
           cephfs_auth_id=openstack
           cephfs_volume_mode = 0755
           cephfs_protocol_helper_type = CEPHFS
+          backend_availability_zone = {{ _ceph.cifmw_ceph_client_cluster }}
+        networkAttachments:
+          - storage
+{% endif %}
+{% endfor %}
   neutron:
       template:
         customServiceConfig: |
