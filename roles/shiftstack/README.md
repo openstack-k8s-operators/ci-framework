@@ -16,6 +16,7 @@ Role for triggering Openshift on Openstack QA automation (installation and tests
 * `cifmw_shiftstack_project_name`: (*string*) The Openstack project name. Defaults to `shiftstack`.
 * `cifmw_shiftstack_qa_gerrithub_change`: (*string*) The gerrithub change to fetch from the `cifmw_shiftstack_qa_repo` repository (i.e. 'refs/changes/29/1188429/50)'. Defaults to ''.
 * `cifmw_shiftstack_qa_repo`: (*string*) The repository containing the Openshift on Openstack QA automation. Defaults to `https://review.gerrithub.io/shiftstack/shiftstack-qa`.
+* `cifmw_shiftstack_rhoso_kubeconfig`: "(*string*) The location in the `cifmw_shiftstack_client_pod_name` where to save the underlying openshift kubeconfig. Defaults to `{{ cifmw_shiftstack_shiftstackclient_installation_dir }}/rhoso_kubeconfig`
 * `cifmw_shiftstack_run_playbook`: (*string*) The playbook to be run from the `cifmw_shiftstack_qa_repo` repository. Defaults to `ocp_testing.yaml`.
 * `cifmw_shiftstack_sc`: (*string*) The storage class to be used for PVC for the shiftstackclient pod. Defaults to `local-storage`.
 * `cifmw_shiftstack_shiftstackclient_artifacts_dir`: (*string*) The artifacts directory path for the shiftstackclient pod. Defaults to `/home/cloud-admin/artifacts`.
