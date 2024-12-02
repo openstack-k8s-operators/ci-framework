@@ -5,7 +5,8 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ## Parameters
 
 * `cifmw_test_operator_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/test_operator` which defaults to `~/ci-framework-data/tests/test_operator`
-* `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
+* `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources related to the test-operator controller pod are created. Default value: `openstack-operators`
+* `cifmw_test_operator_test_namespace`: (String) Namespace inside which all the test related resources (e.g., test pods) are created. Default value: `openstack`
 * `cifmw_test_operator_index`: (String) Full name of container image with index that contains the test-operator. Default value: `quay.io/openstack-k8s-operators/test-operator-index:latest`
 * `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
@@ -54,7 +55,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   kind: Tempest
   metadata:
     name: "{{ cifmw_test_operator_tempest_name }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
+    namespace: "{{ cifmw_test_operator_test_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_tempest_image }}:{{ cifmw_test_operator_tempest_image_tag }}"
     storageClass: "{{ cifmw_test_operator_storage_class }}"
@@ -99,7 +100,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   kind: Tobiko
   metadata:
     name: "{{ cifmw_test_operator_tobiko_name }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
+    namespace: "{{ cifmw_test_operator_test_namespace }}"
   spec:
     kubeconfigSecretName: "{{ cifmw_test_operator_tobiko_kubeconfig_secret }}"
     storageClass: "{{ cifmw_test_operator_storage_class }}"
@@ -145,7 +146,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   kind: AnsibleTest
   metadata:
     name: "{{ cifmw_test_operator_ansibletest_name }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
+    namespace: "{{ cifmw_test_operator_test_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_ansibletest_image }}:{{ cifmw_test_operator_ansibletest_image_tag }}"
     extraConfigmapsMounts: "{{ cifmw_test_operator_ansibletest_extra_configmaps_mounts }}"
@@ -190,7 +191,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   kind: HorizonTest
   metadata:
     name: "{{ cifmw_test_operator_horizontest_name }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
+    namespace: "{{ cifmw_test_operator_test_namespace }}"
   spec:
     containerImage: "{{ cifmw_test_operator_horizontest_image }}:{{ cifmw_test_operator_horizontest_image_tag }}"
     adminUsername: "{{ cifmw_test_operator_horizontest_admin_username }}"
