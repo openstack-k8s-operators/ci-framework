@@ -25,12 +25,12 @@ Role for triggering Openshift on Openstack QA automation (installation and tests
 The role is imported in the test playbook, i.e. when:
 ```
 cifmw_run_tests: true
-cifmw_run_tempest: false
+cifmw_test_operator_stages: []
 cifmw_run_test_role: shiftstack
 cifmw_run_test_shiftstack_testconfig:
   - 4.17_ovnkubernetes_ipi.yaml
   - 4.17_ovnkubernetes_upi.yaml
 cifmw_shiftstack_qa_gerrithub_change: refs/changes/29/1188429/50 #optional
 
-$ ansible-playbook deploy-edpm.yml -e 'cifmw_run_tests=true cifmw_run_tempest=false cifmw_run_test_role=shiftstack cifmw_openshift_kubeconfig={{ ansible_user_dir }}/.kube/config cifmw_shiftstack_qa_gerrithub_change=refs/changes/29/1188429/50' -e 'cifmw_run_test_shiftstack_testconfig=["4.17_ovnkubernetes_ipi.yaml","4.17_ovnkubernetes_upi.yaml"]'
+$ ansible-playbook deploy-edpm.yml --extra-vars "cifmw_run_tests=true cifmw_run_test_role=shiftstack cifmw_test_operator_stages=[] cifmw_openshift_kubeconfig={{ ansible_user_dir }}/.kube/config cifmw_run_test_shiftstack_testconfig=4.15_ovnkubernetes_ipi_va1.yaml cifmw_shiftstack_qa_gerrithub_change=refs/changes/29/1188429/50"
 ```
