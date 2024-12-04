@@ -1,0 +1,36 @@
+---
+- name: Get validation start time
+  ansible.builtin.set_fact:
+    individual_validation_start_time: "{{ now(fmt='%s.%f') }}"
+
+- name: Run a validation
+  ansible.builtin.include_tasks: "{{ item }}"
+
+- name: Get validation end time
+  ansible.builtin.set_fact:
+    individual_validation_end_time: "{{ now(fmt='%s.%f') }}"
+
+- name: Calculate validation total run time
+  ansible.builtin.set_fact:
+    individual_validator_run_time: "{{(individual_validation_end_time |float - individual_validation_start_time |float) |round(3)}}"
+
+- name: Add testcase name and time to generate xml script
+  ansible.builtin.shell: |
+    printf "case = TestCase()\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+    printf "case.name = \"{{item | basename}}\"\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+    printf "case.classname = \"validations.{{item | dirname}}\"\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+    printf "case.time = {{ individual_validator_run_time }}\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+
+- name: Add failure reason to generate xml script
+  ansible.builtin.shell: |
+    printf "case.result = [Error('{{validator_status}}')]\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+  when: '"failed" in validator_status'
+
+- name: Increment failure count
+  ansible.builtin.set_fact:
+    validations_failed: "{{ validations_failed | int + 1 }}"
+  when: '"failed" in validator_status'
+
+- name: Add testcase to generate xml script
+  ansible.builtin.shell: |
+    printf "suite.add_testcase(case)\n\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
