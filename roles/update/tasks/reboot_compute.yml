@@ -1,0 +1,26 @@
+- name: Define command for OpenStack client interactions
+  ansible.builtin.set_fact:
+    openstack_cmd: "oc rsh -n openstack openstackclient openstack"
+    bash_cmd: "oc rsh -n openstack openstackclient bash -c"
+
+- name: Register storage backend type
+  shell: >-
+    {{ openstack_cmd }} volume service list -f json |
+      jq -r -c '.[] | select(.Binary | contains("cinder-volume")) | .Host'
+  register: storage_backend
+
+- name: Get list of OpenStack hypervisors
+  ansible.builtin.shell: |
+    {{ openstack_cmd }} hypervisor list -f json
+  register: hypervisor_list
+  changed_when: false
+
+- name: Parse the hypervisor list to extract hostnames
+  ansible.builtin.set_fact:
+    hypervisor_hostnames: "{{ hypervisor_list.stdout | from_json | map(attribute='Hypervisor Hostname') | list }}"
+
+- name: Iterate over each hypervisor
+  ansible.builtin.include_tasks: reboot_hypervisor.yml
+  loop: "{{ hypervisor_hostnames }}"
+  loop_control:
+    loop_var: hypervisor
