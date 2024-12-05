@@ -1,0 +1,52 @@
+#!/bin/bash
+# Log the instance hypervisor. Useful when tracking compute reboot.
+set -e
+set -o pipefail
+
+export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
+export PATH="{{ cifmw_path }}"
+
+log_file="{{ cifmw_update_artifacts_basedir }}/monitor_vm_placement.log"
+pid_file="{{ cifmw_update_artifacts_basedir }}/monitor_vm_placement.pid"
+
+# Write the script's PID to the file
+echo $$ > "$pid_file"
+
+source_file="{{ cifmw_update_artifacts_basedir }}/workload_suffix"
+
+. "$source_file"
+
+instance_name="instance_${SUFFIX}"
+previous_hypervisor=""
+
+# Trap signals and call cleanup function
+trap cleanup SIGINT SIGTERM
+
+# Function to handle script termination
+cleanup() {
+    TERMINATE=true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Termination signal received, \
+waiting for monitor_vm_placement to complete..." | \
+        tee -a "$log_file"
+}
+
+while true; do
+    # Handle signal
+    if [ "$TERMINATE" = true ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Script terminated" | tee -a "$log_file"
+        rm -f "$pid_file"
+        exit 0
+    fi
+    # If the vm has a new hypervisor, log it.
+    current_hypervisor=$(
+        oc rsh -n {{ cifmw_update_namespace }} openstackclient \
+           openstack server show "${instance_name}" -f json | \
+            jq -r -c '.["OS-EXT-SRV-ATTR:host"]'
+    )
+    if [[ "$current_hypervisor" != "$previous_hypervisor" ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $instance_name $current_hypervisor" \
+             >> "$log_file"
+        previous_hypervisor="$current_hypervisor"
+    fi
+    sleep 1
+done
