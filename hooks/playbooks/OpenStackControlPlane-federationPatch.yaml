@@ -1,0 +1,49 @@
+---
+- name: Create kustomization to update Keystone to use Federation
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Create file to customize keystone for Federation resources deployed in the control plane
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/keystone_federation.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          - namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/tls/caBundleSecretName
+                value: keycloakca
+              - op: add
+                path: /spec/keystone/template/oidcFederation
+                value:
+                  keystoneFederationIdentityProviderName: "{{ cifmw_keystone_OIDC_provider_name }}"
+                  oidcCacheType: "{{ cifmw_keystone_OIDC_CacheType }}"
+                  oidcClaimDelimiter: "{{ cifmw_keystone_OIDC_ClaimDelimiter }}"
+                  oidcClaimPrefix: "{{ cifmw_keystone_OIDC_ClaimPrefix }}"
+                  oidcClientID: "{{ cifmw_keystone_OIDC_ClientID }}"
+                  oidcIntrospectionEndpoint: "{{ cifmw_keystone_OIDC_IntrospectionEndpoint }}"
+                  oidcMemCacheServers: "{{ cifmw_keystone_OIDC_MemCacheServers }}"
+                  oidcPassClaimsAs: "{{ cifmw_keystone_OIDC_PassClaimsAs }}"
+                  oidcPassUserInfoAs: "{{ cifmw_keystone_OIDC_PassUserInfoAs }}"
+                  oidcProviderMetadataURL: "{{ cifmw_keystone_OIDC_ProviderMetadataURL }}"
+                  oidcResponseType: "{{ cifmw_keystone_OIDC_ResponseType }}"
+                  oidcScope: "{{ cifmw_keystone_OIDC_Scope }}"
+                  remoteIDAttribute: "{{ cifmw_keystone_OIDC_remoteIDAttribute }}"
+
+    - name: Add Keycloak CA secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: keycloakca
+            namespace: "openstack"
+          data:
+            KeyCloakCA: "{{ keycloakCaCert }}"
