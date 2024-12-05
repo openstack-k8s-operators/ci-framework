@@ -59,10 +59,10 @@ class FilterModule:
                 "cifmw_gen_kustomize_values_b64_combine requires the optional name "
                 f"to be a string, got {type(name)}"
             )
-        if base_extra_patches and not isinstance(name, list):
+        if base_extra_patches and not isinstance(base_extra_patches, list):
             raise AnsibleFilterTypeError(
                 "cifmw_gen_kustomize_values_b64_combine requires the optional base_extra_patches "
-                f"to be a list, got {type(name)}"
+                f"to be a list, got {type(base_extra_patches)}"
             )
         raw_payloads = [base64.b64decode(payload) for payload in data]
         decoded_payloads = list(
