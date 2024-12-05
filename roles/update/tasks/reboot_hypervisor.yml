@@ -1,0 +1,113 @@
+---
+- name: Extract short hostname from FQDN
+  ansible.builtin.set_fact:
+    cifmw_update_hypervisor_short_name: "{{ hypervisor.split('.')[0] }}"
+
+- name: Display current stage
+  ansible.builtin.debug:
+    msg: "Rebooting {{ cifmw_update_hypervisor_short_name }}"
+
+- name: Define command for nova interaction
+  ansible.builtin.set_fact:
+    cifmw_update_bash_cmd: >-
+      oc rsh -n {{ cifmw_update_namespace }} openstackclient bash -c
+
+- name: Check active VMs on hypervisor
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} server list --all --host {{ hypervisor }} -f json
+    | jq -r -c '.[] | select(.Status | contains("ACTIVE") or contains("PAUSED")) | .ID'
+  register: active_vms
+  changed_when: false
+
+- name: Evacuate VMs if they are running
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    {{ cifmw_update_bash_cmd }} ". cloudrc &&
+    nova host-evacuate-live
+    {% if 'ceph' not in storage_backend.stdout %}
+    --block-migrate
+    {% endif %}
+    {{ hypervisor }}"
+  when:
+    - active_vms.stdout != ''
+    - hypervisor_hostnames | length > 1
+  changed_when: true
+
+- name: Wait for compute node to get quiesced
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} server list --all --host {{ hypervisor }} -f json
+    | jq -r -c '[.[] | select(.Status |
+    contains("ACTIVE") or contains("PAUSED") or contains("MIGRATING"))]
+    | length'
+  register: compute_node_instances
+  until: compute_node_instances.stdout.find("0") > -1
+  retries: 30
+  delay: 5
+  when:
+    - active_vms.stdout != ''
+    - hypervisor_hostnames | length > 1
+
+- name: Reboot the hypervisors using CR
+  ansible.builtin.include_tasks: reboot_hypervisor_using_cr.yml
+
+- name: Perform sanity checks post-reboot
+  ansible.builtin.include_tasks: reboot_hypervisor_sanity_checks.yml
+  vars:
+    current_hypervisor: "{{ hypervisor }}"
+
+- name: Display current stage
+  ansible.builtin.debug:
+    msg: "Migrate back {{ item }} to {{ cifmw_update_hypervisor_short_name }}."
+  with_items: "{{ active_vms.stdout_lines }}"
+
+- name: Migrate back VMs post-reboot
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_bash_cmd }} ". cloudrc &&
+    nova live-migration
+    {% if 'ceph' not in storage_backend.stdout %}
+    --block-migrate
+    {% endif %}
+    {{ item }} {{ hypervisor }}";
+    {{ cifmw_update_openstack_cmd }} server show {{ item }} -f json |
+    jq -r -c '. | .["OS-EXT-SRV-ATTR:host"]'
+  register: instance_migration_result
+  until: instance_migration_result.stdout.find(hypervisor) > -1
+  retries: 30
+  delay: 5
+  with_items: "{{ active_vms.stdout_lines }}"
+  when:
+    - active_vms.stdout != ''
+    - hypervisor_hostnames | length > 1
+
+- name: Start VMs post-reboot when only one hypervisor is present
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} server start {{ item }};
+    sleep 5;
+    {{ cifmw_update_openstack_cmd }} server show {{ item }} -f json
+    | jq -r .status
+  register: instance_migration_result
+  until: instance_migration_result.stdout == "ACTIVE"
+  retries: 30
+  delay: 1                      # We already wait 5s in the shell.
+  with_items: "{{ active_vms.stdout_lines }}"
+  when:
+    - active_vms.stdout != ''
+    - hypervisor_hostnames | length == 1
