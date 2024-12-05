@@ -1,0 +1,46 @@
+#!/bin/bash
+
+set -e
+
+# List of servers can be input as command line arguments or hardcoded here.
+servers=(
+{% for server in hypervisor_hostnames %}
+{{ server.split('.')[0] }}
+{% endfor %}
+)
+# or, for a hardcoded list: servers=("server1" "server2" ...)
+
+# Log file to store the status changes
+log_file="{{ cifmw_update_artifacts_basedir }}/reboot_server_status.log"
+
+# Function to check server status via SSH
+# TODO: ping always replies even if server is down.
+check_servers() {
+    for server in "${servers[@]}"; do
+        if ssh -i {{ cifmw_update_ansible_ssh_private_key_file }} -o BatchMode=yes -o ConnectTimeout=5 "$server" "exit" &> /dev/null; then
+            # Server is up
+            if [ "${server_status[$server]}" == "down" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - $server is UP" | tee -a "$log_file"
+                server_status[$server]="up"
+            fi
+        else
+            # Server is down
+            if [ "${server_status[$server]}" != "down" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - $server is DOWN" | tee -a "$log_file"
+                server_status[$server]="down"
+            fi
+        fi
+    done
+}
+
+# Initialize server status array
+declare -A server_status
+for server in "${servers[@]}"; do
+    server_status[$server]="unknown"
+done
+
+# Main loop to continuously check server status
+while true; do
+    check_servers
+    sleep 1  # Wait for 60 seconds before re-checking
+done
