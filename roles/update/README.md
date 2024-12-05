@@ -16,5 +16,7 @@ Role to run update
 * `cifmw_update_ctl_plane_max_fail`: (Integer) For continuous control plane testing, maximum number of failures allowed. Default to 3.
 * `cifmw_update_ctl_plane_max_tries`: (Integer) For continuous control plane testing, number of retries allowed to stop and destroy the last vm created. Each retry is 5 seconds apart. Default to 84, so 7 minutes.
 * `cifmw_update_openstackclient_pod_timeout`: (Integer) Maximum number of seconds to wait for the openstackclient Pod to be available during control plane testing, as it is being restarted during update.  Default to `10` seconds.
-
+* `cifmw_update_reboot_test`: (Boolean) Activate the reboot test after update. Default to `False`.
+* `cifmw_update_ansible_ssh_private_key_file`: (String) Define the path to the private key file used for the compute nodes.
+* `cifmw_update_wait_retries_reboot`: (Integer) Number of retries to wait for a compute node reboot. One retry is done every five seconds. Default to 60, so five minutes.
 ## Examples

@@ -1,0 +1,71 @@
+- name: Register storage backend type
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} volume service list -f json |
+      jq -r -c '.[] | select(.Binary | contains("cinder-volume")) | .Host'
+  register: storage_backend
+  changed_when: false
+
+- name: Get the list of OpenStack hypervisors
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: |
+    {{ cifmw_update_openstack_cmd }} hypervisor list -f json
+  register: hypervisor_list
+  changed_when: false
+
+- name: Parse the hypervisor list to extract hostnames
+  ansible.builtin.set_fact:
+    hypervisor_hostnames: "{{ hypervisor_list.stdout | from_json | map(attribute='Hypervisor Hostname') | list }}"
+
+- name: Create a reboot monitor servers script
+  ansible.builtin.template:
+    src: "monitor_servers.sh.j2"
+    dest: "{{ cifmw_update_artifacts_basedir }}/monitor_servers.sh"
+    mode: "0775"
+
+- name: Start the monitor servers script
+  ansible.builtin.shell: |
+    nohup {{ cifmw_update_artifacts_basedir }}/monitor_servers.sh &> /dev/null &
+    echo $!
+  register: monitor_servers_job
+
+- name: Create a monitor placement monitor script
+  ansible.builtin.template:
+    src: "monitor_vm_placement.sh.j2"
+    dest: "{{ cifmw_update_artifacts_basedir }}/monitor_vm_placement.sh"
+    mode: "0775"
+
+- name: Start the monitor placement script
+  ansible.builtin.shell: |
+    nohup {{ cifmw_update_artifacts_basedir }}/monitor_vm_placement.sh &> /dev/null &
+    echo $!
+  register: monitor_placement_job
+
+- name: Iterate over each hypervisor for the reboot sequence
+  ansible.builtin.include_tasks: reboot_hypervisor.yml
+  loop: "{{ hypervisor_hostnames }}"
+  loop_control:
+    loop_var: hypervisor
+
+- name: Stop the monitor servers script if running
+  ansible.builtin.shell: |
+    if kill -0 {{ monitor_servers_job.stdout }} &>/dev/null; then
+      kill {{ monitor_servers_job.stdout }}
+    fi
+  register: kill_result
+  failed_when: kill_result.rc not in [0, 1] # We can still have a race
+                                            # between kill -0 and
+                                            # kill, even if unlikely.
+
+- name: Stop the monitor placement script if running
+  ansible.builtin.shell: |
+    if kill -0 {{ monitor_placement_job.stdout }} &>/dev/null; then
+      kill {{ monitor_placement_job.stdout }}
+    fi
+  register: kill_result
+  failed_when: kill_result.rc not in [0, 1]

@@ -1,0 +1,62 @@
+---
+- name: Fetch NodeSets for the Reboot OpenStackDataPlaneDeployment
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    oc -n {{ cifmw_update_namespace }}
+    get openstackdataplanenodeset -o name
+    | awk -F'/' '{print $2}'
+  register: cifmw_update_node_sets
+  changed_when: false
+
+- name: Construct the Reboot CR name
+  ansible.builtin.set_fact:
+    cifmw_reboot_dep_name: >-
+      {{
+      'reboot-' ~ cifmw_update_hypervisor_short_name ~ '-' ~
+      lookup('pipe', 'date +%Y%m%d%H%S')
+      }}
+
+- name: Create the OpenStackDataPlaneDeployment CR used for reboot
+  ansible.builtin.copy:
+    dest: "{{ cifmw_update_artifacts_basedir }}/{{ cifmw_reboot_dep_name }}.yaml"
+    content: "{{ _content | to_nice_yaml }}"
+  vars:
+    _content:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: "{{ cifmw_reboot_dep_name }}"
+        namespace: "{{ cifmw_update_namespace }}"
+      spec:
+        nodeSets: "{{ cifmw_update_node_sets.stdout
+        | split('\n')
+        | map('trim')
+        | reject('equalto', '')
+        | list
+        }}"
+        servicesOverride:
+          - reboot-os
+        ansibleExtraVars:
+          edpm_reboot_strategy: force
+        ansibleLimit: "{{ cifmw_update_hypervisor_short_name }}"
+
+- name: Create the OpenStackDataPlaneDeployment CR to trigger a reboot
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.command: >-
+    oc -n {{ cifmw_update_namespace }}
+    create -f {{ cifmw_update_artifacts_basedir }}/{{ cifmw_reboot_dep_name }}.yaml
+
+- name: Wait for the reboot to finish
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.command: >-
+    oc -n {{ cifmw_update_namespace }}
+    wait --for=condition=Ready
+    openstackdataplanedeployment/{{ cifmw_reboot_dep_name }}
+    --timeout={{ (cifmw_update_wait_retries_reboot | int * 5) }}s
