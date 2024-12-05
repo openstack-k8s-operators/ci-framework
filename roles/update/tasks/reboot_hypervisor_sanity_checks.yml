@@ -1,0 +1,50 @@
+---
+- name: Display current stage
+  ansible.builtin.debug:
+    msg: |
+      Testing the status of the services for {{ current_hypervisor }} after reboot.
+
+- name: Verify nova-compute services
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} compute service list
+    --host {{ current_hypervisor }} -f json
+    | jq -r -c '.[]
+    | select(.Binary | contains("nova-compute")) | .State'
+  register: nova_compute_status
+  until: nova_compute_status.stdout == 'up'
+  retries: 30
+  delay: 5
+
+- name: Verify ovn-controller services
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} network agent list
+    --host {{ current_hypervisor }} -f json
+    | jq -r -c '.[]
+    | select(.Binary | contains("ovn-controller")) | .Alive'
+  register: ovn_controller_status
+  until: ovn_controller_status.stdout == 'true'
+  retries: 30
+  delay: 5
+
+- name: Verify networking-ovn-metadata-agent
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} network agent list
+    --host {{ current_hypervisor }} -f json
+    | jq -r -c '.[]
+    | select(.Binary | contains("neutron-ovn-metadata-agent")) | .Alive'
+  register: networking_ovn_metadata_status
+  until: networking_ovn_metadata_status.stdout == 'true'
+  retries: 30
+  delay: 5
