@@ -1,0 +1,306 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get compute nodes from the host aggregate
+  register: az_hosts
+  ignore_errors: true
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate show {{ _az_to_scaledown }} -c hosts -f value
+
+- name: Get compute nodes from the scale-downed AZ
+  register: az_compute_hosts
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      sh -c "openstack compute service list -c Host -c Zone -f value | grep {{ _az_to_scaledown }} | awk '{print $1}'"
+
+- name: Convert az_hosts string to list and remove extra text
+  ansible.builtin.set_fact:
+    az_hosts_list: >
+      {{ az_hosts.stdout
+         | default([])
+         | from_yaml
+         | list }}
+  when: not az_hosts.failed
+
+- name: Delete the compute nodes from the aggregate
+  loop: "{{ az_hosts_list }}"
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate remove host {{ _az_to_scaledown }} {{ item }}
+  when: not az_hosts.failed
+
+- name: Delete the host aggregate
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate delete {{ _az_to_scaledown }}
+  when: not az_hosts.failed
+
+- name: Disable the compute service on scale-downed compute nodes
+  loop: "{{ az_compute_hosts.stdout_lines }}"
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack compute service set {{ item }} nova-compute --disable
+
+- name: Find all ceph variable files
+  register: _ceph_vars_files
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "ceph_client_az*.yml"
+    recurse: false
+
+- name: Load all ceph vars from files
+  loop: "{{ _ceph_vars_files.files | map(attribute='path') | list }}"
+  register: _ceph_vars
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+
+- name: Combine ceph variables into a list of dictionaries
+  loop: "{{ _ceph_vars.results }}"
+  ansible.builtin.set_fact:
+    _ceph_vars_list: "{{ _ceph_vars_list | union([item.ansible_facts]) }}"
+
+- name: Define _all_azs list for all Ceph backends
+  loop: "{{ _ceph_vars_list }}"
+  ansible.builtin.set_fact:
+    _all_azs: "{{ _all_azs | default([]) + [ item.cifmw_ceph_client_cluster ] }}"
+
+- name: The map for az0 contains all AZ backends
+  ansible.builtin.set_fact:
+    ci_dcn_site_glance_map: "{{ { 'az0': _all_azs } }}"
+
+- name: The map for AZs other than az0 contains backends for az0 and itself
+  loop: "{{ _all_azs }}"
+  when: item != "az0"
+  ansible.builtin.set_fact:
+    ci_dcn_site_glance_map: "{{ ci_dcn_site_glance_map | combine( { item: ['az0', item ] } ) }}"
+
+- name: List instances which are running on the scale-downed AZ
+  register: osp_instances
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack server list --availability-zone {{ _az_to_scaledown }} --all-projects -f value -c ID
+
+- name: Clean the running instances from the AZ up before deleting the hosts from Cell
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack server delete --force {{ item }}
+  loop: "{{ osp_instances.stdout_lines }}"
+
+- name: Get the Cell UUID
+  register: cell_uuid
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: nova-cell0-conductor-0
+    command: >-
+      sh -c "nova-manage cell_v2 list_hosts | grep {{ az_compute_hosts.stdout_lines[0] }} | awk '{print $4}'"
+
+- name: Remove the compute hosts from the cell
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: nova-cell0-conductor-0
+    command: >-
+      nova-manage cell_v2 delete_host --cell_uuid {{ cell_uuid.stdout }} --host {{ item }}
+  loop: "{{ az_compute_hosts.stdout_lines }}"
+
+- name: Render the scale-downed control plane service-values.yaml
+  ansible.builtin.template:
+    mode: "0644"
+    backup: true
+    src: "templates/service-values.yaml.j2"
+    dest: "{{ ci_dcn_site_arch_path }}/control-plane/scaledown/service-values.yaml"
+
+- name: Kustomize scale-downed OpenStackControlPlane
+  ansible.builtin.set_fact:
+    scaledown_controlplane_cr: >-
+      {{ lookup('kubernetes.core.kustomize',
+      dir=ci_dcn_site_arch_path + '/control-plane/scaledown') }}
+
+- name: Save the post-ceph NodeSet CR
+  ansible.builtin.copy:
+    mode: "0644"
+    dest: "{{ ci_dcn_site_arch_path }}/control-plane-scale-downed_{{ _az_to_scaledown }}.yaml"
+    content: "{{ scaledown_controlplane_cr }}"
+    backup: true
+
+- name: Apply post-ceph NodeSet CR
+  register: result
+  retries: 5
+  delay: 10
+  until: result is not failed
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    apply: true
+    src: "{{ ci_dcn_site_arch_path }}/control-plane-scale-downed_{{ _az_to_scaledown }}.yaml"
+
+- name: Delete rabbitmqcluster  and Galera CR
+  vars:
+    az_to_cell_map:
+      az0: cell1
+      az1: cell2
+      az2: cell3
+  ansible.builtin.shell: |
+    oc delete rabbitmqclusters rabbitmq-{{ az_to_cell_map[_az_to_scaledown] }}
+    oc delete galera openstack-{{ az_to_cell_map[_az_to_scaledown] }}
+
+- name: Delete the cinder-volume service
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: cinder-scheduler-0
+    command: >-
+      cinder-manage service remove cinder-volume cinder-volume-{{ _az_to_scaledown }}-0@ceph
+
+- name: Fetch ceph-conf-files secret
+  register: secret_info
+  kubernetes.core.k8s_info:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    kind: Secret
+    name: ceph-conf-files
+    namespace: openstack
+
+- name: Create temporary directory for ceph conf files
+  ansible.builtin.file:
+    path: "/tmp/ceph_conf_files"
+    state: directory
+
+- name: Save secret data to files
+  ansible.builtin.copy:
+    content: "{{ secret_info.resources[0].data[key] | b64decode | regex_replace('(?m)^\\s*\\n', '') }}"
+    dest: "/tmp/ceph_conf_files/{{ key }}"
+  loop: "{{ secret_info.resources[0].data.keys() }}"
+  loop_control:
+    loop_var: key
+
+- name: Delete the Ceph cluster's secrets of removed cluster and default site cluster
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    kind: Secret
+    name: "{{ item }}"
+    namespace: openstack
+    state: absent
+  loop:
+    - "ceph-conf-files-{{ _az_to_scaledown }}"
+    - "ceph-conf-files"
+
+- name: Find all ceph variable files
+  register: all_ceph_conf_files
+  ansible.builtin.find:
+    paths: "/tmp/ceph_conf_files"
+    patterns: "az*.c*"
+    recurse: false
+
+- name: Set fact for base64-encoded file data of ceph-conf-files Secret
+  vars:
+    file_list: "{{ all_ceph_conf_files.files | map(attribute='path') | reject('search', _az_to_scaledown) | list }}"
+  ansible.builtin.set_fact:
+    ceph_conf_cmdline: >-
+      {% for file in file_list %}
+      --from-file={{ file }}{% if not loop.last %} {% endif %}
+      {% endfor %}
+
+- name: Recreate the secret while omitting deleted ceph cluster
+  ansible.builtin.shell: |
+    oc create secret generic ceph-conf-files {{ ceph_conf_cmdline }}
+
+- name: Stop the ovn_controller service
+  ansible.builtin.service:
+    name: edpm_ovn_controller
+    state: stopped
+  become: true
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups[_group_name] }}"
+
+- name: Stop the ovn metadata agent service
+  ansible.builtin.service:
+    name: edpm_ovn_metadata_agent
+    state: stopped
+  become: true
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups[_group_name] }}"
+
+- name: Stop the nova-compute service
+  ansible.builtin.service:
+    name: edpm_nova_compute
+    state: stopped
+  become: true
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups[_group_name] }}"
+
+- name: Remove the systemd unit files of the ovn and nova-compute containers
+  ansible.builtin.shell: |
+    rm -f /etc/systemd/system/edpm_ovn_controller.service
+    rm -f /etc/systemd/system/edpm_ovn_metadata_agent.service
+    rm -f /etc/systemd/system/edpm_nova_compute.service
+  become: true
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups[_group_name] }}"
+
+- name: Delete the network agents on scale-downed compute nodes
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      sh -c "openstack network agent list --host {{ item }} -c ID -f value | xargs openstack network agent delete"
+  loop: "{{ az_compute_hosts.stdout_lines }}"
+
+- name: Fetch OpenStackDataPlaneNodeSet resource
+  register: osdpns_info
+  kubernetes.core.k8s_info:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ _group_name }}-edpm"
+    namespace: openstack
+
+- name: Delete OpenStackDataPlaneNodeSet
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    api_version: dataplane.openstack.org/v1beta1
+    state: absent
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ _group_name }}-edpm"
+    namespace: openstack
+
+- name: Delete each Secret which contains TLS certificate for the NodeSet nodes
+  ansible.builtin.command:
+    cmd: oc delete Secret {{ item }}
+  loop: "{{ osdpns_info.resources[0].status.secretHashes.keys() | select('search', 'cert') | list }}"

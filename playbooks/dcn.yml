@@ -61,8 +61,27 @@
       when:
         - _subnet_network_range != ''
         - _ceph_bootstrap_node != ''
+        - cifmw_ci_dcn_site_scaledown_az is not defined or cifmw_ci_dcn_site_scaledown_az == ""
       ansible.builtin.include_role:
         name: ci_dcn_site
+
+    - name: The map for az0 contains all AZ backends
+      ansible.builtin.set_fact:
+        az_to_group_map:
+          az0: computes
+          az1: dcn1-computes
+          az2: dcn2-computes
+
+    - name: Scaledown the DCN site
+      vars:
+        _az_to_scaledown: "{{ cifmw_ci_dcn_site_scaledown_az }}"
+        _subnet: "subnet{{ (az_to_group_map | dict2items | map(attribute='key') | list)
+                           | ansible.utils.index_of('eq', cifmw_ci_dcn_site_scaledown_az) + 1 }}"
+        _group_name: "{{ az_to_group_map[cifmw_ci_dcn_site_scaledown_az] }}"
+        _group_hosts: "{{ groups[az_to_group_map[cifmw_ci_dcn_site_scaledown_az]] }}"
+      ansible.builtin.include_role:
+        name: ci_dcn_site
+      when: cifmw_ci_dcn_site_scaledown_az is defined and cifmw_ci_dcn_site_scaledown_az != ""
 
     - name: Find all created CRs
       ansible.builtin.find:

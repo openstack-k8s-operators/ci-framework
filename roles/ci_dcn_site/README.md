@@ -12,6 +12,7 @@ with a collocated Ceph cluster.
 ## Parameters
 
 * `_az`: The name of the availability zone for the AZ, e.g. `az1`
+* `_az_to_scaledown`: The name of the availability zone for the deployed AZ to be scaled down.
 * `_group_name`: The name of the group of nodes to be deployed, e.g. `dcn1-computes`
 * `_subnet`: The name of the subnet the DCN site will use, e.g. `subnet2`
 * `_subnet_network_range`: The range of the subnet the DCN site will use, e.g. `192.168.133.0/24`
