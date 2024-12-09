@@ -26,6 +26,7 @@ data:
       storage_availability_zone = az0
   cinderVolumes:
 {% for _ceph in _ceph_vars_list %}
+{% if _ceph.cifmw_ceph_client_cluster != _az_to_scaledown %}
     {{ _ceph.cifmw_ceph_client_cluster }}:
       customServiceConfig: |
         [DEFAULT]
@@ -41,6 +42,7 @@ data:
         rbd_secret_uuid = {{ _ceph.cifmw_ceph_client_fsid }}
         rbd_cluster_name = {{ _ceph.cifmw_ceph_client_cluster }}
         backend_availability_zone = {{ _ceph.cifmw_ceph_client_cluster }}
+{% endif %}
 {% endfor %}
   galera:
     templates:
@@ -50,7 +52,11 @@ data:
         storageRequest: 5G
 {% for index in range(1, _all_azs | length + 1) %}
       openstack-cell{{ index }}:
+{% if "az" ~ (index - 1) != _az_to_scaledown %}
         replicas: 1
+{% else %}
+        replicas: 0
+{% endif %}
         secret: osp-secret
         storageRequest: 5G
 {% endfor %}
@@ -58,6 +64,7 @@ data:
     keystoneEndpoint: az0
     glanceAPIs:
 {% for _ceph in _ceph_vars_list %}
+{% if _ceph.cifmw_ceph_client_cluster != _az_to_scaledown %}
       {{ _ceph.cifmw_ceph_client_cluster }}:
         customServiceConfig: |
           [DEFAULT]
@@ -66,12 +73,14 @@ data:
           [glance_store]
           default_backend = {{ _ceph.cifmw_ceph_client_cluster }}
 {% for _ceph_az in ci_dcn_site_glance_map[_ceph.cifmw_ceph_client_cluster] %}
+{% if _ceph_az != _az_to_scaledown %}
           [{{ _ceph_az }}]
           rbd_store_ceph_conf = /etc/ceph/{{ _ceph_az }}.conf
           store_description = "{{ _ceph_az }} RBD backend"
           rbd_store_pool = images
           rbd_store_user = openstack
           rbd_thin_provisioning = True
+{% endif %}
 {% endfor %}
         networkAttachments:
           - storage
@@ -91,6 +100,7 @@ data:
 {% else %}
         replicas: 1
         type: edge
+{% endif %}
 {% endif %}
 {% endfor %}
   manila:
@@ -157,7 +167,11 @@ data:
           cellDatabaseAccount: nova-cell{{ index }}
           cellMessageBusInstance: rabbitmq-cell{{ index }}
           conductorServiceTemplate:
+{% if "az" ~ (index - 1) != _az_to_scaledown %}
             replicas: 1
+{% else %}
+            replicas: 0
+{% endif %}
           hasAPIAccess: true
           metadataServiceTemplate:
             enabled: true
@@ -170,7 +184,11 @@ data:
                     metallb.universe.tf/loadBalancerIPs: 172.17.0.8{{ index }}
                 spec:
                   type: LoadBalancer
+{% if "az" ~ (index - 1) != _az_to_scaledown %}
             replicas: 3
+{% else %}
+            replicas: 0
+{% endif %}
 {% endfor %}
   rabbitmq:
     templates:
@@ -194,7 +212,11 @@ data:
                 metallb.universe.tf/loadBalancerIPs: 172.17.0.8{{ 5 + index }}
             spec:
               type: LoadBalancer
+{% if "az" ~ (index - 1) != _az_to_scaledown %}
         replicas: 3
+{% else %}
+        replicas: 0
+{% endif %}
 {% endfor %}
   extraMounts:
     - name: v1
@@ -215,7 +237,7 @@ data:
               mountPath: /etc/ceph
               readOnly: true
 {% for _ceph in _ceph_vars_list %}
-{% if _ceph.cifmw_ceph_client_cluster != 'az0' %}
+{% if _ceph.cifmw_ceph_client_cluster != 'az0' and _ceph.cifmw_ceph_client_cluster != _az_to_scaledown %}
         - propagation:
             - {{ _ceph.cifmw_ceph_client_cluster }}
           extraVolType: Ceph
