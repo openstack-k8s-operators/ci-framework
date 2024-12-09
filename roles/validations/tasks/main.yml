@@ -25,6 +25,20 @@
     - artifacts
     - logs
 
+- name: Initialize variables needed for generating polarion xml file
+  ansible.builtin.set_fact:
+    validations_failed: 0
+
+- name: Create validations directory
+  ansible.builtin.file:
+    path: "{{ cifmw_validations_xml_status_file_dir }}"
+    state: directory
+
+- name: Write first line of xml generation script
+  ansible.builtin.shell: |
+    printf "from junitparser import TestCase, TestSuite, JUnitXml, Skipped, Error\n\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+    printf "suite = TestSuite('validations')\n\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+
 # We can execute all defined validations when cifmw_validation_run_all is defined.
 # Else, we will skip this and run only the explicitly defined validations from
 # cifmw_validations_list
@@ -42,7 +56,7 @@
 
     - name: Run all found validations
       ansible.builtin.include_tasks:
-        file: "{{ item.path }}"
+        file: run_validation.yml
       loop: "{{ found_validations.files }}"
 
 - name: Run selected validations
@@ -56,5 +70,35 @@
       failed_when: not validation_exists.stat.exists
 
     - name: Run validations
-      ansible.builtin.include_tasks: "{{ item }}"
+      ansible.builtin.include_tasks:
+        file: run_validation.yml
       loop: "{{ cifmw_validations_list }}"
+
+- name: Add writing xml to file xml generation script
+  ansible.builtin.shell: |
+    printf "xml = JUnitXml()\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+    printf "xml.add_testsuite(suite)\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+    printf "xml.write('{{ cifmw_validations_xml_status_file_dir }}/validations_results.xml', pretty=True)\n" >> {{ cifmw_validations_xml_status_file_dir }}/generate_xml_script
+
+- name: Create virtualenv for junitparser
+  ansible.builtin.pip:
+    name: pip
+    virtualenv: "{{ cifmw_validations_xml_status_file_dir }}/venv"
+    virtualenv_command: "/usr/bin/python3 -m venv"
+    extra_args: --upgrade
+
+- name: Install junitparser
+  ansible.builtin.pip:
+    name: junitparser
+    virtualenv: "{{ cifmw_validations_xml_status_file_dir }}/venv"
+
+- name: Create xml file with junitparser
+  ansible.builtin.shell: |
+    cmd: >-
+      source "{{ cifmw_validations_xml_status_file_dir }}/venv/bin/activate" &&
+      python "{{ cifmw_validations_xml_status_file_dir }}/generate_xml_script"
+
+- name: Fail job when validations fail
+  ansible.builtin.fail:
+    msg: "One or more validations failed"
+  when: validations_failed | int  > 0

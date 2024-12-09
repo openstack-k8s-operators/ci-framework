@@ -6,86 +6,87 @@
 
 # Since jobs use different names for their OpenStackDataPlaneNodeSet's, we need to dynamically
 # determine the name of the currently deployed one
-- name: Determine name of deployed NodeSet
+- name: Set validator status to passed
+  ansible.builtin.set_fact:
+    validator_status: "passed"
+
+- name: Validation block
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
-    script: >-
-      oc get osdpns -n {{ cifmw_validations_namespace }} --no-headers -o custom-columns=":metadata.name"
-  register: deployed_nodeset_name
+  block:
+    - name: Determine name of deployed NodeSet
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+        script: >-
+          oc get osdpns -n {{ cifmw_validations_namespace }} --no-headers -o custom-columns=":metadata.name"
+      register: deployed_nodeset_name
 
 # Simulate hotfixed image by update edpm_nova_compute_image to a different, non-default value
-- name: Update edpm_nova_compute_image value
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
-    script: >-
-      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim }}" --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_nova_compute_image": "{{ cifmw_validations_hotfixed_edpm_nova_compute_image }}"}}}}}'
+    - name: Update edpm_nova_compute_image value
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+        script: >-
+          oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim }}" --type=merge -p '{"spec": {"nodeTemplate": {"ansible": {"ansibleVars": {"edpm_nova_compute_image": "{{ cifmw_validations_hotfixed_edpm_nova_compute_image }}"}}}}}'
 
 # loop check the status of the openstackdataplanenodeset until it is either SetupReady,
 # or reaches a defined timeout value.
-- name: Wait for nodeset to be SetupReady again
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
-    script: >-
-      oc wait osdpns "{{ deployed_nodeset_name.stdout | trim }}"
-      --namespace={{ cifmw_validations_namespace }}
-      --for=condition=SetupReady
-      --timeout={{ cifmw_validations_timeout }}m
+    - name: Wait for nodeset to be SetupReady again
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+        script: >-
+          oc wait osdpns "{{ deployed_nodeset_name.stdout | trim }}"
+          --namespace={{ cifmw_validations_namespace }}
+          --for=condition=SetupReady
+          --timeout={{ cifmw_validations_timeout }}m
 
 # Create a new OpenStackDataPlaneDeployment to apply the hotfixed image
-- name: Create openstackdataplanedeployment to rollout changes
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
-    script: |
-      oc apply -f - <<EOF
-      apiVersion: dataplane.openstack.org/v1beta1
-      kind: OpenStackDataPlaneDeployment
-      metadata:
-        name: edpm-hotfix
-        namespace: {{ cifmw_validations_namespace }}
-      spec:
-        nodeSets:
-          - "{{ deployed_nodeset_name.stdout | trim }}"
-        servicesOverride:
-          - "{{ cifmw_validations_custom_nova_service }}"
-      EOF
+    - name: Create openstackdataplanedeployment to rollout changes
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+        script: |
+          oc apply -f - <<EOF
+          apiVersion: dataplane.openstack.org/v1beta1
+          kind: OpenStackDataPlaneDeployment
+          metadata:
+            name: edpm-hotfix
+            namespace: {{ cifmw_validations_namespace }}
+          spec:
+            nodeSets:
+              - "{{ deployed_nodeset_name.stdout | trim }}"
+            servicesOverride:
+              - "{{ cifmw_validations_custom_nova_service }}"
+          EOF
 
 # loop check the status of the openstackdataplanedeployment until it is either completed,
 # or reaches a defined timeout value.
-- name: Wait for deployment to be complete
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  cifmw.general.ci_script:
-    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
-    script: >-
-      oc wait openstackdataplanedeployment edpm-hotfix
-      --namespace={{ cifmw_validations_namespace }}
-      --for=condition=ready
-      --timeout={{ cifmw_validations_timeout }}m
+    - name: Wait for deployment to be complete
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+        script: >-
+          oc wait openstackdataplanedeployment edpm-hotfix
+          --namespace={{ cifmw_validations_namespace }}
+          --for=condition=ready
+          --timeout={{ cifmw_validations_timeout }}m
 
 # Collect running image to assert the hotfix was applied
-- name: Collect the image currently used by nova_compute on the edpm node
-  ansible.builtin.shell:
-    cmd: >-
-      set -o pipefail && sudo podman inspect nova_compute | jq '.[].ImageName' | tr -d '"'
-  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
-  register: post_change_nova_compute_image
+    - name: Collect the image currently used by nova_compute on the edpm node
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail && sudo podman inspect nova_compute | jq '.[].ImageName' | tr -d '"'
+      delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+      register: post_change_nova_compute_image
 
 # these assertions will determine whether this job has ultimately been successful or not.
 # here, we should list all of the assertions required to satisfy our feature requirements.
-- name: Assert state change reflects our requirements
-  ansible.builtin.assert:
-    that:
-      - cifmw_validations_hotfixed_edpm_nova_compute_image == post_change_nova_compute_image.stdout
+    - name: Assert state change reflects our requirements
+      ansible.builtin.assert:
+        that:
+          - cifmw_validations_hotfixed_edpm_nova_compute_image == post_change_nova_compute_image.stdout
+  rescue:
+    - name: Set validator status to failed
+      ansible.builtin.set_fact:
+        validator_status: "Validator failed task: {{ ansible_failed_task.name }}, Validator failed reason: {{ ansible_failed_result.msg}}"
