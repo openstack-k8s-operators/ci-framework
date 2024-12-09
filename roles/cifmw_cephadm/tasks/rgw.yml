@@ -19,6 +19,30 @@
     _hosts: "{{ _hosts|default([]) + [ item ] }}"
   loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
 
+- name: Ensure cifmw_cephadm_rgw_vip is set
+  when:
+    - cifmw_cephadm_rgw_vip is undefined or cifmw_cephadm_rgw_vip | length == 0
+  block:
+    - name: Set VIP var as empty string
+      ansible.builtin.set_fact:
+        cifmw_cephadm_vip: ""
+
+    - name: Get already assigned RGW IP addresses
+      ansible.builtin.set_fact:
+        ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
+      loop: "{{ _target_hosts }}"
+
+    - name: Compute RGW VIP
+      ansible.builtin.include_tasks:
+        file: check_vip.yml
+      loop: "{{ range(1, (ips | length) + 1) | list }}"
+      vars:
+        cifmw_cephadm_vip_network: "{{ cifmw_cephadm_rgw_network }}"
+
+    - name: Set RGW VIP
+      ansible.builtin.set_fact:
+        cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}"
+
 - name: Create certificate and DNS for RGW if certificate paths are set
   when:
     - cifmw_cephadm_certificate | length > 0
