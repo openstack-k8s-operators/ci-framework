@@ -24,12 +24,15 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_delete_logs_pod`: (Boolean) Delete tempest log pod created by the role at the end of the testing. Default value: `false`.
 * `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `true`
 * `cifmw_test_operator_selinux_level`: (String) Specify SELinux level that should be used for pods spawned with the test-operator. Note, that `cifmw_test_operator_privileged: true` must be set when this parameter has non-empty value. Default value: `s0:c478,c978`
+* `cifmw_test_operator_default_registry`: (String) Default registry for all the supported test frameworks (tempest, tobiko, horizontest and ansibletest) to pull their container images. It can be overridden at test framework level.  Defaults to `quay.io`
+* `cifmw_test_operator_default_namespace`: (String) Default registry's namespace for all the supported test frameworks (tempest, tobiko, horizontest and ansibletest) to pull their container images. It can be overridden at test framework level.  Defaults to `podified-antelope-centos9`
+* `cifmw_test_operator_default_image_tag`: (String) Default tag for all the supported test frameworks (tempest, tobiko, horizontest and ansibletest) to pull their container images. It can be overridden at test framework level.  Defaults to `current-podified`
 * `cifmw_test_operator_stages`: (List) List of dictionaries defining the stages that should be used in the test operator role. List items options are:
   * `name`: (String) The name of the stage. The name must be unique.
   * `type`: (String) The framework name you would like to call, currently the options are: tempest, ansibletest, horizontest, tobiko.
   * `test_vars_file`: (String) Path to the file used for testing, this file should contain the testing params for this stage. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
   * `test_vars`: (String) Testing parameters for this specific stage if a `test_vars` is used the specified parameters would override the ones in the `test_vars_file`. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
-  > Important note! Only variables with the following structure can be used to override inside a stage: `cifmw_test_operator_[test-operator CR name]_[parameter name]` the only exception to that is `cifmw_test_operator_concurrency` which can not be override inside a stage.
+  > Important note! Only variables with the following structure can be used to override inside a stage: `cifmw_test_operator_[test-operator CR name]_[parameter name]`. For example, these variables cannot be overridden per stage: `cifmw_test_operator_concurrency`, `cifmw_test_operator_default_registry`, `cifmw_test_operator_default_namespace`, `cifmw_test_operator_default_image_tag`.
   * `pre_test_stage_hooks`: (List) List of pre hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
   * `post_test_stage_hooks`: (List) List of post hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
  Default value:
@@ -39,13 +42,14 @@ cifmw_test_operator_stages:
     type: tempest
 ```
 
+
 ## Tempest specific parameters
 * `cifmw_test_operator_tempest_name`: (String) Value used in the `Tempest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tempest-tests`
-* `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `quay.io`
-* `cifmw_test_operator_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default value: `podified-antelope-centos9`
+* `cifmw_test_operator_tempest_registry`: (String) The registry where to pull tempest container. Default value: `{{ cifmw_test_operator_default_registry }}`
+* `cifmw_test_operator_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default value: `{{ cifmw_test_operator_default_namespace }}`
 * `cifmw_test_operator_tempest_container`: (String) Name of the tempest container. Default value: `openstack-tempest`
 * `cifmw_test_operator_tempest_image`: (String) Tempest image to be used. Default value: `{{ cifmw_test_operator_tempest_registry }}/{{ cifmw_test_operator_tempest_namespace }}/{{ cifmw_test_operator_tempest_container }}`
-* `cifmw_test_operator_tempest_image_tag`: (String) Tag for the `cifmw_test_operator_tempest_image`. Default value: `current-podified`
+* `cifmw_test_operator_tempest_image_tag`: (String) Tag for the `cifmw_test_operator_tempest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_tempest_include_list`: (String) List of tests to be executed. Setting this will not use the `list_allowed` plugin. Default value: `''`
 * `cifmw_test_operator_tempest_exclude_list`: (String) List of tests to be skipped. Setting this will not use the `list_skipped` plugin. Default value: `''`
 * `cifmw_test_operator_tempest_expected_failures_list`: (String) List of tests for which failures will be ignored. Default value: `''`
@@ -97,11 +101,11 @@ Default value: {}
 
 ## Tobiko specific parameters
 * `cifmw_test_operator_tobiko_name`: (String) Value used in the `Tobiko.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tobiko-tests`
-* `cifmw_test_operator_tobiko_registry`: (String) The registry where to pull tobiko container. Default value: `quay.io`
-* `cifmw_test_operator_tobiko_namespace`: (String) Registry's namespace where to pull tobiko container. Default value: `podified-antelope-centos9`
+* `cifmw_test_operator_tobiko_registry`: (String) The registry where to pull tobiko container. Default value: `{{ cifmw_test_operator_default_registry }}`
+* `cifmw_test_operator_tobiko_namespace`: (String) Registry's namespace where to pull tobiko container. Default value: `{{ cifmw_test_operator_default_namespace }}`
 * `cifmw_test_operator_tobiko_container`: (String) Name of the tobiko container. Default value: `openstack-tobiko`
 * `cifmw_test_operator_tobiko_image`: (String) Tobiko image to be used. Default value: `{{ cifmw_test_operator_tobiko_registry }}/{{ cifmw_test_operator_tobiko_namespace }}/{{ cifmw_test_operator_tobiko_container }}`
-* `cifmw_test_operator_tobiko_image_tag`: (String) Tag for the `cifmw_test_operator_tobiko_image`. Default value: `current-podified`
+* `cifmw_test_operator_tobiko_image_tag`: (String) Tag for the `cifmw_test_operator_tobiko_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_tobiko_testenv`: (String) Executed tobiko testenv. See tobiko `tox.ini` file for further details. Some allowed values: scenario, sanity, faults, neutron, octavia, py3, etc. Default value: `scenario`
 * `cifmw_test_operator_tobiko_version`: (String) Tobiko version to install. It could refer to a branch (master, osp-16.2), a tag (0.6.x, 0.7.x) or an sha-1. Default value: `master`
 * `cifmw_test_operator_tobiko_pytest_addopts`: (String) `PYTEST_ADDOPTS` env variable with input pytest args. Example: `-m <markers> --maxfail <max-failed-tests> --skipregex <regex>`. Defaults to `null`. In case of `null` value, `PYTEST_ADDOPTS` is not set (tobiko tests are executed without any extra pytest options).
@@ -142,11 +146,11 @@ Default value: {}
 
 ## AnsibleTest specific parameters
 * `cifmw_test_operator_ansibletest_name`: (String) Value used in the `Ansibletest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `ansibletest`
-* `cifmw_test_operator_ansibletest_registry`: (String) The registry where to pull ansibletests container. Default value: `quay.io`
-* `cifmw_test_operator_ansibletest_namespace`: (String) Registry's namespace where to pull ansibletests container. Default value:podified-antelope-centos9
+* `cifmw_test_operator_ansibletest_registry`: (String) The registry where to pull ansibletests container. Default value: `{{ cifmw_test_operator_default_registry }}`
+* `cifmw_test_operator_ansibletest_namespace`: (String) Registry's namespace where to pull ansibletests container. Default value: `{{ cifmw_test_operator_default_namespace }}`
 * `cifmw_test_operator_ansibletest_container`: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
 * `cifmw_test_operator_ansibletest_image`: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_ansibletest_registry }}/{{ cifmw_test_operator_ansibletest_namespace }}/{{ cifmw_test_operator_ansibletest_container }}`
-* `cifmw_test_operator_ansibletest_image_tag`: (String) Ansibletests image to be used. Default value: `current-podified`
+* `cifmw_test_operator_ansibletest_image_tag`: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_ansibletest_compute_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for computes. Default value: `dataplane-ansible-ssh-private-key-secret`
 * `cifmw_test_operator_ansibletest_workload_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for the ansible workload. Default value: `""`
 * `cifmw_test_operator_ansibletest_ansible_git_repo`: (String) Git repo to clone into container. Default value: `""`
@@ -187,11 +191,11 @@ Default value: {}
 
 ## Horizontest specific parameters
 * `cifmw_test_operator_horizontest_name`: (String) Value used in the `Horizontest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `horizontest-tests`
-* `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `quay.io`
-* `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `podified-antelope-centos9`
+* `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `{{ cifmw_test_operator_default_registry }}`
+* `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `{{ cifmw_test_operator_default_namespace }}`
 * `cifmw_test_operator_horizontest_container`: (String) Name of the horizontest container. Default value: `openstack-horizontest`
 * `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: `{{ cifmw_test_operator_horizontest_registry }}/{{ cifmw_test_operator_horizontest_namespace }}/{{ cifmw_test_operator_horizontest_container }}`
-* `cifmw_test_operator_horizontest_image_tag`: (String) Tag for the `cifmw_test_operator_horizontest_image`. Default value: `current-podified`
+* `cifmw_test_operator_horizontest_image_tag`: (String) Tag for the `cifmw_test_operator_horizontest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_horizontest_admin_username`: (String) OpenStack admin credentials. Default value: `admin`
 * `cifmw_test_operator_horizontest_admin_password`: (String) OpenStack admin credentials. Default value: `12345678`
 * `cifmw_test_operator_horizontest_dashboard_url`: (String) The URL of the Horizon dashboard. Default value: `https://horizon-openstack.apps.ocp.openstack.lab/`
