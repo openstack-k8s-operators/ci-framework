@@ -15,7 +15,6 @@
 # under the License.
 
 - name: Create working directories
-  delegate_to: localhost
   tags: always
   ansible.builtin.file:
     path: "{{ item }}"
@@ -32,23 +31,20 @@
 - name: Extract luna software
   tags: image_prep
   block:
-    - name: Fetch the linux minimal client
-      ansible.builtin.fetch:
-        src: "{{ cifmw_hsm_luna_minclient_src }}"
+    - name: Get the linux minimal client
+      ansible.builtin.get_url:
+        url: "{{ cifmw_hsm_luna_minclient_src }}"
         dest: "{{ cifmw_hsm_working_dir }}/"
-        flat: true
 
     - name: Extract the minimal client
-      delegate_to: localhost
       ansible.builtin.unarchive:
         src: "{{ cifmw_hsm_working_dir }}/{{ cifmw_hsm_luna_minclient_src | basename }}"
         dest: "{{ cifmw_hsm_working_dir }}/client/"
 
-    - name: Fetch the binaries
-      ansible.builtin.fetch:
-        src: "{{ cifmw_hsm_luna_binaries_src }}/{{ item}}"
+    - name: Get the binaries
+      ansible.builtin.get_url:
+        url: "{{ cifmw_hsm_luna_binaries_src }}/{{ item}}"
         dest: "{{ cifmw_hsm_working_dir }}/bin/"
-        flat: true
       loop:
         - "vtl"
         - "lunacm"
@@ -56,7 +52,6 @@
         - "ckdemo"
 
 - name: Download build tools
-  delegate_to: localhost
   become: true
   tags: image_prep
   ansible.builtin.dnf:
@@ -65,71 +60,44 @@
       - podman
     state: present
 
-- name: Clone barbican-operator to get buildah script
-  delegate_to: localhost
-  tags: image_prep
-  ansible.builtin.git:
-    repo: "{{ cifmw_hsm_barbican_operator_repo }}"
-    dest: "{{ cifmw_hsm_working_dir}}/barbican_operator"
-    version: "{{ cifmw_hsm_barbican_operator_version }}"
-    force: true
-
-# TODO(alee) Use the buildah script from the barbican-operator once it has merged
-# ansible.builtin.command: "{{ cifmw_hsm_working_dir}}/barbican_operator/hack/image_add_luna_minimal_client.sh"
 - name: Create and store new images
-  delegate_to: localhost
   tags: image_prep
   ansible.builtin.script: "image_add_luna_minimal_client.sh"
   environment:
-    BARBICAN_IMAGE_REGISTRY: "{{ content_provider_registry_ip }}:5001"
-    BARBICAN_IMAGE_NAMESPACE: "{{ cifmw_set_openstack_containers_namespace }}"
-    BARBICAN_IMAGE_TAG: "{{ cifmw_update_extras['cifmw_set_openstack_containers_tag'] }}"
-    BARBICAN_FINAL_IMAGE_TAG: "{{ cifmw_update_extras['cifmw_set_openstack_containers_tag'] }}-luna"
+    BARBICAN_SRC_IMAGE_REGISTRY: "{{ cifmw_hsm_barbican_src_image_registry }}"
+    BARBICAN_SRC_IMAGE_NAMESPACE: "{{ cifmw_hsm_barbican_src_image_namespace }}"
+    BARBICAN_SRC_IMAGE_TAG: "{{ cifmw_hsm_barbican_src_image_tag }}"
+    BARBICAN_DEST_IMAGE_REGISTRY: "{{ cifmw_hsm_barbican_dest_image_registry }}"
+    BARBICAN_DEST_IMAGE_NAMESPACE: "{{ cifmw_hsm_barbican_dest_image_namespace }}"
+    BARBICAN_DEST_IMAGE_TAG: "{{ cifmw_hsm_barbican_dest_image_tag }}"
     LUNA_LINUX_MINIMAL_CLIENT_DIR: "{{ cifmw_hsm_working_dir }}/client/linux-minimal"
     LUNA_CLIENT_BIN: "{{ cifmw_hsm_working_dir }}/bin"
 
 - name: Get certs and keys
-  become: true
   tags: cert_prep
   block:
-    - name: Fetch the server cert
-      ansible.builtin.fetch:
-        src: "{{ cifmw_hsm_luna_server_cert_src }}/{{ cifmw_hsm_server_ip }}Cert.pem"
+    - name: Get the server CA cert
+      ansible.builtin.get_url:
+        url: "{{ cifmw_hsm_luna_server_cert_src }}"
+        dest: "{{ cifmw_hsm_working_dir }}/certs/{{ cifmw_hsm_server_ca_file }}"
+
+    - name: Get client cert
+      ansible.builtin.get_url:
+        url: "{{ cifmw_hsm_luna_client_cert_src }}/{{ cifmw_hsm_client_ip }}.pem"
         dest: "{{ cifmw_hsm_working_dir }}/certs/"
-        flat: true
 
-    - name: Check if client cert exists
-      ansible.builtin.stat:
-        path: "{{ cifmw_hsm_luna_client_cert_src }}/{{ cifmw_hsm_client_ip }}.pem"
-      register: client_cert_stat
-
-    - name: Check if client key exists
-      ansible.builtin.stat:
-        path: "{{ cifmw_hsm_luna_client_cert_src }}/{{ cifmw_hsm_client_ip }}Key.pem"
-      register: client_key_stat
-
-    - name: Generate certs if they do not already exist
-      ansible.builtin.import_tasks: generate_luna_client_certs.yaml
-      when: not client_cert_stat.stat.exists or not client_key_stat.stat.exists
-
-    - name: Fetch the client cert and key
-      ansible.builtin.fetch:
-        src: "{{ cifmw_hsm_luna_client_cert_src }}/{{ item }}"
+    - name: Get client key
+      ansible.builtin.get_url:
+        url: "{{ cifmw_hsm_luna_client_cert_src }}/{{ cifmw_hsm_client_ip }}Key.pem"
         dest: "{{ cifmw_hsm_working_dir }}/certs/"
-        flat: true
-      loop:
-        - "{{ cifmw_hsm_client_ip }}.pem"
-        - "{{ cifmw_hsm_client_ip }}Key.pem"
 
 - name: Write out the HSM cert secret template file
-  delegate_to: localhost
   tags: cert_prep
   ansible.builtin.template:
     src: "luna_cert_secret.yml.j2"
     dest: "{{ cifmw_hsm_working_dir }}/luna_cert_secret.yml"
 
 - name: Create the HSM cert secret
-  delegate_to: localhost
   tags: cert_prep
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
@@ -137,14 +105,12 @@
   ansible.builtin.command: "oc apply -f {{ cifmw_hsm_working_dir }}/luna_cert_secret.yml"
 
 - name: Write out the hsm-login secret
-  delegate_to: localhost
   tags: secret_prep
   ansible.builtin.template:
     src: "login_secret.yml.j2"
     dest: "{{ cifmw_hsm_working_dir }}/login_secret.yml"
 
 - name: Create the hsm-login secret
-  delegate_to: localhost
   tags: secret_prep
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
