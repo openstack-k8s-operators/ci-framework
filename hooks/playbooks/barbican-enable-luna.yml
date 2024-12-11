@@ -1,27 +1,17 @@
 ---
-- name: Add lunaclient to inventory
-  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
-  tasks:
-    - name: Get lunaclient key
-      ansible.builtin.get_url:
-        url: "{{ cifmw_hsm_lunaclient_key }}"
-        dest: "{{ ansible_user_dir }}/.ssh/lunaclient"
-        mode: "0400"
-    - name: Add lunaclient VM to inventory
-      ansible.builtin.add_host:
-        name: "{{ cifmw_hsm_lunaclient_vm }}"
-        ansible_user: "{{ cifmw_hsm_lunaclient_user }}"
-        ansible_ssh_private_key_file: "{{ ansible_user_dir }}/.ssh/lunaclient"
-        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
-
 - name: Create modified barbican image and get secrets
-  hosts: "{{ cifmw_hsm_lunaclient_vm }}"
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   tasks:
     - name: Include hsm_prep role
       ansible.builtin.include_role:
         name: hsm_prep
       vars:
-        cifmw_hsm_client_ip: "{{ hostvars[ cifmw_hsm_client_machine ].ansible_host }}"
+        cifmw_hsm_barbican_src_image_registry: "{{ content_provider_registry_ip }}:5001"
+        cifmw_hsm_barbican_src_image_namespace: "{{ cifmw_set_openstack_containers_namespace }}"
+        cifmw_hsm_barbican_src_image_tag: "{{ cifmw_update_extras['cifmw_set_openstack_containers_tag'] }}"
+        cifmw_hsm_barbican_dest_image_registry: "{{ content_provider_registry_ip }}:5001"
+        cifmw_hsm_barbican_dest_image_namespace: "{{ cifmw_set_openstack_containers_namespace }}"
+        cifmw_hsm_barbican_dest_image_tag: "{{ cifmw_update_extras['cifmw_set_openstack_containers_tag'] }}-luna"
 
 - name: Create kustomization to use update barbican to use luna
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
@@ -30,7 +20,6 @@
       vars:
         certs_secret: "{{ cifmw_hsm_luna_cert_secret | default('barbican-luna-certs', true) }}"
         login_secret: "{{ cifmw_hsm_login_secret | default('hsm-login', true) }}"
-        cifmw_hsm_client_ip: "{{ hostvars[ cifmw_hsm_client_machine ].ansible_host }}"
       ansible.builtin.copy:
         dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/93-barbican-luna.yaml"
         content: |-
