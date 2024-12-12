@@ -23,6 +23,20 @@
     owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
+- name: Create a namespace for installing the test-operator
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ cifmw_test_operator_namespace }}"
+  when: not cifmw_test_operator_dry_run | bool
+
 - name: Ensure OperatorGroup for the test-operator is present
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -38,7 +52,7 @@
         namespace: "{{ cifmw_test_operator_namespace }}"
       spec:
         targetNamespaces:
-          - "{{ cifmw_test_operator_namespace }}"
+          - "{{ cifmw_test_operator_target_namespace }}"
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Ensure CatalogSource for the test-operator is present
@@ -81,17 +95,17 @@
           nodeSelector: "{{ cifmw_test_operator_node_selector | default(omit) }}"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Wait until the test-operator csv is present
+- name: Wait until the test-operator CSV is present in the target namespace
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
     context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
+    namespace: "{{ cifmw_test_operator_target_namespace }}"
     kind: ClusterServiceVersion
     api_version: operators.coreos.com/v1alpha1
   register: csv_list
   delay: 10
-  retries: 20
+  retries: 100
   until: >-
     {{
       csv_list.resources |
@@ -100,7 +114,7 @@
     }}
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Get full name of the test-operator csv
+- name: Get full name of the test-operator CSV in the target namespace
   ansible.builtin.set_fact:
     test_operator_csv_name: >-
       {{
@@ -110,12 +124,12 @@
       }}
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Wait for the test-operator csv to Succeed
+- name: Wait for the test-operator CSV to Succeed in the target namespace
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
     context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
+    namespace: "{{ cifmw_test_operator_target_namespace }}"
     kind: ClusterServiceVersion
     api_version: operators.coreos.com/v1alpha1
     name: "{{ test_operator_csv_name }}"
