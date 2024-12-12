@@ -1,5 +1,9 @@
 # Zuul job
 
+~~~{warning}
+This feature isn't tested nor used by the CI Framework team. This feature will be supported and rewritten in our new version of the tool.
+~~~
+
 ~~~{tip}
 It is strongly advised to run this reproducer against a dedicated hypervisor
 with enough resources. The current configuration will require close to 40G
