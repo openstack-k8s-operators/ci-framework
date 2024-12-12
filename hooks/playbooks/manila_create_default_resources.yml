@@ -8,7 +8,55 @@
     extra_specs:
       snapshot_support: "True"
       create_share_from_snapshot_support: "True"
+    manila_provider_network_name: storage
+    manila_provider_network_vlan: "21"
+    manila_provider_network_start: 172.18.0.150
+    manila_provider_network_end: 172.18.0.200
+    manila_provider_network_range: 172.18.0.0/24
   tasks:
+    - name: Override manila_provider_network_ if cifmw_cephadm_nfs_network is set
+      when:
+        - cifmw_cephadm_nfs_network is defined
+        - cifmw_cephadm_nfs_network == "172.21.0.0/24"
+      ansible.builtin.set_fact:
+        manila_provider_network_name: nfs
+        manila_provider_network_vlan: "24"
+        manila_provider_network_start: 172.21.0.150
+        manila_provider_network_end: 172.21.0.200
+        manila_provider_network_range: 172.21.0.0/24
+
+    - name: Check if Manila provider network was already created
+      when:
+        - manila_provider_network_name | length > 0
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: |
+        oc -n {{ namespace }} exec -it pod/openstackclient \
+          -- openstack network show {{ manila_provider_network_name }}
+      register: _existing_provider_network
+      ignore_errors: true
+
+    - name: Create Manila provider network with Neutron for instance to access Manila
+      when:
+        - _existing_provider_network.rc | int > 0
+        - manila_provider_network_name | length > 0
+        - (manila_provider_network_vlan | string) | length > 0
+        - manila_provider_network_start | length > 0
+        - manila_provider_network_end | length > 0
+        - manila_provider_network_range | length > 0
+      register: _manila_provider_network_creation
+      failed_when: >-
+        ( _manila_provider_network_creation.rc | int ) != 0
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      loop:
+        - "openstack network create {{ manila_provider_network_name }} --share --provider-network-type vlan --provider-physical-network datacentre --provider-segment {{ manila_provider_network_vlan }}"
+        - "openstack subnet create --allocation-pool start={{ manila_provider_network_start }},end={{ manila_provider_network_end }} --dhcp --network {{ manila_provider_network_name }} --subnet-range {{ manila_provider_network_range }} --gateway none {{ manila_provider_network_name }}-subnet"
+      ansible.builtin.command: |
+        oc -n {{ namespace }} exec -it pod/openstackclient -- {{ item }}
+
     - name: Create share type default for manila tempest plugin tests
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
