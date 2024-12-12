@@ -1,0 +1,37 @@
+---
+- name: Perform cleanup tasks
+  tags: cleanup
+  when:
+    - cifmw_hsm_cleanup | bool
+    - cifmw_hsm_hsmtype == "luna"
+  block:
+    - name: Log debug tasks
+      ansible.builtin.debug:
+        msg: "Running cleanup tasks here"
+
+    - name: Set fact for client_name
+      ansible.builtin.set_fact:
+        client_name: "{{ cifmw_hsm_client_ip }}"
+
+    - name: Check for existing HSM client
+      ansible.builtin.shell: >
+        sshpass -p '{{ cifmw_hsm_admin_password }}'
+        ssh -o StrictHostKeyChecking=false -c aes256-cbc
+        {{ cifmw_hsm_admin_user }}@{{ cifmw_hsm_server_ip }}
+        -C client list
+      register: client_list
+
+    - name: Delete existing client when rotating certs
+      ansible.builtin.shell: >
+        sshpass -p '{{ cifmw_hsm_admin_password }}'
+        ssh -c aes256-cbc {{ cifmw_hsm_admin_user }}@{{ cifmw_hsm_server_ip }}
+        -C "client delete -f -c {{ client_name }}"
+      when:
+        - client_name in client_list.stdout
+
+    - name: Remove the working directory
+      delegate_to: localhost
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_hsm_working_dir }}"
+        state: absent
