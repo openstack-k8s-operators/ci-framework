@@ -1,0 +1,123 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: OSP 17 - Ironic post overcloud
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Gather ansible_user_dir from undercloud
+      delegate_to: osp-undercloud-0
+      ansible.builtin.setup:
+        gather_subset:
+          - user_dir
+
+    - name: Glance images - ironic-python-agent
+      delegate_to: osp-undercloud-0
+      block:
+        - name: Install the ironic-python-agent images package
+          become: true
+          ansible.builtin.dnf:
+            name: rhosp-director-images-ipa-x86_64
+            state: present
+
+        - name: Create ironic-python-agnet directory
+          ansible.builtin.file:
+            state: directory
+            path: "{{ ansible_user_dir }}/ironic-python-agent"
+
+        - name: Extract ironic-python-images from tar
+          ansible.builtin.unarchive:
+            src: /usr/share/rhosp-director-images/ironic-python-agent-latest.tar
+            dest: "{{ ansible_user_dir }}/ironic-python-agent"
+            remote_src: true
+
+        - name: Upload ironic-python-agent kernel to glance
+          environment:
+            OS_CLOUD: "{{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}"
+          ansible.builtin.shell:
+            cmd: >-
+              openstack image show deploy-kernel &>/dev/null || \
+                openstack image create deploy-kernel \
+                  --public \
+                  --container-format aki \
+                  --disk-format aki \
+                  --file ironic-python-agent.kernel
+          args:
+            chdir: "{{ ansible_user_dir }}/ironic-python-agent"
+
+        - name: Upload ironic-python-agent ramdisk to glance
+          environment:
+            OS_CLOUD: "{{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}"
+          ansible.builtin.shell:
+            cmd: >-
+              openstack image show deploy-ramdisk &>/dev/null || \
+                openstack image create deploy-ramdisk \
+                  --public \
+                  --container-format ari \
+                  --disk-format ari \
+                  --file ironic-python-agent.initramfs
+          args:
+            chdir: "{{ ansible_user_dir }}/ironic-python-agent"
+
+    - name: Create ironic provisioning network
+      delegate_to: osp-undercloud-0
+      environment:
+        OS_CLOUD: "{{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}"
+      block:
+        - name: Create network
+          ansible.builtin.shell:
+            cmd: >-
+              openstack network show provisioning &>/dev/null || \
+                openstack network create provisioning \
+                  --share \
+                  --provider-physical-network baremetal \
+                  --provider-network-type flat
+
+        - name: Create subnet
+          ansible.builtin.shell:
+            cmd: >-
+              openstack subnet show provisioning-subnet &>/dev/null || \
+                openstack subnet create provisioning-subnet \
+                  --network provisioning \
+                  --subnet-range 172.20.1.0/24 \
+                  --gateway 172.20.1.1 \
+                  --allocation-pool start=172.20.1.100,end=172.20.1.199
+
+    - name: Slurp ironic_nodes.yaml from controller-0
+      delegate_to: controller-0
+      register: _ironic_nodes_slurp
+      ansible.builtin.slurp:
+        src: "{{ ansible_user_dir }}/ci-framework-data/parameters/ironic_nodes.yaml"
+
+    - name: Enroll ironic nodes
+      delegate_to: osp-undercloud-0
+      block:
+        - name: Ensure directory exists
+          ansible.builtin.file:
+            state: directory
+            path: "{{ ansible_user_dir }}/ci-framework-data/parameters"
+
+        - name: Write ironic_nodes.yaml on osp-unercloud-o
+          ansible.builtin.copy:
+            content: "{{ _ironic_nodes_slurp.content | b64decode }}"
+            dest: "{{ ansible_user_dir }}/ci-framework-data/parameters/ironic_nodes.yaml"
+
+        - name: Run baremetal create command to enroll the nodes in the Ironic service
+          environment:
+            OS_CLOUD: "{{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}"
+          ansible.builtin.command: >-
+              openstack baremetal create ironic_nodes.yaml
+          args:
+            chdir: "{{ ansible_user_dir }}/ci-framework-data/parameters/"
