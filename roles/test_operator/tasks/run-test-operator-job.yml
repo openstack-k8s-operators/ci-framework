@@ -37,35 +37,35 @@
     definition: "{{ test_operator_cr }}"
   when: not cifmw_test_operator_dry_run | bool
 
-- name: Wait for the last job to be Completed - {{ run_test_fw }}
+- name: Wait for the last Pod to be Completed - {{ run_test_fw }}
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
     context: "{{ cifmw_openshift_context | default(omit) }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Job
+    kind: Pod
     label_selectors:
       - "workflowStep={{ [(test_operator_workflow | length) - 1, 0] | max }}"
-      - "instanceName={{ test_operator_job_name }}"
+      - "instanceName={{ test_operator_instance_name }}"
   retries: "{{ (cifmw_test_operator_timeout / 10) | round | int }}"
   delay: 10
   until: >
-    testjob.resources[0].status.succeeded | default(0) | int >= 1 or
-    testjob.resources[0].status.failed | default(0) | int >= 1
+    testpod.resources[0].status.phase | default(omit) == "Succeeded" or
+    testpod.resources[0].status.phase | default(omit) == "Failed"
   ignore_errors: true
-  register: testjob
+  register: testpod
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Check whether timed out - {{ run_test_fw }}
   ansible.builtin.set_fact:
-    testjob_timed_out: >-
-      {{ testjob.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
+    testpod_timed_out: >-
+      {{ testpod.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Collect logs
   when:
     - not cifmw_test_operator_dry_run | bool
-    - not testjob_timed_out
+    - not testpod_timed_out
   block:
     - name: Reset volumes and volume_mounts to an empty list
       ansible.builtin.set_fact:
@@ -79,7 +79,7 @@
         context: "{{ cifmw_openshift_context | default(omit)}}"
         kind: PersistentVolumeClaim
         label_selectors:
-          - "instanceName={{ test_operator_job_name }}"
+          - "instanceName={{ test_operator_instance_name }}"
       register: logsPVCs
 
     - name: Set up volume mounts and volumes for all PVCs
@@ -88,7 +88,7 @@
           {{
             (volume_mounts | default([])) + [{
               'name': "logs-volume-" ~ index,
-              'mountPath': "/mnt/logs-{{ test_operator_job_name }}-step-" ~ index
+              'mountPath': "/mnt/logs-{{ test_operator_instance_name }}-step-" ~ index
             }]
           }}
         volumes: >
@@ -115,7 +115,7 @@
           apiVersion: v1
           kind: Pod
           metadata:
-            name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_job_name }}"
+            name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
             namespace: "{{ cifmw_test_operator_namespace }}"
           spec:
             containers:
@@ -134,7 +134,7 @@
         context: "{{ cifmw_openshift_context | default(omit) }}"
         namespace: "{{ cifmw_test_operator_namespace }}"
         kind: Pod
-        name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_job_name }}"
+        name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
         wait: true
       register: logs_pod
       until: logs_pod.resources[0].status.phase == "Running"
@@ -146,10 +146,10 @@
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
       vars:
-        pod_path: mnt/logs-{{ test_operator_job_name }}-step-{{ index }}
+        pod_path: mnt/logs-{{ test_operator_instance_name }}-step-{{ index }}
       ansible.builtin.shell: >
         oc cp -n {{ cifmw_test_operator_namespace }}
-        openstack/test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_job_name }}:{{ pod_path }}
+        openstack/test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}:{{ pod_path }}
         {{ cifmw_test_operator_artifacts_basedir }}
       loop: "{{ logsPVCs.resources }}"
       loop_control:
@@ -174,7 +174,7 @@
     namespace: "{{ cifmw_test_operator_namespace }}"
     kind: Pod
     label_selectors:
-      - "instanceName={{ test_operator_job_name }}"
+      - "instanceName={{ test_operator_instance_name }}"
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Get status from test pods
@@ -225,7 +225,7 @@
         kind: "{{ test_operator_kind_name }}"
         state: absent
         api_version: test.openstack.org/v1beta1
-        name: "{{ test_operator_job_name }}"
+        name: "{{ test_operator_instance_name }}"
         namespace: "{{ cifmw_test_operator_namespace }}"
         wait: true
         wait_timeout: 600
@@ -251,7 +251,7 @@
     kind: Pod
     state: absent
     api_version: v1
-    name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_job_name }}"
+    name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
     namespace: "{{ cifmw_test_operator_namespace }}"
     wait: true
     wait_timeout: 600
