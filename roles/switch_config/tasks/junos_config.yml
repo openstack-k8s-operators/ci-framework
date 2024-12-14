@@ -199,6 +199,142 @@
             config: "{{ vlan_interfaces | from_yaml }}"
             state: replaced
 
+    - name: Configure DCB settings
+      when: "'dcb_configuration' in switch_vars"
+      block:
+
+        - name: Configure forwarding classes and classifiers
+          when: "'classifiers' in switch_vars['dcb_configuration']"
+          block:
+            - name: Configure forwarding classes
+              vars:
+                forwarding_class_config: |
+                  {% for classifier in switch_vars['dcb_configuration'][
+                     'classifiers'] %}
+                  {% for fc in classifier['forwarding_classes'] %}
+                  - set class-of-service forwarding-classes class
+                    {{ fc.class_name }} queue-num {{ fc.queue_num }}
+                  {% endfor %}
+                  {% endfor %}
+              junipernetworks.junos.junos_config:
+                lines: "{{ forwarding_class_config | from_yaml }}"
+
+            - name: Configure classifiers
+              vars:
+                classifier_config: |
+                  {% for classifier in switch_vars['dcb_configuration'][
+                     'classifiers'] %}
+                  {% for fc in classifier['forwarding_classes'] %}
+                  - set class-of-service classifiers {{ classifier.type }}
+                    {{ classifier.name }} forwarding-class
+                    {{ fc.class_name }} loss-priority
+                    {{ fc.loss_priority }} code-points {{ fc.code_points }}
+                  {% endfor %}
+                  {% endfor %}
+              junipernetworks.junos.junos_config:
+                lines: "{{ classifier_config | from_yaml }}"
+
+        - name: Configure forwarding class sets
+          vars:
+            forwarding_class_set_config: |
+              {% for fc_set in switch_vars['dcb_configuration'][
+                 'forwarding_class_sets'] | default([]) %}
+              {% for class in fc_set.classes %}
+              - >
+                set class-of-service forwarding-class-sets
+                {{ fc_set.set_name }} class {{ class.class_name }}
+              {% endfor %}
+              {% endfor %}
+          junipernetworks.junos.junos_config:
+            lines: "{{ forwarding_class_set_config | from_yaml }}"
+
+        - name: Configure schedulers
+          vars:
+            scheduler_config: |
+              {% for scheduler in switch_vars['dcb_configuration'][
+                 'schedulers'] | default([]) %}
+              - >
+                set class-of-service schedulers {{ scheduler.name }}
+                priority {{ scheduler.priority }}
+                transmit-rate {{ scheduler.transmit_rate }}
+              - >
+                set class-of-service schedulers {{ scheduler.name }}
+                shaping-rate percent {{ scheduler.shaping_rate_percent }}
+              {% endfor %}
+          junipernetworks.junos.junos_config:
+            lines: "{{ scheduler_config | from_yaml }}"
+
+        - name: Configure scheduler maps
+          vars:
+            scheduler_map_config: |
+              {% for map in switch_vars['dcb_configuration'][
+                 'scheduler_maps'] | default([]) %}
+              {% for fc in map.forwarding_classes %}
+              - >
+                set class-of-service scheduler-maps {{ map.name }}
+                forwarding-class {{ fc }}
+                scheduler {{ map.scheduler }}
+              {% endfor %}
+              {% endfor %}
+          junipernetworks.junos.junos_config:
+            lines: "{{ scheduler_map_config | from_yaml }}"
+
+        - name: Configure traffic control profiles
+          vars:
+            traffic_control_profile_config: |
+              {% for profile in switch_vars['dcb_configuration'][
+                 'traffic_control_profiles'] | default([]) %}
+              - set class-of-service traffic-control-profiles
+                {{ profile.profile_name }}
+                scheduler-map {{ profile.scheduler_map }}
+                guaranteed-rate {{ profile.guaranteed_rate }}
+              {% if profile.shaping_rate_percent is defined %}
+              - set class-of-service traffic-control-profiles
+                {{ profile.profile_name }}
+                shaping-rate percent {{ profile.shaping_rate_percent }}
+              {% endif %}
+              {% endfor %}
+          junipernetworks.junos.junos_config:
+            lines: "{{ traffic_control_profile_config | from_yaml }}"
+
+        - name: Configure DCB settings for interfaces
+          when: "'interfaces' in switch_vars['dcb_configuration']"
+          block:
+
+            - name: Apply DCBX configuration to interfaces
+              junipernetworks.junos.junos_config:
+                lines:
+                  - "set protocols dcbx interface {{ item.interface }}"
+              loop: "{{ switch_vars['dcb_configuration']['interfaces'] }}"
+              when: item.interface is defined
+
+            - name: Apply classifier to interfaces
+              vars:
+                classifier_name: "{{ switch_vars['dcb_configuration'][
+                                  'classifiers'][0]['name'] }}"
+              junipernetworks.junos.junos_config:
+                lines:
+                  - "set class-of-service interfaces {{ item.interface }}
+                     unit 0 classifiers ieee-802.1 {{ classifier_name }}"
+              loop: "{{ switch_vars['dcb_configuration']['interfaces'] }}"
+              when: item.interface is defined and
+                    classifier_name is defined
+
+            - name: Apply fcs and tcp to interfaces
+              vars:
+                interface_config_lines: |
+                  {% for profile in switch_vars['dcb_configuration'][
+                    'traffic_control_profiles'] %}
+                  - set class-of-service interfaces {{ item.interface }}
+                    forwarding-class-set {{ profile.forwarding_class_set }}
+                    output-traffic-control-profile
+                    {{ profile.profile_name }}
+                  {% endfor %}
+              junipernetworks.junos.junos_config:
+                lines: "{{ interface_config_lines | from_yaml }}"
+              loop: "{{ switch_vars['dcb_configuration']['interfaces'] }}"
+              when: item.interface is defined
+
     - name: Save configuration
       junipernetworks.junos.junos_config:
         confirm_commit: true
