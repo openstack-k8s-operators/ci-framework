@@ -20,10 +20,16 @@
       block:
         - name: Fetch existing autoholds from zuul
           vars:
+            _zuul_host: >-
+              {{
+                zuul.executor.hostname
+                if (zuul.executor.hostname is ansible.utils.ip) else
+                (zuul.executor.hostname | split('.'))[1:] | join('.')
+              }}
             _zuul_api_url: >-
               {{
                 [
-                  ('https://'+ (zuul.executor.hostname | split('.'))[1:] | join('.')),
+                  ('https://'+ _zuul_host,
                   'zuul',
                   'api',
                   'tenant',
@@ -32,7 +38,7 @@
                 ] | join('/')
               }}
           ansible.builtin.uri:
-            url: "{{ _zuul_api_url }}"
+            url: "{{ zuul_autohold_endpoint | default(_zuul_api_url) }}"
             method: GET
             headers:
               Content-Type: "application/json"
