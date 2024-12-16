@@ -35,8 +35,8 @@ with a message.
 * `ci_gen_kustomize_fetch_ocp_state`: (Boolean) If true it enables generating CI templates based on the OCP state. Defaults to `true`.
 * `cifmw_ci_gen_kustomize_values_storage_class_prefix`: (String) Prefix for `storageClass` in generated values.yaml files. Defaults to `"lvms-"` only if `cifmw_use_lvms` is True, otherwise it defaults to `""`. The prefix is prepended to the `cifmw_ci_gen_kustomize_values_storage_class`. It is not recommended to override this value, instead set `cifmw_use_lvms` True or False.
 * `cifmw_ci_gen_kustomize_values_storage_class`: (String) Value for `storageClass` in generated values.yaml files. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
-* `cifmw_ci_gen_kustomize_values_remove_keys_expressions`: (List) Remove keys matching the regular expressions from source ConfigMaps (values.yaml).
-  Defaults to `["^nodes$", "^node(_[0-9]+)?$"]`.
+* `cifmw_ci_gen_kustomize_values_remove_keys_expressions*`: (List) Remove keys matching the regular expressions from source ConfigMaps (values.yaml).
+  Defaults to `["^nodes$", "^node(_[0-9]+)?$"]`. Accepts passing additional expressions by passing variables that matches `cifmw_ci_gen_kustomize_values_remove_keys_expressions.+`.
 
 ### Specific parameters for edpm-values
 This configMap needs some more parameters in order to properly override the `architecture` provided one.
