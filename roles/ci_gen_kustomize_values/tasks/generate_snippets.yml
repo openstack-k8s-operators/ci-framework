@@ -69,6 +69,22 @@
          cifmw_ci_gen_kustomize_values_snippets_dir_prefix ~ _datatype) |
          path_join
       }}
+    _cifmw_gen_kustomize_values_reject_extra_expressions: >-
+      {{
+        hostvars[inventory_hostname] |
+        dict2items |
+        selectattr("key", "match", "^cifmw_ci_gen_kustomize_values_remove_keys_expressions.+") |
+        sort(attribute='key') |
+        map(attribute="value") |
+        list
+      }}
+    _cifmw_gen_kustomize_values_reject_expressions: >-
+      {{
+        (
+          _cifmw_gen_kustomize_values_reject_extra_expressions +
+          cifmw_ci_gen_kustomize_values_remove_keys_expressions
+        ) | flatten | unique
+      }}
   ansible.builtin.set_fact:
     values_datatype: "{{ _datatype }}"
     snippet_datadir: "{{ _dest_dir }}"
@@ -81,7 +97,7 @@
       {{
         _config_map_content |
         ansible.utils.remove_keys(
-          target=cifmw_ci_gen_kustomize_values_remove_keys_expressions,
+          target=_cifmw_gen_kustomize_values_reject_expressions,
           matching_parameter='regex')
       }}
     cacheable: false
