@@ -42,8 +42,8 @@ function os_cmd {
 
 function set_vm_ip {
     ## assign floating ip or external ip
-    local workload_sriov={{workload_sriov|default(false) | bool | ternary("True", "")}}
-    if [ -n "${workload_sriov}" ]; then
+    local fixed_ip={{ $1|default(false) | bool }}
+    if [ -n "${fixed_ip}" ]; then
         EXTERNAL_IP=$(os_cmd port show "${SRIOV_PORT}" -f yaml -c fixed_ips | awk '/ip_address/{print $3;exit}')
         VM_IP=${EXTERNAL_IP}
     else
@@ -84,7 +84,7 @@ cleanup_on_exit() {
 
 function generate_traffic {
     if [ -z "${VM_IP}" ]; then
-        set_vm_ip
+        set_vm_ip $1
     fi
     if ! ${SSH} -i "${SSH_KEY_FILE}" cirros@${VM_IP} test -e ${IPERF_BIN}; then
         NS_FIXUP=false
@@ -187,6 +187,29 @@ function sanity_teardown {
 
     local timeout_seconds=${1:-180}
     local elapsed_seconds=0
+    {% if (workload_sriov && workload_dpdk)|default(false) | bool -%}
+    openstack port delete "${SRIOV_PORT}
+    openstack port delete "${DPDK_PORT}
+    {% if workload_sriov|default(false) | bool -%}
+    openstack port delete "${SRIOV_PORT}"
+    {% elif workload_dpdk|default(false) | bool -%}
+    openstack port delete "${DPDK_PORT}"
+    {% else -%}
+    if [ -n "${INSTANCE_FIP}" ]; then
+        echo "Remove ${INSTANCE_FIP} from ${INSTANCE_NAME}"
+        openstack server remove floating ip ${INSTANCE_NAME} ${INSTANCE_FIP}
+    {% else -%}
+    if [ -n "${INSTANCE_FIP}" ]; then
+        echo "Remove ${INSTANCE_FIP} from ${INSTANCE_NAME}"
+        openstack server remove floating ip ${INSTANCE_NAME} ${INSTANCE_FIP}
+    IN_TEARDOWN=true
+    # remove auxiliary resources
+
+    local timeout_seconds=${1:-180}
+    local elapsed_seconds=0
+    {% if (workload_sriov && workload_dpdk)|default(false) | bool -%}
+    openstack port delete "${SRIOV_PORT}
+    openstack port delete "${DPDK_PORT}
     {% if workload_sriov|default(false) | bool -%}
     openstack port delete "${SRIOV_PORT}"
     {% elif workload_dpdk|default(false) | bool -%}
@@ -397,7 +420,16 @@ function workload_launch {
     TENANT_NET_ID=$( openstack network show -f value -c id "${TENANT_NET_NAME}" )
 
     echo "Creating overcloud instance ${INSTANCE_NAME}"
-    {% if workload_sriov|default(false) | bool -%}
+    {% if (workload_sriov && workload_dpdk)|default(false) | bool -%}
+    os_cmd server create  \
+        --image "${IMAGE_NAME}" \
+        --flavor "${FLAVOR_NAME}" \
+        --security-group "${SECGROUP_NAME}" \
+        --key-name  "${KEYPAIR_NAME}" \
+        --nic net-id="${TENANT_NET_ID}" \
+        --port "${SRIOV_PORT}" \
+        "${INSTANCE_NAME}"
+    {% elif workload_sriov|default(false) | bool -%}
     os_cmd server create  \
         --image "${IMAGE_NAME}" \
         --flavor "${FLAVOR_NAME}" \
@@ -510,7 +542,16 @@ if [[ "${MODE}" == "workload_traffic" ]]; then
     echo "export CINDER_VOL_ID=${CINDER_VOL_ID}" >> ~/workload_suffix
     echo "export INSTANCE_FIP=${INSTANCE_FIP}" >> ~/workload_suffix
     echo "export VM_IP=${VM_IP}" > ~/vm_ip.sh
-    generate_traffic
+    local workload_sriov={{workload_sriov|default(false) | bool | ternary("True", "")}}
+    local workload_dpdk={{workload_dpdk|default(false) | bool | ternary("True", "")}}
+    {% if (workload_sriov && workload_dpdk)|default(false) | bool -%}
+        generate_traffic false
+        generate_traffic true
+    {% elif workload_sriov|default(false) | bool -%}
+        generate_traffic true
+    {% else -%}
+        generate_traffic false
+    {%- endif %}
 fi
 
 if [[ "${MODE}" == "cleanup" ]]; then
