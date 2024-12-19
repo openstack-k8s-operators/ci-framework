@@ -17,32 +17,83 @@
 - name: OSP 17 - Ironic post overcloud
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   tasks:
-    - name: Gather ansible_user_dir from undercloud
-      delegate_to: osp-undercloud-0
+    - name: Gather ansible_user_dir from OSP nodes
+      delegate_to: "{{ item }}"
       ansible.builtin.setup:
         gather_subset:
           - user_dir
+      loop:
+        - controller-0
+        - osp-undercloud-0
+        - osp-controller-0
+        - osp-controller-1
+        - osp-controller-2
 
-    - name: Glance images - ironic-python-agent
-      delegate_to: osp-undercloud-0
+    - name: Install ironic-python-agent images package
       block:
         - name: Install the ironic-python-agent images package
           become: true
+          delegate_to: "{{ item }}"
           ansible.builtin.dnf:
             name: rhosp-director-images-ipa-x86_64
             state: present
+          loop:
+            - osp-undercloud-0
+            - osp-controller-0
+            - osp-controller-1
+            - osp-controller-2
 
-        - name: Create ironic-python-agnet directory
+        - name: Create ironic-python-agent directory
+          delegate_to: "{{ item }}"
           ansible.builtin.file:
             state: directory
             path: "{{ ansible_user_dir }}/ironic-python-agent"
+          loop:
+            - osp-undercloud-0
+            - osp-controller-0
+            - osp-controller-1
+            - osp-controller-2
 
         - name: Extract ironic-python-images from tar
+          delegate_to: "{{ item }}"
           ansible.builtin.unarchive:
             src: /usr/share/rhosp-director-images/ironic-python-agent-latest.tar
             dest: "{{ ansible_user_dir }}/ironic-python-agent"
             remote_src: true
+          loop:
+            - osp-undercloud-0
+            - osp-controller-0
+            - osp-controller-1
+            - osp-controller-2
 
+    - name: Copy ironic-python-agent to /var/lib/ironic/httpboot
+      become: true
+      block:
+        - name: Copy ironic-python-agent kernel
+          delegate_to: "{{ item }}"
+          ansible.builtin.copy:
+            src: "{{ ansible_user_dir }}/ironic-python-agent/ironic-python-agent.kernel"
+            dest: /var/lib/ironic/httpboot/agent.kernel
+            remote_src: true
+          loop:
+            - osp-controller-0
+            - osp-controller-1
+            - osp-controller-2
+
+        - name: Copy ironic-python-agent ramdisk
+          delegate_to: "{{ item }}"
+          ansible.builtin.copy:
+            src: "{{ ansible_user_dir }}/ironic-python-agent/ironic-python-agent.initramfs"
+            dest: /var/lib/ironic/httpboot/agent.ramdisk
+            remote_src: true
+          loop:
+            - osp-controller-0
+            - osp-controller-1
+            - osp-controller-2
+
+    - name: Glance images - ironic-python-agent
+      delegate_to: osp-undercloud-0
+      block:
         - name: Upload ironic-python-agent kernel to glance
           environment:
             OS_CLOUD: "{{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}"
