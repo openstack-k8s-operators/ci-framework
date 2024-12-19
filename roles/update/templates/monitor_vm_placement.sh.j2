@@ -1,0 +1,23 @@
+#!/bin/bash
+# Log the instance hypervisor. Useful when tracking compute reboot.
+set -e
+
+export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
+export PATH="{{ cifmw_path }}"
+
+log_file={{ cifmw_update_artifacts_basedir }}/instance_placement.log
+source_file={{ cifmw_update_artifacts_basedir }}/workload_suffix
+
+. "$source_file"
+
+instance_name="instance_${SUFFIX}"
+previous_hypervisor=""
+
+while true; do
+    current_hypervisor=$(oc rsh -n openstack openstackclient openstack server show "${instance_name}" -f json | jq -r -c '.["OS-EXT-SRV-ATTR:host"]')
+    if [[ "$current_hypervisor" != "$previous_hypervisor" ]]; then
+        echo "$(date) $instance_name $current_hypervisor" >> "$log_file"
+        previous_hypervisor="$current_hypervisor"
+    fi
+    sleep 1
+done
