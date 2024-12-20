@@ -119,6 +119,34 @@
           --namespace={{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] }}
           --for=jsonpath='{.status.phase}'=Complete --timeout=20m
 
+- name: Check if the OpenStack initialization CRD exists
+  when:
+    - not cifmw_edpm_prepare_dry_run
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: CustomResourceDefinition
+    name: openstacks.operator.openstack.org
+  register: _cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out
+  tags:
+    - control-plane
+
+- name: OpenStack meta-operator initialization, if necessary
+  when:
+    - not cifmw_edpm_prepare_dry_run
+    - _cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out is defined
+    - _cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out.resources is defined
+    - (_cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out.resources | length) > 0
+  vars:
+    make_openstack_init_env: "{{ cifmw_edpm_prepare_common_env }}"
+    make_openstack_init_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_init'
+  tags:
+    - control-plane
+
   # Note(chkumar): Keeping set_openstack_containers role
   # till we migrate this task to update_containers role
 - name: Update OpenStack Services containers Env
