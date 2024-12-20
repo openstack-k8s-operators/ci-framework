@@ -49,3 +49,30 @@
     {{ item }} > {{ cifmw_artifacts_basedir }}/logs/cmd_after_{{ operator }}_kuttl.log
   loop: "{{ commands_after_kuttl_run }}"
   ignore_errors: true
+
+# Some of the xml files may not be the JUnitXML results, but getting the exact file
+# name (parsing the KUTTL configuration) may be too cumbersome.
+- name: Find the generated JUnitXML files
+  ansible.builtin.find:
+    paths: "{{ cifmw_installyamls_repos }}"
+    file_type: file
+    patterns: '*.xml'
+  register: "_cifmw_kuttl_xml_files"
+
+- name: Copy the log results of {{ operator }}
+  vars:
+    _kuttl_test_result_dir: "{{ cifmw_artifacts_basedir }}/tests/kuttl_{{ operator }}"
+  block:
+    - name: Create the test results directory
+      ansible.builtin.file:
+        path: "{{ _kuttl_test_result_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy the generated test results to the test results directory
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ _kuttl_test_result_dir }}"
+        mode: '0644'
+      loop: "{{ _cifmw_kuttl_xml_files.files }}"
+      ignore_errors: true  # noqa: ignore-errors
