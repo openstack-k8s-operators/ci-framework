@@ -1,0 +1,62 @@
+---
+- name: Define command prefix for OpenShift operations
+  ansible.builtin.set_fact:
+    cifmw_update_oc_cmd_prefix: "oc -n {{ cifmw_update_namespace }}"
+
+- name: Fetch NodeSets for the OpenStackDataPlaneDeployment
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_oc_cmd_prefix }} get openstackdataplanenodeset -o name
+    | awk -F'/' '{print "    - "  $2}'
+  register: cifmw_update_node_sets
+  changed_when: false
+
+- name: Construct date string for the CR name
+  ansible.builtin.set_fact:
+    cifmw_update_cr_date: "{{ lookup('pipe', 'date +%Y%m%d%H%S') }}"
+
+- name: Construct the CR name
+  ansible.builtin.set_fact:
+    cifmw_reboot_dep_name: >-
+      reboot-{{ cifmw_update_hypervisor_short_name }}-{{ cifmw_update_cr_date }}
+
+- name: Create the OpenStackDataPlaneDeployment CR YAML file
+  ansible.builtin.copy:
+    dest: "{{ cifmw_update_artifacts_basedir }}/{{ cifmw_reboot_dep_name }}.yaml"
+    content: |
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: {{ cifmw_reboot_dep_name }}
+        namespace: {{ cifmw_update_namespace }}
+      spec:
+        nodeSets:
+      {{ cifmw_update_node_sets.stdout }}
+        servicesOverride:
+        - reboot-os
+        ansibleExtraVars:
+          edpm_reboot_strategy: force
+        ansibleLimit: {{ cifmw_update_hypervisor_short_name }}
+
+- name: Apply the OpenStackDataPlaneDeployment CR to trigger a reboot
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.command: >-
+    {{ cifmw_update_oc_cmd_prefix }}
+    create -f {{ cifmw_update_artifacts_basedir }}/{{ cifmw_reboot_dep_name }}.yaml
+
+- name: Check OpenStackDataPlaneDeployment status
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.command: >-
+    {{ cifmw_update_oc_cmd_prefix }}
+    get openstackdataplanedeployment {{ cifmw_reboot_dep_name }}
+  register: deployment_status
+  until: deployment_status.stdout.find('Setup complete') > -1
+  retries: "{{ cifmw_update_wait_retries_reboot }}"
+  delay: 5
