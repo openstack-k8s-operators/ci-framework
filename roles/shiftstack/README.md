@@ -13,6 +13,7 @@ Role for triggering Openshift on Openstack QA automation (installation and tests
 * `cifmw_shiftstack_client_pod_image`: (*string*) The image for the container running in the `cifmw_shiftstack_client_pod_name` pod. Defaults to `quay.io/shiftstack-qe/shiftstack-client:latest`.
 * `cifmw_shiftstack_client_pvc_manifest`: (*string*) The file name for the shiftstackclient pvc manifest. Defaults to `"{{ cifmw_shiftstack_client_pod_name }}_pvc.yml"`.
 * `cifmw_shiftstack_cluster_name`: (*string*) The Openshift cluster name. Defaults to `ostest`.
+* `cifmw_shiftstack_hypervisor`: (*string*) The hypervisor where RHOSO is deployed. Defaults to `"{{ hostvars[hostvars['controller-0']['cifmw_hypervisor_host'] | default ('')]['ansible_host'] | default('') }}"`.
 * `cifmw_shiftstack_exclude_artifacts_regex`: (*string*) Regex that will be passed on `oc rsync` command as `--exclude` param, so the role does not gather the artifacts matching it.
 * `cifmw_shiftstack_installation_dir`: (*string*) Directory to place installation files. Defaults to `"{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/installation"`.
 * `cifmw_shiftstack_manifests_dir`: (*string*) Directory name for the role generated Openshift manifests. Defaults to `"{{ cifmw_shiftstack_basedir }}/manifests"`.
