@@ -214,6 +214,7 @@ Default value: {}
 * `cifmw_test_operator_horizontest_logs_directory_name`: (String) The name of the directory to store test logs. Default value: `horizon`
 * `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
 * `cifmw_test_operator_horizontest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
+* `cifmw_test_operator_horizontest_debug`: (Bool) Run HorizonTest in debug mode, it keeps the operator pod sleeping infinitely (it must only set to `true` only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_horizontest_config`: (Dict) Definition of HorizonTest CR instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#horizontest-custom-resource)). Default value:
 ```
   apiVersion: test.openstack.org/v1beta1
@@ -235,6 +236,7 @@ Default value: {}
     password: "{{ cifmw_test_operator_horizontest_password }}"
     flavorName: "{{ cifmw_test_operator_horizontest_flavor_name }}"
     logsDirectoryName: "{{ cifmw_test_operator_horizontest_logs_directory_name }}"
+    debug: "{{ cifmw_test_operator_horizontest_debug }}"
     horizonTestDir: "{{ cifmw_test_operator_horizontest_horizon_test_dir }}"
 ```
 
