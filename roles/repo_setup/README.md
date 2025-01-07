@@ -30,6 +30,7 @@ using `cifmw_repo_setup_src` role default var.
 * `cifmw_repo_setup_rhos_release_rpm`: (String) URL to rhos-release RPM.
 * `cifmw_repo_setup_rhos_release_args`: (String) Parameters to pass down to `rhos-release`.
 * `cifmw_repo_setup_rhos_release_gpg_check`: (Bool) Skips the gpg check during rhos-release rpm installation. Defaults to `True`.
+* `cifmw_repo_setup_rhos_release_path`: (String) The path where the rhos-release rpm is downloaded. Defaults to `{{ cifmw_repo_setup_basedir }}/rhos-release`.
 
 ## Notes
 
