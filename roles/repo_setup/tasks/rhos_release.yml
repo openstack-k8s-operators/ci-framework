@@ -1,8 +1,29 @@
 ---
+- name: Download RHOS Release if the given rpm is a URL
+  when: cifmw_repo_setup_rhos_release_rpm is url
+  block:
+    - name: Create download directory
+      ansible.builtin.file:
+        path: "{{ cifmw_repo_setup_rhos_release_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download the RPM
+      cifmw.general.url_request:
+        url: "{{ cifmw_repo_setup_rhos_release_rpm }}"
+        dest: "{{ cifmw_repo_setup_rhos_release_path }}/rhos-release.rpm"
+        mode: "0644"
+      register: _cifmw_repo_setup_url_get
+
 - name: Install RHOS Release tool
   become: true
   ansible.builtin.package:
-    name: "{{ cifmw_repo_setup_rhos_release_rpm }}"
+    name: >-
+      {{
+        cifmw_repo_setup_rhos_release_rpm
+        if cifmw_repo_setup_rhos_release_rpm is not url
+        else _cifmw_repo_setup_url_get.path
+      }}
     state: present
     disable_gpg_check: "{{ cifmw_repo_setup_rhos_release_gpg_check | bool }}"
 
