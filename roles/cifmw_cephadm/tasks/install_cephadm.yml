@@ -1,0 +1,49 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Enabled ceph Tools Repository
+  when:
+    - cifmw_cephadm_repository_override | bool
+  become: true
+  ansible.builtin.dnf:
+    name: centos-release-ceph-{{ cifmw_cephadm_version }}
+    state: present
+
+- name: Install cephadm package
+  become: true
+  when:
+    - cifmw_cephadm_predeployed | bool or
+      cifmw_cephadm_repository_override | bool
+  ansible.builtin.dnf:
+    name: cephadm
+    state: present
+  register: task_result
+  retries: "{{ cifmw_cephadm_wait_install_retries }}"
+  delay: "{{ cifmw_cephadm_wait_install_delay }}"
+  until: task_result is success
+
+- name: Stat cephadm file
+  ansible.builtin.stat:
+    path: "{{ cifmw_cephadm_bin }}"
+  register: stat_cephadm
+  become: true
+  ignore_errors: true  # noqa: ignore-errors
+
+- name: Fail if cephadm is not available
+  when:
+    - not stat_cephadm.stat.exists
+  ansible.builtin.fail:
+    msg: "{{ cifmw_cephadm_bin }} does not exist"
