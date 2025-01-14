@@ -89,7 +89,7 @@ from ansible.module_utils.basic import AnsibleModule
 
 
 try:
-    from requests import get
+    from requests import get, head
 
     python_requests_installed = True
 except ImportError:
@@ -100,6 +100,19 @@ try:
     python_requests_kerberos_installed = True
 except ImportError:
     python_requests_kerberos_installed = False
+
+
+def _validate_auth_module(module, url, verify_ssl):
+    if python_requests_kerberos_installed:
+        # The module are loaded if requires, no need to validate if it's necessary or not
+        return
+    response = head(url=url, verify=verify_ssl, allow_redirects=True, timeout=30)
+    # If the response in a 401 or 403 we need to authenticate
+    if response.status_code in [401, 403]:
+        # Kerberos module not present, fail
+        module.fail_json(
+            msg="requests_kerberos required for this module to authenticate against the given url"
+        )
 
 
 def main():
@@ -120,13 +133,15 @@ def main():
     if not python_requests_installed:
         module.fail_json(msg="requests required for this module.")
 
-    if not python_requests_kerberos_installed:
-        module.fail_json(msg="requests_kerberos required for this module.")
-
     url = module.params["url"]
     verify_ssl = module.params["verify_ssl"]
 
-    auth = HTTPKerberosAuth(mutual_authentication=OPTIONAL)
+    _validate_auth_module(module, url, verify_ssl)
+    if python_requests_kerberos_installed:
+        auth = HTTPKerberosAuth(mutual_authentication=OPTIONAL)
+    else:
+        auth = None
+
     try:
         response = get(url=url, auth=auth, verify=verify_ssl, allow_redirects=True)
 
