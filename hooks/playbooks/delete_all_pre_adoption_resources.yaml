@@ -1,0 +1,53 @@
+---
+- name: Delete all pre adoption OpenStack resources
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Create openstack config dir
+      ansible.builtin.file:
+        path: "/home/zuul/.config/openstack/"
+        owner: zuul
+        group: zuul
+        mode: '0744'
+        state: directory
+
+    - name: Fetch cloud config to host
+      kubernetes.core.k8s_cp:
+        kubeconfig: "{{ cifmw_resource_delete_kubeconfig }}"
+        namespace: openstack
+        pod: openstackclient
+        remote_path: /home/cloud-admin/.config/openstack/
+        local_path: "/home/zuul/.config/openstack/"
+        state: from_pod
+
+    - name: Install openstackclient
+      ansible.builtin.dnf:
+        name: python3-openstackclient
+        state: installed
+      become: true
+
+    - name: Delete all pre-adoption resources "manually"
+      ansible.builtin.shell: |
+        set -o pipefail
+        openstack flavor list -c ID -f value | xargs openstack flavor delete
+        openstack server list --all-projects -c ID -f value | xargs openstack server delete
+        openstack image list -c ID -f value | xargs openstack image delete
+        openstack floating ip list -c ID -f value | xargs openstack floating ip  delete
+        openstack network trunk list -c ID -f value | xargs openstack network trunk delete
+        for router in `openstack router list -f value -c ID` ; do
+          openstack subnet list -c ID -f value | awk -v router=$router '{ print "openstack router remove subnet " router " " $0}' | bash
+          openstack router delete $router
+        done
+        openstack port list -c ID -f value | xargs openstack port delete
+        openstack network list -c ID -f value | xargs openstack network delete
+        openstack security group list -c ID -f value | xargs openstack security group delete
+        openstack keypair delete test_keypair
+        openstack role delete heat_stack_owner
+        ag=$(openstack aggregate list -f value -c ID)
+        for a in $ag;do
+          h=$(openstack aggregate show $a  -c hosts -f value | awk -F "'" '{print $2}')
+          openstack aggregate remove host $a $h
+          openstack aggregate delete $a
+        done
+      environment:
+        OS_CLOUD: default
