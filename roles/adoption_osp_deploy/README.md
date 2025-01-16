@@ -21,6 +21,10 @@ deployment. Defaults to `pool.ntp.org`
 * `cifmw_adoption_osp_deploy_stopper`: (String) Step at which to stop the run.  See `Break point` section below for possible values.
 * `cifmw_adoption_osp_deploy_scenario`: (Dict) Define the parameter to
 configure the OSP17.1 deployment.
+* `cifmw_adoption_osp_deploy_adoption_vars_exclude_nets`: (List) Name of
+  networks in the ci-framework Network Mapper data to exclude when generating
+  the adoption variables. By default it excludes the ci-framework "public"
+  network (`ocpbm`).
 
 ### Break point
 
