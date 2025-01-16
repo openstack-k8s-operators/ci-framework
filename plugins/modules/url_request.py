@@ -101,17 +101,27 @@ try:
 except ImportError:
     python_requests_kerberos_installed = False
 
+try:
+    from requests_gssapi import HTTPSPNEGOAuth, OPTIONAL
 
-def _validate_auth_module(module, url, verify_ssl):
-    if python_requests_kerberos_installed:
-        # The module are loaded if requires, no need to validate if it's necessary or not
-        return
+    python_requests_gssapi_installed = True
+except ImportError:
+    python_requests_gssapi_installed = False
+
+
+def _get_auth_module(module, url, verify_ssl):
+    # If the auth modules are loaded there's no need to check if the url is secured beforehand
+    if python_requests_gssapi_installed:
+        return HTTPSPNEGOAuth(mutual_authentication=OPTIONAL)
+    elif python_requests_kerberos_installed:
+        return HTTPKerberosAuth(mutual_authentication=OPTIONAL)
+
     response = head(url=url, verify=verify_ssl, allow_redirects=True, timeout=30)
     # If the response in a 401 or 403 we need to authenticate
     if response.status_code in [401, 403]:
         # Kerberos module not present, fail
         module.fail_json(
-            msg="requests_kerberos required for this module to authenticate against the given url"
+            msg="Neither requests_gssapi or requests_kerberos are installed and the url requires authentication"
         )
 
 
@@ -136,14 +146,13 @@ def main():
     url = module.params["url"]
     verify_ssl = module.params["verify_ssl"]
 
-    _validate_auth_module(module, url, verify_ssl)
-    if python_requests_kerberos_installed:
-        auth = HTTPKerberosAuth(mutual_authentication=OPTIONAL)
-    else:
-        auth = None
-
     try:
-        response = get(url=url, auth=auth, verify=verify_ssl, allow_redirects=True)
+        response = get(
+            url=url,
+            auth=_get_auth_module(module, url, verify_ssl),
+            verify=verify_ssl,
+            allow_redirects=True,
+        )
 
         result["status_code"] = response.status_code
         result["headers"] = dict(response.headers)
