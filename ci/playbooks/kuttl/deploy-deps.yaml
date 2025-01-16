@@ -89,35 +89,15 @@
           ignore_errors: true
           register: openstack_operator_subscription
 
-        - name: Install openstack operator
+        - name: Install openstack operator and wait for the csv to succeed
           when: openstack_operator_subscription.stdout == ""
           vars:
-            make_openstack_env: "{{ cifmw_edpm_prepare_common_env |
+            make_openstack_init_env: "{{ cifmw_edpm_prepare_common_env |
               combine(cifmw_edpm_prepare_make_openstack_env) }}"
-            make_openstack_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
+            make_openstack_init_dryrun: "{{ cifmw_edpm_prepare_dry_run }}"
           ansible.builtin.include_role:
             name: 'install_yamls_makes'
-            tasks_from: 'make_openstack'
-
-        - name: Wait for OpenStack subscription creation
-          when: openstack_operator_subscription.stdout == ""
-          ansible.builtin.command:
-            cmd: >-
-              oc get sub openstack-operator
-              --namespace=openstack-operators
-              -o=jsonpath='{.status.installplan.name}'
-          register: cifmw_edpm_prepare_wait_installplan_out
-          until: cifmw_edpm_prepare_wait_installplan_out.rc == 0 and cifmw_edpm_prepare_wait_installplan_out.stdout != ""
-          retries: 30
-          delay: 10
-
-        - name: Wait for OpenStack operator to get installed
-          when: openstack_operator_subscription.stdout == ""
-          ansible.builtin.command:
-            cmd: >-
-              oc wait InstallPlan {{ cifmw_edpm_prepare_wait_installplan_out.stdout }}
-              --namespace=openstack-operators
-              --for=jsonpath='{.status.phase}'=Complete --timeout=20m
+            tasks_from: 'make_openstack_init'
 
         - name: install kuttl test_suite dependencies
           vars:
