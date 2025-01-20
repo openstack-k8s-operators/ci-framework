@@ -1,0 +1,69 @@
+---
+- name: Retrieve .dockerconfigjson from OpenShift secret
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: >-
+    oc get secret/pull-secret -n openshift-config -o json |
+    jq -r '.data[".dockerconfigjson"]' | base64 -d > /home/zuul/authfile.txt
+
+- name: Read username and password from PODMAN_LOGIN_FILE
+  ansible.builtin.shell: >-
+    read -r username password < /tmp/podman.txt
+    && echo "${username}" "${password}"
+  register: podman_login_creds
+
+- name: Log in to Podman with registry credentials
+  ansible.builtin.command: >-
+    podman login --authfile /home/zuul/authfile.txt
+    --username "{{ podman_login_creds.stdout.split()[0] }}"
+    --password "{{ podman_login_creds.stdout.split()[1] }}"
+    brew.registry.redhat.io
+
+- name: Update OpenShift secret with the new .dockerconfigjson
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: >-
+    oc set data secret/pull-secret -n openshift-config
+    --from-file=.dockerconfigjson=/home/zuul/authfile.txt
+
+- name: Read username and password and create Kubernetes secret
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: |
+    read -r username password < /tmp/podman.txt
+    oc create secret generic redhat-registry \
+      --from-literal edpm_container_registry_logins="{\"registry.redhat.io\": {\"${username}\": \"${password}\"}}"
+  args:
+    executable: /bin/bash
+
+- name: Create ImageContentSourcePolicy YAML
+  ansible.builtin.copy:
+    dest: "/home/zuul/brew-registry-imageContentSourcePolicy.yaml"
+    content: |
+      apiVersion: operator.openshift.io/v1alpha1
+      kind: ImageContentSourcePolicy
+      metadata:
+        name: brew-registry
+      spec:
+        repositoryDigestMirrors:
+        - mirrors:
+          - brew.registry.redhat.io
+          source: registry.redhat.io
+        - mirrors:
+          - brew.registry.redhat.io
+          source: registry.stage.redhat.io
+        - mirrors:
+          - brew.registry.redhat.io
+          source: registry-proxy.engineering.redhat.com
+
+- name: Apply ImageContentSourcePolicy using oc
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: oc apply -f /home/zuul/brew-registry-imageContentSourcePolicy.yaml
+  args:
+    executable: /bin/bash
+
