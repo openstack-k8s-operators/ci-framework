@@ -64,6 +64,9 @@
     dest: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     mode: "0644"
 
+- name: Authenticate to private registry
+  ansible.builtin.include_tasks: authenticate_registry.yml
+
 - name: OLM resources
   when: not cifmw_kustomize_deploy_generate_crs_only
   block:
@@ -106,6 +109,41 @@
         - _cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources is defined
         - _cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | length == 1
         - (_cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | first)['status']['installPlanRef'] is defined
+
+    - name: Retrieve the latest InstallPlan name sorted by creation date
+      set_fact:
+        installplan_name: >-
+          {{
+            _cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources
+            | selectattr('kind', 'equalto', 'Subscription')
+            | sort(attribute='metadata.creationTimestamp')
+            | map(attribute='status.installPlanRef.name')
+            | last
+          }}
+
+    - name: Display debug
+      ansible.builtin.debug:
+        msg: "{{ installplan_name }}"
+
+    - name: Accept the InstallPlan
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: InstallPlan
+        name: "{{ installplan_name }}"
+        namespace: "openstack-operators"
+        state: present
+        merge_type:
+          - merge
+        definition:
+          spec:
+            approved: true
+
+    - name: Display debug
+      ansible.builtin.debug:
+        msg: "========> INSTALLPLAN '{{ installplan_name }}' HAS BEEN APPROVED."
 
     - name: Wait for the openstack operators InstallPlan to be finished
       vars:
