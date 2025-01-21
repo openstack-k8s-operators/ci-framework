@@ -1,0 +1,61 @@
+---
+# Create some selfsigned certs to test
+- name: Create a temporal directory for the certs
+  ansible.builtin.tempfile:
+    state: directory
+  register: _tmp_dir
+
+- name: Create private key (RSA, 4096 bits)
+  community.crypto.openssl_privatekey:
+    path: "{{ [_tmp_dir.path, 'certificate.key'] | path_join }}"
+
+- name: Generate the CSRs
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ [_tmp_dir.path, 'certificate.key'] | path_join }}"
+    organizational_unit_name: "{{ item.ou }}"
+    common_name: "{{ item.cn }}"
+  register: _csrs
+  loop:
+    - cn: common-name-test-1
+      ou: "Some OU"
+    - cn: common-name-test-2
+      ou: "Test OU 1"
+    - cn: another-cert-cn
+      ou: "Test OU 2"
+    - cn: cn-1
+      ou: "Not following any pattern"
+
+- name: Create simple self-signed certificate
+  community.crypto.x509_certificate:
+    path: "{{ [_tmp_dir.path, (idx | string) + '.crt'] | path_join }}"
+    privatekey_path: "{{ [_tmp_dir.path, 'certificate.key'] | path_join }}"
+    provider: selfsigned
+    csr_content: "{{ item.csr }}"
+  loop: "{{ _csrs.results }}"
+  loop_control:
+    index_var: idx
+    label: "{{ item.subject }}"
+  register: _certs
+
+- name: Create simple self-signed certificate
+  ansible.builtin.shell:
+    chdir: "{{ _tmp_dir.path }}"
+    cmd: >-
+      cat *.crt > original-pem.crt
+
+- name: Test the module
+  cifmw.general.pem_read:
+    path: "{{ [_tmp_dir.path, 'original-pem.crt'] | path_join }}"
+    ou_filter: "^Some\\s?OU"
+    cn_filter: "cert-cn$"
+  register: _result
+
+- name: Ensure we got the expected certificates
+  vars:
+    _cert_1_content: "{{ lookup('file', [_tmp_dir.path, '0.crt'] | path_join) }}"
+    _cert_2_content: "{{ lookup('file', [_tmp_dir.path, '2.crt'] | path_join) }}"
+  ansible.builtin.assert:
+    that:
+      - _result.certs | length == 2
+      - _result.certs[0] | trim == _cert_1_content | trim
+      - _result.certs[1] | trim == _cert_2_content | trim

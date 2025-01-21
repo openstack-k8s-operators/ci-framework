@@ -31,6 +31,10 @@ None
 * `cifmw_edpm_build_images_cert_install`: (Boolean) Whether to install cert in the image. Default: false
 * `cifmw_edpm_build_images_base_image`: (String) Base image to package the edpm and ipa qcow2 images into the container images for rhel distro.
 
+* `cifmw_edpm_build_images_cert_dest`: (String) The path where the certificates should be placed inside the image builder. Default: `/etc/pki/ca-trust/source/anchors/edpm-build-images.crt`.
+* `cifmw_edpm_build_images_cert_filter_ou`: (String) Optional. If given, filter out by OU the source certs using this regex.
+* `cifmw_edpm_build_images_cert_filter_cn`: (String) Optional. If given, filter out by CN the source certs using this regex.
+
 ## Example
 ```YAML
 ---
