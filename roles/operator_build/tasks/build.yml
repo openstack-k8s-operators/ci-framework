@@ -124,6 +124,32 @@
     output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
     script: make manifests
 
+- name: "{{ operator.name }} - Call bindata"  # noqa: name[template]
+  when:
+    - cifmw_operator_build_meta_build
+    - operator.name == cifmw_operator_build_meta_name
+  vars:
+    _binddata_vars: >-
+      {{
+        {
+          'IMG': operator_img,
+          'IMAGENAMESPACE': cifmw_operator_build_push_org,
+          'IMAGEREGISTRY': cifmw_operator_build_push_registry,
+          'LOCAL_REGISTRY': cifmw_operator_build_local_registry
+        } |
+        combine(
+          {
+            'IMAGEBASE': operator.image_base
+          } if 'image_base' in operator else {}
+        )
+      }}
+  ci_script:
+    dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
+    chdir: "{{ operator.src }}"
+    output_dir: "{{ cifmw_operator_build_basedir }}/artifacts"
+    script: make bindata
+    extra_args: "{{ _binddata_vars }}"
+
 - name: "{{ operator.name }} - Call docker-build"  # noqa: name[template]
   ci_script:
     dry_run: "{{ cifmw_operator_build_dryrun|bool }}"
@@ -160,7 +186,7 @@
       IMAGENAMESPACE: "{{ cifmw_operator_build_push_org }}"
       IMAGEREGISTRY: "{{ cifmw_operator_build_push_registry }}"
       IMAGEBASE: "{{ operator.image_base | default('') }}"
-      LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default (0) }}"
+      LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry }}"
 
 - name: "{{ operator.name }} - Call bundle-build"  # noqa: name[template]
   ci_script:
@@ -174,7 +200,7 @@
       IMAGENAMESPACE: "{{ cifmw_operator_build_push_org }}"
       IMAGEREGISTRY: "{{ cifmw_operator_build_push_registry }}"
       IMAGEBASE: "{{ operator.image_base | default('') }}"
-      LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default (0) }}"
+      LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry }}"
 
 - name: "{{ operator.name }} - Push bundle image"  # noqa: name[template]
   when:
@@ -200,7 +226,7 @@
       IMAGENAMESPACE: "{{ cifmw_operator_build_push_org }}"
       IMAGEREGISTRY: "{{ cifmw_operator_build_push_registry }}"
       IMAGEBASE: "{{ operator.image_base | default('') }}"
-      LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry | default (0) }}"
+      LOCAL_REGISTRY: "{{ cifmw_operator_build_local_registry }}"
 
 
 - name: "{{ operator.name }} - Call catalog-push"  # noqa: name[template]
