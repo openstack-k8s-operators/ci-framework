@@ -2,12 +2,29 @@
 - name: Check if cert exits
   ansible.builtin.stat:
     path: "{{ cifmw_edpm_build_images_cert_path }}"
-  register: cert_path
+  register: _cifmw_edpm_build_images_stat
 
 - name: Install neccessary rpm and customize image to push correct certs in Image.
-  when:
-    - cert_path.stat.exists|bool
+  vars:
+    _cifmw_edpm_build_images_cert_source: >-
+      {{
+        [cifmw_edpm_build_images_basedir, 'edpm-build-images.crt'] | path_join
+      }}
+  when: _cifmw_edpm_build_images_stat.stat.exists
   block:
+    - name: Read the certificates
+      cifmw.general.pem_read:
+        path: "{{ cifmw_edpm_build_images_cert_path }}"
+        ou_filter: "{{ cifmw_edpm_build_images_cert_filter_ou | default(omit) }}"
+        cn_filter: "{{ cifmw_edpm_build_images_cert_filter_cn | default(omit) }}"
+      register: _cifmw_edpm_build_images_certs
+
+    - name: Dump the certificates
+      ansible.builtin.copy:
+        dest: "{{ _cifmw_edpm_build_images_cert_source }}"
+        content: "{{ _cifmw_edpm_build_images_certs.certs | join('\n') }}"
+        mode: "0644"
+
     - name: Install libguestfs packages
       tags:
         - bootstrap
@@ -22,7 +39,7 @@
 
     - name: Add cert if it exists
       ansible.builtin.command: >
-        virt-customize -a {{ cifmw_edpm_build_images_basedir }}/{{ cifmw_discovered_image_name }}
+        virt-customize -a {{ _cifmw_edpm_build_images_cert_source }}/{{ cifmw_edpm_build_images_cert_dest }}
         --upload {{ cifmw_edpm_build_images_cert_path }}:{{ cifmw_edpm_build_images_cert_path }}
         --run-command 'update-ca-trust'
       environment:
