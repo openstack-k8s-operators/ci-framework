@@ -74,6 +74,20 @@
   gather_facts: false
   roles:
     - role: reproducer
+  tasks:
+    - name: Read the podman.txt file
+      ansible.builtin.slurp:
+        src: /tmp/podman.txt
+      register: podman_file
+
+    - name: Decode file content
+      ansible.builtin.set_fact:
+        _podman_content: "{{ podman_file['content'] | b64decode }}"
+
+    - name: Parse the file content
+      ansible.builtin.set_fact:
+        cifmw_update_podman_username: "{{ _podman_content.split()[0] }}"
+        cifmw_update_podman_password: "{{ _podman_content.split()[1] }}"
   post_tasks:
     - name: Allow traffic from OSP VMs to OSP API (needed for shiftstack)
       become: true
@@ -93,6 +107,13 @@
           ansible.builtin.systemd_service:
             name: firewalld
             state: restarted
+
+    - name: Recreate the podman.txt file on controller-0
+      ansible.builtin.copy:
+        content: "{{ cifmw_update_podman_username }} {{ cifmw_update_podman_password }}"
+        dest: /tmp/podman.txt
+        mode: '0644'
+      delegate_to: controller-0
 
     - name: Run deployment if instructed to
       when:
