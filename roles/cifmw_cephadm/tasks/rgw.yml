@@ -61,6 +61,27 @@
         rgw_frontend_cert: "{{ slurp_cert['content'] | b64decode ~
                                slurp_key['content'] | b64decode }}"
 
+- name: Create default RGW realm
+  block:
+    - name: Get radosgw-admin ceph_cli
+      ansible.builtin.include_tasks: ceph_cli.yml
+      vars:
+        ceph_command: radosgw-admin
+
+    - name: Test if default realm exists
+      become: true
+      ignore_errors: true
+      ansible.builtin.command: |
+        {{ cifmw_cephadm_ceph_cli }} realm get --rgw-realm={{ cifmw_ceph_rgw_realm }}
+      register: rgw_realm
+
+    - name: Create default RGW realm
+      when: rgw_realm.rc > 0
+      ansible.builtin.command: |
+        {{ cifmw_cephadm_ceph_cli }} realm create --rgw-realm={{ cifmw_ceph_rgw_realm }}
+      changed_when: false
+      become: true
+
 - name: Create a Ceph RGW spec
   ansible.builtin.template:
     src: templates/ceph_rgw.yml.j2
@@ -68,7 +89,7 @@
     mode: '0644'
     force: true
 
-- name: Get ceph_cli
+- name: Get ceph orch cli
   ansible.builtin.include_tasks: ceph_cli.yml
   vars:
     mount_spec: true
