@@ -1,0 +1,117 @@
+---
+cifmw_architecture_scenario: "ovs-dpdk-sriov-networker"
+
+# Automation section. Most of those parameters will be passed to the
+# controller-0 as-is and be consumed by the `deploy-va.sh` script.
+# Please note, all paths are on the controller-0, meaning managed by the
+# Framework. Please do not edit them!
+_arch_repo: "{{ cifmw_architecture_repo | default('/home/zuul/src/github.com/openstack-k8s-operators/architecture') }}"
+
+# HERE if you want to override kustomization, you can uncomment this parameter
+# and push the data structure you want to apply.
+# cifmw_architecture_user_kustomize:
+#   stage_0:
+#     'network-values':
+#       data:
+#         starwars: Obiwan
+
+# HERE, if you want to stop the deployment loop at any stage, you can uncomment
+# the following parameter and update the value to match the stage you want to
+# reach. Known stages are:
+#   pre_kustomize_stage_INDEX
+#   pre_apply_stage_INDEX
+#   post_apply_stage_INDEX
+#
+# cifmw_deploy_architecture_stopper:
+
+cifmw_libvirt_manager_net_prefix_add: false
+cifmw_libvirt_manager_fixed_networks:
+  - ocpbm
+  - ocppr
+  - osp_external
+  - osp_trunk
+
+cifmw_libvirt_manager_configuration:
+  networks:
+    ocpbm: |
+      <network>
+        <name>ocpbm</name>
+        <forward mode='bridge' />
+        <bridge name='ocpbm' />
+      </network>
+    ocppr: |
+      <network>
+        <name>ocppr</name>
+        <forward mode='bridge' />
+        <bridge name='ocppr' />
+      </network>
+    osp_external: |
+      <network>
+        <name>osp_external</name>
+        <forward mode='bridge' />
+        <bridge name='osp_external' />
+      </network>
+    osp_trunk: |
+      <network>
+        <name>osp_trunk</name>
+        <forward mode='bridge' />
+        <bridge name='osp_trunk' />
+      </network>
+  vms:
+    controller:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+    ocp:
+      amount: 3
+      uefi: true
+      root_part_id: 4
+      admin_user: core
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "ocp_master"
+      disksize: "100"
+      extra_disks_num: 3
+      extra_disks_size: "50G"
+      cpus: 10
+      memory: 32
+      nets:
+        - ocppr
+        - ocpbm
+        - osp_trunk
+        - osp_external
+
+# Note: with that extra_network_names "osp_trunk", we instruct
+# devscripts role to create a new network, and associate it to
+# the OCP nodes. This one is a "private network", and will hold
+# the VLANs used for network isolation.
+
+# Please create a custom env file to provide:
+# cifmw_devscripts_ci_token:
+# cifmw_devscripts_pull_secret:
+
+# Baremetal host configuration
+cifmw_config_bmh: true
+
+# BMH are deployed in a differnt NS than the secret OSP BMO
+# references in each BMH. Metal3 requires the referenced
+# secrets to be in the same NS or be allowed to access them
+cifmw_openshift_setup_metal3_watch_all_ns: true
+
+# Use EDPM image for computes
+cifmw_update_containers_edpm_image_url: "{{ cifmw_update_containers_registry }}/{{ cifmw_update_containers_org }}/edpm-hardened-uefi:{{ cifmw_update_containers_tag }}"
+
+# Set Logical Volume Manager Storage by default for local storage
+cifmw_use_lvms: true
+cifmw_lvms_disk_list:
+  - /dev/vda
+  - /dev/vdb
+  - /dev/vdc
