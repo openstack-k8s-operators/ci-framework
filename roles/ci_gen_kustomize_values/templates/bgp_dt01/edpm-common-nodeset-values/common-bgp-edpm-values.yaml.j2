@@ -1,7 +1,8 @@
 # source: bgp_dt01/edpm-common-nodeset-values/common-bgp-edpm-values.yaml.j2
 {% set instances_names = []                                                            %}
+{% set rack = 'r' ~ rack_number                                                        %}
 {% for _inst in cifmw_networking_env_definition.instances.keys()                       %}
-{%   if _inst.startswith(node_type)                                                    %}
+{%   if _inst.startswith('-'.join([rack, node_type]))                                  %}
 {%     set _ = instances_names.append(_inst)                                           %}
 {%   endif                                                                             %}
 {% endfor                                                                              %}
@@ -22,34 +23,36 @@ data:
         edpm_fips_mode: "{{ 'enabled' if cifmw_fips_enabled|default(false)|bool else 'check' }}"
         timesync_ntp_servers:
           - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
-{% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
         edpm_sshd_allowed_ranges:
-{%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
+{% set sshd_allowed_range = cifmw_ci_gen_kustomize_values_sshd_ranges | default([])    %}
+{% for rack in ['r0', 'r1', 'r2']                                                      %}
+{%   set _ = sshd_allowed_range.append(cifmw_networking_env_definition.networks['ctlplane' + rack].network_v4) %}
+{% endfor                                                                              %}
+{% for range in sshd_allowed_range                                                     %}
           - "{{ range }}"
-{%   endfor                                                                            %}
-{% endif                                                                               %}
+{% endfor                                                                              %}
     nodes:
 {% for instance in instances_names                                                     %}
       {{ instance }}:
         ansible:
-          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+{%   set ctlplane_rack = 'ctlplane' + rack                                             %}
+          host: {{ cifmw_networking_env_definition.instances[instance].networks[ctlplane_rack].ip_v4 }}
 {%   if original_content.data.nodeset.nodes['edpm-' ~ node_type ~ '-' ~ loop.index0].ansible.ansibleVars is defined %}
           ansibleVars: {{ original_content.data.nodeset.nodes['edpm-' ~ node_type ~ '-' ~ loop.index0].ansible.ansibleVars }}
 {%   endif                                                                                                          %}
         hostName: {{ instance }}
         networks:
 {%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
-{%        if net is not match('storagemgmt')                                           %}
-          - name: {{ net }}
-            subnetName: subnet1
-{%          if net is match('ctlplane')                                                %}
+{%        if 'storagemgmt' not in net                                                  %}
+          - name: {{ net if net != ctlplane_rack else 'ctlplane' }}
+            subnetName: {{ 'subnet1' if net != ctlplane_rack else 'subnet' ~ rack_number }}
+{%          if 'ctlplane' in net                                                       %}
             defaultRoute: true
-            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.ip_v4 }}
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks[ctlplane_rack].ip_v4 }}
 {%          endif                                                                      %}
 {%        endif                                                                        %}
 {%      endfor                                                                         %}
-{%        set rack_number = instance.split('-') | last                                 %}
-{%        set peer_suffix = 1 if instance.startswith('compute') else 5                 %}
+{%        set peer_suffix = 1 if 'compute' in instance else 5                          %}
           - name: BgpNet0
             subnetName: subnet{{ rack_number }}
             fixedIP: 100.64.{{ rack_number }}.{{ peer_suffix + 1 }}
@@ -58,8 +61,8 @@ data:
             fixedIP: 100.65.{{ rack_number }}.{{ peer_suffix + 1 }}
           - name: BgpMainNet
             subnetName: subnet{{ rack_number }}
-            fixedIP: 172.30.{{ rack_number }}.{{ peer_suffix + 1 }}
+            fixedIP: 99.99.{{ rack_number }}.{{ peer_suffix + 1 }}
           - name: BgpMainNetV6
             subnetName: subnet{{ rack_number }}
-            fixedIP: f00d:f00d:f00d:f00d:f00d:f00d:f00d:00{{ (rack_number | int) + 1 }}{{ 2 if instance.startswith('compute') else 3 }}
+            fixedIP: f00d:f00d:f00d:f00d:f00d:f00d:f00d:00{{ (rack_number | int) + 1 }}{{ 2 if 'compute' in instance else 3 }}
 {% endfor                                                                              %}
