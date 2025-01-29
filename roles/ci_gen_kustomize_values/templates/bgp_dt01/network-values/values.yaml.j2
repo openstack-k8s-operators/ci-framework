@@ -52,7 +52,7 @@ data:
 {% endfor %}
 
 {% for network in cifmw_networking_env_definition.networks.values() %}
-{% set ns.lb_tools = {} %}
+{%  set ns.lb_tools = {} %}
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
 {%  if network.tools is defined and network.tools.keys() | length > 0 %}
@@ -62,19 +62,38 @@ data:
 {%        set _ = ns.lb_tools.update({tool: []}) %}
 {%      endif %}
 {%    endfor %}
+{%    if network.network_name != 'ctlplane' %}
       - allocationRanges:
-{%    for range in network.tools.netconfig.ipv4_ranges %}
+{%      for range in network.tools.netconfig.ipv4_ranges %}
         - end: {{ range.end }}
           start: {{ range.start }}
-{%    endfor %}
+{%      endfor %}
         cidr: {{ network.network_v4 }}
 {%      if network.gw_v4 is defined %}
         gateway: {{ network.gw_v4 }}
 {%      endif %}
         name: subnet1
-{%  if network.vlan_id is defined  %}
+{%      if network.vlan_id is defined  %}
         vlan: {{ network.vlan_id }}
-{%  endif %}
+{%      endif %}
+{%    else %}
+{%      for rack in ['r0', 'r1', 'r2'] %}
+{%        set rack_subnet = cifmw_networking_env_definition.networks[network.network_name + rack] %}
+      - allocationRanges:
+{%        for range in rack_subnet.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%        endfor %}
+        cidr: {{ rack_subnet.network_v4 }}
+{%        if rack_subnet.gw_v4 is defined %}
+        gateway: {{ rack_subnet.gw_v4 }}
+{%        endif %}
+        name: {{ 'subnet' ~ loop.index0 }}
+{%        if rack_subnet.vlan_id is defined  %}
+        vlan: {{ rack_subnet.vlan_id }}
+{%        endif %}
+{%      endfor %}
+{%    endif %}
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
 {%      for tool in ns.lb_tools.keys() %}
@@ -107,19 +126,18 @@ data:
       {
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
-{%  if network.network_name == "octavia" %}
         "type": "bridge",
-{%  else %}
-        "type": "macvlan",
-{%  endif %}
+        "isDefaultGateway": true,
+        "isGateway": true,
+        "forceAddress": false,
+        "ipMasq": true,
+        "hairpinMode": true,
 {%  if network.network_name == "octavia" %}
         "bridge": "octbr",
-{%  elif network.vlan_id is defined %}
-        "master": "{{ network.network_name }}",
 {%  elif network.network_name == "ctlplane" %}
-        "master": "ospbr",
+        "bridge": "ospbr",
 {%  else %}
-        "master": "{{ ns.interfaces[network.network_name] }}",
+        "bridge": "{{ network.network_name }}",
 {%  endif %}
         "ipam": {
           "type": "whereabouts",
@@ -135,7 +153,8 @@ data:
            ],
 {%  endif %}
           "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
         }
       }
 {%  endif %}
