@@ -1,0 +1,58 @@
+---
+# HACK: (Lewis) This taskfile is used to test pre-release OCP versions
+# by intalling the previous OCP release's catalog source for the
+# dependent operators to use and overriding their subscriptions
+
+- name: Write catalog source
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: CatalogSource
+      metadata:
+        name: "{{ cifmw_openshift_setup_operator_override_catalog_name }}"
+        namespace: "{{ cifmw_openshift_setup_operator_override_catalog_namespace }}"
+      spec:
+        displayName: "{{ cifmw_openshift_setup_operator_override_catalog_name }}"
+        image: "{{ cifmw_openshift_setup_operator_override_catalog_image }}"
+        publisher: CI-Framework
+        sourceType: grpc
+        updateStrategy:
+          registryPoll:
+            interval: 10m
+
+- name: Patch metallb operator subscription to use custom CatalogSource
+  kubernetes.core.k8s:
+    state: patched
+    kind: Subscription
+    api_version: operators.coreos.com/v1alpha1
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    name: metallb-operator-sub
+    namespace: metallb-system
+    definition:
+      spec:
+        source: "{{ cifmw_openshift_setup_operator_override_catalog_name }}"
+    wait: true
+    wait_timeout: 300
+    wait_condition:
+      type: CatalogSourcesUnhealthy
+      status: "False"
+
+- name: Patch nmstate operator subscription to use custom CatalogSource
+  kubernetes.core.k8s:
+    state: patched
+    kind: Subscription
+    api_version: operators.coreos.com/v1alpha1
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    name: kubernetes-nmstate-operator
+    namespace: openshift-nmstate
+    definition:
+      spec:
+        source: "{{ cifmw_openshift_setup_operator_override_catalog_name }}"
+        wait_sleep: 10
+    wait: true
+    wait_timeout: 300
+    wait_condition:
+      type: CatalogSourcesUnhealthy
+      status: "False"
