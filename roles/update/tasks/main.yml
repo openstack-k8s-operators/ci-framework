@@ -36,6 +36,16 @@
   ansible.builtin.shell: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
+- name: Create collect state script
+  ansible.builtin.copy:
+    src: "collect-state.sh"
+    dest: "{{ cifmw_update_artifacts_basedir }}/collect-state.sh"
+    mode: "0775"
+
+- name: Collect state before update
+  ansible.builtin.command: |
+    {{ cifmw_update_artifacts_basedir }}/collect-state.sh 1
+
 - name: Wait for Update InstallPlan creation
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -45,7 +55,7 @@
     kind: InstallPlan
     namespace: openstack-operators
   register: _cifmw_update_install_plans
-  until: cifmw_update_install_plans.resources | selectattr('spec', 'defined') | selectattr('spec', '!=', None) | length > 0
+  until: _cifmw_update_install_plans.resources | selectattr('spec', 'defined') | selectattr('spec', '!=', None) | length > 0
   retries: 30
   delay: 10
 
@@ -54,10 +64,9 @@
     cifmw_update_installplan_name: >-
       {{
       _cifmw_update_install_plans.resources
-      | selectattr('spec', 'defined')
-      | selectattr('spec', '!=', None)
+      | selectattr('spec.clusterServiceVersionNames', 'defined')
       | map(attribute='metadata.name')
-      | last
+      | first
       }}
 
 - name: Approve the Update InstallPlan
@@ -93,6 +102,35 @@
   retries: 30
   delay: 10
 
+- name: Collect state after operator update
+  ansible.builtin.command: |
+    {{ cifmw_update_artifacts_basedir }}/collect-state.sh 2
+
+- name: Make sure we get a new version available, block until we do.
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: openstack
+  register: openstackversion_info
+  until: openstackversion_info.resources[0].spec.targetVersion != openstackversion_info.resources[0].status.availableVersion
+  retries: 20  # Adjust the number of retries as needed
+  delay: 15  # Adjust delay between retries as needed
+
+- name: Capture the .status.availableVersion in cifmw_update_available_version fact
+  set_fact:
+    cifmw_update_available_version: "{{ openstackversion_info.resources[0].status.availableVersion }}"
+
+- name: Display message about the update
+  debug:
+    msg: "About to update to {{ cifmw_update_available_version }}"
+
+- name: Collect state after we get a new version - just make sure.
+  ansible.builtin.command: |
+    {{ cifmw_update_artifacts_basedir }}/collect-state.sh 2
+
 - name: Set openstack_update_run Makefile environment variables
   tags:
     - always
@@ -105,7 +143,7 @@
       CONTAINERS_TARGET_TAG: {{ cifmw_update_openstack_update_run_containers_target_tag }}
       OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
       {% else -%}
-      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+      OPENSTACK_VERSION: {{ cifmw_update_available_version }}
       {% endif -%}
 
 - name: Run make openstack_update_run
