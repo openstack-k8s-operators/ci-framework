@@ -36,6 +36,62 @@
   ansible.builtin.shell: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
+- name: Wait for Update InstallPlan creation
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    namespace: openstack-operators
+  register: _cifmw_update_install_plans
+  until: cifmw_update_install_plans.resources | selectattr('spec', 'defined') | selectattr('spec', '!=', None) | length > 0
+  retries: 30
+  delay: 10
+
+- name: Retrieve Update InstallPlan name
+  set_fact:
+    cifmw_update_installplan_name: >-
+      {{
+      _cifmw_update_install_plans.resources
+      | selectattr('spec', 'defined')
+      | selectattr('spec', '!=', None)
+      | map(attribute='metadata.name')
+      | last
+      }}
+
+- name: Approve the Update InstallPlan
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    namespace: openstack-operators
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: InstallPlan
+      metadata:
+        name: "{{ cifmw_update_installplan_name }}"
+      spec:
+        approved: true
+
+- name: Display debug
+  ansible.builtin.debug:
+    msg: "{{ cifmw_update_installplan_name }}"
+
+- name: Wait for the Update InstallPlan to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    namespace: openstack-operators
+    name: "{{ cifmw_update_installplan_name }}"
+  register: _cifmw_update_installplan_status
+  until: _cifmw_update_installplan_status.resources[0].status.phase == 'Complete'
+  retries: 30
+  delay: 10
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
@@ -51,7 +107,6 @@
       {% else -%}
       OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
       {% endif -%}
-
 
 - name: Run make openstack_update_run
   vars:
