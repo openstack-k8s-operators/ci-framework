@@ -35,7 +35,7 @@ are shared among multiple roles:
 - `cifmw_deploy_edpm`: (Bool) toggle deploying EDPM. Default to false.
 - `cifmw_use_vbmc`: (Bool) Toggle VirtualBMC usage. Defaults to `false`.
 - `cifmw_use_sushy_emulator`: (Bool) Toggle Sushy Emulator usage. Defaults to `true`.
-- `cifmw_set_openstack_containers`:  (Bool) Run set_openstack_containers role during deployment to update openstack containers. Defaults to `false`.
+- `cifmw_set_openstack_containers`: (Bool) Run set_openstack_containers role during deployment to update openstack containers. Defaults to `false`.
 - `cifmw_sushy_redfish_bmc_protocol`: (String) The RedFish BMC protocol you would like to use with Sushy Emulator, options are `redfish` or `redfish-virtualmedia`. Defaults to `redfish-virtualmedia`
 - `cifmw_config_nmstate`: (Bool) toggle NMstate networking deployment. Default to false.
 - `cifmw_config_multus`: (Bool) toggle Multus networking deployment. Default to false.
@@ -57,7 +57,7 @@ are shared among multiple roles:
 - `cifmw_edpm_deploy_nfs`: (Bool) Specifies whether an nfs server should be deployed.
 - `cifmw_nfs_target`: (String) The Ansible inventory group where the nfs server is deployed. Defaults to `computes`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_nfs_network`: (String) The network the deployed nfs server will be accessible from. Defaults to `storage`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
-- `cifmw_nfs_shares`: (List) List of the shares that will be setup in the nfs server.  Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
+- `cifmw_nfs_shares`: (List) List of the shares that will be setup in the nfs server. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_fips_enabled`: (Bool) Specifies whether FIPS should be enabled in the deployment. Note that not all deployment methods support this functionality. Defaults to `false`.
 - `cifmw_baremetal_hosts`: (Dict) Baremetal nodes environment details. More details [here](../baremetal/01_baremetal_hosts_data.md)
 - `cifmw_deploy_obs` (Bool) Specifies whether to deploy Cluster Observability operator.
@@ -67,12 +67,13 @@ are shared among multiple roles:
 - `cifmw_parent_scenario`: (String or List(String)) path to existing scenario/parameter file to inherit from.
 - `cifmw_configure_switches`: (Bool) Specifies whether switches should be configured. Computes in `reproducer.yml` playbook. Defaults to `false`.
 - `cifmw_use_ocp_overlay`: (Boolean) Specifies whether OCP nodes deployed via devscripts should use overlay images. Using overlay images speeds up the redeployment when using the reproducer role locally but in CI each job is cleaned up and redeployed. Creating the overlay image takes time so should be disabled when not used. Defaults to `true`.
-- `cifmw_run_operators_compliance_scans`: (Bool) Specifies whether to run operator compliance scans.  Defaults to `false`.
-- `cifmw_run_compute_compliance_scans`: (Bool) Specifies whether to run compliance scans on the first compute.  Defaults to `false`.
+- `cifmw_run_operators_compliance_scans`: (Bool) Specifies whether to run operator compliance scans. Defaults to `false`.
+- `cifmw_run_compute_compliance_scans`: (Bool) Specifies whether to run compliance scans on the first compute. Defaults to `false`.
 - `cifmw_run_id`: (String) CI Framework run identifier. This is used in libvirt_manager, to add some uniqueness to some types of virtual machines (anything that's not OCP, CRC nor controller).
   If not set, the Framework will generate a random string for you, and store it on the target host, in `{{ cifmw_basedir }}/artifacts/run-id`
 - `cifmw_deploy_architecture_args`: (String) additional args and parameters to pass to the deploy-architecture script. Default is `''`.
 - `cifmw_enable_virtual_baremetal_support`: (Bool) Toggle the deployment and configuration of virtual baremetal services. If enabled Sushy Emulator will be deployed to OCP and Libvirt will be configured on the CI-Framework Ansible controller node. Defaults to `false`
+- `cifmw_openshift_setup_enable_operator_catalog_override`: (Bool) Toggles the option to deploy a custom CatalogSource and patch dependent operators to use it. Defaults to `false`
 
 ```{admonition} Words of caution
 :class: danger
@@ -101,6 +102,7 @@ proper parameter name, you may run arbitrary playbook or load custom CRDs at
 specific points in the standard run.
 
 Hooks may be presented in two ways:
+
 - as a list
 - as a single hook in a parameter
 
