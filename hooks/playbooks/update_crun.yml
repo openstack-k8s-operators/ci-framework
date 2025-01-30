@@ -1,0 +1,63 @@
+---
+- name: Add compute nodes to inventory
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  vars:
+    ssh_key_file: "/tmp/key_rsa"
+    secret_name: dataplane-ansible-ssh-private-key-secret
+    cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.kube/config"
+    cifmw_path: "{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+  tasks:
+    - name: Extract key to a local file
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          oc get secret {{ secret_name }} -n openstack -o json | jq -r '.data["ssh-privatekey"]' | base64 -d > {{ ssh_key_file }}
+          chmod 600 {{ ssh_key_file }}
+
+    - name: Fetch OSP BMO nodesets
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get OpenStackBaremetalSet -n openstack -o yaml
+      register: _osp_bmo_nodsets_oc_out
+
+    - name: Add OSP BMO nodesets to Ansible
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: "{{ item.group }}"
+        ansible_ssh_user: "{{ item.user }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_ssh_private_key_file: "{{ ssh_key_file }}"
+        ansible_ssh_extra_args: '-o StrictHostKeyChecking=no'
+      loop: >-
+        {% set hosts = [] -%}
+        {% set nodesets = (_osp_bmo_nodsets_oc_out.stdout | from_yaml)['items'] | default([]) -%}
+        {% for spec in nodesets | map(attribute='spec') -%}
+        {%   for host_key, host_val in spec.baremetalHosts.items() -%}
+        {%     set _ = hosts.append(
+          {
+          'name': host_key,
+          'ip': host_val['ctlPlaneIP'] | ansible.utils.ipaddr('address'),
+          'user': spec.cloudUserName,
+          'group': host_key | split('-') | first + 's'
+        }) -%}
+        {%   endfor -%}
+        {% endfor -%}
+        {{ hosts }}
+
+
+- name: Update crun on compute nodes
+  hosts: computes
+  become: true
+  tasks:
+    - name: Update crun RPM
+      ansible.builtin.dnf:
+        name: http://file.tlv.redhat.com/~rsafrono/files/crun-1.16.1-1.el9.x86_64.rpm
+        disable_gpg_check: true
+
+    - name: Get crun version
+      ansible.builtin.shell: |
+        hostname
+        crun --version
