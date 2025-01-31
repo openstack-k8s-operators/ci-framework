@@ -167,6 +167,7 @@ run_ctx_molecule: ci_ctx ## Run molecule check in a container
 	podman run \
 		--rm \
 		--security-opt label=disable \
+		--cap-add=SYS_ADMIN \
 		-v ${PWD}:/opt/sources \
 		--user root \
 		-e MOLECULE_CONFIG=${MOLECULE_CONFIG} \
