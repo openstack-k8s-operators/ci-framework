@@ -46,7 +46,7 @@
   ansible.builtin.command: |
     {{ cifmw_update_artifacts_basedir }}/collect-state.sh 1
 
-- name: Wait for Update InstallPlan creation
+- name: Wait for Unapproved Update InstallPlan Creation
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
@@ -55,18 +55,19 @@
     kind: InstallPlan
     namespace: openstack-operators
   register: _cifmw_update_install_plans
-  until: _cifmw_update_install_plans.resources | selectattr('spec', 'defined') | selectattr('spec', '!=', None) | length > 0
+  until: _cifmw_update_install_plans.resources | selectattr('spec.approval', 'equalto', 'Manual') | selectattr('spec.approved', 'equalto', false) | length > 0
   retries: 30
   delay: 10
 
-- name: Retrieve Update InstallPlan name
+- name: Collect Update InstallPlan Name
   set_fact:
     cifmw_update_installplan_name: >-
       {{
-      _cifmw_update_install_plans.resources
-      | selectattr('spec.clusterServiceVersionNames', 'defined')
-      | map(attribute='metadata.name')
-      | first
+      (_cifmw_update_install_plans.resources
+      | selectattr('spec.approval', 'equalto', 'Manual')
+      | selectattr('spec.approved', 'equalto', false)
+      | first)
+      .metadata.name
       }}
 
 - name: Approve the Update InstallPlan
