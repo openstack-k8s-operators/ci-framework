@@ -109,14 +109,32 @@ except ImportError:
     python_requests_gssapi_installed = False
 
 
-def _get_auth_module(module, url, verify_ssl):
+def _get_verify(verify: bool):
+    # If SSL verification is disabled do nothing
+    if not verify:
+        return False
+    # If the REQUESTS_CA_BUNDLE env var is present
+    # let requests handle picking the CA bundle from the env
+    if "REQUESTS_CA_BUNDLE" in os.environ:
+        return True
+    # Before defaulting to the requests/certifi CA bundle try to
+    # use the system one if available
+    for certs_path in ["/etc/ssl/certs", "/etc/pki/tls/certs"]:
+        path = os.path.join(certs_path, "ca-bundle.crt")
+        if os.path.exists(path):
+            return path
+    # Cannot locate the CA bundle, so verify the certs using the built-in bundle
+    return True
+
+
+def _get_auth_module(module, url, verify):
     # If the auth modules are loaded there's no need to check if the url is secured beforehand
     if python_requests_gssapi_installed:
         return HTTPSPNEGOAuth(mutual_authentication=OPTIONAL)
     elif python_requests_kerberos_installed:
         return HTTPKerberosAuth(mutual_authentication=OPTIONAL)
 
-    response = head(url=url, verify=verify_ssl, allow_redirects=True, timeout=30)
+    response = head(url=url, verify=verify, allow_redirects=True, timeout=30)
     # If the response in a 401 or 403 we need to authenticate
     if response.status_code in [401, 403]:
         # Kerberos module not present, fail
@@ -144,13 +162,12 @@ def main():
         module.fail_json(msg="requests required for this module.")
 
     url = module.params["url"]
-    verify_ssl = module.params["verify_ssl"]
-
+    verify = _get_verify(module.params["verify_ssl"])
     try:
         response = get(
             url=url,
-            auth=_get_auth_module(module, url, verify_ssl),
-            verify=verify_ssl,
+            auth=_get_auth_module(module, url, verify),
+            verify=verify,
             allow_redirects=True,
         )
 
