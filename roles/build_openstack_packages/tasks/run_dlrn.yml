@@ -147,10 +147,16 @@
       block:
         - name: Clone the downstream project
           ansible.builtin.git:
-            repo: '{{ _change.host }}/gerrit/{{ _change.project }}'
+            repo: '{{ _change.host }}/{{ _change.project }}'
             dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested'
-            refspec: "{{ _change.refspec }}"
-            version: 'FETCH_HEAD'
+            refspec: "+refs/merge-requests/*:refs/remotes/origin/mr/*"
+            version: 'origin/mr/{{ _change.change }}/head'
+
+        - name: Remove default checkout branch # noqa: command-instead-of-module
+          ansible.builtin.command:
+            cmd: "git branch -D {{ cifmw_bop_osp_release }}-trunk-patches"
+          args:
+            chdir: "{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested"
 
         - name: Update the branch name for local DLRN clone # noqa: command-instead-of-module
           ansible.builtin.command:
@@ -163,7 +169,7 @@
 
         - name: Update the project reference in packages.yml # noqa: command-instead-of-module
           vars:
-            _old_content: 'osp-patches: ssh://{{ _change.host | split("//") | last }}:22/{{ _change.project }}'
+            _old_content: 'osp-patches: git@{{ _change.host | split("//") | last }}:{{ _change.project }}.git'
             _new_content: 'osp-patches: file://{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}-tested'
           ansible.builtin.command:
             cmd: >-
