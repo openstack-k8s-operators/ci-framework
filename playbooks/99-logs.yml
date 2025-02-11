@@ -110,3 +110,58 @@
           ansible.builtin.file:
             path: "{{ ansible_user_dir }}/ansible_facts_cache"
             state: absent
+
+    - name: Debug hypervisor
+      ansible.builtin.debug:
+        var: hypervisor
+
+    - name: Add the hypervisor to inventory.
+      when:
+        - hypervisor is defined
+      ansible.builtin.add_host:
+        name: hypervisor
+        ansible_user: "{{ ansible_user_id }}"
+        ansible_host: "{{ hypervisor }}"
+        ansible_private_key_file: "{{ ansible_user_dir }}/.ssh/id_rsa_rhos_qe"
+        ansible_host_key_checking: false
+
+
+- name: Collate the logs in hypervisor
+  hosts: hypervisor
+  vars:
+    _logs_path: "{{ ansible_user_dir }}/logs/hypervisor"
+  tasks:
+    - name: Create hypervisor folder.
+      ansible.builtin.file:
+        path: "{{ _logs_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy hypervisor logs
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}"
+        cmd: >-
+          rsync -qa --no-links
+          --exclude=workload
+          --exclude=images
+          --exclude=*.qcow2
+          {{ item }} {{ _logs_path }}
+      failed_when: false
+      loop:
+        - ci-framework-data
+        - ci
+      changed_when: false
+
+- name: Collate all the logs.
+  hosts: controller, hypervisor
+  tasks:
+    - name: "Copy files from logs directory at {{ ansible_user_dir }}"
+      ansible.posix.synchronize:
+        src: "{{ ansible_user_dir }}/logs"
+        dest: "{{ zuul.executor.log_root }}"
+        mode: pull
+        copy_links: true
+        verify_host: false
+        rsync_opts:
+          - '-q'
+      failed_when: false
