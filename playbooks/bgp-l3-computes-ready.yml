@@ -1,0 +1,19 @@
+---
+- name: Wait until computes are ready
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Wait until number of computes is the expected one
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        openstackclient
+        openstack compute service list -f value --service nova-compute
+      register: nova_compute_service_list
+      retries: 30
+      delay: 4
+      until:
+        - nova_compute_service_list.rc == 0
+        - nova_compute_service_list.stdout | regex_findall('enabled up') | length == num_computes | int
