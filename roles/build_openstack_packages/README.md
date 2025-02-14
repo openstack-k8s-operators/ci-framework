@@ -26,6 +26,8 @@ An Ansible role for generating custom RPMSs of OpenStack Projects using DLRN
 * `cifmw_bop_skipped_projects`: List of projects on which DLRN build needs to be skipped.
 * `cifmw_bop_change_list`: Zuul Change list constructed while using Depends-On in CI to build rpm packages using DLRN.
 * `cifmw_bop_release_mapping`: A list of openstack release names and their respective branch names.
+* `cifmw_bop_versions_url`: A dict with downstream release name (cifmw_bop_osp_release) as key and their value as
+  versions.csv or frozen_versions.csv url.
 
 ## Examples
 
