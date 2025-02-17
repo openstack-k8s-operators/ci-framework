@@ -123,6 +123,9 @@ If you want to list multiple hooks, you have to use the following parameter name
 - `post_admin_setup`: before admin setup
 - `pre_tests`: before running tests
 - `post_tests`: after running tests
+- `post_install_operators_kuttl_from_operator`: after installing openstack operator for kuttl test when calling them from the operator's make target
+- `pre_kuttl_from_operator`: before running kuttl test when calling them from
+    the operator's make target
 
 Since we're already providing hooks as list, you may want to just add one or two hooks
 using your own environment file. Parameter structure is simple: `PREFIX_HOOKNAME: {hook struct}`
