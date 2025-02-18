@@ -7,7 +7,7 @@ __metaclass__ = type
 
 DOCUMENTATION = r"""
 ---
-module: url_request
+module: krb_request
 short_description: Downloads/fetches the content of a SPNEGO secured URL
 extends_documentation_fragment:
     - files
@@ -26,6 +26,12 @@ options:
       - The URL to retrieve the content from
     required: True
     type: str
+  method:
+    description:
+      - The HTTP method to use in the request
+    type: str
+    default: GET
+    choices: ["GET", "OPTIONS", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
   verify_ssl:
     description:
       - Enables/disables using TLS to reach the URL
@@ -43,7 +49,7 @@ options:
 
 EXAMPLES = r"""
 - name: Get some content
-  url_request:
+  krb_request:
     url: "http://someurl.local/resource"
     dest: "{{ ansible_user_dir }}/content.raw"
     mode: "0644"
@@ -89,7 +95,7 @@ from ansible.module_utils.basic import AnsibleModule
 
 
 try:
-    from requests import get, head
+    from requests import request, head
 
     python_requests_installed = True
 except ImportError:
@@ -148,6 +154,11 @@ def main():
         "url": {"type": "str", "required": True},
         "verify_ssl": {"type": "bool", "default": True},
         "dest": {"type": "str", "required": False},
+        "method": {
+            "type": "str",
+            "default": "GET",
+            "choices": ["GET", "OPTIONS", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+        },
     }
 
     result = {
@@ -162,9 +173,12 @@ def main():
         module.fail_json(msg="requests required for this module.")
 
     url = module.params["url"]
+    method = module.params["method"]
     verify = _get_verify(module.params["verify_ssl"])
     try:
-        response = get(
+
+        response = request(
+            method,
             url=url,
             auth=_get_auth_module(module, url, verify),
             verify=verify,
