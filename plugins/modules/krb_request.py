@@ -201,8 +201,8 @@ def main():
             except ValueError as e:
                 module.fail_json(msg=f"Error with the JSON response: {str(e)}")
 
-        if "dest" in module.params:
-            dest = module.params["dest"]
+        dest = module.params.get("dest", None)
+        if dest:
             if (
                 os.path.exists(dest)
                 and os.path.isdir(dest)
