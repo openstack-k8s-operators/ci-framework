@@ -1,6 +1,6 @@
 ---
 - name: "Run ci/playbooks/multinode-autohold.yml"
-  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  hosts: controller, primary
   gather_facts: true
   tasks:
     - name: Verify if "success" flag exists after successful tests execution
@@ -37,38 +37,20 @@
                   'autohold'
                 ] | join('/')
               }}
-          ansible.builtin.uri:
-            url: "{{ zuul_autohold_endpoint | default(_zuul_api_url) }}"
-            method: GET
-            headers:
-              Content-Type: "application/json"
-              Accept: "application/json"
-            return_content: yes
-            status_code: 200
-            body_format: json
-          register: autoholds_response
-          retries: 2
-          delay: 10
-          until:
-            - autoholds_response.status is defined
-            - autoholds_response.content_type is defined
-            - autoholds_response.status == 200
-            - "autoholds_response.content_type.startswith('application/json')"
-          ignore_errors: true
+            cifmw_krb_request_url: "{{ zuul_autohold_endpoint | default(_zuul_api_url)  }}"
+          ansible.builtin.include_role:
+            name: krb_request
+            apply:
+              ignore_errors: true  # noqa: ignore-errors
 
         - name: Check if any autohold matches
           vars:
             autoholds_returned_data: >-
               {{
                 (
-                  autoholds_response.content |
-                  default('[]') |
-                  from_json
-                ) if
-                  (
-                    (not autoholds_response.failed) and
-                    autoholds_response.content_type.startswith('application/json')
-                  )
+                  cifmw_krb_request_out.response_json |
+                  default([])
+                ) if (not cifmw_krb_request_out.failed)
                 else []
               }}
             autohold_candidates: >-
