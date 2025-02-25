@@ -1,65 +1,101 @@
 ---
-- name: Download sso76-image-stream.json
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/sso76-image-stream.json
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-image-stream.json"
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
 
-- name: Download sso76-ocp4-https.json
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/passthrough/ocp-4.x/sso76-ocp4-https.json
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-https.json"
+- name: Create kube dir for config
+  ansible.builtin.file:
+    path: /home/zuul/.kube/
+    state: directory
+    mode: '0770'
+  when: cifmw_federation_deploy_type == "crc"
 
-- name: Download sso76-ocp4-postgresql.json
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/passthrough/ocp-4.x/sso76-ocp4-postgresql.json
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql.json"
+- name: Link kubeconfg for comparability
+  ansible.builtin.copy:
+    src: /home/zuul/.crc/machines/crc/kubeconfig
+    dest: /home/zuul/.kube/config
+  when: cifmw_federation_deploy_type == "crc"
 
-- name: Download sso76-ocp4-postgresql-persistent.json
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/passthrough/ocp-4.x/sso76-ocp4-postgresql-persistent.json
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql-persistent.json"
+- name: Create namespace
+  kubernetes.core.k8s:
+    name: "{{ cifmw_federation_keycloak_namespace }}"
+    api_version: v1
+    kind: Namespace
+    state: present
 
-- name: Download sso76-ocp4-x509-https.json
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/reencrypt/ocp-4.x/sso76-ocp4-x509-https.json
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-https.json"
+- name: Read federation rhsso operator template
+  ansible.builtin.template:
+    src: rhsso-operator-olm.yaml.j2
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'rhsso-operator-olm.yaml' ] | path_join }}"
 
-- name: Download sso76-ocp4-x509-postgresql-persistent.json
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/reencrypt/ocp-4.x/sso76-ocp4-x509-postgresql-persistent.json
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-postgresql-persistent.json"
-
-- name: Update the core set of SSO resources
+- name: Install federation rhsso operator
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
-    cmd: >-
-      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-image-stream.json
-      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-https.json
-      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql.json
-      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-postgresql-persistent.json
-      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-https.json
-      oc replace -n openshift -f {{ ansible_user_dir }}/ci-framework-data/tmp/sso76-ocp4-x509-postgresql-persistent.json
-  register: federation_create_resource_templates
+    cmd: "oc apply -f {{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'rhsso-operator-olm.yaml' ] | path_join }}"
 
-- name: Install the sso OpenShift image streams
+- name: Wait for the rhsso install plan to be present
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+  register: ip_list
+  until: >-
+    {{
+      ip_list.resources |
+      map(attribute='metadata.labels') |
+      select('match', '.*rhsso-operator.*')
+    }}
+  retries: 30
+  delay: 40
+
+- name: Approve rhsso operator install plan
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: >-
+    oc patch installplan
+    $(oc get ip
+    -o=jsonpath='{.items[].metadata.name}')
+    --type merge --patch '{"spec":{"approved":true}}'
+
+- name: Add sso admin user secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: credential-sso
+        namespace: "{{ cifmw_federation_keycloak_namespace }}"
+      data:
+        ADMIN_USERNAME: "{{ cifmw_federation_keycloak_admin_username | b64encode }}"
+        ADMIN_PASSWORD: "{{ cifmw_federation_keycloak_admin_password | b64encode }}"
+
+- name: Read federation sso template
+  ansible.builtin.template:
+    src: sso.yaml.j2
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'sso.yaml' ] | path_join }}"
+
+- name: Install federation sso pod
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
-    cmd: >-
-      oc -n openshift import-image rh-sso-7/sso76-openshift-rhel8:7.6 --from=registry.redhat.io/rh-sso-7/sso76-openshift-rhel8:7.6 --confirm
-  register: federation_install_sso_image
-
-- name: Deploy SSO on OpenShift
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc new-app -n {{ cifmw_federation_run_osp_cmd_namespace }} --template=sso76-ocp4-x509-https -p SSO_ADMIN_USERNAME={{ cifmw_federation_keycloak_admin_username }} -p SSO_ADMIN_PASSWORD={{ cifmw_federation_keycloak_admin_password }}
-  register: federation_deploy_sso
+    cmd: "oc apply -n {{ cifmw_federation_keycloak_namespace }} -f {{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'sso.yaml' ] | path_join }}"
 
 - name: Add CRC IP address to hosts
   become: true
@@ -68,7 +104,7 @@
     block: |
       {{ hostvars['crc'].ansible_host }} api.crc.testing
       {{ hostvars['crc'].ansible_host }} oauth-openshift.apps-crc.testing
-      {{ hostvars['crc'].ansible_host }} sso-openstack.apps-crc.testing
+      {{ hostvars['crc'].ansible_host }} keycloak-openstack.apps-crc.testing
   when: cifmw_federation_deploy_type == "crc"
 
 - name: Wait for SSO pod to be avalable
@@ -79,23 +115,18 @@
     validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
   register: _result
   until: _result.status == 200
-  retries: 24 # wait at least 2 min for pod then fail
+  retries: 48 # wait at least 4 min for the to pod come online then fail
   delay: 5
 
-- name: Get SSO pod CA cert
+- name: Get ingress operator CA cert
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc get configmap kube-root-ca.crt -n {{ cifmw_federation_run_osp_cmd_namespace }} -o "jsonpath={ .data['ca\.crt']}"
-  register: federation_sso_ca
+      oc extract secret/router-ca --to={{ [ ansible_user_dir , 'ci-framework-data','tmp'] | path_join }} --keys=tls.crt -n openshift-ingress-operator --confirm
 
-- name: Write SSO pod CA cert to file for openstackclient pod
+- name: Store ingress operator CA to file for openstackclient pod
   ansible.builtin.copy:
-    content: "{{ federation_sso_ca.stdout }}"
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso-service-ca.crt"
-
-- name: Setting SSO pod CA fact
-  ansible.builtin.set_fact:
-    cifmw_federation_sso_ca: "{{ federation_sso_ca.stdout }}"
+    src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'tls.crt'] | path_join }}"
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"

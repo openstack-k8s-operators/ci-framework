@@ -28,6 +28,9 @@
               - op: add
                 path: /spec/keystone/template/customServiceConfig
                 value: |
+                  [DEFAULT]
+                  insecure_debug=true
+                  debug=true
                   [federation]
                   trusted_dashboard={{ '{{ .KeystoneEndpointPublic }}' }}/dashboard/auth/websso/
                   [openid]
@@ -35,9 +38,9 @@
                   [auth]
                   methods = password,token,oauth1,mapped,application_credential,openid
 
-    - name: Get SSO pod CA cert
+    - name: Get ingress operator CA cert
       ansible.builtin.slurp:
-        src: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso-service-ca.crt"
+        src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
       register: federation_sso_ca
 
     - name: Add Keycloak CA secret
@@ -52,9 +55,9 @@
             name: keycloakca
             namespace: "openstack"
           data:
-            KeyCloakCA: "{{ federation_sso_ca.content | b64encode }}"
+            KeyCloakCA: "{{ federation_sso_ca.content }}"
 
-    - name: Create Keystone HTTPD override secret for Federation
+    - name: Create Keystone httpd override secret for Federation
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         state: present
@@ -74,7 +77,7 @@
               OIDCPassUserInfoAs "{{ cifmw_keystone_OIDC_PassUserInfoAs }}"
               OIDCPassClaimsAs "{{ cifmw_keystone_OIDC_PassClaimsAs }}"
               OIDCCacheType "{{ cifmw_keystone_OIDC_CacheType }}"
-              OIDCMemCacheServers "{{ cifmw_keystone_OIDC_MemCacheServers }}"
+              OIDCMemCacheServers "{{ '{{ .MemcachedServers }}' }}"
               OIDCProviderMetadataURL "{{ cifmw_keystone_OIDC_ProviderMetadataURL }}"
               OIDCClientID "{{ cifmw_keystone_OIDC_ClientID }}"
               OIDCClientSecret "{{ cifmw_keystone_OIDC_ClientSecret }}"
