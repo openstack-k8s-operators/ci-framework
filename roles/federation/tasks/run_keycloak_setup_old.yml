@@ -1,3 +1,4 @@
+---
 - name: Download sso76-image-stream.json
   ansible.builtin.get_url:
     url: https://raw.githubusercontent.com/jboss-container-images/redhat-sso-7-openshift-image/sso76-dev/templates/sso76-image-stream.json
@@ -59,9 +60,6 @@
     cmd: >-
       oc new-app -n {{ cifmw_federation_run_osp_cmd_namespace }} --template=sso76-ocp4-x509-https -p SSO_ADMIN_USERNAME={{ cifmw_federation_keycloak_admin_username }} -p SSO_ADMIN_PASSWORD={{ cifmw_federation_keycloak_admin_password }}
   register: federation_deploy_sso
-  failed_when: >
-    ( '"deploymentconfigs.apps.openshift.io \"sso\" already exists" not in federation_deploy_sso.stderr' ) or
-    ( '"deploymentconfigs.apps.openshift.io \"sso\" created" not in federation_deploy_sso.stderr' )
 
 - name: Add CRC IP address to hosts
   become: true
@@ -84,20 +82,15 @@
   retries: 24 # wait at least 2 min for pod then fail
   delay: 5
 
-- name: Get SSO pod CA cert
+- name: Get ingress operator CA cert
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc get configmap sso-service-ca -n {{ cifmw_federation_run_osp_cmd_namespace }} -o "jsonpath={ .data['service-ca\.crt']}"
-  register: federation_sso_ca
+      oc extract secret/router-ca --to={{ [ ansible_user_dir , 'ci-framework-data','tmp'] | path_join }} --keys=tls.crt -n openshift-ingress-operator --confirm
 
-- name: Write SSO pod CA cert to file for openstackclient pod
+- name: Store ingress operator CA to file for openstackclient pod
   ansible.builtin.copy:
-    content: "{{ federation_sso_ca.stdout }}"
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso-service-ca.crt"
-
-- name: Setting SSO pod CA fact
-  ansible.builtin.set_fact:
-    cifmw_federation_sso_ca: "{{ federation_sso_ca.stdout }}"
+    src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'tls.crt'] | path_join }}"
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
