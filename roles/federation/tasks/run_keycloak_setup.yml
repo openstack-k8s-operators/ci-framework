@@ -82,20 +82,15 @@
   retries: 24 # wait at least 2 min for pod then fail
   delay: 5
 
-- name: Get SSO pod CA cert
+- name: Get ingress operator CA cert
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
     cmd: >-
-      oc get configmap kube-root-ca.crt -n {{ cifmw_federation_run_osp_cmd_namespace }} -o "jsonpath={ .data['ca\.crt']}"
-  register: federation_sso_ca
+      oc extract secret/router-ca --to={{ [ ansible_user_dir , 'ci-framework-data','tmp'] | path_join }} --keys=tls.crt -n openshift-ingress-operator --confirm
 
-- name: Write SSO pod CA cert to file for openstackclient pod
+- name: Store ingress operator CA to file for openstackclient pod
   ansible.builtin.copy:
-    content: "{{ federation_sso_ca.stdout }}"
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/sso-service-ca.crt"
-
-- name: Setting SSO pod CA fact
-  ansible.builtin.set_fact:
-    cifmw_federation_sso_ca: "{{ federation_sso_ca.stdout }}"
+    src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'tls.crt'] | path_join }}"
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
