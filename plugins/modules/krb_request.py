@@ -38,6 +38,11 @@ options:
     required: False
     type: bool
     default: true
+  body:
+    description:
+      - The body to send as json.
+    required: False
+    type: raw
   dest:
     description:
       - Path to the destination file/dir where the content should be downloaded
@@ -154,6 +159,7 @@ def main():
         "url": {"type": "str", "required": True},
         "verify_ssl": {"type": "bool", "default": True},
         "dest": {"type": "str", "required": False},
+        "body": {"type": "raw", "required": False},
         "method": {
             "type": "str",
             "default": "GET",
@@ -183,6 +189,7 @@ def main():
             auth=_get_auth_module(module, url, verify),
             verify=verify,
             allow_redirects=True,
+            json=module.params.get("body", None),
         )
 
         result["status_code"] = response.status_code
