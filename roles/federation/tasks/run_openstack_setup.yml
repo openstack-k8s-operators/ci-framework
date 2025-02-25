@@ -18,74 +18,67 @@
   ansible.builtin.copy:
     src: /home/zuul/.crc/machines/crc/kubeconfig
     dest: /home/zuul/.kube/config
-    follow: no
   when: cifmw_federation_deploy_type == "crc"
 
 - name: Run federation create domain
   vars:
-    cifmw_federation_run_osp_cmd: "openstack domain create {{ cifmw_federation_domain }}"
+    _osp_cmd: "openstack domain create {{ cifmw_federation_domain }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Run federation identity provider create
   vars:
-    cifmw_federation_run_osp_cmd: "openstack identity provider create --remote-id {{ cifmw_federation_remote_id }} --domain {{ cifmw_federation_domain }} {{ cifmw_federation_IdpName }}"
+    _osp_cmd: "openstack identity provider create
+      --remote-id {{ cifmw_federation_remote_id }}
+      --domain {{ cifmw_federation_domain }}
+      {{ cifmw_federation_IdpName }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
-- name: Setup federation create rules json file
-  ansible.builtin.copy:
-    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/{{ cifmw_federation_rules_file }}"
-    content: |
-      [
-        {
-          "local": [
-              {
-                  "user": {
-                  "name": "{0}"
-              },
-              "group": {
-                  "name": "{{ cifmw_federation_group_name }}",
-                  "domain": {
-                      "name": "{{ cifmw_federation_domain }}"
-                  }
-                }
-              }
-          ],
-          "remote": [
-            {
-              "type": "{{ cifmw_federation_clame_id }}"
-            }
-          ]
-        }
-      ]
+- name: Read federation rules json template
+  ansible.builtin.template:
+    src: rules.json.j2
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_rules_file ] | path_join }}"
 
-- name: Copy federation create rules json file to remote pod
+- name: Copy federation rules json file into pod
   kubernetes.core.k8s_cp:
     namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
     pod: openstackclient
     remote_path: "/home/cloud-admin/{{ cifmw_federation_rules_file }}"
-    local_path: "{{ ansible_user_dir }}/ci-framework-data/tmp/{{ cifmw_federation_rules_file }}"
+    local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_rules_file ] | path_join }}"
 
 - name: Run federation mapping create
   vars:
-    cifmw_federation_run_osp_cmd: "openstack mapping create --rules {{ cifmw_federation_rules_file }} {{ cifmw_federation_mapping_name }}"
+    _osp_cmd: "openstack mapping create
+      --rules {{ cifmw_federation_rules_file }}
+      {{ cifmw_federation_mapping_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Run federation group create
   vars:
-    cifmw_federation_run_osp_cmd: "openstack group create --domain {{ cifmw_federation_domain }} {{ cifmw_federation_group_name }}"
+    _osp_cmd: "openstack group create
+      --domain {{ cifmw_federation_domain }}
+      {{ cifmw_federation_group_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Run federation project create
   vars:
-    cifmw_federation_run_osp_cmd: "openstack project create --domain {{ cifmw_federation_domain }} {{ cifmw_federation_project_name }}"
+    _osp_cmd: "openstack project create
+      --domain {{ cifmw_federation_domain }}
+      {{ cifmw_federation_project_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Run federation rule add
   vars:
-    cifmw_federation_run_osp_cmd: "openstack role add --group {{ cifmw_federation_group_name }} --group-domain {{ cifmw_federation_domain }} --project {{ cifmw_federation_project_name }} --project-domain {{ cifmw_federation_domain }} member"
+    _osp_cmd: "openstack role add
+      --group {{ cifmw_federation_group_name }}
+      --group-domain {{ cifmw_federation_domain }}
+      --project {{ cifmw_federation_project_name }}
+      --project-domain {{ cifmw_federation_domain }}
+      member"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Run federation protocol create
   vars:
-    cifmw_federation_run_osp_cmd: "openstack federation protocol create openid --mapping {{ cifmw_federation_mapping_name }} --identity-provider {{ cifmw_federation_IdpName }}"
+    _osp_cmd: "openstack federation protocol create openid
+      --mapping {{ cifmw_federation_mapping_name }}
+      --identity-provider {{ cifmw_federation_IdpName }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
