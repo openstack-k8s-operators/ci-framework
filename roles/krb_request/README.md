@@ -16,6 +16,7 @@ Not required.
 * `cifmw_krb_request_dest_mode`: (String) Path where the request result should be dumped, if given.
 * `cifmw_krb_verify_ssl`: (Boolean) Verify or not the SSL certificate of the server. Defaults to `true`.
 * `cifmw_krb_request_method`: (String) HTTP method to use. Defaults to `GET`.
+* `cifmw_krb_request_body`: (Any) Body to serialize as json. Optional.
 
 ## Examples
 
