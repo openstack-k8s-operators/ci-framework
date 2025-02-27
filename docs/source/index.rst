@@ -73,10 +73,10 @@ In case of emergency, or if we didn't come back to you in a reasonable time (exp
 
 .. toctree::
    :maxdepth: 1
-   :caption: Cookbooks
+   :caption: Zuul
    :glob:
 
-   cookbooks/*
+   zuul/*
 
 .. toctree::
    :maxdepth: 1
