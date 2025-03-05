@@ -1,0 +1,57 @@
+---
+- name: "Run stage {{ _stage_vars.name }}"
+  ansible.builtin.debug:
+    msg: "Run stage {{ _stage_vars.name }}"
+
+- name: "Call pre stage hooks for test operator stage {{ _stage_vars.name }}"
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _stage_vars.pre_test_stage_hooks is defined
+  vars:
+    step: pre_test_hooks
+    hooks: "{{ _stage_vars.pre_test_stage_hooks }}"
+  ansible.builtin.import_role:
+    name: run_hook
+
+- name: Set empty stage vars dict
+  ansible.builtin.set_fact:
+    stage_vars_dict: {}
+
+- name: Include stage var file
+  ansible.builtin.include_vars:
+    file: "{{ _stage_vars.test_vars_file | default('/dev/null') }}"
+    name: _stage_var_file
+
+- name: Merge file vars and test vars
+  vars:
+    file_vars: "{{ _stage_var_file }}"
+    test_vars: "{{ _stage_vars.test_vars | default({}) }}"
+  ansible.builtin.set_fact:
+    _stage_test_vars: "{{ file_vars | combine(test_vars) }}"
+
+- name: Overwrite global_vars with stage_vars
+  with_dict: "{{ vars | combine(_stage_test_vars) }}"
+  vars:
+    start_with: cifmw_test_operator_{{ _stage_vars.type }}
+  when: item.key.startswith(start_with)
+  ansible.builtin.set_fact:
+    stage_vars_dict: "{{ stage_vars_dict | combine({item.key: _stage_test_vars[item.key] | default(lookup('vars', item.key, default=omit))} ) }}"
+
+- name: Override specific type config
+  vars:
+    _stage_config: 'cifmw_test_operator_{{ _stage_vars.type }}_config'
+  ansible.builtin.set_fact:
+    stage_vars_dict: "{{ stage_vars_dict | combine({_stage_config: _stage_test_vars[_stage_config] | default(lookup('vars', _stage_config, default=omit))} ) }}"
+
+- name: "Call runner {{ _stage_vars.type }}"
+  ansible.builtin.include_tasks: "runners/{{ _stage_vars.type }}_runner.yml"
+
+- name: "Call post stage hooks for test operator stage {{ _stage_vars.name }}"
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _stage_vars.post_test_stage_hooks is defined
+  vars:
+    step: post_test_hooks
+    hooks: "{{ _stage_vars.post_test_stage_hooks }}"
+  ansible.builtin.import_role:
+    name: run_hook
