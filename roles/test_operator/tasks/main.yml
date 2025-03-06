@@ -23,100 +23,107 @@
     owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
     group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
 
-- name: Patch CSV to change test-operator version if needed
-  when:
-    - cifmw_test_operator_bundle is defined
-    - cifmw_test_operator_bundle != ""
-    - not cifmw_test_operator_dry_run | bool
-  block:
-    - name: Get openstack-operator csv information
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit)}}"
-        kind: ClusterServiceVersion
-        api_version: operators.coreos.com/v1alpha1
-        label_selectors:
-          - operators.coreos.com/openstack-operator.openstack-operators
-        namespace: "{{ cifmw_test_operator_controller_namespace }}"
-      register: csv_info
+- name: Ensure OperatorGroup for the test-operator is present
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: operators.coreos.com/v1
+      kind: OperatorGroup
+      metadata:
+        name: test-operator-operatorgroup
+        namespace: "{{ cifmw_test_operator_namespace }}"
+      spec:
+        targetNamespaces:
+          - "{{ cifmw_test_operator_namespace }}"
+  when: not cifmw_test_operator_dry_run | bool
 
-    - name: Get full name of openstack-operator CSV
-      ansible.builtin.set_fact:
-        openstack_operator_csv_name: >-
-          {{
-            csv_info.resources |
-            map(attribute='metadata.name') |
-            list | first
-          }}
+- name: Ensure CatalogSource for the test-operator is present
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: CatalogSource
+      metadata:
+        name: test-operator-catalog
+        namespace: "{{ cifmw_test_operator_namespace }}"
+      spec:
+        sourceType: grpc
+        image: "{{ cifmw_test_operator_index }}"
+  when: not cifmw_test_operator_dry_run | bool
 
-    - name: Get index of test-operator image
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
-      ansible.builtin.shell: >-
-        set -o pipefail;
-        oc get ClusterServiceVersion {{ openstack_operator_csv_name }}
-        -o json |
-        jq '.spec.install.spec.deployments[0].spec.template.spec.containers[0].env |
-        to_entries[] |
-        select(.value.name == "RELATED_IMAGE_TEST_OPERATOR_MANAGER_IMAGE_URL").key'
-      register: image_index
+- name: Ensure Subscription for the test-operator is present
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: test-operator
+        namespace: "{{ cifmw_test_operator_namespace }}"
+      spec:
+        name: test-operator
+        source: test-operator-catalog
+        sourceNamespace: "{{ cifmw_test_operator_namespace }}"
+        config:
+          tolerations: "{{ cifmw_test_operator_tolerations | default(omit) }}"
+          nodeSelector: "{{ cifmw_test_operator_node_selector | default(omit) }}"
+  when: not cifmw_test_operator_dry_run | bool
 
-    - name: Patch test-operator version in CSV
-      kubernetes.core.k8s_json_patch:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit)}}"
-        kind: ClusterServiceVersion
-        api_version: operators.coreos.com/v1alpha1
-        namespace: "{{ cifmw_test_operator_controller_namespace }}"
-        name: "{{ openstack_operator_csv_name }}"
-        patch:
-          - path: "/spec/install/spec/deployments/0/spec/template/spec/containers/0/env/{{ image_index.stdout }}/value"
-            value: "{{ cifmw_test_operator_bundle }}"
-            op: replace
+- name: Wait until the test-operator csv is present
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_test_operator_namespace }}"
+    kind: ClusterServiceVersion
+    api_version: operators.coreos.com/v1alpha1
+  register: csv_list
+  delay: 10
+  retries: 20
+  until: >-
+    {{
+      csv_list.resources |
+      map(attribute='metadata.name') |
+      select('match', 'test-operator')
+    }}
+  when: not cifmw_test_operator_dry_run | bool
 
-    - name: Get test-operator-controller-manager pod information
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit)}}"
-        kind: Pod
-        label_selectors:
-          - control-plane=controller-manager
-          - openstack.org/operator-name=test
-        namespace: "{{ cifmw_test_operator_controller_namespace }}"
-      register: pod_info
+- name: Get full name of the test-operator csv
+  ansible.builtin.set_fact:
+    test_operator_csv_name: >-
+      {{
+        csv_list.resources |
+        map(attribute='metadata.name') |
+        select('match', 'test-operator') | first
+      }}
+  when: not cifmw_test_operator_dry_run | bool
 
-    - name: Get full name of test-operator-controller-manager pod
-      ansible.builtin.set_fact:
-        test_operator_controller_name: >-
-          {{
-            pod_info.resources |
-            map(attribute='metadata.name') |
-            list | first
-          }}
-
-    - name: Wait until the test-operator-controller-manager is reloaded
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        namespace: "{{ cifmw_test_operator_controller_namespace }}"
-        kind: Pod
-      register: pod_list
-      delay: 10
-      retries: 20
-      until: >-
-        {{
-          not (
-            pod_list.resources |
-            map(attribute='metadata.name') |
-            select('match', test_operator_controller_name) |
-            list
-          )
-        }}
+- name: Wait for the test-operator csv to Succeed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_test_operator_namespace }}"
+    kind: ClusterServiceVersion
+    api_version: operators.coreos.com/v1alpha1
+    name: "{{ test_operator_csv_name }}"
+  register: csv
+  retries: 20
+  delay: 10
+  until: csv.resources[0].status.phase | default(omit) == "Succeeded"
+  when: not cifmw_test_operator_dry_run | bool
 
 - name: Call test stages loop
   when: not cifmw_test_operator_dry_run | bool
@@ -124,6 +131,10 @@
   loop: "{{ cifmw_test_operator_stages }}"
   loop_control:
     loop_var: _stage_vars
+
+- name: Delete all resources created by the role
+  ansible.builtin.include_tasks: cleanup.yml
+  when: cifmw_test_operator_cleanup | bool and not cifmw_test_operator_dry_run | bool
 
 - name: Fail when any tests failed
   when:

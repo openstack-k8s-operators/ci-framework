@@ -5,8 +5,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ## Parameters
 * `cifmw_test_operator_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/test_operator` which defaults to `~/ci-framework-data/tests/test_operator`
 * `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
-* `cifmw_test_operator_controller_namespace`: (String) Namespace inside which the test-operator-controller-manager is created. Default value: `openstack-opearators`
-* `cifmw_test_operator_bundle`: (String) Full name of container image with bundle that contains the test-operator. Default value: `""`
+* `cifmw_test_operator_index`: (String) Full name of container image with index that contains the test-operator. Default value: `quay.io/openstack-k8s-operators/test-operator-index:latest`
 * `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
 * `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. As of now this value can not be specified inside `test_vars`. Default value: `8`
