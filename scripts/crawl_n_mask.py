@@ -197,7 +197,6 @@ class SecretMask:
                 return list(yaml.safe_load_all(f))
         except (FileNotFoundError, yaml.YAMLError) as e:
             print(f"Error while reading YAML: {e}")
-            # sys.exit(-1)
         return None
 
     def _write_yaml(self, encoded_secret: Any) -> None:
