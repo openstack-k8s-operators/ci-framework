@@ -65,6 +65,7 @@ cifmw_test_operator_stages:
 * `cifmw_test_operator_tempest_network_attachments`: (List) List of network attachment definitions to attach to the tempest pods spawned by test-operator. Default value: `[]`.
 * `cifmw_test_operator_tempest_extra_rpms`: (List) . A list of URLs that point to RPMs that should be installed before the execution of tempest. Note that this parameter has no effect when `cifmw_test_operator_tempest_external_plugin` is used. Default value: `[]`
 * `cifmw_test_operator_tempest_extra_configmaps_mounts`: (List) A list of configmaps that should be mounted into the tempest test pods. Default value: `[]`
+* `cifmw_test_operator_tempest_extra_mounts`: (List) A list of additional volume mounts for the tempest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_tempest_debug`: (Bool) Run Tempest in debug mode, it keeps the operator pod sleeping infinity (it must only set to `true`only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_tempest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When untouched it clears the default values set on the test-operator side. This means that the tempest test pods run with unspecified resource limits. Default value: `{requests: {}, limits: {}}`
 * `cifmw_tempest_tempestconf_config`: Deprecated, please use `cifmw_test_operator_tempest_tempestconf_config` instead
@@ -122,6 +123,7 @@ Default value: {}
 * `cifmw_test_operator_tobiko_network_attachments`: (List) List of network attachment definitions to attach to the tobiko pods spawned by test-operator. Default value: `[]`.
 * `cifmw_test_operator_tobiko_workflow`: (List) Definition of a Tobiko workflow that consists of multiple steps. Each step can contain all values from Spec section of [Tobiko CR](https://openstack-k8s-operators.github.io/test-operator/crds.html#tobiko-custom-resource).
 * `cifmw_test_operator_tobiko_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
+* `cifmw_test_operator_tobiko_extra_mounts`: (List) A list of additional volume mounts for the tobiko test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_tobiko_config`: (Dict) Definition of Tobiko CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#tobiko-custom-resource)). Default value:
 ```
   apiVersion: test.openstack.org/v1beta1
@@ -168,6 +170,7 @@ Default value: {}
 * `cifmw_test_operator_ansibletest_debug`: (Bool) Run ansible playbook with -vvvv. Default value: `false`
 * `cifmw_test_operator_ansibletest_workflow`: (List) A parameter that contains a workflow definition. Default value: `[]`
 * `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: (List) Extra configmaps for mounting in the pod. Default value: `[]`
+* `cifmw_test_operator_ansibletest_extra_mounts`: (List) A list of additional volume mounts for the ansibletest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_ansibletest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
 * `cifmw_test_operator_ansibletest_config`: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value:
 ```
@@ -215,6 +218,7 @@ Default value: {}
 * `cifmw_test_operator_horizontest_logs_directory_name`: (String) The name of the directory to store test logs. Default value: `horizon`
 * `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
 * `cifmw_test_operator_horizontest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
+* `cifmw_test_operator_horizontest_extra_mounts`: (List) A list of additional volume mounts for the horizontest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_horizontest_debug`: (Bool) Run HorizonTest in debug mode, it keeps the operator pod sleeping infinitely (it must only set to `true` only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_horizontest_extra_flag`: (String) The extra flag to modify pytest command to include/exclude tests. Default value: `not pagination`
 * `cifmw_test_operator_horizontest_project_name_xpath`: (String) The xpath to select project name based on dashboard theme. Default value: `//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
