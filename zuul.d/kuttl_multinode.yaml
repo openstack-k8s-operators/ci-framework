@@ -51,7 +51,7 @@
 
 - job:
     name: cifmw-multinode-kuttl
-    parent: cifmw-base-multinode-kuttl
+    parent: cifmw-base-multinode-kuttl-crc-cloud
     timeout: 9000
     files:
       - ^ci/playbooks/kuttl/.*
@@ -75,6 +75,94 @@
 - job:
     name: cifmw-multinode-kuttl-operator-target
     parent: cifmw-base-multinode-kuttl
+    description: |
+      This job runs kuttl tests from the operator Make targets,
+      without relying on install_yamls.
+    dependencies: ["openstack-meta-content-provider"]
+    pre-run:
+      - ci/playbooks/kuttl/kuttl-from-operator-deps.yaml
+    run:
+      - ci/playbooks/kuttl/kuttl-from-operator-run.yaml
+    vars:
+      cifmw_target_host: controller
+
+### CRC CLOUD ###
+- job:
+    name: cifmw-base-multinode-kuttl-crc-cloud
+    parent: cifmw-podified-multinode-edpm-base-crc-cloud
+    timeout: 7200
+    abstract: true
+    nodeset: centos-9-medium-crc-cloud-ocp-4-18-1-3xl
+    vars:
+      zuul_log_collection: true
+    extra-vars:
+      crc_ci_bootstrap_cloud_name: "{{ nodepool.cloud | replace('-nodepool-tripleo','') }}"
+      crc_ci_bootstrap_networking:
+        networks:
+          default:
+            range: 192.168.122.0/24
+            mtu: "{{ ('ibm' in nodepool.cloud) | ternary('1440', '1500') }}"
+            router_net: "{{ ('ibm' in nodepool.cloud) | ternary('hostonly', 'public') }}"
+          internal-api:
+            vlan: 20
+            range: 172.17.0.0/24
+          storage:
+            vlan: 21
+            range: 172.18.0.0/24
+          tenant:
+            vlan: 22
+            range: 172.19.0.0/24
+        instances:
+          controller:
+            networks:
+              default:
+                ip: 192.168.122.11
+          crc:
+            networks:
+              default:
+                ip: 192.168.122.10
+              internal-api:
+                ip: 172.17.0.5
+              storage:
+                ip: 172.18.0.5
+              tenant:
+                ip: 172.19.0.5
+    pre-run:
+      - ci/playbooks/e2e-prepare.yml
+    run:
+      - ci/playbooks/dump_zuul_data.yml
+      - ci/playbooks/kuttl/run.yml
+    post-run:
+      - ci/playbooks/collect-logs.yml
+    required-projects:
+      - github.com/openstack-k8s-operators/install_yamls
+
+- job:
+    name: cifmw-multinode-kuttl-crc-cloud
+    parent: cifmw-base-multinode-kuttl-crc-cloud
+    timeout: 9000
+    files:
+      - ^ci/playbooks/kuttl/.*
+      - ^scenarios/centos-9/kuttl.yml
+      - ^zuul.d/kuttl.yaml
+    vars:
+      cifmw_extras:
+        - '@scenarios/centos-9/kuttl_multinode.yml'
+      cifmw_kuttl_tests_operator_list:
+        - openstack
+        - barbican
+        - keystone
+        - horizon
+      commands_before_kuttl_run:
+        - oc get pv
+        - oc get all
+      commands_after_kuttl_run:
+        - oc get pv
+        - oc get all
+
+- job:
+    name: cifmw-multinode-kuttl-operator-target-crc-cloud
+    parent: cifmw-base-multinode-kuttl-crc-cloud
     description: |
       This job runs kuttl tests from the operator Make targets,
       without relying on install_yamls.
