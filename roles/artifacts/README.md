@@ -10,6 +10,7 @@ None - writes happen only in the user home.
 * `cifmw_artifacts_crc_host`: (String) Hostname of the CRC instance. Defaults to `api.crc.testing`.
 * `cifmw_artifacts_crc_user`: (String) Username to connect to the CRC instance. Defaults to `core`.
 * `cifmw_artifacts_crc_sshkey`: (String) Path to the private SSH key to connect to CRC. Defaults to `~/.crc/machines/crc/id_ecdsa`.
+* `cifmw_artifacts_crc_sshkey_ed25519`: (String) Path to the private SSH key to connect to CRC (newer CRC images). Defaults to `~/.crc/machines/crc/id_ed25519`.
 * `cifmw_artifacts_gather_logs`: (Boolean) Enables must-gather logs fetching. Defaults to `true`
 
 ## Examples
