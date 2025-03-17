@@ -18,12 +18,22 @@
     - crc_host_key.rc is defined
     - crc_host_key.rc == 0
   block:
+    - name: Recognize new keypair
+      ansible.builtin.stat:
+        path: "{{ cifmw_artifacts_crc_sshkey_ed25519 }}"
+      register: _sshkeypair
+
+    - name: Set fact if new keypair exists
+      when: _sshkeypair.stat.exists
+      ansible.builtin.set_fact:
+        new_keypair_path: "{{ cifmw_artifacts_crc_sshkey_ed25519 }}"
+
     - name: Prepare root ssh accesses
       ignore_errors: true  # noqa: ignore-errors
       ci_script:
         output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
         script: |-
-          ssh -i {{ cifmw_artifacts_crc_sshkey }} {{ cifmw_artifacts_crc_user }}@{{ cifmw_artifacts_crc_host }} <<EOF
+          ssh -i {{ new_keypair_path | default(cifmw_artifacts_crc_sshkey) }} {{ cifmw_artifacts_crc_user }}@{{ cifmw_artifacts_crc_host }} <<EOF
           set -xe;
           test -d /etc/ssh/sshd_config.d/ && sudo sed -ri 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config.d/* || true;
           sudo sed -i 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config;
@@ -36,6 +46,6 @@
       ci_script:
         output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
         script: >-
-          scp -v -r -i {{ cifmw_artifacts_crc_sshkey }}
+          scp -v -r -i {{ new_keypair_path | default(cifmw_artifacts_crc_sshkey) }}
           root@{{ cifmw_artifacts_crc_host }}:/ostree/deploy/rhcos/var/log/pods
           {{ cifmw_artifacts_basedir }}/logs/crc/
