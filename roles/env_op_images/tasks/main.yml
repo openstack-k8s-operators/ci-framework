@@ -54,37 +54,31 @@
           -o yaml
       register: _csvs_out
 
+    # FIXME: why there is no "manager" anymore? Should we parse
+    # all images with *manager* ?
+    - name: Get the images name
+      ansible.builtin.shell: >
+        set -o pipefail;
+        oc get ClusterServiceVersion
+        -l operators.coreos.com/openstack-operator.openstack-operators
+        --all-namespaces
+        -o yaml |
+        yq e '
+        [.items[]? |
+        .spec.install.spec.deployments[]? |
+        .spec.template.spec.containers[]? |
+        .env[]? |
+        select(.name? | test("^RELATED_IMAGE")) |
+        {(.name): .value}]'
+      register: _sa_images_content
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ ansible_user_dir }}/.kube/config"
+
     - name: Extract env variable name and images
       ansible.builtin.set_fact:
-        cifmw_openstack_service_images_content: >-
-          {{
-            cifmw_openstack_service_images_content |
-            default({}) |
-            combine(
-              {
-                item.name: item.value
-              }
-            )
-          }}
-      loop: >-
-        {{
-          (_csvs_out.stdout | from_yaml)['items'] |
-          flatten(levels=1) |
-          selectattr('spec.install.spec.deployments', 'defined') |
-          map(attribute='spec.install.spec.deployments') |
-          flatten(levels=1) |
-          selectattr('spec.template.spec.containers', 'defined') |
-          map(attribute='spec.template.spec.containers') |
-          flatten(levels=1) |
-          selectattr('name', 'defined') |
-          selectattr('name', 'equalto', 'manager') |
-          selectattr('env', 'defined') |
-          map(attribute='env') |
-          flatten(levels=1) |
-          selectattr("name", "match", "^RELATED_IMAGE")
-        }}
-      loop_control:
-        label: "{{ item.name }}"
+        cifmw_openstack_service_images_content: "{{ _sa_images_content.stdout | from_yaml }}"
 
     - name: Get all the pods in openstack-operator namespace
       vars:
