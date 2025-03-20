@@ -114,15 +114,29 @@
         dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
         version: '{{ _change.branch }}'
 
-    - name: "Symlink {{ project_name_mapped.stdout }} from Zuul clonned repos for upstream" # noqa: name[template]
+    - name: "Clone {{ project_name_mapped.stdout }} from Github" # noqa: name[template]
       when:
         - cifmw_bop_openstack_project_path | length == 0
         - not repo_status.stat.exists
-        - cifmw_bop_osp_release is not defined
-      ansible.builtin.file:
-        src: '{{ ansible_user_dir }}/{{ _change.src_dir }}'
-        path: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
-        state: link
+        - "'host' in _change"
+        - "'github.com' in _change.host"
+      ansible.builtin.git:
+        repo: '{{ _change.host }}/{{ _change.project }}'
+        dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
+        refspec: "+refs/pull/*:refs/remotes/origin/pr/*"
+        version: 'origin/pr/{{ _change.change }}/head'
+
+    - name: "Clone Openstack {{ project_name_mapped.stdout }}" # noqa: name[template]
+      when:
+        - cifmw_bop_openstack_project_path | length == 0
+        - not repo_status.stat.exists
+        - "'host' in _change"
+        - "'opendev' in _change.host"
+      ansible.builtin.git:
+        repo: '{{ _change.host }}/{{ _change.project }}'
+        dest: '{{ cifmw_bop_build_repo_dir }}/DLRN/data/{{ project_name_mapped.stdout }}'
+        refspec: "{{ _change.refspec }}"
+        version: 'FETCH_HEAD'
 
     - name: "Update packages.yml to use zuul repo for {{ project_name_mapped.stdout }}" # noqa: name[template], command-instead-of-module
       vars:
