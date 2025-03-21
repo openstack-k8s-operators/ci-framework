@@ -36,6 +36,82 @@
   ansible.builtin.shell: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
+- name: Wait for Unapproved Update InstallPlan Creation
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    namespace: openstack-operators
+  register: _cifmw_update_install_plans
+  until: _cifmw_update_install_plans.resources | selectattr('spec.approval', 'equalto', 'Manual') | selectattr('spec.approved', 'equalto', false) | length > 0
+  retries: 30
+  delay: 10
+
+- name: Collect Update InstallPlan Name
+  set_fact:
+    cifmw_update_installplan_name: >-
+      {{
+      (_cifmw_update_install_plans.resources
+      | selectattr('spec.approval', 'equalto', 'Manual')
+      | selectattr('spec.approved', 'equalto', false)
+      | first)
+      .metadata.name
+      }}
+- name: Approve the Update InstallPlan
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    namespace: openstack-operators
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: InstallPlan
+      metadata:
+        name: "{{ cifmw_update_installplan_name }}"
+      spec:
+        approved: true
+
+- name: Display debug
+  ansible.builtin.debug:
+    msg: "{{ cifmw_update_installplan_name }}"
+
+- name: Wait for the Update InstallPlan to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    namespace: openstack-operators
+    name: "{{ cifmw_update_installplan_name }}"
+  register: _cifmw_update_installplan
+  until: _cifmw_update_installplan.resources[0].status.phase == 'Complete'
+  retries: 120
+  delay: 10
+
+- name: Make sure we get a new version available, block until we do.
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: openstack
+  register: openstackversion_info
+  until: openstackversion_info.resources[0].spec.targetVersion != openstackversion_info.resources[0].status.availableVersion
+  retries: 20  # Adjust the number of retries as needed
+  delay: 15  # Adjust delay between retries as needed
+
+- name: Capture the .status.availableVersion in cifmw_update_available_version fact
+  set_fact:
+    cifmw_update_available_version: "{{ openstackversion_info.resources[0].status.availableVersion }}"
+
+- name: Display message about the update
+  debug:
+    msg: "About to update to {{ cifmw_update_available_version }}"
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
@@ -49,7 +125,7 @@
       CONTAINERS_TARGET_TAG: {{ cifmw_update_openstack_update_run_containers_target_tag }}
       OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
       {% else -%}
-      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+      OPENSTACK_VERSION: {{ cifmw_update_available_version }}
       {% endif -%}
 
 
