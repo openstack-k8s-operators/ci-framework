@@ -60,22 +60,22 @@
         oc get ClusterServiceVersion
         -l operators.coreos.com/openstack-operator.openstack-operators
         --all-namespaces
-        -o yaml |
-        yq e '
+        -o json |
+        jq -r '
         [.items[]? |
         .spec.install.spec.deployments[]? |
         .spec.template.spec.containers[]? |
         .env[]? |
         select(.name? | test("^RELATED_IMAGE")) |
-        select(.name == "*manager*" or .name == "*MANAGER*") |
-        {(.name): .value}]'
+        select(.name | contains("MANAGER")) |
+        {(.name): .value} ]'
       register: _sa_images_content
       args:
         executable: /bin/bash
 
     - name: Extract env variable name and images
       ansible.builtin.set_fact:
-        cifmw_openstack_service_images_content: "{{ _sa_images_content.stdout | from_yaml }}"
+        cifmw_openstack_service_images_content: "{{ _sa_images_content.stdout | from_json }}"
 
     - name: Get all the pods in openstack-operator namespace
       vars:
