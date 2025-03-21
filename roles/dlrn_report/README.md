@@ -22,6 +22,7 @@ This role does not need privilege escalation.
 * `cifmw_dlrn_report_zuul_log_path`: (string) Zuul log path url.
 * `cifmw_dlrn_report_promote_source`: (string) DLRN tag against which job status should be reported. It works with `cifmw_repo_setup_promotion` var. When the Deployment
   is prepared with `current-podified`. But the job needs to be reported against `podified-ci-testing`. In that case, We can user `cifmw_dlrn_report_promote_source`.
+* `cifmw_dlrn_report_force`: (boolean) By default, dlrn do not report for testproject, you need to force reporting setting this variable to true.
 
 ## Dependencies
 
