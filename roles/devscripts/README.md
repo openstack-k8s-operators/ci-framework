@@ -76,6 +76,11 @@ If you provide neither, or both, it will fail.
 
 ### Supported keys in cifmw_devscripts_config_overrides
 
+The `openshift_version` value can be set to either a minor version "X.Y.Z" (e.g.
+4.16.0) or a stable version "stable-X.Y" (e.g. stable-4.16), which would be
+translated to the corresponding minor version.
+Allowed values can be found [here](https://mirror.openshift.com/pub/openshift-v4/clients/ocp/)
+
 | Key | Default Value | Description |
 | --- | ------------- | ----------- |
 | working_dir | `/home/dev-scripts` | Path to the directory to store script artifacts. |

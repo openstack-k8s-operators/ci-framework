@@ -216,6 +216,8 @@ Default value: {}
 * `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
 * `cifmw_test_operator_horizontest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
 * `cifmw_test_operator_horizontest_debug`: (Bool) Run HorizonTest in debug mode, it keeps the operator pod sleeping infinitely (it must only set to `true` only for debugging purposes). Default value: `false`
+* `cifmw_test_operator_horizontest_extra_flag`: (String) The extra flag to modify pytest command to include/exclude tests. Default value: `not pagination`
+* `cifmw_test_operator_horizontest_project_name_xpath`: (String) The xpath to select project name based on dashboard theme. Default value: `//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
 * `cifmw_test_operator_horizontest_config`: (Dict) Definition of HorizonTest CR instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#horizontest-custom-resource)). Default value:
 ```
   apiVersion: test.openstack.org/v1beta1
@@ -238,6 +240,8 @@ Default value: {}
     flavorName: "{{ cifmw_test_operator_horizontest_flavor_name }}"
     logsDirectoryName: "{{ cifmw_test_operator_horizontest_logs_directory_name }}"
     debug: "{{ cifmw_test_operator_horizontest_debug }}"
+    extraFlag: "{{ cifmw_test_operator_horizontest_extra_flag }}"
+    projectNameXpath "{{ cifmw_test_operator_horizontest_project_name_xpath }}"
     horizonTestDir: "{{ cifmw_test_operator_horizontest_horizon_test_dir }}"
 ```
 
