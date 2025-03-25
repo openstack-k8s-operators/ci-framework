@@ -216,3 +216,209 @@ then use:
 ```
 
 More tags may show up according to the needs.
+
+## Debugging kuttl job
+
+This example how to debug `kuttl` job on hold node was based on job, that runs
+tests:
+
+```raw
+TASK [Run kuttl tests _raw_params=run-kuttl-tests.yml] *************************
+included: /home/zuul/src/github.com/openstack-k8s-operators/ci-framework/ci/playbooks/kuttl/run-kuttl-tests.yml for localhost => (item=openstack)
+included: /home/zuul/src/github.com/openstack-k8s-operators/ci-framework/ci/playbooks/kuttl/run-kuttl-tests.yml for localhost => (item=barbican)
+included: /home/zuul/src/github.com/openstack-k8s-operators/ci-framework/ci/playbooks/kuttl/run-kuttl-tests.yml for localhost => (item=keystone)
+included: /home/zuul/src/github.com/openstack-k8s-operators/ci-framework/ci/playbooks/kuttl/run-kuttl-tests.yml for localhost => (item=horizon)
+```
+
+To run the playbooks as it was done on Zuul, do:
+
+```shell
+cd src/github.com/openstack-k8s-operators/ci-framework
+# make sure ansible.cfg role path contains: ~/ci-framework-data/artifacts/roles
+
+# you can edit list of operators to be tested, by editing: ci/playbooks/kuttl/e2e-kuttl.yml
+# and replace: cifmw_kuttl_tests_operator_list with list of operators to check.
+
+cat << EOF > testvars.yaml
+---
+ansible_user_dir: /home/zuul
+zuul:
+  projects:
+    github.com/openstack-k8s-operators/ci-framework:
+      src_dir: src/github.com/openstack-k8s-operators/ci-framework
+cifmw_internal_registry_login: false
+cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+cifmw_openshift_setup_skip_internal_registry: true
+cifmw_artifacts_basedir: "{{ ansible_user_dir }}/ci-framework-data/artifacts "
+cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+EOF
+
+# Take the inventory.yaml file from /zuul-info directory from failing job
+curl -SL https://logserver.rdoproject.org/876/rdoproject.org/876b1be532664415afb9ad158d1b031c/zuul-info/inventory.yaml > zuul-vars-tmp.yaml
+yq .all.vars zuul-vars-tmp.yaml > zuul-vars.yaml
+
+ansible-playbook -e @testvars.yaml -e @zuul-vars.yaml ci/playbooks/kuttl/e2e-kuttl.yml
+```
+
+
+
+## Rerun kuttl job on local VM
+
+- Deploy CRC
+
+```shell
+# Run crc setup first if not executed earlier
+/usr/local/bin/crc start --memory 24000 --disk-size 80 --cpus 14
+```
+
+- configure additional nodes
+
+Based on: https://github.com/openstack-k8s-operators/install_yamls/?tab=readme-ov-file#deploy-dev-env-using-crc-edpm-nodes-with-isolated-networks
+
+```shell
+git clone https://github.com/openstack-k8s-operators/install_yamls ~/src/github.com/openstack-k8s-operators/install_yamls
+cd ~/src/github.com/openstack-k8s-operators/install_yamls/devsetup
+
+make download_tools
+make crc_attach_default_interface
+EDPM_TOTAL_NODES=1 make edpm_compute
+```
+
+- Prepare for kuttl:
+```
+pip3 install ansible-core yq
+git clone https://github.com/openstack-k8s-operators/install_yamls ~/src/github.com/openstack-k8s-operators/install_yamls
+git clone https://github.com/openstack-k8s-operators/ci-framework ~/src/github.com/openstack-k8s-operators/ci-framework
+
+# Deploy compute host
+cd ~/src/github.com/openstack-k8s-operators/install_yamls/devsetup
+make download_tools
+make crc_attach_default_interface
+EDPM_TOTAL_NODES=1 make edpm_compute
+
+sudo virsh attach-interface --domain edpm-compute-0 --type network --source default --model virtio --config --live
+# attach twice even that it will fail.
+sudo virsh attach-interface --domain edpm-compute-0 --type network --source default --model virtio --config --live || true
+edpm_node_ip_address=$(sudo virsh net-dhcp-leases default | grep edpm-compute | awk '{print $5}' | cut -f1 -d'/')
+
+cd ~/src/github.com/openstack-k8s-operators/ci-framework/
+
+ansible-galaxy install -r requirements.yml
+sed -i 's/localhost/controller/g' inventory.yml
+
+mkdir -p roles/prepare-workspace/tasks/
+
+curl -SL https://logserver.rdoproject.org/e56/rdoproject.org/e56761f5b6e147c5b0a424c47e8f0503/zuul-info/inventory.yaml > zuul-inventory.yaml
+old_controller_ip=$(cat zuul-inventory.yaml | yq -e .all.hosts.controller.ansible_host | xargs)
+new_controller_ip=$(ip route get 1.2.3.4 | awk '{print $7}' | head -n1)
+old_controller_user=$(cat zuul-inventory.yaml | yq -e .all.hosts.controller.ansible_user | xargs)
+new_controller_user=$(whoami)
+old_crc_ip=$(cat zuul-inventory.yaml | yq -e .all.hosts.crc.ansible_host | xargs)
+new_crc_ip=192.168.130.11
+sed -i "s/$old_controller_ip/$new_controller_ip/g" zuul-inventory.yaml
+sed -i "s/ansible_user: $old_controller_user/ansible_user: $new_controller_user/g" zuul-inventory.yaml
+sed -i "s/$old_crc_ip/$new_crc_ip/g" zuul-inventory.yaml
+
+for host in localhost $new_controller_ip $new_crc_ip $edpm_node_ip_address; do
+    ssh-keyscan -H $host >> ~/.ssh/known_hosts
+done
+
+if ! [ -f "~/.ssh/id_ed25519" ]; then
+  ssh-keygen -t ed25519 -a 200 -f ~/.ssh/id_ed25519 -N ""
+fi
+
+cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+scp -i ~/.crc/machines/crc/id_ecdsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ~/.ssh/id_ed25519.pub  core@192.168.130.11:~/.ssh/authorized_keys.d/controller
+scp -i ~/.crc/machines/crc/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ~/.ssh/id_ed25519.pub  core@192.168.130.11:~/.ssh/authorized_keys.d/controller
+sshpass -p "12345678" ssh-copy-id -o StrictHostKeyChecking=no -i ~/.ssh/id_ed25519.pub "root@$edpm_node_ip_address"
+
+# Gen zuul-vars.yaml
+yq .all.vars zuul-inventory.yaml > zuul-vars.yaml
+
+# create required files to satisfy world
+executor_dir=$(dirname $(cat zuul-vars.yaml | yq -e '.zuul.executor.inventory_file' | sed 's|/inventory.yaml||g' | xargs))
+executor_workdir="$executor_dir/work/logs/zuul-info"
+sudo mkdir -p $executor_workdir
+sudo chown $(whoami):$(whoami) $executor_workdir
+ln -s $(pwd)/zuul-inventory.yaml $executor_workdir/inventory.yaml
+
+cat << EOF > testvars.yaml
+---
+ansible_user_dir: /home/$(whoami)
+zuul:
+  projects:
+    github.com/openstack-k8s-operators/ci-framework:
+      src_dir: src/github.com/openstack-k8s-operators/ci-framework
+cifmw_internal_registry_login: false
+cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+cifmw_openshift_setup_skip_internal_registry: true
+cifmw_artifacts_basedir: "{{ ansible_user_dir }}/ci-framework-data/artifacts "
+cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
+nodepool:
+  cloud: ""
+## From zuul.d/kuttl_multinode.yaml
+cifmw_extras:
+  - '@scenarios/centos-9/kuttl_multinode.yml'
+cifmw_kuttl_tests_operator_list:
+  - openstack
+  - barbican
+  - keystone
+  - horizon
+commands_before_kuttl_run:
+  - oc get pv
+  - oc get all
+commands_after_kuttl_run:
+  - oc get pv
+  - oc get all
+EOF
+
+sudo mkdir -p /etc/ci/env
+cat << 'EOF' > gen-network-info.sh
+#!/bin/bash
+
+echo "crc_ci_bootstrap_networks_out:"
+
+for vm in crc edpm-compute-0; do
+  if [ "$vm" == "crc" ]; then
+    net="crc"
+  else
+    net="default"
+  fi
+  ip=$(sudo virsh net-dhcp-leases "$net" | grep "$vm" | awk '{print $5}' | cut -f 1 -d'/')
+  gw=$(sudo virsh net-dumpxml default | grep -o "address='[^']*'" | tail -n1 | cut -f2 -d'=' | xargs)
+  mac=$(sudo virsh domiflist "$vm" | grep network | awk '{print $5}' | head -1)
+  iface=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+
+  if [ -z "$ip" ]; then
+      ip="192.168.122.10"
+  fi
+
+  if [ -z "$gw" ]; then
+      gw="192.168.122.1"
+  fi
+  echo "  $vm:"
+  for role in default internal-api storage tenant; do
+  echo "    $role:"
+  echo "      connection: $net"
+  echo "      gw: $gw"
+  echo "      iface: $iface"
+  echo "      ip: $ip"
+  echo "      mac: $mac"
+  echo "      mtu: '1500'"
+  done
+done
+
+echo """
+crc_ci_bootstrap_provider_dns:
+  - $(ip route get 1.2.3.4 | awk '{print $7}')
+  - 9.9.9.9
+  - 1.1.1.1
+"""
+EOF
+
+bash gen-network-info.sh | sudo tee /etc/ci/env/networking-info.yml
+
+ansible-playbook -i inventory.yml -e @testvars.yaml -e @zuul-vars.yaml ci/playbooks/multinode-customizations.yml
+ansible-playbook -i inventory.yml -e @testvars.yaml -e @zuul-vars.yaml ci/playbooks/e2e-prepare.yml
+ansible-playbook -i inventory.yml -e @testvars.yaml -e @zuul-vars.yaml ci/playbooks/dump_zuul_data.yml
+ansible-playbook -i inventory.yml -e @testvars.yaml -e @zuul-vars.yaml ci/playbooks/kuttl/run.yml
