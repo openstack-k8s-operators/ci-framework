@@ -67,6 +67,25 @@
     dest: "~/ci-framework-data/parameters/ceph-{{ _az }}.yml"
     content: "{{ _content | to_nice_yaml }}"
 
+- name: Check if ceph_client file already exists
+  ansible.builtin.stat:
+    path: "/tmp/ceph_client_{{_az}}.yml"
+  register: ceph_file_stat
+
+- name: Load ceph variables if the file exists
+  ansible.builtin.include_vars:
+    file: "/tmp/ceph_client_{{_az}}.yml"
+  when: ceph_file_stat.stat.exists
+
+- name: If It exists Add cifmw_cephadm_keys to ceph variables file
+  ansible.builtin.blockinfile:
+    path: "~/ci-framework-data/parameters/ceph-{{ _az }}.yml"
+    block: |
+      cifmw_cephadm_keys:
+      {{ keys | default({}) | to_nice_yaml }}
+    insertafter: EOF
+  when: ceph_file_stat.stat.exists
+
 - name: Deploy Ceph
   cifmw.general.ci_script:
     output_dir: "/home/zuul/ci-framework-data/artifacts"

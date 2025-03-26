@@ -1,0 +1,145 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Read the existing inventory file
+  ansible.builtin.slurp:
+    src: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+  register: inventory_content
+
+- name: Parse YAML content of inventory file
+  ansible.builtin.set_fact:
+    inventory_data: "{{ inventory_content.content | b64decode | from_yaml }}"
+
+- name: Replicate and modify the host entry in the inventory
+  ansible.builtin.set_fact:
+    new_host_entry: "{{ inventory_data[_group_name]['hosts'] | dict2items | first | json_query('value') | combine({'ansible_host': _node_to_add + '.utility'}, recursive=True) }}"
+
+- name: Add the new host to the group of computes in the inventory
+  ansible.builtin.set_fact:
+    updated_inventory: "{{ inventory_data | combine({_group_name: {'hosts': inventory_data[_group_name]['hosts'] | combine({_node_to_add: new_host_entry})}}, recursive=True) }}"
+
+- name: Write the updated inventory back to the file
+  ansible.builtin.copy:
+    content: "{{ updated_inventory | to_nice_yaml }}"
+    dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+    mode: '0644'
+
+- name: Read the existing networking-environment-definition.yml file
+  ansible.builtin.slurp:
+    src: /etc/ci/env/networking-environment-definition.yml
+  register: net_env_content
+
+- name: Parse YAML content of networking-environment-definition.yml file
+  ansible.builtin.set_fact:
+    net_env_data: "{{ net_env_content.content | b64decode | from_yaml }}"
+
+- name: The map for az0 contains all AZ backends
+  ansible.builtin.set_fact:
+    az_to_dcn:
+      az0: ""
+      az1: dcn1
+      az2: dcn2
+
+- name: Load new host networking environment definition from template into a variable
+  ansible.builtin.set_fact:
+    new_net_host_entry: "{{ lookup('template', 'node_network_env_definitions.yaml.j2') | from_yaml }}"
+
+- name: Merge both YAML files of networking environment definition
+  ansible.builtin.set_fact:
+    merged_net_env_data: "{{ net_env_data | combine(new_net_host_entry, recursive=True) }}"
+
+- name: Save merged YAML file of networking environment definition
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/ci/env/networking-environment-definition.yml
+    content: "{{ merged_net_env_data | to_nice_yaml }}"
+    mode: '0644'
+
+- name: Get MAC address of public interface on the new host
+  ansible.builtin.shell: |
+    set -o pipefail
+    virsh domiflist cifmw-{{ _node_to_add }} | grep {{ az_to_dcn[_az] }}_pb | awk '{print $5}'
+  register: mac_pb
+  delegate_to: hypervisor
+
+- name: Get MAC address of trunk interface on the new host
+  ansible.builtin.shell: |
+    set -o pipefail
+    virsh domiflist cifmw-{{ _node_to_add }} | grep {{ az_to_dcn[_az] }}_tr | awk '{print $5}'
+  register: mac_tr
+  delegate_to: hypervisor
+
+- name: Get UUID of the VM hosting the new host
+  ansible.builtin.shell: |
+    virsh domuuid cifmw-{{ _node_to_add }}
+  register: vm_uuid
+  delegate_to: hypervisor
+
+- name: Create content of new item of cifmw_baremetal_hosts in reproducer-variables.yml
+  ansible.builtin.set_fact:
+    new_variable_host_entry: >-
+      {{
+        {
+          "cifmw_baremetal_hosts": {
+            _node_to_add: {
+              "boot_mode": "legacy",
+              "connection": "redfish-virtualmedia+http://sushy.utility:8000/redfish/v1/Systems/" + vm_uuid.stdout,
+              "nics": [
+                { "mac": mac_pb.stdout, "network": az_to_dcn[_az] + "_pb" },
+                { "mac": mac_tr.stdout, "network": az_to_dcn[_az] + "_tr" }
+              ],
+              "password": "password",
+              "username": "admin",
+              "uuid": vm_uuid.stdout
+            }
+          }
+        }
+      }}
+
+- name: Read the existing reproducer-variables.yml file
+  ansible.builtin.slurp:
+    src: "{{ ansible_user_dir }}/reproducer-variables.yml"
+  register: vars_env_content
+
+- name: Parse YAML content of reproducer-variables.yml file
+  ansible.builtin.set_fact:
+    vars_env_data: "{{ vars_env_content.content | b64decode | from_yaml }}"
+
+- name: Merge both YAML files of reproducer variables
+  ansible.builtin.set_fact:
+    merged_vars_env_data: "{{ vars_env_data | combine(new_variable_host_entry, recursive=True) }}"
+
+- name: Save merged YAML file
+  ansible.builtin.copy:
+    dest: "{{ ansible_user_dir }}/reproducer-variables.yml"
+    content: "{{ merged_vars_env_data | to_nice_yaml }}"
+    mode: '0644'
+
+- name: Created updated cifmw_baremetal_hosts fact
+  ansible.builtin.set_fact:
+    updated_cifmw_baremetal_hosts: "{{ merged_vars_env_data['cifmw_baremetal_hosts'] }}"
+
+- name: Load reproducer-variables
+  ansible.builtin.include_vars:
+    file: "~/reproducer-variables.yml"
+
+- name: Load networking-environment-definition
+  ansible.builtin.include_vars:
+    file: "/etc/ci/env/networking-environment-definition.yml"
+    name: cifmw_networking_env_definition
+
+- name: Load updated inventory
+  ansible.builtin.meta: refresh_inventory

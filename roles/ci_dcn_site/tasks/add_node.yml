@@ -1,0 +1,115 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# We are scaling out and the ceph cluster already exists we can directly create the Nodeset utilizing the existing
+# "pre-ceph" values and then update it with "post-ceph" values which include additional ceph configuration and then
+# create and apply Deployment CR with full list of dataplane services.
+- name: Create a values.yaml.j2 file with full list of dataplane services
+  ansible.builtin.copy:
+    dest: "{{ ci_dcn_site_cifmw_repo_path }}/roles/ci_dcn_site/templates/deployment/values.yaml.j2"
+    mode: '0644'
+    content: |
+      ---
+      # source: dcn/deployment/values.yaml.j2
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: edpm-deployment-values-post-ceph
+        annotations:
+          config.kubernetes.io/local-config: "true"
+      data:
+        nodeset_name: "{% raw %}{{ _group_name }}{% endraw %}-edpm"
+        deployment:
+          name: "add-node-{% raw %}{{ _group_name }}{% endraw %}"
+        servicesOverride:
+          - bootstrap
+          - configure-network
+          - validate-network
+          - install-os
+          - ceph-hci-pre
+          - configure-os
+          - ssh-known-hosts
+          - run-os
+          - reboot-os
+          - install-certs
+          - ceph-client
+          - ovn
+          - "neutron-metadata-cell{% raw %}{{ _all_azs.index(_az) +1 }}{% endraw %}"
+          - libvirt
+          - nova-custom-ceph-{% raw %}{{ _az }}{% endraw %}
+
+- name: Initialize vars
+  ansible.builtin.set_fact:
+    _ceph_vars_list: []
+    _all_azs: []
+
+- name: Find all ceph .conf and .keyring files
+  register: _ceph_conf_files
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "ceph*.conf,ceph*.keyring,az*.conf,az*.keyring"
+    recurse: false
+
+- name: Load ceph configuration files
+  ansible.builtin.set_fact:
+    _ceph_files: "{{ _ceph_conf_files.files | map(attribute='path') | list }}"
+
+- name: Render the NodeSet values.yaml
+  vars:
+    _edpm_instance_dict: "{{ cifmw_networking_env_definition.instances }}"
+    _edpm_network_dict: "{{ cifmw_networking_env_definition.networks }}"
+    _ssh_authorizedkeys: "{{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}"
+    _ssh_private_key: "{{ lookup('file', '~/.ssh/id_cifw', rstrip=False) }}"
+    _ssh_public_key: "{{ lookup('file', '~/.ssh/id_cifw.pub', rstrip=False) }}"
+    _migration_priv_key: "{{ lookup('file', '~/ci-framework-data/artifacts/nova_migration_key', rstrip=False) }}"
+    _migration_pub_key: "{{ lookup('file', '~/ci-framework-data/artifacts/nova_migration_key.pub', rstrip=False) }}"
+  ansible.builtin.template:
+    backup: true
+    src: "templates/edpm-pre-ceph/nodeset/values.yaml.j2"
+    dest: "{{ ci_dcn_site_arch_path }}/edpm-pre-ceph/nodeset/values.yaml"
+    mode: "0644"
+
+- name: Kustomize NodeSet
+  ansible.builtin.set_fact:
+    nodeset_cr: >-
+      {{ lookup('kubernetes.core.kustomize',
+      dir=ci_dcn_site_arch_path + '/edpm-pre-ceph/nodeset') }}
+
+- name: Save the NodeSet CR
+  ansible.builtin.copy:
+    mode: "0644"
+    dest: "{{ ci_dcn_site_arch_path }}/dataplane-nodeset-pre-ceph_{{ _az }}.yaml"
+    content: "{{ nodeset_cr }}"
+    backup: true
+
+- name: Render the values with updated ceph configuration, kustomize and apply CR of NodeSet and DataPlaneDeployment
+  ansible.builtin.import_tasks: post-ceph.yml
+
+- name: Set Network related facts
+  ansible.builtin.include_tasks: set_network_facts.yml
+
+- name: Deploy Ceph in DCN context
+  ansible.builtin.include_tasks: ceph.yml
+
+- name: Run Nova cell discovery for new DCN hosts
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: nova-cell0-conductor-0
+    command: nova-manage cell_v2 discover_hosts --verbose
+
+- name: Add new hosts to AZ
+  ansible.builtin.include_tasks: az.yml
