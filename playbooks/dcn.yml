@@ -61,7 +61,6 @@
       when:
         - _subnet_network_range != ''
         - _ceph_bootstrap_node != ''
-        - cifmw_ci_dcn_site_scaledown_az is not defined or cifmw_ci_dcn_site_scaledown_az == ""
       ansible.builtin.include_role:
         name: ci_dcn_site
 
@@ -82,6 +81,49 @@
       ansible.builtin.include_role:
         name: ci_dcn_site
       when: cifmw_ci_dcn_site_scaledown_az is defined and cifmw_ci_dcn_site_scaledown_az != ""
+
+    - name: Remove a compute node from the deployment
+      vars:
+        _node_to_remove: "{{ cifmw_ci_dcn_site_scaledown_node }}"
+        _az: "{{ cifmw_ci_dcn_site_scaledown_node_az | default('az1') }}"
+        _group_name: "{{ az_to_group_map[_az] }}"
+        _group_hosts: "{{ groups[_group_name] }}"
+        _edpm_hosts: "{{ cifmw_baremetal_hosts | dict2items | selectattr('key', 'in', groups[_group_name]) | items2dict }}"
+        _ceph_bootstrap_node: "{{ (_edpm_hosts | dict2items | first).key if _edpm_hosts | length > 0 else '' }}"
+      when:
+        - cifmw_ci_dcn_site_scaledown_node is defined and cifmw_ci_dcn_site_scaledown_node != ""
+      ansible.builtin.include_role:
+        name: ci_dcn_site
+        tasks_from: remove_node.yml
+
+    - name: Add a compute node to a site
+      when:
+        - cifmw_ci_dcn_site_scaleout_node is defined and cifmw_ci_dcn_site_scaleout_node != ""
+      block:
+        # We need to update ci-framework related variable and inventory files to include the new host
+        - name: Update ci-framework variables and inventory files
+          vars:
+            _node_to_add: "{{ cifmw_ci_dcn_site_scaleout_node }}"
+            _az: "{{ cifmw_ci_dcn_site_scaleout_node_az | default('az1') }}"
+            _subnet: "{{ cifmw_ci_dcn_site_scaleout_node_subnet | default('subnet2') }}"
+            _group_name: "{{ az_to_group_map[_az] }}"
+          ansible.builtin.include_role:
+            name: ci_dcn_site
+            tasks_from: update_conf_new_node.yml
+
+        - name: Add a compute node to dataplane
+          vars:
+            _node_to_add: "{{ cifmw_ci_dcn_site_scaleout_node }}"
+            _az: "{{ cifmw_ci_dcn_site_scaleout_node_az | default('az1') }}"
+            _subnet: "{{ cifmw_ci_dcn_site_scaleout_node_subnet | default('subnet2') }}"
+            _subnet_network_range: "{{ _network_ranges[_az[-1] | int] }}"
+            _group_name: "{{ az_to_group_map[_az] }}"
+            _group_hosts: "{{ groups[_group_name] }}"
+            _edpm_hosts: "{{ updated_cifmw_baremetal_hosts | dict2items | selectattr('key', 'in', groups[_group_name]) | items2dict }}"
+            _ceph_bootstrap_node: "{{ (_edpm_hosts | dict2items | first).key if _edpm_hosts | length > 0 else '' }}"
+          ansible.builtin.include_role:
+            name: ci_dcn_site
+            tasks_from: add_node.yml
 
     - name: Find all created CRs
       ansible.builtin.find:
