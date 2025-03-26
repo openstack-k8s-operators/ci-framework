@@ -21,6 +21,16 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    - name: Initialize monitoring
+      ansible.builtin.include_role:
+        name: update
+        tasks_from: init_monitoring.yml
+
+    - name: Set update step to Update Repo and OpenStack Services Containers
+      ansible.builtin.command:
+        cmd: >
+          {{ cifmw_basedir }}/tests/update/update_event.sh
+          Update Repo and OpenStack Services Containers
     - name: Copy repos to before_update_repos directory
       ansible.builtin.copy:
         remote_src: true
@@ -53,6 +63,16 @@
         dest: "/etc/yum.repos.d/"
         src: "{{ cifmw_basedir }}/artifacts/repositories/"
         mode: "0755"
+
+- name: Log Ceph update state
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Set update step to Ceph Update
+      ansible.builtin.command:
+        cmd: >
+          {{ cifmw_basedir }}/tests/update/update_event.sh
+          Ceph Update
 
 - name: Run Ceph update if part of the deployment
   hosts: "{{ (groups[cifmw_ceph_target | default('computes')] | default([]))[:1] }}"
@@ -95,11 +115,33 @@
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    - name: Set update step to Update Role
+      ansible.builtin.command:
+        cmd: >
+          {{ cifmw_basedir }}/tests/update/update_event.sh
+          Update Role
     - name: Run update
       tags:
         - update
       ansible.builtin.import_role:
         name: update
+    - name: Set update step to End of Update Role
+      ansible.builtin.command:
+        cmd: >
+          {{ cifmw_basedir }}/tests/update/update_event.sh
+          End of Update Role
+    - name: Stop monitoring
+      block:
+        - name: Verify monitoring pid file
+          ansible.builtin.stat:
+            path: "{{ cifmw_update_artifacts_basedir }}/monitor_resources_changes.pid"
+          register: cifmw_update_monitoring_pid
+        - name: Stop the monitoring process
+          ansible.builtin.shell:
+            cmd: >-
+              kill
+              $(cat {{ cifmw_basedir }}/tests/update/monitor_resources_changes.pid)
+          when: cifmw_update_monitoring_pid.stat.exists | bool
 
     - name: Run post_update hooks
       vars:
