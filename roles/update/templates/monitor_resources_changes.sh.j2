@@ -1,0 +1,429 @@
+#!/bin/bash
+#
+# Description: The script monitors OpenShift events, Podman events,
+# and update stages.  It logs all changes to a timeline file in
+# chronological order.
+#
+# Unless called with `-a init` or `-f` this script will daemonize itself.
+#
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+set -euo pipefail
+
+# Initialize default options
+SLOG_FILE="/dev/null"
+FOREGROUND=false
+ACTION="all"
+POLL_INTERVAL="{{ cifmw_update_resources_monitoring_interval }}"
+BASE_DIR="{{ cifmw_update_artifacts_basedir }}"
+TIMELINE_LOG_FILE="${BASE_DIR}/update_timeline.log"
+
+# Where to find the inventory to connect to the compute
+CI_INVENTORY="${CI_INVENTORY:-{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml}"
+
+# Log files
+UPDATE_EVENT_FILE="${BASE_DIR}/current_update_event.log"
+
+# OpenShift variables
+OS_NAMESPACES=("openstack-operators" "openstack")
+export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
+export PATH="{{ cifmw_path }}"
+
+# Script related variables
+PID_FILE="${BASE_DIR}/monitor_resources_changes.pid"
+TMP_LOG="${BASE_DIR}/monitor_resources_tmp_dir.txt"
+TERMINATE_REQUESTED=false       # Flag to indicate termination request
+ORIGINAL_ARGS=("$@")            # Save the original argument list
+
+# Get the PID back, or empty if not file
+PID=$( [[ -f "${PID_FILE}" ]] && cat "${PID_FILE}" || echo "" )
+
+show_help() {
+    echo "Usage: ${0##*/} [options] [+-a all|init|monitor] [+-t time in sec]"
+    echo
+    echo "Options:"
+    echo "  -a ACTION         Action to perform: all, init, or monitor. Default is all."
+    echo "  -t POLL_INTERVAL  Time between checks in seconds. Default is ${POLL_INTERVAL}."
+    echo "  -l SLOG_FILE      Script log file. Default is /dev/null."
+    echo "  -f                Run in the foreground (do not daemonize)."
+    echo "  -h                Display this help message."
+}
+
+while getopts 'a:t:l:fh' OPT; do
+    case $OPT in
+        a) ACTION="$OPTARG" ;;
+        t) POLL_INTERVAL="$OPTARG" ;;
+        l) SLOG_FILE="$OPTARG" ;;
+        f) FOREGROUND=true ;;
+        h)
+            show_help
+            exit 0
+            ;;
+        *)
+            show_help
+            exit 2
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# Run as daemon
+daemonize() {
+    # Manage file descriptors
+    exec 0<&-                   # Close stdin
+    exec 1>>"${SLOG_FILE}"      # Redirect stdout to log file
+    exec 2>&1                   # Redirect stderr to log file
+
+    # Start a new session
+    setsid "$0" "${ORIGINAL_ARGS[@]}" &
+    echo $! > "${PID_FILE}"
+    # Exit parent process
+    exit
+}
+
+# Check if already running
+if [[ -n "${PID}" && -e /proc/${PID} ]]; then
+    if [[ ${PID} -ne $$ ]]; then # We are not the pid. This happens
+                                 # when we were just daemonized
+        echo "Daemon is already running with PID ${PID}."
+        exit 1
+    fi
+fi
+
+# Trap function to handle script termination
+terminate_script() {
+    echo "Signal received, request termination..."
+    TERMINATE_REQUESTED=true
+}
+
+# Register the termination signal handler
+trap 'terminate_script' SIGTERM SIGINT
+
+
+# Daemonize the script unless running init (blocking) or in the
+# foreground
+if [[ "${ACTION}" != "init" ]] && ! $FOREGROUND; then
+    if [[ -z "${PID}" ]]; then
+        daemonize
+    fi
+fi
+
+# Temporary files handling
+setup_tmp_dir() {
+    local action="${1:-all}"
+
+    if [ "${action}" != "monitor" ]; then
+        TMP_DIR=$(mktemp -d -q -p ${BASE_DIR} -t monitor_tmp-XXX)
+        echo "${TMP_DIR}" > "${TMP_LOG}"
+    else
+        TMP_DIR=$(cat "${TMP_LOG}")
+    fi
+
+    OCP_EVENTS_DIR="${TMP_DIR}/openshift_events"
+    PODMAN_EVENTS_FILE="${TMP_DIR}/podman_events.txt"
+    MONITOR_LAST_CHECK_FILE="${TMP_DIR}/monitor_last_check_time.txt"
+    CYCLE_EVENTS_FILE="${TMP_DIR}/cycle_events_init.txt"
+    DEDUP_FILE="${TMP_DIR}/dedup_events.txt"
+    SORTED_FILE="${TMP_DIR}/sorted_events.txt"
+
+    mkdir -p "${OCP_EVENTS_DIR}"
+    touch "${DEDUP_FILE}"
+    touch "${CYCLE_EVENTS_FILE}"
+    touch "${MONITOR_LAST_CHECK_FILE}"
+}
+
+get_current_timestamp() {
+    date --iso-8601=n
+}
+
+## Events handling
+sort_events_file() {
+    local cycle_file="$1"
+    sort -t '|' -k1,1 "${cycle_file}" > "${SORTED_FILE}"
+}
+
+deduplicate_events() {
+    local content
+    local content_hash
+    while IFS= read -r line; do
+        content="$(echo "$line" | cut -d '|' -f2-)"
+        content_hash="$(echo "$content" | md5sum | awk '{print $1}')"
+
+        if ! grep -q "$content_hash" "${DEDUP_FILE}"; then
+            echo "$content" >> "${TIMELINE_LOG_FILE}"
+            # Add the date to be able to clean up the dedup file
+            echo "$(date +%s) $content_hash" >> "${DEDUP_FILE}"
+        fi
+    done < "${SORTED_FILE}"
+}
+
+cleanup_dedup_file() {
+    local current_time
+    current_time=$(date +%s)
+    local twice_poll_interval=$((POLL_INTERVAL * 2))
+    local cutoff=$((current_time - twice_poll_interval))
+    awk -v cutoff="${cutoff}" \
+        '$1 >= cutoff {print}' "${DEDUP_FILE}" > "${DEDUP_FILE}.tmp"
+    mv "${DEDUP_FILE}.tmp" "${DEDUP_FILE}"
+}
+
+process_events_file() {
+    local cycle_file="$1"
+
+    if [[ -s "${cycle_file}" ]]; then
+        sort_events_file "${cycle_file}"
+        deduplicate_events
+        cleanup_dedup_file
+        rm -f "${cycle_file}" "${SORTED_FILE}"
+    fi
+}
+
+## Collect events and information
+# Time, this is triggered only once at the start
+get_time_info() {
+    ansible -i "${CI_INVENTORY}" -m shell -a "date" all 2>>"${SLOG_FILE}" | \
+        awk -v script_ts="$(get_current_timestamp)" '
+            /CHANGED/ {
+                host=$1
+                if (getline date_out) {
+                    print script_ts " [TIME:" host "] " date_out
+                }
+            }
+        ' >> "${TIMELINE_LOG_FILE}"
+}
+
+# Podman events
+get_podman_events() {
+    local since_time="$1"  # Format: "25m", "10s"
+
+    # Use --until '+1s' to make the command non-blocking
+    ansible -i "${CI_INVENTORY}" -m shell -a \
+            "sudo podman events --format {% raw %} {% raw %} '{{.Time}}|{{.Type}} {{.Status}} {{.Name}} {{.Image}}' --since $since_time --until '+1s' {% endraw %} {{ '{' }}% endraw %{{ '}' }} | awk '!/health_status/ {print}'" \
+            computes 2>>"${SLOG_FILE}" | \
+        awk '
+            BEGIN { compute = "" }
+            /^compute/ {
+               compute = $1
+               next
+            }
+            {
+               line = compute "|" $0
+               print line
+            }' | sort > "${PODMAN_EVENTS_FILE}"
+}
+
+# Collect OpenShift events
+get_openshift_events() {
+    local since_time=$1  # Format: "25 minutes", "10 seconds"
+    local event_file=$2
+    local namespace=$3
+
+    # Get events from the specified namespace and filter for relevant events
+    oc get events -n "${namespace}" -o json --sort-by='.lastTimestamp' | \
+        # oc doens't have a `--since` parameter.  Here we assume that
+        # TZ are the same on the controller and the server.
+        jq -r --arg time "$(date --iso-8601=s -d "$since_time ago")" \
+           '.items[] |
+            select(.lastTimestamp >= $time) |
+            # Filter for important events: deletions, creations, unhealthy states,
+            # and failures
+            select(
+                (.reason | test("Delete|Deleted|Killing|Removed")) or
+                (.reason | test("Create|Created|Scheduled|Started|Pulled")) or
+                (.reason | test("Unhealthy|Failed|Error|BackOff|Evicted|Warning")) or
+                (.type == "Warning") or
+                (.message | test("fail|error|unable|cannot|denied|exceeded|invalid|conflict|timeout|refused|rejected"))
+                ) |
+                "\(.lastTimestamp)|\(.type) \(.reason) \(.involvedObject.kind)/\(.involvedObject.name): \(.message)"' \
+           > "$event_file"
+}
+
+# Log update event changes
+get_update_events() {
+    local cycle_file="$1"
+    local update_event_lock_file="${BASE_DIR}/current_update_event.lock"
+
+    if [[ ! -f $UPDATE_EVENT_FILE ]]; then
+        echo "Update event file not found. Creating empty file..." >> "${SLOG_FILE}"
+        touch $UPDATE_EVENT_FILE
+    fi
+
+    # Use flock to ensure exclusive access: we don't want to truncate
+    # the file while it's being written by `update_event.sh`
+    (
+        flock -x 200
+
+        # If file exists and has content
+        if [[ -s "${UPDATE_EVENT_FILE}" ]]; then
+            process_update_file "${cycle_file}"
+
+            # Truncate the file after processing all events
+            : > "${UPDATE_EVENT_FILE}"
+        fi
+    ) 200>"${update_event_lock_file}"
+}
+
+process_podman_file() {
+    local cycle_file="$1"
+    while IFS= read -r line; do
+        local compute
+        local raw_time
+        compute="$(echo "$line" | cut -d '|' -f1)"
+        raw_time="$(echo "$line" | cut -d '|' -f2)"
+        # Stripping UTC like part from "... +0000 UTC" Podman date
+        # output which is not supported by the `date` command.
+        local local_time
+        local_time="$(date --iso-8601=n -d "${raw_time% [A-Z]*}" 2>/dev/null || echo "${raw_time}")"
+        local message
+        message="$(echo "$line" | cut -d '|' -f3-)"
+        if [ -n "${message}" ]; then
+            echo "${local_time}|${local_time} [PODMAN:${compute}] ${message}" >> "${cycle_file}"
+        fi
+    done < "${PODMAN_EVENTS_FILE}"
+}
+
+process_openshift_file() {
+    local event_file="$1"
+    local cycle_file="$2"
+    local namespace="$3"
+    while IFS= read -r line; do
+        local raw_time
+        local local_time
+        local message
+        raw_time="$(echo "$line" | cut -d '|' -f1)"
+        local_time="$(date --iso-8601=n -d "${raw_time}" 2>/dev/null || echo "${raw_time}")"
+        message="$(echo "$line" | cut -d '|' -f2-)"
+        if [ -n "${message}" ]; then
+            echo "${local_time}|${local_time} [OPENSHIFT:${namespace}] ${message}" \
+                 >> "${cycle_file}"
+        fi
+    done < "${event_file}"
+}
+
+process_update_file() {
+    local cycle_file="$1"
+
+    while IFS= read -r line; do
+        local timestamp
+        local event
+        timestamp="$(echo "$line" | cut -d '|' -f1)"
+        event="$(echo "$line" | cut -d '|' -f2-)"
+        echo "${timestamp}|${timestamp} [UPDATE EVENT] ${event}" \
+             >> "${cycle_file}"
+    done < "${UPDATE_EVENT_FILE}"
+}
+
+## Event processing.
+# Time since last check
+calculate_since_time() {
+    local last_check_time="$1"
+    local now_sec
+    local last_sec
+    now_sec=$(date +%s)
+    last_sec=$(date -d "$last_check_time" +%s 2>/dev/null || echo 0)
+    local diff_seconds=$(( now_sec - last_sec ))
+
+    echo $diff_seconds
+}
+
+# Main driver
+collect_and_process_events() {
+    local since_time="$1"
+    local cycle_file="$2"
+
+    # Update events
+    get_update_events "${cycle_file}"
+
+    # Podman events
+    get_podman_events "${since_time}s"
+    if [[ -s "${PODMAN_EVENTS_FILE}" ]]; then
+        process_podman_file "${cycle_file}"
+    fi
+
+    # OpenShift events
+    if [ -e "${KUBECONFIG}" ]; then
+        for namespace in "${OS_NAMESPACES[@]}"; do
+            local events_file="${OCP_EVENTS_DIR}/${namespace}_events.txt"
+
+            get_openshift_events "${since_time} seconds" \
+                                 "${events_file}" "$namespace"
+
+            if [[ -s "${events_file}" ]]; then
+                process_openshift_file "${events_file}" "${cycle_file}" "${namespace}"
+            fi
+        done
+    fi
+
+    process_events_file "${cycle_file}"
+}
+
+# Initial gathering of states
+initialize() {
+    echo "Gathering initial states..." > "${SLOG_FILE}"
+
+    get_time_info
+
+    # Get initial events
+    local initial_time="120"   # Look back 2 minutes for initial
+                               # events
+
+    get_current_timestamp > "${MONITOR_LAST_CHECK_FILE}"
+
+    # Get initial events
+    collect_and_process_events "${initial_time}" "${CYCLE_EVENTS_FILE}"
+}
+
+# Main monitoring loop
+monitor() {
+    echo "Starting monitoring loop..."
+    local last_check_time
+    local cycle_file
+    local since_time
+
+    while true; do
+        if [[ -f "${MONITOR_LAST_CHECK_FILE}" ]]; then
+            last_check_time="$(cat "${MONITOR_LAST_CHECK_FILE}")"
+        else
+            last_check_time="$(get_current_timestamp)"
+        fi
+
+        cycle_file="${TMP_DIR}/cycle_events_$(date +%s).txt"
+        touch "${cycle_file}"
+
+        since_time="$(calculate_since_time "${last_check_time}")"
+
+        # Add some overlap to ensure we don't miss any event
+        since_time=$((since_time + (POLL_INTERVAL / 3)))
+
+        collect_and_process_events "${since_time}" "${cycle_file}"
+
+        get_current_timestamp > "${MONITOR_LAST_CHECK_FILE}"
+
+        if $TERMINATE_REQUESTED; then
+            echo "Termination request processed. Exiting..."
+            exit 0
+        fi
+
+        sleep "${POLL_INTERVAL}"
+    done
+}
+
+case $ACTION in
+    init) setup_tmp_dir init; initialize ;;
+    monitor) setup_tmp_dir monitor; monitor ;;
+    all) setup_tmp_dir; initialize; monitor ;;
+    *) echo "Choose between all, init and monitor for action"; exit 1;
+esac
