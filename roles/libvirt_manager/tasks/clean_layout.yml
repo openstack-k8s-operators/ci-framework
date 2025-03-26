@@ -2,10 +2,19 @@
 - name: Get installed packages list
   ansible.builtin.package_facts: {}
 
-- name: Get virtqemud socket
-  register: _virtqemud
-  ansible.builtin.stat:
-    path: "/var/run/libvirt/virtqemud-sock"
+- name: Populate service facts
+  ansible.builtin.service_facts:
+
+- name: Start virtqemud socket service
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - virtqemud.service
+    - virtqemud.socket
+  when: ansible_facts['services']['virtqemud.service']['status'] | default('not-found') != 'not-found'
+  become: true
 
 - name: Set _is_deepscrub internal fact
   ansible.builtin.set_fact:
@@ -22,7 +31,7 @@
       cifmw_libvirt_manager_dependency_packages |
       difference(ansible_facts.packages.keys()) |
       length == 0
-    - _virtqemud.stat.exists
+    - ansible_facts['services']['virtqemud.service']['status'] | default('not-found') != 'not-found'
   block:
     - name: List all of the existing virtual machines
       register: vms_list
