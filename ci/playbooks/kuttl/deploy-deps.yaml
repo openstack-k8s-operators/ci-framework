@@ -32,18 +32,28 @@
       loop_control:
         label: "{{ item }}"
 
-    - name: Ensure that the isolated net was configured for crc
-      ansible.builtin.assert:
-        that:
-          - crc_ci_bootstrap_networks_out is defined
-          - "'crc' in crc_ci_bootstrap_networks_out"
-          - "'default' in crc_ci_bootstrap_networks_out['crc']"
+    - name: set facts for further usage within the framework
+      vars:
+        _crc_hostname: "{{ cifmw_crc_hostname | default('crc') }}"
+      block:
+        - name: Ensure that the isolated net was configured for crc
+          ansible.builtin.assert:
+            that:
+              - crc_ci_bootstrap_networks_out is defined
+              - crc_ci_bootstrap_networks_out[_crc_hostname] is defined
+              - crc_ci_bootstrap_networks_out[_crc_hostname]['default'] is defined
 
-    - name: Set facts for further usage within the framework
-      ansible.builtin.set_fact:
-        cifmw_edpm_prepare_extra_vars:
-          NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out.crc.default.iface }}"
-          NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out.crc.default.mtu }}"
+        - name: Set facts for further usage within the framework
+          ansible.builtin.set_fact:
+            cifmw_edpm_prepare_extra_vars:
+              NNCP_INTERFACE: "{{ crc_ci_bootstrap_networks_out.crc.default.iface }}"
+              NETWORK_MTU: "{{ crc_ci_bootstrap_networks_out.crc.default.mtu }}"
+              NNCP_DNS_SERVER: >-
+                {{
+                  crc_ci_bootstrap_networks_out[_crc_hostname].default.ip4 |
+                  default(crc_ci_bootstrap_networks_out[_crc_hostname].default.ip) |
+                  split('/') | first
+                }}
 
 - hosts: "{{ cifmw_target_host | default('localhost') }}"
   name: Deploy Openstack Operators
