@@ -1,0 +1,278 @@
+#!/bin/bash
+#
+# Description: The script monitors pods in openstack and
+# openstack-operator namespaces. It also monitors the containers and
+# rpm on the compute hosts.  If a change happens, it logs a diff style
+# of the change that happened into TIMELINE_LOG_FILE.
+#
+# Unless called with `-a init` or `-f` this script will daemonize
+# itself.
+#
+set -euo pipefail
+
+# Initialize default options
+SLOG_FILE="/dev/null"           # Script log file
+FOREGROUND=false
+ACTION="all" # default action
+TIME_UNIT=10 # default time unit
+BASE_DIR="{{ cifmw_update_artifacts_basedir }}"
+TIMELINE_LOG_FILE="${BASE_DIR}/update_timeline.log"
+
+# Where to find the inventory to connect to the compute.
+CI_INVENTORY="{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+
+# Log files
+UPDATE_STAGE_FILE="${BASE_DIR}/current_update_stage.log"
+
+# OpenShift variables
+OS_NAMESPACES=("openstack-operators" "openstack")
+export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
+export PATH="{{ cifmw_path }}"
+
+# Script related variables
+PID_FILE="${BASE_DIR}/monitor_resources_changes.pid"
+TMP_LOG="${BASE_DIR}/monitor_resources_tmp_dir.txt"
+TERMINATE_REQUESTED=false       # Flag to indicate termination request
+ORIGINAL_ARGS=("$@")            # Save the original argument list
+# Get the PID back, or empty if not file
+PID=$( [[ -f "${PID_FILE}" ]] && cat "${PID_FILE}" || echo "" )
+
+show_help() {
+    echo "Usage: ${0##*/} [options] [+-a all|init|monitor] [+-t time in sec]"
+    echo
+    echo "Options:"
+    echo "  -a ACTION     Action to perform: all, init, or monitor. Default is all."
+    echo "  -t TIME_UNIT  Time between checks in seconds. Default is ${TIME_UNIT}."
+    echo "  -l SLOG_FILE  Script log file. Default is /dev/null."
+    echo "  -f            Run in the foreground (do not daemonize)."
+    echo "  -h            Display this help message."
+}
+
+# Parse options
+while getopts 'a:t:l:fh' OPT; do
+    case $OPT in
+        a) ACTION="$OPTARG" ;;
+        t) TIME_UNIT="$OPTARG" ;;
+        l) SLOG_FILE="$OPTARG" ;;
+        f) FOREGROUND=true ;;
+        h)
+            show_help
+            exit 0
+            ;;
+        *)
+            show_help
+            exit 2
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# Run as daemon
+daemonize() {
+    # Manage file descriptors
+    exec 0<&-                   # Close stdin
+    exec 1>>"${SLOG_FILE}"      # Redirect stdout to log file
+    exec 2>&1                   # Redirect stderr to log file
+
+    # Start a new session
+    setsid "$0" "${ORIGINAL_ARGS[@]}" &
+    echo $! > "${PID_FILE}"
+    # Exit parent process
+    exit
+}
+
+# Check if already running
+if [[ -n "${PID}" && -e /proc/${PID} ]]; then
+    if [[ ${PID} -ne $$ ]]; then # We are not the pid. This happens
+                                 # when we were just daemonized
+        echo "Daemon is already running with PID ${PID}."
+        exit 1
+    fi
+fi
+
+# Daemonize the script before proceeding with action handling unless
+# we run init which is blocking by design, or we run in the
+# foreground.
+if [[ "${ACTION}" != "init" ]] && ! $FOREGROUND; then
+    if [[ -z "${PID}" ]]; then
+        daemonize
+    fi
+fi
+
+# Trap function to handle script termination
+terminate_script() {
+    echo "Signal received, request termination..."
+    TERMINATE_REQUESTED=true
+}
+
+# Register the termination signal handler
+trap 'terminate_script' SIGTERM SIGINT
+
+# Temporary directory
+setup_tmp_dir() {
+    local action="${1:-all}"
+
+    if [ "${action}" != "monitor" ]; then
+        TMP_DIR=$(mktemp -d -q -p ${BASE_DIR} -t monitor_tmp-XXX)
+        echo "${TMP_DIR}" > "${TMP_LOG}"
+    else
+        TMP_DIR=$(cat "${TMP_LOG}")
+    fi
+}
+
+# Collect time on all nodes
+get_time_info() {
+    local log_file="$1"
+    echo "# ===> Current time on all the nodes" >> "${log_file}"
+    ansible -vv -i "${CI_INVENTORY}" -m shell -a "date" all \
+            2>>${SLOG_FILE} | \
+        awk '/CHANGED/{start=1}{if (start == 1){print}}' | \
+        sed  's/^/# /' >> "${log_file}"
+}
+
+# Collect pod information in namespace
+get_pod_info() {
+    local namespace=$1
+    # Proctect against non working OpenShift environment
+    if [ ! -s "${KUBECONFIG}" ]; then
+        echo "Kubeconfig non existant, skipping tests: '${KUBECONFIG}'" \
+             2>>${SLOG_FILE}
+        return
+    fi
+    oc get pods -n $namespace -o json 2>>${SLOG_FILE} | \
+        jq -r '.items[] | "\(.metadata.name) \(.status.phase) \(.spec.containers[] | .image) \(.status.startTime)"' \
+        | sort
+}
+
+# Collect containers information on compute
+get_compute_containers() {
+    ansible -i "${CI_INVENTORY}" -m shell -a \
+            "sudo podman ps -q 2>/dev/null | sort | (xargs -I {} sudo podman inspect --format {% raw %} {% raw %} '{{.State.StartedAt}} - {{.Name}} - {{.Config.Image}} - {{.State.Health.Status}} - {{.ID}}' {} 2>/dev/null || true) {% endraw %} {{ '{' }}% endraw %{{ '}' }}" computes 2>>${SLOG_FILE} | \
+        awk \
+            'BEGIN { compute = "" }
+            /^compute/ {
+               compute = $1
+               next
+            }
+            {
+               line = compute " - " $0
+               print line
+            }' | sort
+}
+
+# Collect RPM information on the Compute nodes
+get_compute_rpms() {
+    ansible -i "${CI_INVENTORY}" -m shell -a \
+            "rpm -qa 2>/dev/null | sort" computes 2>>${SLOG_FILE} | \
+        awk \
+            'BEGIN { compute = "" }
+            /^compute/ {
+               compute = $1
+               next
+            }
+            {
+               line = compute " - " $0
+               print line
+            }' | sort
+}
+
+# Compare states and log changes
+compare_and_log() {
+    local prev_state_file=$1
+    local current_state_file=$2
+    local resource_type=$3
+
+    # grep might fail.
+    set +e
+    diff -u $prev_state_file $current_state_file | \
+        grep -E '^[-+]' | grep -v '^---' | grep -v '^+++' \
+                                                > ${TMP_DIR}/current_change
+    set -e
+    if [[ -s ${TMP_DIR}/current_change ]]; then
+        echo "# ===> $(date +"%Y-%m-%d %H:%M:%S") - CHANGES DETECTED in $resource_type:" \
+             >> "$TIMELINE_LOG_FILE"
+        cat ${TMP_DIR}/current_change >> "$TIMELINE_LOG_FILE"
+    fi
+    mv "${current_state_file}" "${prev_state_file}"
+}
+
+# Log update state changes
+monitor_update_stage() {
+    local prev_stage_file="${TMP_DIR}/prev_update_stage.txt"
+
+    if [[ ! -f $UPDATE_STAGE_FILE ]]; then
+        echo "Update stage file not found. Skipping..." >> ${SLOG_FILE}
+        return
+    fi
+
+    current_stage=$(cat $UPDATE_STAGE_FILE)
+    prev_stage=""
+    if [[ -e "${prev_stage_file}" ]]; then
+        prev_stage=$(cat $prev_stage_file)
+    fi
+
+    if [[ "$current_stage" != "$prev_stage" || \
+              ! -e "${prev_stage_file}" ]]; then
+        echo "# ===> $(date '+%Y-%m-%d %H:%M:%S')" \
+             "- Update stage changed: $current_stage" >> "$TIMELINE_LOG_FILE"
+        echo "$current_stage" > "$prev_stage_file"
+    fi
+}
+
+# Initial gathering of states
+initialize() {
+    echo "Gathering initial states..." > ${SLOG_FILE}
+    for namespace in "${OS_NAMESPACES[@]}"; do
+        get_pod_info $namespace > "${TMP_DIR}/${namespace}_prev.txt"
+    done
+    get_compute_containers > "${TMP_DIR}/compute_containers_prev.txt"
+    get_compute_rpms > "${TMP_DIR}/compute_rpms_prev.txt"
+
+    # Log the initial state of the update state file
+    monitor_update_stage
+
+    # Get current everywhere
+    get_time_info "${TIMELINE_LOG_FILE}"
+}
+
+# Main monitoring loop
+monitor() {
+    echo $$ > "${PID_FILE}"
+    echo "Starting monitoring loop..."
+    while true; do
+        # Monitor update stage changes
+        monitor_update_stage
+
+        for namespace in "${OS_NAMESPACES[@]}"; do
+            get_pod_info $namespace > "${TMP_DIR}/${namespace}_current.txt"
+            compare_and_log "${TMP_DIR}/${namespace}_prev.txt" \
+                            "${TMP_DIR}/${namespace}_current.txt" \
+                            "$namespace"
+        done
+
+        get_compute_containers > "${TMP_DIR}/compute_containers_current.txt"
+        compare_and_log "${TMP_DIR}/compute_containers_prev.txt" \
+                        "${TMP_DIR}/compute_containers_current.txt" \
+                        "Compute Containers"
+
+        get_compute_rpms > "${TMP_DIR}/compute_rpms_current.txt"
+        compare_and_log "${TMP_DIR}/compute_rpms_prev.txt" \
+                        "${TMP_DIR}/compute_rpms_current.txt" \
+                        "Compute RPMs"
+
+        # Check if termination was requested
+        if $TERMINATE_REQUESTED; then
+            echo "Termination request processed. Exiting..."
+            exit 0
+        fi
+
+        sleep $TIME_UNIT
+    done
+}
+
+case $ACTION in
+    init) setup_tmp_dir init; initialize ;;
+    monitor) setup_tmp_dir monitor; monitor ;;
+    all) setup_tmp_dir; initialize; monitor ;;
+    *) echo "Choose between all, init and monitor for action"; exit 1;
+esac
