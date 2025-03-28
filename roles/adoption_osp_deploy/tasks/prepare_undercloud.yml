@@ -48,11 +48,24 @@
       vars:
         _container_prepare_cmd: >-
           openstack tripleo container image prepare
-          default --output-env-file
+          default --local-push-destination --output-env-file
           {{ ansible_user_dir }}/containers-prepare-parameters.yaml
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_basedir }}/artifacts"
         script: "{{ _container_prepare_cmd }}"
+      when: cifmw_adoption_osp_deploy_scenario.container_prepare_params is not defined
+
+    - name: Set registry credential in containers-prepare-parameters if needed
+      ansible.builtin.blockinfile:
+        path: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
+        insertafter: EOF
+        append_newline: true
+        block: |
+          # Container Registry Credentials
+            ContainerImageRegistryCredentials:
+              registry.redhat.io:
+                {{ cifmw_adoption_osp_deploy_container_user }}: {{ cifmw_adoption_osp_deploy_container_password }}
+        backup: true
       when: cifmw_adoption_osp_deploy_scenario.container_prepare_params is not defined
 
     - name: Copy containers-prepare-parameters if needed
