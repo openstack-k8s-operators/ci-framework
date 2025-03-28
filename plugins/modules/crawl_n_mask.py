@@ -179,7 +179,7 @@ def crawl(module, path) -> bool:
             continue
 
         for f in files:
-            if re.search(excluded_file_ext_regex, f) is None:
+            if not re.search(excluded_file_ext_regex, f):
                 file_changed = mask(module, os.path.join(root, f))
                 # even if one file is masked, the final result will be True
                 if file_changed:
@@ -282,7 +282,7 @@ def read_yaml(module, file_path: str) -> Optional[Union[list, None]]:
             return list(yaml.safe_load_all(f))
     except (FileNotFoundError, yaml.YAMLError) as e:
         module.warn("Error opening file: %s" % e)
-    return None
+    return
 
 
 def write_yaml(module, path, encoded_secret: Any) -> bool:
@@ -345,7 +345,7 @@ def run_module():
     if (
         not isdir
         and os.path.exists(path)
-        and re.search(excluded_file_ext_regex, path) is None
+        and not re.search(excluded_file_ext_regex, path)
     ):
         changed = mask(module, path)
 
