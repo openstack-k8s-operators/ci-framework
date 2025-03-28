@@ -179,7 +179,7 @@ def crawl(module, path) -> bool:
             continue
 
         for f in files:
-            if re.search(excluded_file_ext_regex, f) is None:
+            if not re.search(excluded_file_ext_regex, f):
                 file_changed = mask(module, os.path.join(root, f))
                 # even if one file is masked, the final result will be True
                 if file_changed:
@@ -203,6 +203,17 @@ def mask(module, path: str) -> bool:
 
 
 def process_list(lst: list) -> None:
+    """
+    For each list we get in our yaml dict,
+    this method will check the type of item.
+    If the item in list is dict, it will call
+    apply_mask method to process it, else if
+    we get nested list, process_list will be
+    recursively called.
+    We are not checking for string as secrets
+    are mainly in form <key>: <value> in dict,
+    not in list as item.
+    """
     for item in lst:
         if isinstance(item, dict):
             apply_mask(item)
@@ -282,7 +293,7 @@ def read_yaml(module, file_path: str) -> Optional[Union[list, None]]:
             return list(yaml.safe_load_all(f))
     except (FileNotFoundError, yaml.YAMLError) as e:
         module.warn("Error opening file: %s" % e)
-    return None
+    return
 
 
 def write_yaml(module, path, encoded_secret: Any) -> bool:
@@ -331,22 +342,25 @@ def run_module():
     path = params["path"]
     isdir = params["isdir"]
 
+    # validate if the path exists and no wrong value of isdir and path is
+    # provided
+    if not os.path.exists(path):
+        module.fail_json(msg=f"Provided path doesn't exist", path=path)
+    if os.path.isdir(path) != isdir:
+        module.fail_json(msg=f"Value of isdir/path is incorrect. Please check it")
+
     # if the user is working with this module in only check mode we do not
     # want to make any changes to the environment, just return the current
     # state with no modifications
     if module.check_mode:
         module.exit_json(**result)
 
-    if isdir and os.path.exists(path):
+    if isdir:
         # craw through the provided directly and then
         # process eligible files individually
         changed = crawl(module, path)
 
-    if (
-        not isdir
-        and os.path.exists(path)
-        and re.search(excluded_file_ext_regex, path) is None
-    ):
+    if not isdir and not re.search(excluded_file_ext_regex, path):
         changed = mask(module, path)
 
     result.update(changed=changed)
