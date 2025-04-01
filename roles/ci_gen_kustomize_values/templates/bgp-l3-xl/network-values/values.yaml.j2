@@ -1,0 +1,194 @@
+---
+# source: bgp-l3-xl/network-values/values.yaml.j2
+{% set ns = namespace(interfaces={},
+                      ocp_index=0,
+                      lb_tools={}) %}
+data:
+{% for host in cifmw_networking_env_definition.instances.keys() -%}
+{%   set hostname = cifmw_networking_env_definition.instances[host]['hostname'] %}
+{%   if host is match('^(ocp|crc).*') %}
+  node_{{ ns.ocp_index }}:
+    name: {{ hostname }}
+{%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
+{%       set ns.interfaces = ns.interfaces |
+                             combine({network.network_name: (network.parent_interface |
+                                                             default(network.interface_name)
+                                                            )
+                                     },
+                                     recursive=true) %}
+    {{ network.network_name }}_ip: {{ network.ip_v4 }}
+{%       if 'worker-9' == hostname and 'ctlplane' == network.network_name %}
+    base_if: {{ network.interface_name }}
+{%       endif %}
+{%     endfor %}
+{%     set node_bgp_orig_content = original_content.data.bgp.bgpdefs['node' ~ ns.ocp_index] %}
+{%     set node_bgp_net0 = node_bgp_orig_content.bgpnet0 %}
+{%     if 'worker-9' != hostname %}
+{%       set node_bgp_net1 = node_bgp_orig_content.bgpnet1 %}
+{%     endif %}
+    bgp_peers:
+      - {{ node_bgp_net0.bgp_peer }}
+{%     if 'worker-9' != hostname %}
+      - {{ node_bgp_net1.bgp_peer }}
+{%     endif %}
+    bgp_ip:
+      - {{ node_bgp_net0.bgp_ip }}
+{%     if 'worker-9' != hostname %}
+      - {{ node_bgp_net1.bgp_ip }}
+{%     endif %}
+    loopback_ip: {{ node_bgp_orig_content.loopback_ip }}
+    loopback_ipv6: {{ node_bgp_orig_content.loopback_ipv6 }}
+{%     if node_bgp_orig_content.routes | default(false) %}
+    routes: {{ node_bgp_orig_content.routes }}
+{%     endif %}
+{%     set ns.ocp_index = ns.ocp_index+1 %}
+{%   endif %}
+{% endfor %}
+
+{% for network in cifmw_networking_env_definition.networks.values() %}
+{%  set ns.lb_tools = {} %}
+  {{ network.network_name }}:
+    dnsDomain: {{ network.search_domain }}
+{%  if network.tools is defined and network.tools.keys() | length > 0 %}
+    subnets:
+{%    for tool in network.tools.keys() %}
+{%      if tool is match('.*lb$') %}
+{%        set _ = ns.lb_tools.update({tool: []}) %}
+{%      endif %}
+{%    endfor %}
+{%    if network.network_name != 'ctlplane' %}
+      - allocationRanges:
+{%      for range in network.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%      endfor %}
+        cidr: {{ network.network_v4 }}
+{%      if network.gw_v4 is defined %}
+        gateway: {{ network.gw_v4 }}
+{%      endif %}
+        name: subnet1
+{%      if network.vlan_id is defined  %}
+        vlan: {{ network.vlan_id }}
+{%      endif %}
+{%    else %}
+{%      for rack in ['r0', 'r1', 'r2'] %}
+{%        set rack_subnet = cifmw_networking_env_definition.networks[network.network_name + rack] %}
+      - allocationRanges:
+{%        for range in rack_subnet.tools.netconfig.ipv4_ranges %}
+        - end: {{ range.end }}
+          start: {{ range.start }}
+{%        endfor %}
+        cidr: {{ rack_subnet.network_v4 }}
+{%        if rack_subnet.gw_v4 is defined %}
+        gateway: {{ rack_subnet.gw_v4 }}
+{%        endif %}
+        name: {{ 'subnet' ~ loop.index0 }}
+{%        if rack_subnet.vlan_id is defined  %}
+        vlan: {{ rack_subnet.vlan_id }}
+{%        endif %}
+{%      endfor %}
+{%    endif %}
+{%    if ns.lb_tools | length > 0 %}
+    lb_addresses:
+{%      for tool in ns.lb_tools.keys() %}
+{%        for lb_range in network.tools[tool].ipv4_ranges %}
+      - {{ lb_range.start }}-{{ lb_range.end }}
+{%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
+{%        endfor %}
+    endpoint_annotations:
+      {{ tool }}.universe.tf/address-pool: {{ network.network_name }}
+      {{ tool }}.universe.tf/allow-shared-ip: {{ network.network_name }}
+      {{ tool }}.universe.tf/loadBalancerIPs: {{ ','.join(ns.lb_tools[tool]) }}
+{%      endfor %}
+{%    endif %}
+{%  endif %}
+    prefix-length: {{ network.network_v4 | ansible.utils.ipaddr('prefix') }}
+    mtu: {{ network.mtu | default(1500) }}
+{%  if network.vlan_id is defined  %}
+    vlan: {{ network.vlan_id }}
+{%    if ns.interfaces[network.network_name] is defined %}
+    iface: {{ network.network_name }}
+    base_iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
+{%  else %}
+{%    if ns.interfaces[network.network_name] is defined %}
+    iface: {{ ns.interfaces[network.network_name] }}
+{%    endif %}
+{%  endif %}
+{%  if network.tools.multus is defined %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "{{ network.network_name }}",
+        "type": "bridge",
+        "isDefaultGateway": true,
+        "isGateway": true,
+        "forceAddress": false,
+        "ipMasq": true,
+        "hairpinMode": true,
+{%  if network.network_name == "octavia" %}
+        "bridge": "octbr",
+{%  elif network.network_name == "ctlplane" %}
+        "bridge": "ospbr",
+{%  else %}
+        "bridge": "{{ network.network_name }}",
+{%  endif %}
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network.network_v4 }}",
+{%  if network.network_name == "octavia" and network.tools.multus.ipv4_routes | default([]) | length > 0 %}
+          "routes": [
+{%  for route in network.tools.multus.ipv4_routes %}
+             {
+               "dst": "{{ route.destination }}",
+               "gw": "{{ route.gateway }}"
+             }{% if not loop.last %},{% endif %}
+{%  endfor %}
+           ],
+{%  endif %}
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
+{%  if network.network_name == "ctlplane" %}
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(2) }}"
+{% else %}
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
+{% endif %}
+        }
+      }
+{%  endif %}
+{% endfor %}
+
+  dns-resolver:
+    config:
+      server:
+# We set ctlplane = 192.168.125.0/24 and we rely on this definition to create the nad above.
+# BGP exposes nad ips by advertising a 192.168.125.X address on the worker, and this would break dns
+# because the traffic will not be sent to the right nic if a local ip on the same network is present.
+# To avoid messing with routes etc we hardcode the 122.1 ip here
+        - 192.168.122.1
+      search: []
+    options:
+      - key: server
+        values:
+          - 192.168.122.1
+{% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
+      - key: server
+        values:
+          - {{ nameserver }}
+{% endfor %}
+
+  routes:
+    config: []
+
+# Hardcoding the last IP bit since we don't have support for endpoint_annotations in the networking_mapper output
+  rabbitmq:
+    endpoint_annotations:
+      metallb.universe.tf/address-pool: internalapi
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(85) }}
+  rabbitmq-cell1:
+    endpoint_annotations:
+      metallb.universe.tf/address-pool: internalapi
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'].network_v4 | ansible.utils.ipmath(86) }}
+
+  lbServiceType: LoadBalancer
+  storageClass: local-storage

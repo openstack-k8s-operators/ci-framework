@@ -1,0 +1,87 @@
+hostname {{ ansible_hostname }}
+log file /var/log/frr/frr.log
+service integrated-vtysh-config
+line vty
+frr version 7.0
+
+debug bfd peer
+debug bfd network
+debug bfd zebra
+
+debug bgp graceful-restart
+debug bgp neighbor-events
+debug bgp updates
+debug bgp update-groups
+
+router bgp 64999
+  bgp log-neighbor-changes
+  bgp graceful-shutdown
+
+  bgp graceful-restart
+  bgp graceful-restart notification
+  bgp graceful-restart restart-time 60
+  bgp graceful-restart preserve-fw-state
+  ! bgp long-lived-graceful-restart stale-time 15
+
+  neighbor downlink peer-group
+  neighbor downlink remote-as internal
+  neighbor downlink bfd
+  neighbor downlink bfd profile tripleo
+  neighbor downlink password f00barZ
+  ! neighbor downlink capability extended-nexthop
+{% for iface in downlink_interfaces %}
+  neighbor {{iface}} interface peer-group downlink
+{% endfor %}
+
+  neighbor uplink peer-group
+  neighbor uplink remote-as external
+  neighbor uplink bfd
+  neighbor uplink bfd profile tripleo
+  ! neighbor uplink capability extended-nexthop
+{% for iface in uplink_ifs %}
+  neighbor {{iface}} interface peer-group uplink
+{% endfor %}
+
+  address-family ipv4 unicast
+    redistribute connected
+    neighbor downlink route-reflector-client
+    neighbor downlink default-originate
+    neighbor downlink next-hop-self
+    neighbor downlink prefix-list only-host-prefixes out
+    neighbor uplink allowas-in origin
+    neighbor uplink prefix-list only-default-host-prefixes in
+  exit-address-family
+
+  address-family ipv6 unicast
+    redistribute connected
+    neighbor downlink activate
+    neighbor downlink route-reflector-client
+    neighbor downlink default-originate
+    neighbor downlink next-hop-self
+    neighbor uplink activate
+    neighbor uplink allowas-in origin
+    neighbor uplink prefix-list only-default-host-prefixes in
+  exit-address-family
+
+  address-family l2vpn evpn
+    neighbor uplink activate
+    neighbor uplink allowas-in origin
+    neighbor downlink activate
+    neighbor downlink route-reflector-client
+  exit-address-family
+
+ip prefix-list only-default-host-prefixes permit 0.0.0.0/0
+ip prefix-list only-default-host-prefixes permit 0.0.0.0/0 ge 32
+ip prefix-list only-host-prefixes permit 0.0.0.0/0 ge 32
+
+ipv6 prefix-list only-default-host-prefixes permit ::/0
+ipv6 prefix-list only-default-host-prefixes permit ::/0 ge 128
+ipv6 prefix-list only-host-prefixes permit ::/0 ge 128
+
+ip nht resolve-via-default
+
+bfd
+  profile tripleo
+    detect-multiplier 10
+    transmit-interval 500
+    receive-interval 500
