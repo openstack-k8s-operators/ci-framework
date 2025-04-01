@@ -1,0 +1,61 @@
+---
+# NOTE: This solution would apply IOPS limitation for XFS filesystem only.
+- name: Set IOPS limitation on CRC host
+  hosts: crc.dev
+  vars:
+    iops_limit: 20000
+  tasks:
+    - name: Check if CRC version is nested
+      ansible.builtin.command: cat /etc/redhat-release
+      register: _rh_release
+
+    - name: Set fact with main device name
+      ansible.builtin.set_fact:
+        main_blk_name: >-
+          {%- if "'CoreOS' in _rh_release.stdout" -%}
+          /dev/vda4
+          {%- else -%}
+          /dev/vda1
+          {%- endif -%}
+
+    - name: Create system.slice dir
+      become: true
+      ansible.builtin.file:
+        path: /etc/systemd/system/system.slice.d
+        state: directory
+        mode: "0755"
+
+    - name: Create systemd service file to limit IOPS
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/system.slice.d/iops-limit.conf
+        content: |
+          [Slice]
+          IOReadIOPSMax={{ main_blk_name }} {{ iops_limit }}
+          IOWriteIOPSMax={{ main_blk_name }} {{ iops_limit }}
+        mode: "0644"
+
+    - name: Set io-limit.slice as default for all units
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/system.conf
+        regexp: '^#?DefaultSlice='
+        line: "DefaultSlice=io-limit.slice"
+        mode: "0644"
+
+    - name: Reload systemd and restart system.slice
+      become: true
+      ansible.builtin.systemd:
+        daemon_reload: true
+        daemon_reexec: true
+        name: io-limit.slice
+        state: restarted
+
+    # verify using: /sys/fs/cgroup/system.slice/io.max
+    - name: Get io.max value
+      ansible.builtin.command: cat /sys/fs/cgroup/system.slice/io.max
+      register: _current_io_max
+
+    - name: Print io.max value
+      ansible.builtin.debug:
+        msg: "{{ _current_io_max }}"
