@@ -1,0 +1,521 @@
+---
+- name: Common spines and leaves configuration
+  hosts: "spines,leafs{{ router_bool | default(false) | ternary(',routers', '') }}"
+  tasks:
+    - name: Workaround router advertisement packets polluting routing tables
+      become: true
+      ansible.builtin.shell:
+        cmd: |
+          for i in $(ls /proc/sys/net/ipv6/conf/*/forwarding); do echo 1 > $i; done
+      changed_when: false
+
+    - name: Register interfaces
+      ansible.builtin.shell:
+        cmd: "set -o pipefail && ls -1 /proc/sys/net/ipv4/conf/*/rp_filter | cut -d/ -f7"
+      register: interfaces
+      changed_when: false
+
+    - name: Disable reverse path forwarding validation
+      become: true
+      ansible.posix.sysctl:
+        name: "net.ipv4.conf.{{ item }}.rp_filter"
+        value: "0"
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/sysctl.conf
+        state: present
+        reload: true
+      loop: "{{ interfaces.stdout_lines }}"
+      register: result
+      retries: 3
+      timeout: 60
+      until: result is not failed
+
+    - name: Disable reverse path forwarding validation
+      become: true
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/sysctl.conf
+        state: present
+        reload: true
+      loop: "{{ sysctls | dict2items }}"
+      vars:
+        sysctls:
+          net.ipv4.conf.all.rp_filter: '0'
+          net.ipv4.conf.default.rp_filter: '0'
+      register: result
+      retries: 3
+      timeout: 60
+      until: result is not failed
+
+    - name: Set IPv4 forwarding
+      become: true
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/90-network.conf
+        state: present
+        reload: true
+
+    - name: Set IPv6 forwarding
+      become: true
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.all.forwarding
+        value: '1'
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/90-network.conf
+        state: present
+        reload: true
+
+    - name: Check installed packages
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Install FRR
+      when: '"frr" not in ansible_facts.packages'
+      block:
+        - name: Install RHOS Release tool
+          become: true
+          ansible.builtin.package:
+            name: "{{ cifmw_repo_setup_rhos_release_rpm }}"
+            state: present
+            disable_gpg_check: true
+
+        - name: Enable RHOS release repos.
+          become: true
+          ansible.builtin.command:
+            cmd: "rhos-release rhel"
+          changed_when: false
+
+        - name: Install frr
+          become: true
+          ansible.builtin.package:
+            name: frr
+            state: present
+
+    - name: Enable FRR BGP daemon
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/frr/daemons
+        regexp: "^bgpd="
+        line: "bgpd=yes"
+        owner: frr
+        group: frr
+        mode: '640'
+
+    - name: Enable FRR BFD daemon
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/frr/daemons
+        regexp: "^bfdd="
+        line: "bfdd=yes"
+        owner: frr
+        group: frr
+        mode: '640'
+
+    - name: Enable retain option of zebra
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/frr/daemons
+        regexp: "^zebra_options="
+        line: "zebra_options=\"  -A 127.0.0.1 -s 90000000 -r \""
+        owner: frr
+        group: frr
+        mode: '640'
+
+# Router play
+- name: Configure router
+  hosts: "{{ router_bool | default(false) | ternary('routers', 'localhost') }}"
+  tasks:
+    - name: Early end if no router defined
+      ansible.builtin.meta: end_play
+      when: not (router_bool | default(false))
+
+    - name: Obtain the connection for the eth0 interface
+      ansible.builtin.command:
+        cmd: >
+          nmcli -g GENERAL.CONNECTION device show eth0
+      register: router_eth0_conn
+      changed_when: false
+
+    # When eth0 connection name is "Wired connection 1", then the rest of the
+    # connection names corresponding to the interfaces will follow this pattern:
+    # eth1 -> "Wired connection 2"
+    # eth2 -> "Wired connection 3"
+    # When eth0 connection name is different from "Wired connection 1", then the
+    # rest of the connection names corresponding to the interfaces will follow
+    # this pattern:
+    # eth1 -> "Wired connection 1"
+    # eth2 -> "Wired connection 2"
+    - name: Set router_conn_name_offset
+      ansible.builtin.set_fact:
+        router_conn_name_offset: >-
+          {{
+            1 if "Wired connection 1" == (router_eth0_conn.stdout | trim)
+            else 0
+          }}
+
+    - name: Build downlink connection list
+      vars:
+        connection_name: "Wired connection {{ (item | int) + (router_conn_name_offset | int) }}"
+        interface_name: "eth{{ item }}"
+      ansible.builtin.set_fact:
+        router_downlink_conns: "{{ router_downlink_conns | default([]) + [connection_name] }}"
+        router_downlink_ifs: "{{ router_downlink_ifs | default([]) + [interface_name] }}"
+      loop: "{{ range(1, 3) | list }}"  # the number of spines is always 2
+
+    - name: Build uplink connection
+      vars:
+        len_router_downlink_conns: "{{ router_downlink_conns | length }}"
+      ansible.builtin.set_fact:
+        router_uplink_conn: "Wired connection {{ 1 + (len_router_downlink_conns | int) + (router_conn_name_offset | int) }}"
+        router_uplink_if: "eth{{ 1 + (len_router_downlink_conns | int) }}"
+
+    - name: Configure downlink router connections with nmcli
+      become: true
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "{{ item }}"
+        type: ethernet
+        method4: disabled
+        method6: link-local
+        state: present
+      loop: "{{ router_downlink_conns }}"
+
+    - name: Configure uplink router connections with nmcli
+      become: true
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "{{ router_uplink_conn }}"
+        ip4: "{{ router_uplink_ip }}/30"
+        method4: manual
+        method6: link-local
+        state: present
+
+    - name: Add provider network gateway IP to router loopback
+      become: true
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: lo
+        ip4:
+          - 127.0.0.1/8
+          - 192.168.133.1/32
+        method4: manual
+        ip6: "::1/128"
+        method6: manual
+        state: present
+
+    - name: Configure FRR
+      become: true
+      ansible.builtin.template:
+        src: templates/router-frr.conf.j2
+        dest: /etc/frr/frr.conf
+        owner: frr
+        group: frr
+        mode: '640'
+
+    - name: Enable and start FRR
+      become: true
+      ansible.builtin.service:
+        name: frr
+        enabled: true
+        state: restarted
+
+    - name: Masquerade mortacci
+      block:
+        - name: Install iptables
+          become: true
+          ansible.builtin.package:
+            name: iptables
+            state: present
+
+        - name: Masquerade outgoing traffic
+          vars:
+            router_ext_if: eth0
+          become: true
+          ansible.builtin.shell:
+            cmd: |
+              iptables -t nat -A POSTROUTING -s 99.99.0.0/16 -o {{ router_ext_if }} -j MASQUERADE
+              iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o {{ router_ext_if }} -j MASQUERADE
+          changed_when: false
+
+    - name: Restart NetworkManager
+      become: true
+      ansible.builtin.systemd:
+        name: NetworkManager.service
+        state: restarted
+
+
+# Spines play
+- name: Configure spines
+  hosts: spines
+  tasks:
+    - name: Obtain the connection for the eth0 interface
+      ansible.builtin.command:
+        cmd: >
+          nmcli -g GENERAL.CONNECTION device show eth0
+      register: spine_eth0_conn
+      changed_when: false
+
+    - name: Set spine_conn_name_offset
+      ansible.builtin.set_fact:
+        spine_conn_name_offset: >-
+          {{
+            1 if "Wired connection 1" == (spine_eth0_conn.stdout | trim)
+            else 0
+          }}
+
+    - name: Build downlink connection list
+      vars:
+        num_conns: "{{ (num_racks | default(4) | int) * 2 }}"
+        connection_name: "Wired connection {{ (item | int) + (spine_conn_name_offset | int) }}"
+        interface_name: "eth{{ item }}"
+      ansible.builtin.set_fact:
+        spine_downlink_conns: "{{ spine_downlink_conns | default([]) + [connection_name] }}"
+        spine_downlink_ifs: "{{ spine_downlink_ifs | default([]) + [interface_name] }}"
+      loop: "{{ range(1, 1 + (num_conns | int)) | list }}"
+
+    - name: Build uplink connection
+      vars:
+        len_spine_downlink_conns: "{{ spine_downlink_conns | length }}"
+      ansible.builtin.set_fact:
+        spine_uplink_conn: "Wired connection {{ 1 + (len_spine_downlink_conns | int) + (spine_conn_name_offset | int) }}"
+        spine_uplink_if: "eth{{ 1 + (len_spine_downlink_conns | int) }}"
+
+    - name: Configure spine connections with nmcli
+      become: true
+      vars:
+        spine_conns: >-
+          {{
+            router_bool | default(false) |
+            ternary(spine_downlink_conns + [spine_uplink_conn],
+                    spine_downlink_conns)
+          }}
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "{{ item }}"
+        type: ethernet
+        method4: disabled
+        method6: link-local
+        state: present
+      loop: "{{ spine_conns }}"
+
+    - name: Configure FRR
+      become: true
+      ansible.builtin.template:
+        src: templates/spine-frr.conf.j2
+        dest: /etc/frr/frr.conf
+        owner: frr
+        group: frr
+        mode: '640'
+
+    - name: Enable and start FRR
+      become: true
+      ansible.builtin.service:
+        name: frr
+        enabled: true
+        state: restarted
+
+    - name: Masquerade mortacci
+      when: not (router_bool | default(false))
+      block:
+        - name: Install iptables
+          become: true
+          ansible.builtin.package:
+            name: iptables
+            state: present
+
+        - name: Masquerade outgoing traffic
+          become: true
+          ansible.builtin.shell:
+            cmd: |
+              iptables -t nat -A POSTROUTING -s 99.99.0.0/16 -o {{ spine_uplink_if }} -j MASQUERADE
+              iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o {{ spine_uplink_if }} -j MASQUERADE
+          changed_when: false
+
+# Leaves play
+- name: Configure leaves
+  hosts: leafs
+  vars:
+    leaf_id: "{{ (ansible_hostname.split('-')[-1] | int) % 2 }}"  # always 2 leaves per rack
+    rack_id: "{{ (ansible_hostname.split('-')[-1] | int) // 2 }}"  # always 2 leaves per rack
+  tasks:
+    - name: Obtain the connection for the eth0 interface
+      ansible.builtin.command:
+        cmd: >
+          nmcli -g GENERAL.CONNECTION device show eth0
+      register: leaf_eth0_conn
+      changed_when: false
+
+    - name: Set leaf_conn_name_offset
+      ansible.builtin.set_fact:
+        leaf_conn_name_offset: >-
+          {{
+            1 if "Wired connection 1" == (leaf_eth0_conn.stdout | trim)
+            else 0
+          }}
+
+    - name: Build uplink connection list
+      vars:
+        connection_name: "Wired connection {{ (item | int) + (leaf_conn_name_offset | int) }}"
+        interface_name: "eth{{ item }}"
+      ansible.builtin.set_fact:
+        uplink_conns: "{{ uplink_conns | default([]) + [connection_name] }}"
+        uplink_ifs: "{{ uplink_ifs | default([]) + [interface_name] }}"
+      loop: "{{ range(1, 3) | list }}"  # the number of spines is always 2
+
+    - name: Build downlink connection list
+      vars:
+        num_conns: "{{ (edpm_nodes_per_rack | default(1) | int) + (ocp_nodes_per_rack | default(0) | int) }}"
+        connection_name: "Wired connection {{ (item | int) + (leaf_conn_name_offset | int) }}"
+        interface_name: "eth{{ item }}"
+      ansible.builtin.set_fact:
+        leaf_downlink_conns: "{{ leaf_downlink_conns | default([]) + [connection_name] }}"
+        leaf_downlink_ifs: "{{ leaf_downlink_ifs | default([]) + [interface_name] }}"
+      loop: "{{ range(3, 3 + (num_conns | int)) | list }}"
+
+    - name: Build downlink connection list for rack3
+      vars:
+        connection_name: "Wired connection {{ (item | int) + (leaf_conn_name_offset | int) }}"
+        interface_name: "eth{{ item }}"
+      ansible.builtin.set_fact:
+        downlink_conns_rack3: "{{ downlink_conns_rack3 | default([]) + [connection_name] }}"
+        downlink_ifs_rack3: "{{ downlink_ifs_rack3 | default([]) + [interface_name] }}"
+      loop: "{{ range(3, 6) | list }}"  # number of OCP nodes on rack3 is always 3
+
+    # rack3 is special because only OCP nodes are deployed on it when it exists
+    - name: Configure downlink leaf connections on rack3
+      become: true
+      vars:
+        leaf_ds_ip4: >-
+          100.{{ 64 + (leaf_id | int) }}.{{ rack_id }}.{{ 1 + 4 * (loop_index | int) }}
+      when: (rack_id | int) == 3
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "{{ item }}"
+        ip4: "{{ leaf_ds_ip4 }}/30"
+        method4: manual
+        method6: link-local
+        state: present
+      loop: "{{ downlink_conns_rack3 }}"
+      loop_control:
+        index_var: loop_index
+
+    - name: Configure downlink leaf connections on racks 0, 1 and 2
+      become: true
+      vars:
+        leaf_ds_ip4: >-
+          100.{{ 64 + (leaf_id | int) }}.{{ rack_id }}.{{ 1 + 4 * (loop_index | int) }}
+      when: (rack_id | int) != 3
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "{{ item }}"
+        ip4: "{{ leaf_ds_ip4 }}/30"
+        method4: manual
+        method6: link-local
+        state: present
+      loop: "{{ leaf_downlink_conns }}"
+      loop_control:
+        index_var: loop_index
+
+    - name: Configure uplink leaf connections
+      become: true
+      community.general.nmcli:
+        autoconnect: true
+        conn_name: "{{ item }}"
+        method4: disabled
+        method6: link-local
+        state: present
+      loop: "{{ uplink_conns }}"
+
+    - name: Configure FRR
+      become: true
+      vars:
+        downlink_interfaces: "{{ downlink_ifs_rack3 if (rack_id | int) == 3 else leaf_downlink_ifs }}"
+      ansible.builtin.template:
+        src: templates/leaf-frr.conf.j2
+        dest: /etc/frr/frr.conf
+        owner: frr
+        group: frr
+        mode: '640'
+
+    - name: Enable FRR Zebra daemon
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/frr/daemons
+        regexp: "^zebra="
+        line: "zebra=yes"
+        owner: frr
+        group: frr
+        mode: '640'
+
+    - name: Enable and start FRR
+      become: true
+      ansible.builtin.service:
+        name: frr
+        enabled: true
+        state: restarted
+
+# Final play to remove DHCP default routes
+- name: Remove DHCP default routes and use BGP instead
+  hosts: "leafs{{ router_bool | default(false) | ternary(',spines', '') }}"
+  tasks:
+    - name: Obtain the device with the DHCP default route
+      ansible.builtin.shell:
+        cmd: >
+          ip r show default |
+          grep "proto dhcp" |
+          grep -o "dev \w*" |
+          cut -d" " -f 2
+      ignore_errors: true
+      register: dhcp_default_route_device
+      changed_when: false
+
+    - name: Remove DHCP default route if it exists
+      when:
+        - dhcp_default_route_device.rc == 0
+        - dhcp_default_route_device.stdout | trim | length > 0
+      vars:
+        default_device: "{{ dhcp_default_route_device.stdout | trim }}"
+      block:
+        - name: Obtain the connection for the DHCP default route device
+          ansible.builtin.command:
+            cmd: >
+              nmcli -g GENERAL.CONNECTION device show {{ default_device }}
+          register: default_connection
+          changed_when: false
+
+        - name: Ignore dhcp default route from ocpbm interfaces
+          become: true
+          community.general.nmcli:
+            conn_name: "{{ default_connection.stdout | trim }}"
+            gw4_ignore_auto: true
+            gw6_ignore_auto: true
+            never_default4: true
+            state: present
+
+    - name: Remove default route obtained via DHCP from leaves in order to apply BGP
+      become: true
+      ansible.builtin.shell:
+        cmd: >
+          set -o pipefail && ip route show default |
+          grep "proto dhcp" |
+          xargs -r ip route del
+      changed_when: false
+
+    - name: Restart NetworkManager
+      become: true
+      ansible.builtin.systemd:
+        name: NetworkManager.service
+        state: restarted
+
+    - name: Check new default route corresponds with BGP
+      ansible.builtin.command:
+        cmd: "ip route show default"
+      register: default_ip_route_result
+      retries: 10
+      delay: 1
+      until: "'proto bgp' in default_ip_route_result.stdout"
+      changed_when: false
