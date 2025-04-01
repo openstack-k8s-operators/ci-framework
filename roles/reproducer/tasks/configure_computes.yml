@@ -2,15 +2,24 @@
 - name: Configure networking on computes
   delegate_to: "{{ _host }}"
   block:
-    - name: Ensure we can ping controller-0 from ctlplane
-      when:
-        # do not check connectivity between computes/networkers and
-        # controller-0 in BGP environments via ctlplane until BGP is configured
-        - _host is not match('^r[0-9]-compute-.*')
-        - _host is not match('^r[0-9]-networker-.*')
-      ansible.builtin.command:
-        cmd: |
-          ping -c2 {{ cifmw_reproducer_validate_network_host }}
+    - name: Check connectivity
+      block:
+        - name: Ensure we can ping controller-0 from ctlplane
+          when:
+            # do not check connectivity between computes/networkers and
+            # controller-0 in BGP environments via ctlplane until BGP is configured
+            - _host is not match('^r[0-9]-compute-.*')
+            - _host is not match('^r[0-9]-networker-.*')
+          ansible.builtin.command:
+            cmd: |
+              ping -c2 {{ cifmw_reproducer_validate_network_host }}
+          retries: 30
+          delay: 10
+          register: ping_output
+      rescue:
+        - name: Show ping output for debug reasons
+          ansible.builtin.fail:
+            msg: "{{ ping_output }}"
 
     - name: Tweak dnf configuration
       become: true
