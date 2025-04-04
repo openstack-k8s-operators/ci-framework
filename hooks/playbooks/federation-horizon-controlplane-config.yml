@@ -1,0 +1,35 @@
+---
+- name: Create kustomization to update Horizon to use Federation
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Create file to customize horizon for Federation resources deployed in the control plane
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/horizon_federation.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          - namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/horizon/enabled
+                value: true
+              - op: add
+                path: /spec/horizon/template/memcachedInstance
+                value: memcached
+              - op: add
+                path: /spec/horizon/template/customServiceConfig
+                value: |
+                  OPENSTACK_KEYSTONE_URL = "{{ '{{ .KeystoneEndpointPublic }}' }}/v3"
+                  WEBSSO_ENABLED = True
+                  WEBSSO_CHOICES = (
+                    ("credentials", _("Keystone Credentials")),
+                    ("OIDC", _("OpenID Connect")),
+                  )
+                  WEBSSO_IDP_MAPPING = {
+                    "OIDC": ("{{ cifmw_keystone_OIDC_provider_name }}", "openid"),
+                  }
