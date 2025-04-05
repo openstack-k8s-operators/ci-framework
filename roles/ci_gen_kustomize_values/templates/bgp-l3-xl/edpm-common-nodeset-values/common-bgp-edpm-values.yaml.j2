@@ -1,0 +1,86 @@
+# source: bgp-l3-xl/edpm-common-nodeset-values/common-bgp-edpm-values.yaml.j2
+{% set instances_names = [] %}
+{% set rack = 'r' ~ rack_number %}
+{% for _inst in cifmw_networking_env_definition.instances.keys() %}
+{%   if _inst.startswith('-'.join([rack, node_type])) %}
+{%     set _ = instances_names.append(_inst) %}
+{%   endif %}
+{% endfor %}
+data:
+  ssh_keys:
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
+    public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      ansibleVars:
+        edpm_fips_mode: "{{ 'enabled' if cifmw_fips_enabled|default(false)|bool else 'check' }}"
+        timesync_ntp_servers:
+          - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+        edpm_sshd_allowed_ranges:
+{% set sshd_allowed_range = cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) %}
+{% for rack in ['r0', 'r1', 'r2'] %}
+{%   set _ = sshd_allowed_range.append(cifmw_networking_env_definition.networks['ctlplane' + rack].network_v4) %}
+{% endfor %}
+{% for range in sshd_allowed_range %}
+          - "{{ range }}"
+{% endfor %}
+          - 192.168.125.0/24
+          - 192.168.111.0/24
+    nodes:
+{% for instance in instances_names %}
+      {{ instance }}:
+        ansible:
+{%   set ctlplane_rack = 'ctlplane' + rack %}
+          host: {{ cifmw_networking_env_definition.instances[instance].networks[ctlplane_rack].ip_v4 }}
+{%   if original_content.data.nodeset.nodes['edpm-' ~ instance].ansible.ansibleVars is defined %}
+          ansibleVars: {{ original_content.data.nodeset.nodes['edpm-' ~ instance].ansible.ansibleVars }}
+{%   endif %}
+        hostName: {{ instance }}
+        networks:
+{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
+{%        if 'storagemgmt' not in net %}
+          - name: {{ net if net != ctlplane_rack else 'ctlplane' }}
+            subnetName: {{ 'subnet1' if net != ctlplane_rack else 'subnet' ~ rack_number }}
+{%          if 'ctlplane' in net %}
+            defaultRoute: true
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks[ctlplane_rack].ip_v4 }}
+{%          endif %}
+{%        endif %}
+{%      endfor %}
+{%        if 'compute-0' in instance %}
+{%          set peer_suffix = 1 %}
+{%          set main_suffix = 7 %}
+{%        elif 'compute-1' in instance %}
+{%          set peer_suffix = 5 %}
+{%          set main_suffix = 8 %}
+{%        else %}
+{%          set peer_suffix = 9 %}
+{%          set main_suffix = 9 %}
+{%        endif %}
+          - name: BgpNet0
+            subnetName: subnet{{ rack_number }}
+            fixedIP: 100.64.{{ rack_number }}.{{ peer_suffix + 1 }}
+          - name: BgpNet1
+            subnetName: subnet{{ rack_number }}
+            fixedIP: 100.65.{{ rack_number }}.{{ peer_suffix + 1 }}
+          - name: BgpMainNet
+            subnetName: subnet{{ rack_number }}
+            fixedIP: 99.99.{{ rack_number }}.{{ main_suffix }}
+          - name: BgpMainNetV6
+            subnetName: subnet{{ rack_number }}
+{%        if 'compute-0' in instance %}
+{%          set suffix = 7 %}
+{%        elif 'compute-1' in instance %}
+{%          set suffix = 8 %}
+{%        else %}
+{%          set suffix = 9 %}
+{%        endif %}
+            fixedIP: f00d:f00d:f00d:f00d:f00d:f00d:f00d:00{{ (rack_number | int) + 1 }}{{ suffix }}
+{% endfor %}
