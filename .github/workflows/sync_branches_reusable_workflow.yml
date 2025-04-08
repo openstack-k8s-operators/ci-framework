@@ -1,39 +1,34 @@
 ---
-name: Sync a follower branch with Main
+name: Sync a target branch with source branch
 on:
   workflow_call:
     inputs:
-      main-branch:
+      source-branch:
         required: true
         type: string
-      follower-branch:
+      target-branch:
         required: true
         type: string
 
 jobs:
-  sync:
+  sync-branches:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
-      - name: Checkout main branch
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref:
-            ${{ inputs.main-branch }}
 
-      - name: Checkout, rebase and push to follower branch
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref:
-            ${{ inputs.follower-branch }}
-      - run: |
-          # Details about the GH action bot comes from
-          # https://api.github.com/users/github-actions%5Bbot%5D
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rebase origin/${{ inputs.main-branch }}
-          git push origin ${{ inputs.follower-branch }}
+      - name: Git config
+        run: |
+          git config --global user.name "openstack-k8s-ci-robot"
+          git config --global user.email "openstack-k8s@redhat.com"
+
+      - name: Rebase and Push
+        run: |
+          git fetch origin ${{ inputs.source-branch }}
+          git checkout ${{ inputs.target-branch }}
+          git rebase ${{ inputs.source-branch }}
+          git push origin ${{ inputs.target-branch }}
