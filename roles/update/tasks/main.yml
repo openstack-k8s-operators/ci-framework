@@ -33,8 +33,14 @@
   when:
     - cifmw_update_control_plane_check | bool
     - not cifmw_update_run_dryrun | bool
-  ansible.builtin.shell: |
-    {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
+
+  block:
+    - name: Prevent updating openstackclient during openstack update
+      ansible.builtin.include_tasks: prevent_openstack_client_update.yml
+
+    - name: Start the continuous control plane test
+      ansible.builtin.shell: |
+        {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
 
 - name: Set openstack_update_run Makefile environment variables
@@ -72,8 +78,20 @@
   when:
     - cifmw_update_control_plane_check | bool
     - not cifmw_update_run_dryrun | bool
-  ansible.builtin.command: |
-    {{ cifmw_update_artifacts_basedir }}/control_plane_test_stop.sh
+
+  block:
+    - name: Stop the continuous control plane test
+      ansible.builtin.command: |
+        {{ cifmw_update_artifacts_basedir }}/control_plane_test_stop.sh
+
+    - name: Patch openstackversion to trigger update of openstackclient
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: >
+        oc patch -n {{ cifmw_update_namespace }}
+        openstackversion {{ cifmw_openstack_version_name.stdout }} --type=json
+        --patch '[{ "op": "remove", "path": "/spec/customContainerImages/openstackClientImage" }]'
 
 - name: Reboot the compute nodes
   ansible.builtin.include_tasks: reboot_computes.yml
