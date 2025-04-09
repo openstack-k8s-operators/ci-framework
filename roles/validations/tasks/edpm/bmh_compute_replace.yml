@@ -1,0 +1,196 @@
+# This job tests the functionality of the openstack-operator to replace a
+# bmh compute node.
+#
+# This job was created to satisfy:
+# https://issues.redhat.com/browse/OSPRH-15061
+
+- name: Get name of nodeset containing bmh node to be used as spare node
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} get bmh {{ cifmw_validations_bmh_spare_leaf_label }} -o jsonpath='{.spec.consumerRef.name}'
+  register: bmh_nodeset_name
+
+- name: Verify bmh node being used as spare is provisioned before scale down
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} get bmh {{ cifmw_validations_bmh_spare_leaf_label }} -o jsonpath='{.status.provisioning.state}'
+  register: bmh_nodes_before_scale_down
+  failed_when: bmh_nodes_before_scale_down.stdout != "provisioned"
+
+- name: Get compute service list
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service list
+  register: compute_service_list_out
+  until: '"{{ cifmw_validations_bmh_spare_hostname }}" in compute_service_list_out.stdout'
+
+- name: Disable nova-compute for node being removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service set {{ cifmw_validations_bmh_spare_hostname }} nova-compute --disable
+  register: compute_service_set_out
+  until: '"Failed" not in compute_service_set_out.stdout'
+
+- name: Get ovn controller id of host to be removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack network agent list --host {{ cifmw_validations_bmh_spare_hostname }} | grep "OVN Controller agent"  | awk '{print $2}'
+  register: remove_ovn_id
+
+- name: Delete network agent for compute being removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack network agent delete {{ remove_ovn_id.stdout }}
+
+- name: Get compute service id of host to be removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service list --host {{ cifmw_validations_bmh_spare_hostname }} -f value -c ID
+  register: remove_compute_service_id
+
+- name: Delete compute service for node being removed
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient openstack compute service delete {{ remove_compute_service_id.stdout }}
+
+- name: Patch nodeset to remove node
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ bmh_nodeset_name.stdout | trim}}" --type=json --patch '[{ "op": "remove", "path": "/spec/nodes/{{ cifmw_validations_bmh_spare_nodename }}" }]'
+
+- name: Wait for nodeset to be SetupReady again
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait osdpns "{{ bmh_nodeset_name.stdout | trim }}"
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=SetupReady
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Patch spare bmh node to change its label to match label of node being replaced
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc patch -n {{ cifmw_validations_namespace }} bmh/"{{ cifmw_validations_bmh_spare_leaf_label }}" --type=json --patch '[{ "op": "replace", "path": "/metadata/labels/nodeName", "value": "{{ cifmw_validations_bmh_replace_leaf_label }}" }]'
+
+- name: Verify bmh node being used as spare is available after changing label
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} get bmh {{ cifmw_validations_bmh_spare_leaf_label }} -o jsonpath='{.status.provisioning.state}'
+  register: bmh_nodes_after_scale_down
+  until: bmh_nodes_after_scale_down.stdout == "available"
+  retries: 20
+  delay: 20
+
+- name: Create openstackdataplanedeployment to deploy the scaledown
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-scaledown
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ bmh_nodeset_name.stdout | trim }}"
+        servicesOverride:
+          - ssh-known-hosts
+      EOF
+
+- name: Wait for deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment edpm-scaledown
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Delete faulty baremetal node
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} delete bmh {{ cifmw_validations_bmh_replace_leaf_label }}
+
+- name: Wait for nodeset to be SetupReady
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait osdpns "{{ bmh_nodeset_name.stdout | trim }}"
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=SetupReady
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Create openstackdataplanedeployment to deploy the compute replacement
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-compute-replacement
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ bmh_nodeset_name.stdout | trim }}"
+        servicesOverride:
+          - ssh-known-hosts
+      EOF
+
+- name: Wait for deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment edpm-compute-replacement
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Wait for nodeset to be Ready
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait osdpns "{{ bmh_nodeset_name.stdout | trim }}"
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=Ready
+      --timeout={{ cifmw_validations_timeout }}m
