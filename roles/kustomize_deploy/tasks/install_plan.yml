@@ -1,0 +1,90 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# Description:
+# Set of tasks to accept the latest Manual installPlan provided by OLM.
+
+- name: Wait for unapproved InstallPlan creation
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    namespace: openstack-operators
+  register: _cifmw_kustomize_deploy_install_plans
+  until: >
+    _cifmw_kustomize_deploy_install_plans.resources |
+    selectattr('spec.approval', 'equalto', 'Manual') |
+    selectattr('spec.approved', 'equalto', false) | length > 0
+  retries: 30
+  delay: 10
+
+- name: Get InstallPlan name
+  ansible.builtin.set_fact:
+    _cifmw_kustomize_deploy_installplan_name: >-
+      {{
+      (_cifmw_kustomize_deploy_install_plans.resources
+      | selectattr('spec.approval', 'equalto', 'Manual')
+      | selectattr('spec.approved', 'equalto', false)
+      | first)
+      .metadata.name
+      }}
+
+- name: Approve the InstallPlan
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    namespace: openstack-operators
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: InstallPlan
+      metadata:
+        name: "{{ _cifmw_kustomize_deploy_installplan_name }}"
+      spec:
+        approved: true
+
+- name: Display the status of the installPlan found
+  ansible.builtin.debug:
+    msg: "Waiting for InstallPlan {{ _cifmw_kustomize_deploy_installplan_name }}."
+
+- name: Wait for the InstallPlan to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    namespace: openstack-operators
+    name: "{{ _cifmw_kustomize_deploy_installplan_name }}"
+  register: _cifmw_kustomize_deploy_installplan
+  until:
+    - _cifmw_kustomize_deploy_installplan.failed is false
+    - _cifmw_kustomize_deploy_installplan.resources is defined
+    - _cifmw_kustomize_deploy_installplan.resources | length == 1
+    - >-
+      (
+      _cifmw_kustomize_deploy_installplan.resources | first
+      ).status.phase | lower  == 'complete'
+  retries: "{{ cifmw_kustomize_deploy_retries_install_plan }}"
+  delay: "{{ cifmw_kustomize_deploy_delay }}"
+
+- name: Display the status of the installPlan found
+  ansible.builtin.debug:
+    msg: >
+      InstallPlan {{ _cifmw_kustomize_deploy_installplan_name }} deployed.
