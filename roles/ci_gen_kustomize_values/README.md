@@ -64,7 +64,9 @@ If the following parameter is set, it overrides the associated parameter in `arc
 
 * `cifmw_ci_gen_kustomize_values_deployment_version`: (String) The version to be deployed by setting the `startingCSV` of the subscription for the OpenStack operator. Versions `v1.0.3` and `v1.0.6` are unique as they configure the subscription for all operators. The right kustomize overlay is selected by the `ci_gen_kustomize_values/tasks/olm_subscriptions_overlay.yml` file.
 
-Access the remaining parameters in the `olm-subscription/values.yaml` file and override them with the `cifmw_architecture_user_kustomize_<some_string>` variable, which should set the `common.olm-values` hash. The earlier version parameter shouldn't be modified using this method, as it won't activate the additional code required for proper functionality.
+* `cifmw_ci_gen_kustomize_values_installplan_approval`: (String) Options are `Manual` or `Automatic`. This determines how the OpenStack operator is installed. In `Manual` mode, the install plan requires approval, which is automatically handled in the `kustomize_deploy/tasks/install_operators.yml` task file.
+
+Access to the other parameters defined in the `olm-subscription/values.yaml` file is doable by overriding them using the `cifmw_architecture_user_kustomize_<some_string>` variable, which should set the `common.olm-values` hash. However, the last two variables should not be modified using this method, as it won't activate the additional code required for them to function correctly.
 
 ## Adding a new template
 
