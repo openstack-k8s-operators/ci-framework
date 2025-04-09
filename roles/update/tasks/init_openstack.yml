@@ -1,0 +1,62 @@
+- name: Set update step to About to initialize the Openstack operator
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      About to initialize the Openstack operator
+
+- name: Create the openstack-init YAML
+  ansible.builtin.copy:
+    dest: "/home/zuul/openstack-init.yaml"
+    content: |
+      ---
+      apiVersion: operator.openstack.org/v1beta1
+      kind: OpenStack
+      metadata:
+          name: openstack
+          namespace: openstack-operators
+
+- name: Apply openstack-init using oc
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: oc apply -f /home/zuul/openstack-init.yaml
+  args:
+    executable: /bin/bash
+
+- name: Set update step to Openstack initialization applied
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      Openstack initialization applied
+
+- name: Ensure OpenStack deployment is successful and block until it is
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operator.openstack.org/v1beta1
+    kind: OpenStack
+    namespace: openstack-operators
+  register: openstack_info
+  until: >
+    openstack_info.resources[0].status.conditions is defined
+    and
+    (
+      openstack_info.resources[0].status.conditions |
+      selectattr('type', 'equalto', 'Ready') |
+      map(attribute='status') | first | default('False') == 'True'
+    )
+    and
+    (
+      openstack_info.resources[0].status.conditions |
+      selectattr('type', 'equalto', 'OpenStackOperatorReadyCondition') |
+      map(attribute='status') | first | default('False') == 'True'
+    )
+  retries: 20
+  delay: 15
+
+- name: Set update step to Openstack initialization finished
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      Openstack initialization finished
