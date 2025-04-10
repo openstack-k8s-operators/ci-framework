@@ -1,0 +1,34 @@
+---
+- name: Parse variables to group_vars file
+  hosts: controller
+  gather_facts: true
+  vars:
+    # FIXME
+    ci_framework_dir: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework"
+    ci_framework_group_vars_path: "{{ ci_framework_dir }}/ci/playbooks/kuttl/group_vars"
+  tasks:
+    - name: Parse extra vars
+      ansible.builtin.include_role:
+        name: parse-vars
+      loop: "{{ cifmw_extras | default([]) }}"
+
+    # FIXME
+    - name: Parse extra vars files
+      ansible.builtin.include_role:
+        name: parse-vars
+      loop:
+        - "/home/zuul/ci-framework-data/artifacts/parameters/zuul-params.yml"
+        - "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/base.yml"
+        - "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/ci.yml"
+        - "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/kuttl.yml"
+
+    - name: Read group_vars all file
+      ansible.builtin.slurp:
+        src: "{{ ci_framework_group_vars_path }}/all"
+      register: _group_vars_all
+
+    - name: Set global variables
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+        cacheable: true
+      loop: "{{ _group_vars_all['content'] | b64decode | from_yaml | dict2items }}"
