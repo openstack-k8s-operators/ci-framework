@@ -36,6 +36,54 @@
   ansible.builtin.shell: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
+- name: Install plan
+  ansible.builtin.include_role:
+    name: kustomize_deploy
+    tasks_from: install_plan.yml
+  when:
+    - cifmw_ci_gen_kustomize_values_installplan_approval is defined
+    - cifmw_ci_gen_kustomize_values_installplan_approval == 'Manual'
+
+- name: Initialize the openstack operator if needed
+  ansible.builtin.include_tasks: init_openstack.yml
+  when:
+    - cifmw_ci_gen_kustomize_values_deployment_version is defined
+    - cifmw_ci_gen_kustomize_values_deployment_version is in ['v1.0.3', 'v1.0.6']
+
+# Get the next available version available when using OLM
+- name: Handle the next version when using OLM
+  when:
+    - cifmw_ci_gen_kustomize_values_deployment_version is defined
+  block:
+    - name: Make sure we get a new version available, block until we do.
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackVersion
+        namespace: "{{ cifmw_update_namespace }}"
+      register: openstackversion_info
+      until: openstackversion_info.resources[0].spec.targetVersion != openstackversion_info.resources[0].status.availableVersion
+      retries: 20
+      delay: 15
+
+    - name: Capture the available version in openstackversion
+      ansible.builtin.set_fact:
+        cifmw_update_next_available_version: >-
+          {{ openstackversion_info.resources[0].status.availableVersion }}
+
+    - name: Capture the deployed version in openstackversion
+      ansible.builtin.set_fact:
+        cifmw_update_deployed_version: >-
+          {{ openstackversion_info.resources[0].status.deployedVersion }}
+
+    - name: Set update step to display coming OpenStack update version
+      ansible.builtin.command:
+        cmd: >
+          {{ cifmw_update_artifacts_basedir }}/update_step.sh
+          About to Update openstack from {{ cifmw_update_deployed_version }}
+          to {{ cifmw_update_next_available_version }}
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
@@ -43,15 +91,34 @@
   ansible.builtin.set_fact:
     _make_openstack_update_run_params: |
       TIMEOUT: {{ cifmw_update_openstack_update_run_timeout }}
-      {% if not cifmw_update_openstack_update_run_operators_updated | bool -%}
+      {% if _cifmw_update_use_fake_update | bool -%}
       FAKE_UPDATE: true
       CONTAINERS_NAMESPACE: {{ cifmw_update_openstack_update_run_containers_namespace }}
       CONTAINERS_TARGET_TAG: {{ cifmw_update_openstack_update_run_containers_target_tag }}
       OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
       {% else -%}
-      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+      OPENSTACK_VERSION: {{ _cifmw_update_openstack_version }}
       {% endif -%}
+  vars:
+    # When using OLM style of update, or if
+    # cifmw_update_openstack_update_run_operators_updated is true do
+    # not use fake update in openstack-update.sh.
+    _cifmw_update_use_fake_update: >-
+      {{
+      not ( cifmw_ci_gen_kustomize_values_deployment_version is defined ) and
+      not ( cifmw_update_openstack_update_run_operators_updated | bool )
+      }}
+    _cifmw_update_openstack_version: >-
+      {{
+      cifmw_update_next_available_version |
+      default(cifmw_update_openstack_update_run_target_version)
+      }}
 
+- name: Set update step to About to start the Update sequence
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      Update to start the Update sequence
 
 - name: Run make openstack_update_run
   vars:
@@ -61,6 +128,12 @@
   ansible.builtin.include_role:
     name: 'install_yamls_makes'
     tasks_from: 'make_openstack_update_run'
+
+- name: Set update step to Update Sequence complete
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      Update Sequence complete
 
 - name: Stop the ping test
   ansible.builtin.include_tasks: l3_agent_connectivity_check_stop.yml
@@ -75,7 +148,27 @@
   ansible.builtin.command: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_stop.sh
 
+- name: Set update step to Openstackclient updated
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      Openstackclient updated
+
+- name: Set update step to About to start Reboot
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      About to start Reboot
+  when:
+    - cifmw_update_reboot_test | bool
+
 - name: Reboot the compute nodes
   ansible.builtin.include_tasks: reboot_computes.yml
   when:
     - cifmw_update_reboot_test | bool
+
+- name: Set update step to Update complete
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      Update complete

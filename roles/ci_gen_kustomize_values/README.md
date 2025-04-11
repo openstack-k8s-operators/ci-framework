@@ -54,6 +54,20 @@ Optional parameters:
 
 * `cifmw_ci_gen_kustomize_values_edpm_net_template_b64`: (String) The base64 content of `edpm_network_config_template`.
 
+### Specific parameters for olm-values
+This ConfigMap specifies parameters to override those in `architecture/example/common/olm/values.yaml`.
+
+* `cifmw_ci_gen_kustomize_values_ooi_image`: (String) The URI for the image providing the OpenStack operator index. Defaults to `quay.io/openstack-k8s-operators/openstack-operator-index:latest`.
+* `cifmw_ci_gen_kustomize_values_sub_channel`: (String) Specifies the channel to be used.
+
+If the following parameter is set, it overrides the associated parameter in `architecture/example/common/olm-subscriptions/values.yaml`.
+
+* `cifmw_ci_gen_kustomize_values_deployment_version`: (String) The version to be deployed by setting the `startingCSV` of the subscription for the OpenStack operator. Versions `v1.0.3` and `v1.0.6` are unique as they configure the subscription for all operators. The right kustomize overlay is selected by the `ci_gen_kustomize_values/tasks/olm_subscriptions_overlay.yml` file.
+
+* `cifmw_ci_gen_kustomize_values_installplan_approval`: (String) Options are `Manual` or `Automatic`. This determines how the OpenStack operator is installed. In `Manual` mode, the install plan requires approval, which is automatically handled in the `kustomize_deploy/tasks/install_operators.yml` task file.
+
+Access to the other parameters defined in the `olm-subscription/values.yaml` file is doable by overriding them using the `cifmw_architecture_user_kustomize_<some_string>` variable, which should set the `common.olm-values` hash. However, the last two variables should not be modified using this method, as it won't activate the additional code required for them to function correctly.
+
 ## Adding a new template
 
 The template must have a leading comment staging its source. For example, if your template is located in
