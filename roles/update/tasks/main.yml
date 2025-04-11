@@ -36,6 +36,12 @@
   ansible.builtin.shell: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
+- name: Set update step to About to accept the installPlan
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      About to accept the installPlan
+
 - name: Install plan
   ansible.builtin.include_role:
     name: kustomize_deploy
@@ -43,6 +49,12 @@
   when:
     - cifmw_ci_gen_kustomize_values_installplan_approval is defined
     - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
+
+- name: Set update step to InstallPlan completed
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_step.sh
+      InstallPlan completed
 
 - name: Initialize the openstack operator if needed
   ansible.builtin.include_tasks: init_openstack.yml
@@ -72,6 +84,26 @@
       ansible.builtin.set_fact:
         cifmw_update_next_available_version: >-
           {{ openstackversion_info.resources[0].status.availableVersion }}
+
+    - name: Capture the deployed version in openstackversion
+      ansible.builtin.set_fact:
+        cifmw_update_deployed_version: >-
+          {{ openstackversion_info.resources[0].status.deployedVersion }}
+
+    - name: Set update step to display coming OpenStack update version
+      ansible.builtin.command:
+        cmd: >
+          {{ cifmw_update_artifacts_basedir }}/update_step.sh
+          About to Update openstack from {{ cifmw_update_deployed_version }}
+          to {{ cifmw_update_next_available_version }}
+
+    # Some messages in the update timeline might be missed, make sure
+    # we always get the versions we update from and to in the logs.
+    - name: Display the version update in the logs as well
+      ansible.builtin.debug:
+        msg: >
+          About to Update openstack from {{ cifmw_update_deployed_version }}
+          to {{ cifmw_update_next_available_version }}
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
