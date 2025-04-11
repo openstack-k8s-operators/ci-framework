@@ -36,6 +36,36 @@
   ansible.builtin.shell: |
     {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
+- name: Install plan
+  ansible.builtin.include_role:
+    name: kustomize_deploy
+    tasks_from: install_plan.yml
+  when:
+    - cifmw_ci_gen_kustomize_values_installplan_approval is defined
+    - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
+
+# Get the next available version available when using OLM
+- name: Handle the next version when using OLM
+  when:
+    - cifmw_ci_gen_kustomize_values_deployment_version is defined
+  block:
+    - name: Make sure we get a new version available, block until we do.
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackVersion
+        namespace: "{{ cifmw_update_namespace }}"
+      register: openstackversion_info
+      until: openstackversion_info.resources[0].spec.targetVersion != openstackversion_info.resources[0].status.availableVersion
+      retries: 20
+      delay: 15
+
+    - name: Capture the available version in openstackversion
+      ansible.builtin.set_fact:
+        cifmw_update_next_available_version: >-
+          {{ openstackversion_info.resources[0].status.availableVersion }}
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
@@ -43,15 +73,28 @@
   ansible.builtin.set_fact:
     _make_openstack_update_run_params: |
       TIMEOUT: {{ cifmw_update_openstack_update_run_timeout }}
-      {% if not cifmw_update_openstack_update_run_operators_updated | bool -%}
+      {% if _cifmw_update_use_fake_update | bool -%}
       FAKE_UPDATE: true
       CONTAINERS_NAMESPACE: {{ cifmw_update_openstack_update_run_containers_namespace }}
       CONTAINERS_TARGET_TAG: {{ cifmw_update_openstack_update_run_containers_target_tag }}
       OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
       {% else -%}
-      OPENSTACK_VERSION: {{ cifmw_update_openstack_update_run_target_version }}
+      OPENSTACK_VERSION: {{ _cifmw_update_openstack_version }}
       {% endif -%}
-
+  vars:
+    # When using OLM style of update, or if
+    # cifmw_update_openstack_update_run_operators_updated is true do
+    # not use fake update in openstack-update.sh.
+    _cifmw_update_use_fake_update: >-
+      {{
+      not ( cifmw_ci_gen_kustomize_values_deployment_version is defined ) and
+      not ( cifmw_update_openstack_update_run_operators_updated | bool )
+      }}
+    _cifmw_update_openstack_version: >-
+      {{
+      cifmw_update_next_available_version |
+      default(cifmw_update_openstack_update_run_target_version)
+      }}
 
 - name: Run make openstack_update_run
   vars:

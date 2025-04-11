@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Description: This playbook generates the kustomize file that
+# retrieves the appropriate overlay based on
+# cifmw_ci_gen_kustomize_values_deployment_version. It allows for
+# specifying the deployment version when multiple versions are
+# available in the OLM catalog. This is particularly useful for
+# testing updates but can also be used to deploy any version from the
+# OLM catalog.
+
+- name: Fail if installplan_approval is defined without deployment_version
+  ansible.builtin.fail:
+    msg: >
+      You cannot have 'cifmw_ci_gen_kustomize_values_installplan_approval'
+      set to Manual without 'cifmw_ci_gen_kustomize_values_deployment_version'
+  when:
+    - cifmw_ci_gen_kustomize_values_installplan_approval is defined
+    - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
+    - cifmw_ci_gen_kustomize_values_deployment_version is not defined
+
+- name: Set the right overlay for the subscriptions
+  ansible.builtin.set_fact:
+    _cifmw_update_deployment_version_dir: >-
+      {{
+      cifmw_ci_gen_kustomize_values_deployment_version
+      if cifmw_ci_gen_kustomize_values_deployment_version in ['v1.0.3', 'v1.0.6']
+      else
+      'default'
+      }}
+
+- name: Point to the right overlay for OLM when deploying old version
+  vars:
+    _kustomization:
+      components:
+        - "../../../lib/olm-deps"
+        - "../../../lib/olm-openstack-subscriptions/overlays/{{ _cifmw_update_deployment_version_dir }}"
+      resources:
+        - "values.yaml"
+  ansible.builtin.copy:
+    content: |
+      ---
+      {{ _kustomization | ansible.builtin.to_nice_yaml(indent=2) }}
+    dest: "{{ cifmw_ci_gen_kustomize_values_architecture_repo }}/examples/common/olm-subscriptions/kustomization.yaml"
+    mode: "0644"
+  when: _cifmw_update_deployment_version_dir != 'default'
+
+# Pass down the new value for `cifmw_kustomize_deploy_olm_source_files`
+- name: Change directory for the customization file when deploying old version
+  ansible.builtin.set_fact:
+    cifmw_kustomize_deploy_olm_source_files: >-
+      {{
+      cifmw_ci_gen_kustomize_values_architecture_repo
+      }}/examples/common/olm-subscriptions
