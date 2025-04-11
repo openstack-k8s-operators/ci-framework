@@ -1,0 +1,109 @@
+---
+- name: Gather NodeSet resource information
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    namespace: "openstack"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: "OpenStackDataPlaneNodeSet"
+    api_version: "dataplane.openstack.org/v1beta1"
+  register: _cifmw_update_osdpns_all_info
+
+- name: Fail if no OSDPNS resources are found
+  ansible.builtin.fail:
+    msg: "No OSDPNS resources found in the 'openstack' namespace!"
+  when: _cifmw_update_osdpns_all_info.resources | length == 0
+
+- name: Choose the first OSDPNS resource
+  ansible.builtin.set_fact:
+    _cifmw_update_osdpns_info: "{{ _cifmw_update_osdpns_all_info.resources[0] }}"
+
+- name: Display which osdpns we're using
+  ansible.builtin.debug:
+    msg: "Found OSDPNS named: '{{ _cifmw_update_osdpns_info.metadata.name }}'"
+
+- name: Determine registry
+  ansible.builtin.set_fact:
+    cifmw_update_local_registry: >-
+      {{
+      (cifmw_ci_gen_kustomize_values_ooi_image.split('/')[0])
+      if cifmw_ci_gen_kustomize_values_ooi_image is defined
+      else 'quay.io'
+      | trim
+      }}
+
+- name: Check if credentials exist
+  ansible.builtin.set_fact:
+    brew_username: "{{ login_username }}"
+    brew_password: "{{ login_dict[login_username] }}"
+  vars:
+    login_dict: >-
+      {{
+      _cifmw_update_osdpns_info.spec.nodeTemplate.ansible.ansibleVars.
+      edpm_container_registry_logins[cifmw_update_local_registry]
+      }}
+    login_username: "{{ login_dict.keys()|list|first }}"
+  when:
+    - _cifmw_update_osdpns_info.spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins is defined
+    - login_dict is defined
+    - login_dict|length > 0
+    - cifmw_update_local_registry != 'quay.io'
+
+- name: Log in to registry when needed
+  containers.podman.podman_login:
+    # Hardcoded for now
+    registry: "registry.redhat.io"
+    username: "{{ brew_username }}"
+    password: "{{ brew_password }}"
+  when:
+    - brew_username is defined
+    - brew_password is defined
+    - cifmw_update_local_registry != 'quay.io'
+
+- name: Retrieve the openstackclient Pod
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    namespace: "openstack"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: "Pod"
+    name: "openstackclient"
+  register: _cifmw_update_openstackclient_pod
+
+- name: Fail if openstackclient Pod is not found
+  ansible.builtin.fail:
+    msg: "No openstackclient Pod found in the openstack namespace!"
+  when: _cifmw_update_openstackclient_pod.resources | length == 0
+
+- name: Set the openstackclient image fact
+  ansible.builtin.set_fact:
+    openstackclient_image: "{{ _cifmw_update_openstackclient_pod.resources[0].spec.containers[0].image }}"
+
+- name: Collect and save OpenStack config files
+  ansible.builtin.include_tasks: collect_openstackclient_config.yml
+  loop:
+    - 'clouds.yaml'
+    - 'secure.yaml'
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create local openstack wrapper script
+  ansible.builtin.copy:
+    dest: "{{ cifmw_update_artifacts_basedir }}/openstack"
+    mode: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      OS_CLOUD=default /usr/bin/openstack --insecure "$@"
+
+- name: Ensure lopenstackclient container is running
+  containers.podman.podman_container:
+    name: lopenstackclient
+    image: "{{ openstackclient_image }}"
+    state: started
+    net: host
+    volumes:
+      - "{{ cifmw_update_artifacts_basedir }}/clouds.yaml:/home/cloud-admin/.config/openstack/clouds.yaml:ro,Z"
+      - "{{ cifmw_update_artifacts_basedir }}/secure.yaml:/home/cloud-admin/.config/openstack/secure.yaml:ro,Z"
+      - "{{ cifmw_update_artifacts_basedir }}/openstack:/home/cloud-admin/.local/bin/openstack:ro,Z"
+    command: ['/usr/bin/sleep', 'infinity']
