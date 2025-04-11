@@ -177,16 +177,30 @@
       az1: cell2
       az2: cell3
   ansible.builtin.shell: |
-    oc delete rabbitmqclusters rabbitmq-{{ az_to_cell_map[_az_to_scaledown] }}
-    oc delete galera openstack-{{ az_to_cell_map[_az_to_scaledown] }}
+    oc delete -n openstack rabbitmqclusters rabbitmq-{{ az_to_cell_map[_az_to_scaledown] }}
+    oc delete -n openstack galera openstack-{{ az_to_cell_map[_az_to_scaledown] }}
+
+- name: Get list of pods in the openstack namespace
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: openstack
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+  register: pod_list
+
+- name: Find the cinder scheduler pod prefix
+  set_fact:
+    cinder_prefix: "{{ (item.metadata.name | regex_search('^(cinder-[a-z0-9]+)')) }}"
+  loop: "{{ pod_list.resources }}"
+  when: item.metadata.name is match('^cinder-.*-scheduler-0$')
+  no_log: true
 
 - name: Delete the cinder-volume service
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
     namespace: openstack
-    pod: cinder-scheduler-0
+    pod: "{{ cinder_prefix }}-scheduler-0"
     command: >-
-      cinder-manage service remove cinder-volume cinder-volume-{{ _az_to_scaledown }}-0@ceph
+      cinder-manage service remove cinder-volume {{ cinder_prefix }}-volume-{{ _az_to_scaledown }}-0@ceph
 
 - name: Fetch ceph-conf-files secret
   register: secret_info
@@ -304,5 +318,5 @@
 
 - name: Delete each Secret which contains TLS certificate for the NodeSet nodes
   ansible.builtin.command:
-    cmd: oc delete Secret {{ item }}
+    cmd: oc -n openstack delete Secret {{ item }}
   loop: "{{ osdpns_info.resources[0].status.secretHashes.keys() | select('search', 'cert') | list }}"

@@ -1,0 +1,97 @@
+---
+# Copyright 2025 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Fail if Ceph FSID is not set
+  ansible.builtin.fail:
+    msg: "Ceph FSID must be defined"
+  when: cifmw_cephadm_fsid is undefined
+
+- name: Get ceph_cli
+  ansible.builtin.include_tasks: ceph_cli.yml
+
+- name: Get list of Ceph pools
+  become: true
+  ansible.builtin.command: >-
+    {{ cifmw_cephadm_ceph_cli }} osd pool ls --format json
+  register: ceph_pools
+  delegate_to: "{{ ceph_bootstrap_node }}"
+
+- name: Get number of Ceph nodes
+  become: true
+  ansible.builtin.command: >-
+    {{ cifmw_cephadm_ceph_cli }} orch host ls --format json
+  register: ceph_hosts
+  delegate_to: "{{ ceph_bootstrap_node }}"
+
+- name: Set number of Ceph nodes
+  ansible.builtin.set_fact:
+    ceph_node_count: "{{ ceph_hosts.stdout | from_json | length }}"
+
+# We may need to reduce the replica size for the pools to be able to drain the node
+- name: Process each Ceph pool to reduce replica size
+  vars:
+    ceph_pools_list: "{{ ceph_pools.stdout | from_json }}"
+  block:
+    - name: Get current replica size for each pool
+      become: true
+      ansible.builtin.command: >-
+        {{ cifmw_cephadm_ceph_cli }} osd pool get {{ item }} size --format json
+      register: pool_sizes
+      with_items: "{{ ceph_pools_list }}"
+      delegate_to: "{{ ceph_bootstrap_node }}"
+
+    - name: Extract pool sizes per ceph pool into a dictionary
+      ansible.builtin.set_fact:
+        pool_size_map: "{{ pool_size_map | default({}) | combine({item.item: (item.stdout | from_json).size | int}) }}"
+      with_items: "{{ pool_sizes.results }}"
+
+    - name: Reduce replica size if it matches node count
+      become: true
+      ansible.builtin.command: >-
+        {{ cifmw_cephadm_ceph_cli }} osd pool set {{ item.key }} size {{ (item.value - 1) }}
+      when:
+        - item.value | int == ceph_node_count | int
+        - item.value | int > 2
+      with_dict: "{{ pool_size_map }}"
+      delegate_to: "{{ ceph_bootstrap_node }}"
+
+- name: Drain all Ceph daemons from the host
+  become: true
+  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch host drain {{ ceph_node_to_remove }}"
+  delegate_to: "{{ ceph_bootstrap_node }}"
+
+- name: Check OSD removal status
+  become: true
+  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch osd rm status"
+  register: osd_rm_status
+  until: osd_rm_status.stdout == "No OSD remove/replace operations reported"
+  retries: 10
+  delay: 30
+  delegate_to: "{{ ceph_bootstrap_node }}"
+
+- name: Check if all daemons are removed from host
+  become: true
+  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch ps {{ ceph_node_to_remove }} --format json"
+  register: ps_result
+  until: (ps_result.stdout | from_json) | length == 0
+  retries: 10
+  delay: 30
+  delegate_to: "{{ ceph_bootstrap_node }}"
+
+- name: Remove host from Ceph cluster
+  become: true
+  ansible.builtin.command: "{{ cifmw_cephadm_ceph_cli }} orch host rm {{ ceph_node_to_remove }}"
+  delegate_to: "{{ ceph_bootstrap_node }}"
