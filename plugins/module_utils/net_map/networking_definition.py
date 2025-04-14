@@ -1044,6 +1044,7 @@ class SubnetBasedNetworkToolDefinition:
     __FIELD_ROUTES = "routes"
     __FIELD_ROUTES_IPV4 = "routes-v4"
     __FIELD_ROUTES_IPV6 = "routes-v6"
+    __FIELD_TYPE = "type"
 
     def __init__(
         self,
@@ -1067,6 +1068,7 @@ class SubnetBasedNetworkToolDefinition:
         self.__ipv6_ranges: typing.List[HostNetworkRange] = []
         self.__ipv4_routes: typing.List[HostNetworkRoute] = []
         self.__ipv6_routes: typing.List[HostNetworkRoute] = []
+        self.__type: typing.Optional[str] = None
 
         self.__parse_raw(raw_config)
 
@@ -1092,6 +1094,13 @@ class SubnetBasedNetworkToolDefinition:
             alone_field=self.__FIELD_ROUTES,
         )
 
+        _validate_fields_one_of(
+            [
+                self.__FIELD_TYPE,
+            ],
+            raw_definition,
+            parent_name=self.__object_name,
+        )
         self.__parse_raw_range_field(raw_definition, self.__FIELD_RANGES)
         self.__parse_raw_range_field(
             raw_definition, self.__FIELD_RANGES_IPV4, ip_version=4
@@ -1107,6 +1116,7 @@ class SubnetBasedNetworkToolDefinition:
         self.__parse_raw_route_field(
             raw_definition, self.__FIELD_ROUTES_IPV6, ip_version=6
         )
+        self.__parse_raw_type_field(raw_definition, self.__FIELD_TYPE)
 
     def __parse_raw_range_field(
         self,
@@ -1189,6 +1199,21 @@ class SubnetBasedNetworkToolDefinition:
                     self.__ipv4_routes.append(ipv4_route)
                 if ipv6_route:
                     self.__ipv6_routes.append(ipv6_route)
+
+    @property
+    def type(self) -> str:
+        """The type of the tool for multus."""
+        return self.__type
+
+    def __parse_raw_type_field(self, raw_definition, field_name: str):
+        if field_name in raw_definition:
+            type = _validate_parse_field_type(
+                field_name,
+                raw_definition,
+                str,
+                parent_name=self.__object_name,
+            )
+            self.__type = type
 
 
 class MultusNetworkDefinition(SubnetBasedNetworkToolDefinition):
