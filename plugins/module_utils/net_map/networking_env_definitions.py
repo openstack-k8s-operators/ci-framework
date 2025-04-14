@@ -136,6 +136,7 @@ class MappedMultusNetworkConfig:
         ipv6_ranges: IPv6 ranges assigned to Multus.
         ipv4_routes: IPv4 routes assigned to Multus.
         ipv6_routes: IPv6 routes assigned to Multus.
+        multus_type: The type of the multus network.
 
     """
 
@@ -143,6 +144,7 @@ class MappedMultusNetworkConfig:
     ipv6_ranges: typing.List[MappedIpv6NetworkRange]
     ipv4_routes: typing.List[MappedIpv4NetworkRoute]
     ipv6_routes: typing.List[MappedIpv6NetworkRoute]
+    multus_type: typing.Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
