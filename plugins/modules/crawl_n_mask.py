@@ -175,7 +175,7 @@ def crawl(module, path) -> bool:
     """
     changed = False
     for root, _, files in os.walk(path, onerror=handle_walk_errors):
-        if any(excluded in root for excluded in EXCLUDED_DIRS):
+        if any(excluded in root.split("/") for excluded in EXCLUDED_DIRS):
             continue
 
         for f in files:
