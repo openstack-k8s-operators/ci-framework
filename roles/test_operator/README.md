@@ -106,6 +106,7 @@ Default value: {}
 * `cifmw_test_operator_tobiko_name`: (String) Value used in the `Tobiko.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tobiko-tests`
 * `cifmw_test_operator_tobiko_registry`: (String) The registry where to pull tobiko container. Default value: `{{ cifmw_test_operator_default_registry }}`
 * `cifmw_test_operator_tobiko_namespace`: (String) Registry's namespace where to pull tobiko container. Default value: `{{ cifmw_test_operator_default_namespace }}`
+* `cifmw_test_operator_tobiko_cleanup`: (Boolean) Cleanup all resources created by tobiko. Default value: `false`
 * `cifmw_test_operator_tobiko_container`: (String) Name of the tobiko container. Default value: `openstack-tobiko`
 * `cifmw_test_operator_tobiko_image`: (String) Tobiko image to be used. Default value: `{{ cifmw_test_operator_tobiko_registry }}/{{ cifmw_test_operator_tobiko_namespace }}/{{ cifmw_test_operator_tobiko_container }}`
 * `cifmw_test_operator_tobiko_image_tag`: (String) Tag for the `cifmw_test_operator_tobiko_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
@@ -116,6 +117,7 @@ Default value: {}
 * `cifmw_test_operator_tobiko_num_processes`: (Integer) Sets the value of the env variable `TOX_NUM_PROCESSES` that is used to run pytest with `--numprocesses $TOX_NUM_PROCESSES`. Defaults to `null`. In case of `null` value, `TOX_NUM_PROCESSES` is not set (tobiko internally uses the value `auto`, see pytest documentation about the `--numprocesses` option).
 * `cifmw_test_operator_tobiko_advanced_image_url`: (String) Tobiko will download images from this URL that will be used to create advance VM instances. By default, the provided image will include all the customizations required by the tobiko tests. Defaults to `https://softwarefactory-project.io/ubuntu-minimal-customized-enp3s0`.
 * `cifmw_test_operator_tobiko_kubeconfig_secret`: (String) Name of the Openshift Secret required to use Openshift Client from the Tobiko pod. Default value: `tobiko-secret`
+* `cifmw_test_operator_tobiko_openstack_cmd`: (String) Openstack command is used by tobiko to cleanup resources. Default value: `oc -n openstack exec openstackclient -- openstack`
 * `cifmw_test_operator_tobiko_override_conf`: (Dict) Overrides the default configuration from `cifmw_test_operator_tobiko_default_conf` that is used to generate the tobiko.conf file. Default value: empty dictionary
 * `cifmw_test_operator_tobiko_ssh_keytype`: (String) Type of ssh key that tobiko will use to connect to the VM instances it creates. Defaults to `cifmw_ssh_keytype` which default to `ecdsa`.
 * `cifmw_test_operator_tobiko_ssh_keysize`: (Integer) Size of ssh key that tobiko will use to connect to the VM instances it creates. Defaults to `cifmw_ssh_keysize` which defaults to 521.
