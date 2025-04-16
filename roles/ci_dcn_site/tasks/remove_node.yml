@@ -1,0 +1,231 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Remove the compute node from CEPH cluster
+- name: Initialize vars
+  ansible.builtin.set_fact:
+    _ceph_vars_list: []
+
+- name: Find all ceph variable files
+  register: _ceph_vars_files
+  ansible.builtin.find:
+    paths: "/tmp"
+    patterns: "ceph_client_az*.yml"
+    recurse: false
+
+- name: Load all ceph vars from files
+  loop: "{{ _ceph_vars_files.files | map(attribute='path') | list }}"
+  register: _ceph_vars
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+
+- name: Combine ceph variables into a list of dictionaries
+  loop: "{{ _ceph_vars.results }}"
+  ansible.builtin.set_fact:
+    _ceph_vars_list: "{{ _ceph_vars_list | union([item.ansible_facts]) }}"
+
+- name: Get compute nodes from the scale-downed AZ
+  register: removed_compute
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      sh -c "openstack compute service list -c Host -c Zone -f value | grep {{ _node_to_remove}} | awk '{print $1}'"
+
+- name: Set removed compute node fact
+  ansible.builtin.set_fact:
+    _removed_compute: "{{ removed_compute.stdout | trim }}"
+
+- name: Get AZ of compute node to be removed
+  register: compute_az
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      sh -c "openstack compute service list -c Host -c Zone -f value | grep {{ _removed_compute }} | awk '{print $2}'"
+
+- name: Set removed compute node fact
+  ansible.builtin.set_fact:
+    _compute_az: "{{ compute_az.stdout | trim }}"
+
+- name: List instances which are running on the node to be removed
+  register: osp_instances
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack server list --availability-zone {{ _compute_az }} --host {{ _removed_compute }} --all-projects -f value -c ID
+
+- name: Clean the running instances from the node up
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack server delete --force {{ item }}
+  loop: "{{ osp_instances.stdout_lines }}"
+
+- name: Delete the compute nodes from the aggregate
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack aggregate remove host {{ _compute_az }} {{ _removed_compute }}
+
+- name: Disable the compute service on scale-downed compute nodes
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      openstack compute service set {{ _removed_compute }} nova-compute --disable
+
+- name: Get fsid of ceph cluster for Ceph cluster the node is being removed from
+  ansible.builtin.set_fact:
+    cifmw_cephadm_fsid: "{{ _ceph_vars_list | selectattr('cifmw_ceph_client_cluster', 'equalto', _az) | map(attribute='cifmw_ceph_client_fsid') | first }}"
+
+- name: Set cifmw_cephadm_cluster which the node is removed from
+  ansible.builtin.set_fact:
+    cifmw_cephadm_cluster: "{{ _az }}"
+
+- name: Remove the node from Ceph cluster
+  ansible.builtin.include_role:
+    name: cifmw_cephadm
+    tasks_from: scale_down_node.yml
+  vars:
+    ceph_bootstrap_node: "{{ _ceph_bootstrap_node }}"
+    ceph_node_to_remove: "{{ _node_to_remove}}"
+
+- name: Get the Cell UUID
+  register: cell_uuid
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: nova-cell0-conductor-0
+    command: >-
+      sh -c "nova-manage cell_v2 list_hosts | grep {{ _removed_compute }} | awk '{print $4}'"
+
+- name: Remove the compute hosts from the cell
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: nova-cell0-conductor-0
+    command: >-
+      nova-manage cell_v2 delete_host --cell_uuid {{ cell_uuid.stdout }} --host {{ _removed_compute }}
+
+- name: Stop the ovn_controller service
+  ansible.builtin.service:
+    name: edpm_ovn_controller
+    state: stopped
+  become: true
+  delegate_to: "{{ _node_to_remove}}"
+
+- name: Stop the ovn metadata agent service
+  ansible.builtin.service:
+    name: edpm_ovn_metadata_agent
+    state: stopped
+  become: true
+  delegate_to: "{{ _node_to_remove}}"
+
+- name: Stop the nova-compute service
+  ansible.builtin.service:
+    name: edpm_nova_compute
+    state: stopped
+  become: true
+  delegate_to: "{{ _node_to_remove}}"
+
+- name: Remove the systemd unit files of the ovn and nova-compute containers
+  ansible.builtin.shell: |
+    rm -f /etc/systemd/system/edpm_ovn_controller.service
+    rm -f /etc/systemd/system/edpm_ovn_metadata_agent.service
+    rm -f /etc/systemd/system/edpm_nova_compute.service
+  become: true
+  delegate_to: "{{ _node_to_remove}}"
+
+- name: Delete the network agents on scale-downed compute nodes
+  kubernetes.core.k8s_exec:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    namespace: openstack
+    pod: openstackclient
+    command: >-
+      sh -c "openstack network agent list --host {{ _removed_compute }} -c ID -f value | xargs openstack network agent delete"
+
+- name: Remove specific node from OpenStackDataPlaneNodeSet
+  kubernetes.core.k8s_json_patch:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ az_to_group_map[_compute_az] }}-edpm"
+    namespace: "openstack"
+    patch:
+      - op: "remove"
+        path: "/spec/nodes/edpm-{{ _node_to_remove }}"
+
+- name: Create OpenStackDataPlaneDeployment CR file
+  ansible.builtin.template:
+    src: dataplane_remove_node_deploy.yaml.j2
+    dest: "{{ ci_dcn_site_arch_path }}/dataplane_remove_node_deploy.yaml"
+    mode: "0644"
+    backup: true
+
+- name: Apply OpenStackDataPlaneDeployment CR
+  kubernetes.core.k8s:
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    state: present
+    namespace: openstack
+    src: "{{ ci_dcn_site_arch_path }}/dataplane_remove_node_deploy.yaml"
+
+- name: Wait for the node to be removed from the OpenStackDataPlaneNodeSet CR
+  kubernetes.core.k8s_info:
+    api_version: openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ az_to_group_map[_compute_az] }}-edpm"
+    namespace: openstack
+  register: nodeset_status
+  until: (_node_to_remove not in (nodeset_status.resources[0].spec.nodes | default({})).keys())
+  retries: 30
+  delay: 10
+
+- name: Stop the VM
+  ansible.builtin.shell: |
+    virsh destroy cifmw-{{ _node_to_remove }}
+  delegate_to: hypervisor
+  changed_when: false
+
+# Remove the node from ci-framework variables and inventory files
+- name: Remove the node from ci-framework variables and inventory files
+  block:
+    - name: Load the YAML file
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: vars_files
+      with_items:
+        - /etc/ci/env/networking-environment-definition.yml
+        - "{{ ansible_user_dir }}/reproducer-variables.yml"
+        - "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+
+    - name: Remove the node and save the updated YAML file
+      become: true
+      ansible.builtin.copy:
+        dest: "{{ item.item }}"
+        content: "{{ item.content | b64decode | from_yaml | ansible.utils.remove_keys(target=[_node_to_remove]) | to_nice_yaml }}"
+        mode: '0644'
+      with_items: "{{ vars_files.results }}"
+      no_log: true

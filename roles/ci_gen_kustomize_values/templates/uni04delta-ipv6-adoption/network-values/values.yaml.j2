@@ -1,0 +1,147 @@
+---
+# source: uni04delta-ipv6-adoption/network-values/values.yaml.j2
+{% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
+{% set ns = namespace(interfaces={},
+                      ocp_index=0,
+                      lb_tools={}) %}
+data:
+{% for host in cifmw_networking_env_definition.instances.keys() -%}
+{%   if host is match('^(ocp|crc).*') %}
+  node_{{ ns.ocp_index }}:
+{%     set ns.ocp_index = ns.ocp_index+1 %}
+    name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}
+{# FIXEME: (hjensas): We need to ensure the OCP cluster_name and base_domain is available here #}
+{#                    Because devscripts use fqdn for node names when ipv6                     #}
+    node_name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}.ocp.openstack.lab
+{%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
+{%     set ns.interfaces = ns.interfaces |
+                           combine({network.network_name: (network.parent_interface |
+                                                           default(network.interface_name)
+                                                          )
+                                   },
+                                   recursive=true) %}
+    {{ network.network_name }}_ip: {{ network[_ipv.ip_vX] }}
+{%     endfor %}
+{%   endif %}
+{% endfor %}
+
+{% for network in cifmw_networking_env_definition.networks.values() %}
+{% set ns.lb_tools = {} %}
+  {{ network.network_name }}:
+    dnsDomain: {{ network.search_domain }}
+{%  if network.tools is defined and network.tools.keys() | length > 0 %}
+{%    for tool in network.tools.keys() %}
+{%      if tool is match('.*lb$') %}
+{%        set _ = ns.lb_tools.update({tool: []}) %}
+{%      endif %}
+{%    endfor %}
+{%    if network.tools.netconfig is defined  %}
+    subnets:
+      - name: subnet1
+        cidr: {{ network[_ipv.network_vX] }}
+        gateway: {{ omit if network[_ipv.gw_vX] is not defined else network[_ipv.gw_vX] }}
+        vlan: {{ omit if network.vlan_id is not defined else network.vlan_id }}
+        allocationRanges:
+{%    for range in network.tools.netconfig[_ipv.ipvX_ranges] %}
+          - end: {{ range.end }}
+            start: {{ range.start }}
+{%    endfor %}
+{%  endif %}
+{%    if ns.lb_tools | length > 0 %}
+    lb_addresses:
+{%      for tool in ns.lb_tools.keys() %}
+{%        for lb_range in network.tools[tool][_ipv.ipvX_ranges] %}
+      - {{ lb_range.start }}-{{ lb_range.end }}
+{%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
+{%        endfor %}
+    endpoint_annotations:
+      {{ tool }}.universe.tf/address-pool: {{ network.network_name }}
+      {{ tool }}.universe.tf/allow-shared-ip: {{ network.network_name }}
+      {{ tool }}.universe.tf/loadBalancerIPs: {{ ','.join(ns.lb_tools[tool]) }}
+{%      endfor %}
+{%    endif %}
+{%  endif %}
+    prefix-length: {{ network[_ipv.network_vX] | ansible.utils.ipaddr('prefix') }}
+    mtu: {{ network.mtu | default(1500) }}
+{%  if network.vlan_id is defined  %}
+    vlan: {{ network.vlan_id }}
+    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
+    base_iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
+{%  elif network.network_name != "ironic" %}
+    iface: {{ omit if ns.interfaces[network.network_name] is not defined else ns.interfaces[network.network_name] }}
+{% else %}
+    iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
+{%  endif %}
+{%  if network.tools.multus is defined and network.network_name == "ctlplane" %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "{{ network.network_name }}",
+        "type": "macvlan",
+        "master": "ospbr",
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network[_ipv.network_vX] }}",
+          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
+          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
+        }
+      }
+{%  endif %}
+{%  if network.tools.multus is defined and network.network_name == "ironic" %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "ironic",
+        "type": "bridge",
+        "bridge": "ironic",
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network[_ipv.network_vX] }}",
+          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
+          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
+        }
+      }
+{%  endif %}
+{%  if network.tools.multus is defined and network.network_name not in ["ctlplane", "ironic"] %}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "{{ network.network_name }}",
+        "type": "macvlan",
+        "master": "{{ network.network_name if network.vlan_id is defined else ns.interfaces[network.network_name] }}",
+        "ipam": {
+          "type": "whereabouts",
+          "range": "{{ network[_ipv.network_vX] }}",
+          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
+          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
+        }
+      }
+{%  endif %}
+{% endfor %}
+  dns-resolver:
+    config:
+      server:
+        - "{{ cifmw_networking_env_definition.networks.ctlplane[_ipv.gw_vX] }}"
+      search: []
+    options:
+      - key: server
+        values:
+          - {{ cifmw_networking_env_definition.networks.ctlplane[_ipv.gw_vX] }}
+{% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
+      - key: server
+        values:
+          - {{ nameserver }}
+{% endfor %}
+
+# Hardcoding the last IP bit since we don't have support for endpoint_annotations in the networking_mapper output
+  rabbitmq:
+    endpoint_annotations:
+      metallb.universe.tf/address-pool: internalapi
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX] | ansible.utils.ipmath(85) }}
+  rabbitmq-cell1:
+    endpoint_annotations:
+      metallb.universe.tf/address-pool: internalapi
+      metallb.universe.tf/loadBalancerIPs: {{ cifmw_networking_env_definition.networks['internalapi'][_ipv.network_vX] | ansible.utils.ipmath(86) }}
+
+  lbServiceType: LoadBalancer
+  storageClass: {{ cifmw_ci_gen_kustomize_values_storage_class }}
