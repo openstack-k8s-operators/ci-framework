@@ -1,0 +1,30 @@
+#!/usr/bin/bash
+
+export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
+export PATH="{{ cifmw_path }}"
+
+CT_NAME=lopenstackclient
+OSDPNS_NAME=openstack-edpm
+IMAGE=brew.$(oc -n openstack get pods openstackclient -o json | jq -r .spec.containers[0].image)
+OSDPNS=$(oc get osdpns $OSDPNS_NAME  -n openstack -o json)
+
+oc -n openstack rsh openstackclient cat .config/openstack/clouds.yaml > {{ cifmw_update_artifacts_basedir }}/clouds.yaml
+oc -n openstack rsh openstackclient cat .config/openstack/secure.yaml > {{ cifmw_update_artifacts_basedir }}/secure.yaml
+cat > {{ cifmw_update_artifacts_basedir }}/openstack <<'EOF'
+#!/bin/bash
+OS_CLOUD=default /usr/bin/openstack --insecure "$@"
+EOF
+chmod +x {{ cifmw_update_artifacts_basedir }}//openstack
+username=$(echo "$OSDPNS" | jq -r '.spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins["brew.registry.redhat.io"] | to_entries | .[0].key')
+password=$(echo "$OSDPNS" | jq -r '.spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins["brew.registry.redhat.io"] | to_entries | .[0].value')
+podman login -u "$username" -p "$password" brew.registry.redhat.io
+
+podman run --network=host \
+       -v {{ cifmw_update_artifacts_basedir }}/clouds.yaml:/home/cloud-admin/.config/openstack/clouds.yaml:ro,z \
+       -v {{ cifmw_update_artifacts_basedir }}/secure.yaml:/home/cloud-admin/.config/openstack/secure.yaml:ro,z \
+       -v {{ cifmw_update_artifacts_basedir }}/openstack:/home/cloud-admin/.local/bin/openstack:ro,z \
+       -d --name $CT_NAME \
+       $IMAGE \
+       /usr/bin/sleep infinity
+
+# cat workload_launch.sh | podman exec -i foobar bash -i
