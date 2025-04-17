@@ -456,6 +456,124 @@
       cifmw_config_nmstate: true
       cifmw_config_multus: true
       cifmw_ci_nmstate_instance_config:
+        crc:
+          interfaces:
+            - name: ospbr
+              description: Configuring Bridge ospbr with interface ens8
+              type: linux-bridge
+              mtu: 9000
+              bridge:
+                options:
+                  stp:
+                    enabled: false
+                port:
+                  - name: ens8
+                    vlan: {}
+              ipv4:
+                address:
+                  - ip: 192.168.122.10
+                    prefix-length: 24
+                enabled: true
+              ipv6:
+                enabled: false
+            - description: storagemgmt vlan interface
+              name: ens8.23
+              type: vlan
+              vlan:
+                base-iface: ens8
+                id: 23
+                reorder-headers: true
+              ipv4:
+                address:
+                  - ip: 172.20.0.5
+                    prefix-length: 24
+                dhcp: false
+                enabled: true
+              ipv6:
+                enabled: false
+            - description: tenant vlan interface
+              name: ens8.22
+              type: vlan
+              vlan:
+                base-iface: ens8
+                id: 22
+                reorder-headers: true
+              ipv4:
+                address:
+                  - ip: 172.19.0.5
+                    prefix-length: 24
+                dhcp: false
+                enabled: true
+              ipv6:
+                enabled: false
+            - description: storage vlan interface
+              name: ens8.21
+              type: vlan
+              vlan:
+                base-iface: ens8
+                id: 21
+                reorder-headers: true
+              ipv4:
+                address:
+                  - ip: 172.18.0.5
+                    prefix-length: 24
+                dhcp: false
+                enabled: true
+              ipv6:
+                enabled: false
+            - description: internalapi vlan interface
+              name: ens8.20
+              type: vlan
+              vlan:
+                base-iface: ens8
+                id: 20
+                reorder-headers: true
+              ipv4:
+                address:
+                  - ip: 172.17.0.5
+                    prefix-length: 24
+                dhcp: false
+                enabled: true
+              ipv6:
+                enabled: false
+            - description: baremetal bridge
+              name: baremetal
+              mtu: 9000
+              type: linux-bridge
+              bridge:
+                options:
+                  stp:
+                    enabled: false
+                port:
+                  - name: ens7
+              ipv4:
+                address:
+                  - ip: 172.20.1.5
+                    prefix-length: "24"
+                enabled: true
+              ipv6:
+                enabled: false
+            - description: Baremetal VRF
+              name: baremetalvrf
+              state: up
+              type: vrf
+              vrf:
+                port:
+                  - baremetal
+                route-table-id: 10
+          route-rules:
+            config: []
+          routes:
+            config:
+              - destination: 0.0.0.0/0
+                metric: 150
+                next-hop-address: 172.20.1.1
+                next-hop-interface: baremetal
+                table-id: 10
+              #- destination: 172.20.1.0/24
+              #  metric: 150
+              #  next-hop-address: 192.168.122.1
+              #  next-hop-interface: ospbr
         controller:
           interfaces:
             - name: "{{ cifmw_networking_env_definition.instances['controller'].networks['baremetal'].interface_name | default(omit) }}"
@@ -482,16 +600,20 @@
                 enabled: false
       cifmw_install_yamls_vars_patch_01_ironic_ci_base:
         INSTALL_NMSTATE: false
+        INSTALL_NNCP: false
+        NNCP_INTERFACE: ens8
       cifmw_networking_mapper_definition_patch_02_bmaas_net:
         networks:
           baremetal:
             network: "172.20.1.0/24"
+            gateway: "172.20.1.1"
             mtu: 1500
             tools:
               multus:
                 ranges:
                   - start: 30
                     end: 70
+                type: bridge
         instances:
           controller:
             networks:
@@ -501,6 +623,12 @@
             networks:
               baremetal:
                 ip: "172.20.1.5"
+      cifmw_networking_mapper_definition_patch_03_router:
+        routers:
+          ci-router:
+            networks:
+              - default
+              - baremetal
       cifmw_libvirt_manager_configuration:
         vms:
           compute:
@@ -520,5 +648,7 @@
               <forward mode='bridge' />
               <bridge name='baremetal' />
             </network>
+      cifmw_extras:
+        - '@scenarios/centos-9/ironic.yml'
     run:
       - ci/playbooks/edpm/run.yml
