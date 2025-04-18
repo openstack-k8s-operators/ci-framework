@@ -21,12 +21,17 @@ set -x
 
 DURATION_TIME=${DURATION_TIME:-10}
 
-NODE_NAMES=$(/usr/local/bin/oc get node -o name -l node-role.kubernetes.io/worker)
+if ! [ -f "/home/zuul/bin/oc" ]; then
+    echo "Can not find '/home/zuul/bin/oc' binary"
+    exit 1
+fi
+
+NODE_NAMES=$(/home/zuul/bin/oc get node -o name -l node-role.kubernetes.io/worker)
 if [ -z "$NODE_NAMES" ]; then
-    echo "Unable to determine node name with 'oc' command."
+    echo "Unable to determine node name with '/home/zuul/bin/oc' command."
     exit 1
 fi
 
 for node in $NODE_NAMES; do
-    /usr/local/bin/oc debug $node -T -- chroot /host /usr/bin/bash -c "crictl stats -a -s $DURATION_TIME |  (sed -u 1q; sort -k 2 -h -r)"
+    /home/zuul/bin/oc debug "$node" -T -- chroot /host /usr/bin/bash -c "crictl stats -a -s $DURATION_TIME |  (sed -u 1q; sort -k 2 -h -r)"
 done
