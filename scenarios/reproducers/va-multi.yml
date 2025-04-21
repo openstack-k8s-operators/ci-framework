@@ -1,0 +1,405 @@
+---
+cifmw_architecture_scenario: multi-namespace
+
+# HERE if you want to override kustomization, you can uncomment this parameter
+# and push the data structure you want to apply.
+# cifmw_architecture_user_kustomize:
+#   stage_0:
+#     'network-values':
+#       data:
+#         starwars: Obiwan
+
+# HERE, if you want to stop the deployment loop at any stage, you can uncomment
+# the following parameter and update the value to match the stage you want to
+# reach. Known stages are:
+#   pre_kustomize_stage_INDEX
+#   pre_apply_stage_INDEX
+#   post_apply_stage_INDEX
+#
+# cifmw_deploy_architecture_stopper:
+
+cifmw_arch_automation_file: multi-namespace.yaml
+cifmw_os_must_gather_additional_namespaces: kuttl,openshift-storage,sushy-emulator,openstack2
+cifmw_reproducer_validate_network_host: "192.168.122.1"
+cifmw_libvirt_manager_default_gw_nets:
+  - ocpbm
+  - osptrunk2
+cifmw_networking_mapper_interfaces_info_translations:
+  osp_trunk:
+    - controlplane
+    - ctlplane
+  osptrunk2:
+    - ctlplane2
+
+cifmw_libvirt_manager_configuration:
+  networks:
+    osp_trunk: |
+      <network>
+        <name>osp_trunk</name>
+        <forward mode='nat'/>
+        <bridge name='osp_trunk' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4'
+        address='{{ cifmw_networking_definition.networks.ctlplane.network |
+                    ansible.utils.nthhost(1) }}'
+        prefix='{{ cifmw_networking_definition.networks.ctlplane.network |
+                   ansible.utils.ipaddr('prefix') }}'>
+        </ip>
+      </network>
+    osptrunk2: |
+      <network>
+        <name>osptrunk2</name>
+        <forward mode='nat'/>
+        <bridge name='osptrunk2' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4'
+        address='{{ cifmw_networking_definition.networks.ctlplane2.network |
+                    ansible.utils.nthhost(1) }}'
+        prefix='{{ cifmw_networking_definition.networks.ctlplane2.network |
+                   ansible.utils.ipaddr('prefix') }}'>
+        </ip>
+      </network>
+    ocpbm: |
+      <network>
+        <name>ocpbm</name>
+        <forward mode='nat'/>
+        <bridge name='ocpbm' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4' address='192.168.111.1' prefix='24'>
+        </ip>
+      </network>
+    ocppr: |
+      <network>
+        <name>ocppr</name>
+        <forward mode='bridge'/>
+        <bridge name='ocppr'/>
+      </network>
+  vms:
+    ocp:
+      amount: 3
+      admin_user: core
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "ocp_master"
+      disksize: "100"
+      extra_disks_num: 3
+      extra_disks_size: "50G"
+      cpus: 16
+      memory: 32
+      root_part_id: 4
+      uefi: true
+      nets:
+        - ocppr
+        - ocpbm
+        - osp_trunk
+        - osptrunk2
+    compute:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      extra_disks_num: 3
+      extra_disks_size: 30G
+      nets:
+        - ocpbm
+        - osp_trunk
+    compute2:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      extra_disks_num: 3
+      extra_disks_size: 30G
+      nets:
+        - ocpbm
+        - osptrunk2
+    controller:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+        - osptrunk2
+
+## devscript support for OCP deploy
+cifmw_devscripts_config_overrides:
+  fips_mode: "{{ cifmw_fips_enabled | default(false) | bool }}"
+
+# Set Logical Volume Manager Storage by default for local storage
+cifmw_use_lvms: true
+cifmw_lvms_disk_list:
+  - /dev/vda
+  - /dev/vdb
+  - /dev/vdc
+
+cifmw_networking_definition:
+  networks:
+    ctlplane:
+      network: "192.168.122.0/24"
+      gateway: "192.168.122.1"
+      dns:
+        - "192.168.122.1"
+      mtu: 1500
+      tools:
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+        netconfig:
+          ranges:
+            - start: 100
+              end: 120
+            - start: 150
+              end: 170
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+    ctlplane2:
+      network: "192.168.133.0/24"
+      gateway: "192.168.133.1"
+      dns:
+        - "192.168.133.1"
+      mtu: 1500
+      tools:
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+        netconfig:
+          ranges:
+            - start: 100
+              end: 120
+            - start: 150
+              end: 170
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+    internalapi:
+      network: "172.17.0.0/24"
+      vlan: 20
+      mtu: 1496
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+    internalapi2:
+      network: "172.17.10.0/24"
+      vlan: 30
+      mtu: 1496
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+    storage:
+      network: "172.18.0.0/24"
+      vlan: 21
+      mtu: 1496
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+    storage2:
+      network: "172.18.10.0/24"
+      vlan: 31
+      mtu: 1496
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+    tenant:
+      network: "172.19.0.0/24"
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+      vlan: 22
+      mtu: 1496
+    tenant2:
+      network: "172.19.10.0/24"
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+      vlan: 32
+      mtu: 1496
+    external:
+      network: "10.0.0.0/24"
+      tools:
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+      vlan: 22
+      mtu: 1500
+    external2:
+      network: "10.10.0.0/24"
+      tools:
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+      vlan: 32
+      mtu: 1500
+
+  group-templates:
+    ocps:
+      network-template:
+        range:
+          start: 10
+          length: 10
+      networks: &ocps_nets
+        ctlplane: {}
+        internalapi:
+          trunk-parent: ctlplane
+        tenant:
+          trunk-parent: ctlplane
+        storage:
+          trunk-parent: ctlplane
+        ctlplane2: {}
+        internalapi2:
+          trunk-parent: ctlplane2
+        tenant2:
+          trunk-parent: ctlplane2
+        storage2:
+          trunk-parent: ctlplane2
+    ocp_workers:
+      network-template:
+        range:
+          start: 20
+          length: 10
+      networks: *ocps_nets
+    computes:
+      network-template:
+        range:
+          start: 100
+          length: 21
+      networks:
+        ctlplane: {}
+        internalapi:
+          trunk-parent: ctlplane
+        tenant:
+          trunk-parent: ctlplane
+        storage:
+          trunk-parent: ctlplane
+    compute2s:
+      network-template:
+        range:
+          start: 200
+          length: 21
+      networks:
+        ctlplane2: {}
+        internalapi2:
+          trunk-parent: ctlplane2
+        tenant2:
+          trunk-parent: ctlplane2
+        storage2:
+          trunk-parent: ctlplane2
+  instances:
+    controller-0:
+      networks:
+        ctlplane:
+          ip: "192.168.122.9"
+        ctlplane2:
+          ip: "192.168.133.9"
+
+# Hooks
+post_deploy:
+  - name: Discover hypervisors for openstack2 namespace
+    type: playbook
+    source: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/hooks/playbooks/nova_manage_discover_hosts.yml"
+    extra_vars:
+      namespace: openstack2
+      _cell_conductors: nova-cell0-conductor-0
+
+pre_admin_setup:
+  - name: Prepare OSP networks in openstack2 namespace
+    type: playbook
+    source: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/playbooks/multi-namespace/ns2_osp_networks.yaml"
+    extra_vars:
+      cifmw_os_net_setup_namespace: openstack2
+      cifmw_os_net_setup_public_cidr: "192.168.133.0/24"
+      cifmw_os_net_setup_public_start: "192.168.133.230"
+      cifmw_os_net_setup_public_end: "192.168.133.250"
+      cifmw_os_net_setup_public_gateway: "192.168.133.1"
+
+post_tests:
+  - name: Run tempest against openstack2 namespace
+    type: playbook
+    source: "/home/zuul/src/github.com/openstack-k8s-operators/ci-framework/playbooks/multi-namespace/ns2_validation.yaml"
+    extra_vars:
+      cifmw_test_operator_tempest_name: tempest-tests2
+      cifmw_test_operator_namespace: openstack2
