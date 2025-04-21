@@ -14,14 +14,52 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Load architecture automation file
+  register: _automation
+  ansible.builtin.slurp:
+    path: "{{ cifmw_architecture_automation_file }}"
+
+- name: Prepare automation data
+  vars:
+    _parsed: "{{ _automation.content | b64decode | from_yaml }}"
+  ansible.builtin.set_fact:
+    cifmw_deploy_architecture_steps: >-
+      {{ _parsed['vas'][cifmw_architecture_scenario] }}
+
+- name: Generate list of CRs to delete
+  vars:
+    _stages_crs: >-
+      {{
+        cifmw_deploy_architecture_steps['stages'] |
+        reverse |
+        selectattr('build_output', 'defined') |
+        map(attribute='build_output') |
+        list
+      }}
+    _stages_crs_path: >-
+      {{
+        [cifmw_kustomize_deploy_kustomizations_dest_dir]
+        | product(_stages_crs)
+        | map('join', '/')
+        | unique
+      }}
+    _operators_crs:
+      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
+      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+  register: _cifmw_kustomize_files
+  ansible.builtin.set_fact:
+    cifmw_kustomize_deploy_crs_to_delete: >-
+      {{
+        _stages_crs_path +
+        _operators_crs
+      }}
+
 - name: Ensure that kustomization files are present
   ansible.builtin.stat:
     path: "{{ item }}"
-  loop:
-    - "{{ cifmw_kustomize_deploy_cp_dest_file }}"
-    - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
-    - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
-    - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+  loop: "{{ cifmw_kustomize_deploy_crs_to_delete }}"
   register: _cifmw_kustomize_files
 
 - name: Cleaning operators resources
