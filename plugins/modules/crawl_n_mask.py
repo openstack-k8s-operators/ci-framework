@@ -77,6 +77,7 @@ EXCLUDED_DIRS = [
     "openstack-k8s-operators-openstack-must-gather",
     "tmp",
     "venv",
+    ".github",
 ]
 # file extensions which we do not want to process
 EXCLUDED_FILE_EXT = [
@@ -137,6 +138,8 @@ PROTECT_KEYS = [
     "secret_key",
     "heartbeat_key",
     "fernet_keys",
+    "sshkey",
+    "keytab_base64",
 ]
 # connection keys which may be part of the value itself
 CONNECTION_KEYS = [
