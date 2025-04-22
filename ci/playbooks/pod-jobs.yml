@@ -16,17 +16,23 @@
         state: directory
         mode: "0755"
 
+    - name: Create workdir directory
+      ansible.builtin.file:
+        path: "{{ cimfw_project_dir_absolute | dirname }}"
+        state: directory
+
+    - name: Create symlink for project dir
+      ansible.builtin.file:
+        src: "/workspace/{{ cimfw_project_dir }}"
+        dest: "{{ cimfw_project_dir_absolute }}"
+        state: link
+
     - name: Run make targets
-      vars:
-        src_dir: >-
-          {{
-            zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir
-          }}
       block:
         - name: Install dependencies
           register: _setup
           community.general.make:
-            chdir: "{{ src_dir }}"
+            chdir: "{{ cimfw_project_dir_absolute }}"
             target: setup_molecule
             params:
               USE_VENV: "no"
@@ -36,7 +42,7 @@
 
         - name: Run check
           community.general.make:
-            chdir: "{{ src_dir }}"
+            chdir: "{{ cimfw_project_dir_absolute }}"
             target: "{{ run_test }}"
             params:
               USE_VENV: "no"
