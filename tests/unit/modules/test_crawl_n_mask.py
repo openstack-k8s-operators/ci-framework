@@ -1,3 +1,5 @@
+from xmlrpc.client import Fault
+
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
 
@@ -60,10 +62,22 @@ class TestCrawlNMask:
         result = cnm.apply_regex(value)
         assert result == value
 
-    def test_process_list(self):
-        data = [{"password": "secret"}, ["nested", {"token": "value"}]]
+    @pytest.mark.parametrize(
+        "data, ismasked",
+        [
+            ([{"password": "secret"}], True),
+            ([{"secret": "value"}], True),
+            ([{True: "test_bool_key"}], False),
+            ([{1: "int_key"}], False),
+            ([{1.1: "float_key"}], False),
+        ],
+    )
+    def test_process_list(self, data, ismasked):
         cnm.process_list(data)
-        assert data[0]["password"] == cnm.MASK_STR
+        if ismasked:
+            assert cnm.MASK_STR in [list(item.values())[0] for item in data]
+        else:
+            assert cnm.MASK_STR not in [list(item.values())[0] for item in data]
 
     def test_apply_mask(self):
         data = {"password": "secret", "normal": "data"}
