@@ -1,0 +1,56 @@
+---
+- name: Configure cleanup
+  delegate_to: controller-0
+  block:
+    - name: Discover and expose CI Framework path on remote node
+      tags:
+        - always
+      vars:
+        default_path: >-
+          {{
+            cifmw_reproducer_default_repositories |
+            selectattr('src', 'match', '^.*/ci[_\-]framework$') |
+            map(attribute='dest') | first
+          }}
+        custom_path: >-
+          {{
+            cifmw_reproducer_repositories |
+            selectattr('src', 'match', '^.*/ci-framework$') |
+            map(attribute='dest')
+          }}
+        _path: >-
+          {{
+            (custom_path | length > 0) |
+            ternary(custom_path | first, default_path)
+          }}
+      ansible.builtin.set_fact:
+        _cifmw_reproducer_framework_location: >-
+          {{
+            (_path is match('.*/ci-framework/?$')) |
+            ternary(_path, [_path, 'ci-framework'] | path_join)
+          }}
+
+    - name: Push cleanup script
+      vars:
+        run_directory: "{{ _cifmw_reproducer_framework_location }}"
+        exports:
+          ANSIBLE_LOG_PATH: "~/ansible-cleanup-architecture.log"
+        default_extravars:
+          - "@~/ci-framework-data/parameters/reproducer-variables.yml"
+          - "@~/ci-framework-data/parameters/openshift-environment.yml"
+          - "@~/ci-framework-data/artifacts/parameters/openshift-login-params.yml"
+        extravars: "{{ cifmw_reproducer_play_extravars }}"
+        playbook: "clean_openstack_deployment.yaml"
+      ansible.builtin.template:
+        dest: "/home/zuul/cleanup-architecture.sh"
+        src: "script.sh.j2"
+        mode: "0755"
+        owner: "zuul"
+        group: "zuul"
+
+    - name: Rotate some logs
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - ansible-cleanup-architecture.log
