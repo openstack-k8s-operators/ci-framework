@@ -61,9 +61,10 @@ class TestCrawlNMask:
         assert result == value
 
     def test_process_list(self):
-        data = [{"password": "secret"}, ["nested", {"token": "value"}]]
+        data = [{"password": "secret"}, ["nested", {"token": "value"}], {True: "test_bool_key"}]
         cnm.process_list(data)
         assert data[0]["password"] == cnm.MASK_STR
+        assert data[2][True] == "test_bool_key"
 
     def test_apply_mask(self):
         data = {"password": "secret", "normal": "data"}
