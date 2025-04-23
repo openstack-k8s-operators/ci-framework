@@ -44,6 +44,51 @@
     - cifmw_ci_gen_kustomize_values_installplan_approval is defined
     - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
 
+- name: Initialize the openstack operator if needed
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition: "{{ _openstack_init_resource }}"
+    state: present
+  vars:
+    _openstack_init_resource:
+      apiVersion: operator.openstack.org/v1beta1
+      kind: OpenStack
+      metadata:
+        name: openstack
+        namespace: openstack-operators
+  when:
+    - cifmw_ci_gen_kustomize_values_deployment_version is defined
+    - cifmw_ci_gen_kustomize_values_deployment_version is in ['v1.0.3', 'v1.0.6']
+
+- name: Ensure OpenStack deployment is successful and block until it is done
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operator.openstack.org/v1beta1
+    kind: OpenStack
+    namespace: openstack-operators
+  register: _cifmw_update_openstack_info
+  until: >
+    _cifmw_update_openstack_info.resources[0].status.conditions is defined
+    and
+    (
+      _cifmw_update_openstack_info.resources[0].status.conditions |
+      selectattr('type', 'equalto', 'Ready') |
+      map(attribute='status') | first | default('False') == 'True'
+    )
+    and
+    (
+      _cifmw_update_openstack_info.resources[0].status.conditions |
+      selectattr('type', 'equalto', 'OpenStackOperatorReadyCondition') |
+      map(attribute='status') | first | default('False') == 'True'
+    )
+  retries: 20
+  delay: 15
+  when: not (cifmw_update_run_dryrun | bool)
+
 # Get the next available version available when using OLM
 - name: Handle the next version when using OLM
   when:
