@@ -245,7 +245,7 @@ def apply_mask(yaml_dict: Dict[str, Any]) -> None:
     of type dict.
     """
     for k, v in yaml_dict.items():
-        if re.findall(key_regex, k):
+        if re.findall(key_regex, str(k)):
             yaml_dict[k] = MASK_STR
 
         elif isinstance(v, str):
