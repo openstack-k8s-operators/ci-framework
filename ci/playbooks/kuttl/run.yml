@@ -1,19 +1,83 @@
+---
+### WARNING:
+# command, shell, stat -> all are executed on remote host, but...
+# include_vars is on zuul-executor.
+###
+- name: Read variables and set as fact globally
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Include group vars
+      ansible.builtin.include_vars:
+        file: "{{ zuul.executor.work_root }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/centos-9/base.yml"
+        name: group_vars_base
+
+    - name: Include ci vars
+      ansible.builtin.include_vars:
+        file: "{{ zuul.executor.work_root }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/centos-9/ci.yml"
+        name: ci_vars
+
+    - name: Include kuttl vars
+      ansible.builtin.include_vars:
+        file: "{{ zuul.executor.work_root }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/centos-9/kuttl.yml"
+        name: kuttl_vars
+
+#######################
+    - name: debug path
+      ansible.builtin.debug:
+        msg: |
+          group vars
+          {{ group_vars_base }}
+          ci vars
+          {{ ci_vars }}
+          kuttl vars
+          {{ kuttl_vars }}
+      ignore_errors: true
+#######################
+
+    - name: Set global variables as cachable fact - group_vars_base
+      when: group_vars_base | default(false)
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+        cacheable: true
+      ignore_errors: true
+      loop: "{{ group_vars_base | dict2items }}"
+
+    - name: Set global variables as cachable fact ci_vars
+      when: ci_vars | default(false)
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+        cacheable: true
+      ignore_errors: true
+      loop: "{{ ci_vars | dict2items }}"
+
+    - name: Set global variables as cachable fact - kuttl_vars
+      when: kuttl_vars | default(false)
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+        cacheable: true
+      ignore_errors: true
+      loop: "{{ kuttl_vars | dict2items }}"
+
 - name: "Run ci/playbooks/kuttl/run.yml"
   hosts: controller
   gather_facts: true
   tasks:
-    - name: Run kuttl tests playbook
-      ansible.builtin.command:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook ci/playbooks/kuttl/e2e-kuttl.yml
-          -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
-          -e @scenarios/centos-9/base.yml
-          -e @scenarios/centos-9/ci.yml
-          -e @scenarios/centos-9/kuttl.yml
-          {%- if cifmw_extras is defined %}
-          {%-   for extra_vars in cifmw_extras %}
-          -e "{{   extra_vars }}"
-          {%-   endfor %}
-          {%- endif %}
-          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+    - name: Set global variables - extra vars
+      when: cifmw_extras | default(false)
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+        cacheable: true
+      loop: "{{ cifmw_extras | default({}) }}"
+      ignore_errors: true
+
+    - name: Read zuul params
+      ansible.builtin.slurp:
+        src: /home/zuul/ci-framework-data/artifacts/parameters/zuul-params.yml
+      register: _group_vars_all
+
+    - name: Set global variables - zuul params
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+        cacheable: true
+      loop: "{{ _group_vars_all['content'] | b64decode | from_yaml | dict2items }}"
