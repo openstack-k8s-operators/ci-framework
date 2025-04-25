@@ -8,10 +8,24 @@
   become: "{{ not cifmw_repo_setup_output.startswith(ansible_user_dir) }}"
   when:
     - mirror_path.stat.exists
-  ansible.builtin.shell: |
-    set -o pipefail
-    source /etc/ci/mirror_info.sh
-    sed -i -e "s|https://trunk.rdoproject.org|$NODEPOOL_RDO_PROXY|g" *.repo
-    sed -i -e "s|http://mirror.stream.centos.org|$NODEPOOL_CENTOS_MIRROR|g" *.repo
-  args:
-    chdir: "{{ cifmw_repo_setup_output }}"
+  block:
+    - name: Use RDO proxy mirrors
+      ansible.builtin.shell: |
+        set -o pipefail
+        source /etc/ci/mirror_info.sh
+        sed -i -e "s|https://trunk.rdoproject.org|$NODEPOOL_RDO_PROXY|g" *.repo
+      args:
+        chdir: "{{ cifmw_repo_setup_output }}"
+
+    # TODO(rlandy) remove when CentOS 10 mirrors exist on Nodepool Hosts
+    # mirror ref: http://mirror.regionone.vexxhost-nodepool-sf.rdoproject.org/centos-stream/
+    - name: Use RDO CentOS mirrors (remove CentOS 10 conditional when Nodepool mirrors exist)
+      when:
+        - ansible_distribution | lower == 'centos'
+        - ansible_distribution_major_version is not version('10', '==')
+      ansible.builtin.shell: |
+        set -o pipefail
+        source /etc/ci/mirror_info.sh
+        sed -i -e "s|http://mirror.stream.centos.org|$NODEPOOL_CENTOS_MIRROR|g" *.repo
+      args:
+        chdir: "{{ cifmw_repo_setup_output }}"
