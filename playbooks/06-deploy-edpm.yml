@@ -1,15 +1,16 @@
 ---
-- name: Run pre_deploy hooks
-  when:
-    - cifmw_architecture_scenario is not defined
-  vars:
-    step: pre_deploy
-  ansible.builtin.import_playbook: ./hooks.yml
-
 - name: Deploy podified control plane
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
+    - name: Run pre_deploy hooks
+      when:
+        - cifmw_architecture_scenario is not defined
+      vars:
+        step: pre_deploy
+      ansible.builtin.import_role:
+        name: run_hook
+
     # end_play will end only current play, not the main edpm-deploy.yml
     - name: Early end if architecture deploy
       when:
@@ -34,12 +35,13 @@
       ansible.builtin.include_role:
         name: edpm_prepare
 
-- name: Run post_ctlplane_deploy hooks
-  when:
-    - cifmw_architecture_scenario is undefined
-  vars:
-    step: post_ctlplane_deploy
-  ansible.builtin.import_playbook: ./hooks.yml
+    - name: Run post_ctlplane_deploy hooks
+      when:
+        - cifmw_architecture_scenario is undefined
+      vars:
+        step: post_ctlplane_deploy
+      ansible.builtin.import_role:
+        name: run_hook
 
 - name: EDPM deployment on virtual baremetal
   hosts: "{{ cifmw_target_host | default('localhost') }}"
@@ -150,12 +152,13 @@
           vars:
             cifmw_edpm_deploy_prepare_run: false
 
-- name: Run post_deploy hooks
-  when:
-    - cifmw_architecture_scenario is not defined
-  vars:
-    step: post_deploy
-  ansible.builtin.import_playbook: ./hooks.yml
+    - name: Run post_deploy hooks
+      when:
+        - cifmw_architecture_scenario is not defined
+      vars:
+        step: post_deploy
+      ansible.builtin.import_role:
+        name: run_hook
 
 - name: Validations workflow
   # If we're doing an architecture deployment, we need to skip validations here.
