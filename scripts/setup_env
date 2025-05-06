@@ -32,7 +32,6 @@ USE_VENV=${USE_VENV:-'yes'}
 source /etc/os-release || source /usr/lib/os-release
 RHT_PKG_MGR=$(command -v dnf)
 PYTHON_EXEC=$(command -v python3)
-SYSTEM_PIP=$(dirname "$PYTHON_EXEC")/pip3
 
 # Install the requirements we need to run local tests
 command -v gcc || sudo dnf -y install gcc
@@ -67,11 +66,12 @@ mkdir -p ${HOME}/ci/yum.repos.d
 cp /etc/ci/mirror_info.sh ${HOME}/ci || touch ${HOME}/ci/mirror_info.sh
 cp -r /opt/yum.repos.d/* ${HOME}/ci/yum.repos.d || cp -r /etc/yum.repos.d/* ${HOME}/ci/yum.repos.d
 
+sudo "${RHT_PKG_MGR}" -y install python3-libvirt
 
 case ${USE_VENV} in
     y|yes|true):
         # Create a virtual env
-        "${PYTHON_EXEC}" -m venv --upgrade-deps "${HOME}/test-python"
+        "${PYTHON_EXEC}" -m venv --upgrade-deps --system-site-packages "${HOME}/test-python"
         if [[ -d "${HOME}/.cache/pip/wheels" ]]; then
             rm -rf "${HOME}/.cache/pip/wheels"
         fi
@@ -82,8 +82,7 @@ esac
 "${PIP}" install pip setuptools bindep --upgrade
 "${PROJECT_DIR}/scripts/bindep-install"
 
-${SYSTEM_PIP} install ${PIP_INSTALL_ARGUMENTS}
+${PIP} install ${PIP_INSTALL_ARGUMENTS}
 
 # Display list of installed packages with versions (debugging failures)
-"${SYSTEM_PIP}" freeze
 "${PIP}" freeze
