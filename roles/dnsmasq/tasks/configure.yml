@@ -66,6 +66,15 @@
 - name: Render dns configuration
   ansible.builtin.include_tasks: dns.yml
 
+- name: Add localhost addresses from defined dnsmasq listen addresses to loopback interface
+  become: true
+  loop: "{{ cifmw_dnsmasq_listen_addresses }}"
+  when: item is match("^127\\..*")
+  ansible.builtin.shell: |
+    set -xe -o pipefail
+    ip addr show lo | grep -q "{{ item }}" || ip addr add {{ item }}/8 dev lo
+  changed_when: false
+
 - name: Manage and start dnsmasq instance
   become: true
   when:
