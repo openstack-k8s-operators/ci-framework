@@ -24,3 +24,50 @@
         oc rsh openstackclient \
             openstack volume type set --property multiattach="<is> True" \
             {{ cifmw_volume_multiattach_type }}
+
+    # This block is needed for octavia because the Amphora image needs to be created on a multiattach volume
+    - name: Block to configure cinder_volume_type when needed
+      when: configure_cinder_volume_type | default('false') | bool
+      block:
+        - name: Create tempfile
+          ansible.builtin.tempfile:
+            state: file
+            prefix: glance_custom_service_config
+          register: _glance_custom_service_config_file
+
+        - name: Write current glance customServiceConfig to tempfile
+          ansible.builtin.shell: |
+            set -xe -o pipefail
+            crname=$(oc get openstackcontrolplane -o name -n {{ namespace }})
+            oc -n {{ namespace }} get ${crname} -o jsonpath={.spec.glance.template.customServiceConfig} > {{ _glance_custom_service_config_file.path }}
+          changed_when: false
+
+        - name: Ensure cinder_volume_type is configured with proper value in tempfile
+          community.general.ini_file:
+            path: "{{ _glance_custom_service_config_file.path }}"
+            section: "{{ default_backend | default('default_backend') }}"
+            option: cinder_volume_type
+            value: "{{ cifmw_volume_multiattach_type }}"
+            mode: "0644"
+          register: _glance_ini_file
+
+        - name: Slurp tempfile # noqa: no-handler
+          ansible.builtin.slurp:
+            path: "{{ _glance_custom_service_config_file.path }}"
+          register: _glance_ini_content
+          when: _glance_ini_file.changed
+
+        - name: Apply patched glance customServiceConfig # noqa: no-handler
+          vars:
+            _yaml_patch:
+              spec:
+                glance:
+                  template:
+                    customServiceConfig: "{{ _glance_ini_content.content | b64decode }}"
+          ansible.builtin.shell: |
+            set -xe -o pipefail
+            crname=$(oc get openstackcontrolplane -o name -n {{ namespace }})
+            oc -n {{ namespace }} patch ${crname} --type=merge --patch "{{ _yaml_patch | to_nice_yaml }}"
+            oc -n {{ namespace }} wait ${crname} --for condition=Ready --timeout=10m
+          changed_when: _glance_ini_file.changed
+          when: _glance_ini_file.changed
