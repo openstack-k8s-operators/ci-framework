@@ -1,0 +1,274 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Load CI job environment
+  tags:
+    - bootstrap_layout
+  when:
+    - cifmw_job_uri is defined
+  ansible.builtin.include_tasks:
+    file: ci_data.yml
+    apply:
+      tags:
+        - bootstrap_layout
+
+- name: Discover and expose CI Framework path on remote node
+  tags:
+    - always
+  vars:
+    default_path: >-
+      {{
+        cifmw_reproducer_default_repositories |
+        selectattr('src', 'match', '^.*/ci[_\-]framework$') |
+        map(attribute='dest') | first
+      }}
+    custom_path: >-
+      {{
+        cifmw_reproducer_repositories |
+        selectattr('src', 'match', '^.*/ci-framework$') |
+        map(attribute='dest')
+      }}
+    _path: >-
+      {{
+        (custom_path | length > 0) |
+        ternary(custom_path | first, default_path)
+      }}
+  ansible.builtin.set_fact:
+    _cifmw_reproducer_framework_location: >-
+      {{
+        (_path is match('.*/ci-framework/?$')) |
+        ternary(_path, [_path, 'ci-framework'] | path_join)
+      }}
+
+- name: Set _use_crc based on actual layout
+  tags:
+    - always
+  vars:
+    _use_crc: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.crc is defined and
+        (
+          (_cifmw_libvirt_manager_layout.vms.crc.amount is defined and
+           _cifmw_libvirt_manager_layout.vms.crc.amount|int > 0) or
+        _cifmw_libvirt_manager_layout.vms.crc.amount is undefined)
+      }}
+    _use_ocp: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.ocp is defined and
+        (_cifmw_libvirt_manager_layout.vms.ocp.amount is defined and
+         _cifmw_libvirt_manager_layout.vms.ocp.amount|int > 0)
+      }}
+  ansible.builtin.set_fact:
+    _use_crc: "{{ _use_crc }}"
+    _use_ocp: "{{ _use_ocp }}"
+    _has_openshift: "{{ _use_ocp or _use_crc }}"
+
+- name: Ensure directories are present
+  tags:
+    - always
+  ansible.builtin.file:
+    path: "{{ cifmw_reproducer_basedir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - artifacts
+    - logs
+
+- name: Load the architecture local kustomize patches
+  when:
+    - cifmw_architecture_scenario is defined
+  ansible.builtin.include_role:
+    name: kustomize_deploy
+    tasks_from: generate_base64_patches_from_tree.yml
+
+- name: Run only on hypervisor with controller-0
+  block:
+    - name: Push local code
+      ansible.builtin.include_tasks: push_code.yml
+
+    - name: Group tasks on controller-0
+      delegate_to: controller-0
+      block:
+        - name: Inject CI Framework motd
+          become: true
+          ansible.builtin.template:
+            dest: "/etc/motd.d/cifmw.motd"
+            src: "motd.j2"
+            mode: "0644"
+
+        - name: Rotate ansible-bootstrap logs
+          tags:
+            - always
+          ansible.builtin.include_tasks: rotate_log.yml
+          loop:
+            - "/home/zuul/ansible-bootstrap.log"
+
+        - name: Bootstrap environment on controller-0
+          environment:
+            ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.command:
+            chdir: "{{ _cifmw_reproducer_framework_location }}"
+            cmd: >-
+              ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+              -e @~/ci-framework-data/parameters/reproducer-variables.yml
+              -e @scenarios/reproducers/networking-definition.yml
+              playbooks/01-bootstrap.yml
+            creates: "/home/zuul/ansible-bootstrap.log"
+
+        - name: Install dev tools from install_yamls on controller-0
+          environment:
+            ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+          vars:
+            _devsetup_path: >-
+              {{
+                (
+                  cifmw_install_yamls_repo | default('/home/zuul/src/github.com/openstack-k8s-operators/install_yamls'),
+                  'devsetup'
+                ) | ansible.builtin.path_join
+              }}
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.command:
+            chdir: "{{ _devsetup_path }}"
+            cmd: >-
+              ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+              download_tools.yaml --tags kustomize,kubectl
+            creates: "/home/zuul/bin/kubectl"
+
+# Run from the hypervisor
+- name: Ensure OCP cluster is stable
+  when:
+    - _wait_ocp_cluster is defined
+    - _wait_ocp_cluster | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  vars:
+    _auth_path: >-
+      {{
+        (
+          cifmw_devscripts_repo_dir,
+          'ocp',
+          cifmw_devscripts_config.cluster_name,
+          'auth'
+        ) | ansible.builtin.path_join
+      }}
+    cifmw_openshift_adm_op: "stable"
+    cifmw_openshift_kubeconfig: >-
+      {{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}
+  ansible.builtin.include_role:
+    name: openshift_adm
+
+- name: Run from controller-0
+  delegate_to: controller-0
+  block:
+    - name: Emulate CI job
+      when:
+        - cifmw_job_uri is defined
+      ansible.builtin.include_tasks: ci_job.yml
+
+    - name: Prepare VA deployment
+      when:
+        - cifmw_architecture_scenario is defined
+        - cifmw_job_uri is undefined
+      tags:
+        - deploy_architecture
+      ansible.builtin.include_tasks:
+        file: configure_architecture.yml
+        apply:
+          tags:
+            - deploy_architecture
+
+    - name: Set facts related to the reproducer
+      ansible.builtin.set_fact:
+        _ctl_reproducer_basedir: >-
+          {{
+            (
+            '/home/zuul',
+            'ci-framework-data',
+            ) | path_join
+          }}
+
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ _ctl_reproducer_basedir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - parameters
+        - artifacts
+
+    - name: Inject most of the cifmw_ parameters passed to the reproducer run
+      tags:
+        - bootstrap_env
+      vars:
+        _filtered_vars: >-
+          {{
+            hostvars[inventory_hostname] | default({}) |
+            dict2items |
+            selectattr('key', 'match',
+                       '^(pre|post|cifmw)_(?!install_yamls|devscripts).*') |
+            rejectattr('key', 'equalto', 'cifmw_target_host') |
+            rejectattr('key', 'equalto', 'cifmw_basedir') |
+            rejectattr('key', 'equalto', 'cifmw_path') |
+            rejectattr('key', 'equalto', 'cifmw_extras') |
+            rejectattr('key', 'equalto', 'cifmw_openshift_kubeconfig') |
+            rejectattr('key', 'equalto', 'cifmw_openshift_token') |
+            rejectattr('key', 'equalto', 'cifmw_networking_env_definition') |
+            rejectattr('key', 'match', '^cifmw_use_(?!lvms).*') |
+            rejectattr('key', 'match', '^cifmw_reproducer.*') |
+            rejectattr('key', 'match', '^cifmw_rhol.*') |
+            rejectattr('key', 'match', '^cifmw_discover.*') |
+            rejectattr('key', 'match', '^cifmw_libvirt_manager.*') |
+            rejectattr('key', 'match', '^cifmw_manage_secrets_(pullsecret|citoken).*') |
+            items2dict
+          }}
+      ansible.builtin.copy:
+        mode: "0644"
+        dest: "/home/zuul/ci-framework-data/parameters/reproducer-variables.yml"
+        content: "{{ _filtered_vars | to_nice_yaml }}"
+
+    - name: Create reproducer-variables.yml symlink to old location
+      ansible.builtin.file:
+        dest: "/home/zuul/reproducer-variables.yml"
+        src: "/home/zuul/ci-framework-data/parameters/reproducer-variables.yml"
+        state: link
+
+    - name: Slurp kubeadmin password
+      ansible.builtin.slurp:
+        src: /home/zuul/.kube/kubeadmin-password
+      register: _kubeadmin_password
+
+    - name: Prepare ci-like EDPM deploy
+      when:
+        - cifmw_job_uri is undefined
+      delegate_to: controller-0
+      vars:
+        run_directory: "{{ _cifmw_reproducer_framework_location }}"
+        exports:
+          ANSIBLE_LOG_PATH: "~/ansible-deploy-edpm.log"
+        default_extravars:
+          - "@scenarios/centos-9/base.yml"
+          - "@scenarios/centos-9/edpm_ci.yml"
+          - "cifmw_openshift_password='{{ _kubeadmin_password.content | b64decode }}'"
+        extravars: "{{ cifmw_reproducer_play_extravars }}"
+        playbook: "deploy-edpm.yml"
+      ansible.builtin.template:
+        dest: "/home/zuul/deploy-edpm.sh"
+        src: "script.sh.j2"
+        mode: "0755"
+        owner: "zuul"
+        group: "zuul"

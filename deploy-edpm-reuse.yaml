@@ -1,0 +1,102 @@
+---
+- name: Manage unique ID
+  ansible.builtin.import_playbook: playbooks/unique-id.yml
+
+- name: Reproducer prepare play
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  pre_tasks:
+    - name: Prepare cleanup script
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: configure_cleanup.yaml
+
+    - name: Run Openstack cleanup
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
+      poll: 20
+      delegate_to: controller-0
+      ansible.builtin.command:
+        cmd: "/home/zuul/cleanup-architecture.sh"
+
+    - name: Inherit from parent scenarios if needed
+      ansible.builtin.include_tasks:
+        file: "ci/playbooks/tasks/inherit_parent_scenario.yml"
+
+    - name: Include common architecture parameter file
+      when:
+        - cifmw_architecture_scenario is defined
+        - cifmw_architecture_scenario | length > 0
+      ansible.builtin.include_vars:
+        file: "scenarios/reproducers/va-common.yml"
+
+    - name: Run reproducer validations
+      ansible.builtin.import_role:
+        name: reproducer
+        tasks_from: validations
+
+    - name: Gather OS facts
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - "distribution"
+
+    - name: Tweak dnf configuration
+      become: true
+      community.general.ini_file:
+        no_extra_spaces: true
+        option: "{{ config.option }}"
+        path: "/etc/dnf/dnf.conf"
+        section: "{{ config.section | default('main') }}"
+        state: "{{ config.state | default(omit) }}"
+        value: "{{ config.value | default(omit) }}"
+        mode: "0644"
+      loop: "{{ cifmw_reproducer_dnf_tweaks }}"
+      loop_control:
+        label: "{{ config.option }}"
+        loop_var: 'config'
+
+    - name: Install custom CA if needed
+      ansible.builtin.import_role:
+        name: install_ca
+
+    - name: Setup repositories via rhos-release if needed
+      tags:
+        - packages
+      when:
+        - ansible_facts['distribution'] == 'RedHat'
+        - cifmw_reproducer_hp_rhos_release | bool
+      vars:
+        cifmw_repo_setup_output: /etc/yum.repos.d
+        cifmw_repo_setup_rhos_release_args: "rhel"
+      ansible.builtin.import_role:
+        name: repo_setup
+        tasks_from: rhos_release
+
+  roles:
+    - role: ci_setup
+
+- name: Prepare switches
+  vars:
+    cifmw_configure_switches: "{{ 'switches' in groups }}"
+  ansible.builtin.import_playbook: playbooks/switches_config.yml
+
+- name: Reproducer reuse run
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Run reproducer reuse playbook
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: reuse_main
+
+    - name: Run deployment if instructed to
+      when:
+        - cifmw_deploy_architecture | default(false) | bool
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
+      poll: 20
+      delegate_to: controller-0
+      ansible.builtin.command:
+        cmd: "/home/zuul/deploy-architecture.sh {{ cifmw_deploy_architecture_args | default('') }}"
