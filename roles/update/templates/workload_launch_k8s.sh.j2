@@ -1,53 +1,8 @@
 #!/usr/bin/bash
-set +x
 
-export KUBECONFIG="{{ cifmw_openshift_kubeconfig }}"
-export PATH="{{ cifmw_path }}"
-
-OS_POD_TIMEOUT={{ cifmw_update_openstackclient_pod_timeout }}
-WAIT=0
-
-# Temporary file where to put the error message, if any.
-ERROR_FILE=/tmp/cifmw_update_ctl_testing_current_ouput.txt
-rm -f "${ERROR_FILE}"
-
-while [ $((WAIT++)) -lt ${OS_POD_TIMEOUT} ]; do
-    set -o pipefail             # Make sure we get the failure, as tee
+set -e
+set -o pipefail             # Make sure we get the failure, as tee
                                 # will always succeed.
-    cat "{{ cifmw_update_artifacts_basedir }}/workload_launch.sh" | \
-        oc rsh -n openstack openstackclient env WKL_MODE=sanityfast bash 2>&1 | tee "${ERROR_FILE}"
-    RC=$?
-    set +o pipefail
-    if [ "${RC}" -eq 137 ]; then
-       # When the command is interrupted by the restart of the
-       # OSclient, we have this returns code.  We just retry.
-       sleep 1
-       continue
-    fi
-    # If there's an error and the error file was created we check for
-    # the error message.
-    if [ "${RC}" -ne 0 ]; then
-        if [ ! -e "${ERROR_FILE}" ]; then
-            # no error file, rethrow the error.
-            exit $RC
-        fi
-        # Fragile as it depends on the exact output message.
-        if grep -F 'error: unable to upgrade connection: container not found' \
-                "${ERROR_FILE}"; then
-            # Openstackclient was not able to start as it's being
-            # restarted, retry.
-            sleep 1
-            continue
-        fi
-        # Error is not related to the the openstackclient not being
-        # available. We rethrow it.
-        exit ${RC}
-    fi
-    # No error.
-    exit 0
-done
-
-# We only reach this code if we reach timeout while retrying to
-# trigger the openstackclient.
-echo "OpenstackClient Pod unavalaible, giving up after ${OS_POD_TIMEOUT} seconds" >&2
-exit 127
+cat "{{ cifmw_update_artifacts_basedir }}/workload_launch.sh" | \
+    podman exec -i lopenstackclient \
+           env WKL_MODE=sanityfast bash -i 2>&1

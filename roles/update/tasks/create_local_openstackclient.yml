@@ -1,0 +1,122 @@
+---
+- name: Gather NodeSet resource information
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    namespace: "openstack"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: "OSDPNS"
+    api_version: "core.openstack.org/v1beta1"
+    name: "{{ cifmw_update_osdpns_name }}"
+  register: _cifmw_update_osdpns_info
+
+- name: Determine registry
+  ansible.builtin.set_fact:
+    cifmw_update_local_registry: >-
+      {{ (cifmw_ci_gen_kustomize_values_ooi_image is defined)
+         | ternary(
+             cifmw_ci_gen_kustomize_values_ooi_image.split('/')[0],
+             'quay.io'
+           )
+      }}
+
+- name: Check if {{ cifmw_update_local_registry }} credentials exist
+  ansible.builtin.set_fact:
+    brew_username: >-
+      {{
+        _cifmw_update_osdpns_info.resources[0]
+        | json_query("spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins[cifmw_update_local_registry]
+        | to_entries
+        | [0].key")
+      }}
+    brew_password: >-
+      {{
+        _cifmw_update_osdpns_info.resources[0]
+        | json_query("spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins[cifmw_update_local_registry]
+        | to_entries |
+        [0].value")
+      }}
+  when:
+    - _cifmw_update_osdpns_info.resources | length > 0
+    - _cifmw_update_osdpns_info.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins is defined
+    - _cifmw_update_osdpns_info.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins[cifmw_update_local_registry] is defined
+    - cifmw_update_local_registry != 'quay.io'
+
+- name: Log in to registry when needed
+  community.general.podman_login:
+    registry_url: "{{ cifmw_update_local_registry }}"
+    username: "{{ brew_username }}"
+    password: "{{ brew_password }}"
+  when:
+    - brew_username is defined
+    - brew_password is defined
+    - cifmw_update_local_registry != 'quay.io'
+
+- name: Retrieve the openstackclient Pod
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    namespace: "openstack"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: "Pod"
+    name: "openstackclient"
+  register: _cifmw_update_openstackclient_pod
+
+- name: Fail if openstackclient Pod is not found
+  ansible.builtin.fail:
+    msg: "No openstackclient Pod found in the openstack namespace!"
+  when: _cifmw_update_openstackclient_pod.resources | length == 0
+
+- name: Set the openstackclient image fact
+  ansible.builtin.set_fact:
+    openstackclient_image: "{{ _cifmw_update_openstackclient_pod.resources[0].spec.containers[0].image }}"
+
+- name: Collect and save OpenStack config files
+  block:
+    - name: Collect file from openstackclient container
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "openstack"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        pod: "openstackclient"
+        container: "openstackclient"
+        command: ["cat", "/home/cloud-admin/.config/openstack/{{ item }}"]
+      register: file_content
+      changed_when: false
+
+    - name: Save file locally
+      ansible.builtin.copy:
+        content: "{{ file_content.stdout }}"
+        dest: "{{ cifmw_update_artifacts_basedir }}/{{ item }}"
+        mode: '0644'
+      changed_when: false
+
+  loop:
+    - 'clouds.yaml'
+    - 'secure.yaml'
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create local openstack wrapper script
+  ansible.builtin.copy:
+    dest: "{{ cifmw_update_artifacts_basedir }}/openstack"
+    mode: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      OS_CLOUD=default /usr/bin/openstack --insecure "$@"
+
+- name: Ensure lopenstackclient container is running
+  community.general.podman_container:
+    name: lopenstackclient
+    image: "{{ openstackclient_image }}"
+    state: started
+    net: host
+    pull: yes
+    volumes:
+      - "{{ cifmw_update_artifacts_basedir }}/clouds.yaml:/home/cloud-admin/.config/openstack/clouds.yaml:ro,Z"
+      - "{{ cifmw_update_artifacts_basedir }}/secure.yaml:/home/cloud-admin/.config/openstack/secure.yaml:ro,Z"
+      - "{{ cifmw_update_artifacts_basedir }}/openstack:/home/cloud-admin/.local/bin/openstack:ro,Z"
+    command: /usr/bin/sleep
+    args: ['infinity']
