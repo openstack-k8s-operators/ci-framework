@@ -1,0 +1,50 @@
+---
+- name: Create kustomization to update Horizon to use Federation
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Set urls for install type uni
+      ansible.builtin.set_fact:
+        cifmw_federation_keycloak_url: 'https://keycloak-openstack.apps.ocp.openstack.lab'
+        cifmw_federation_keystone_url: 'https://keystone-public-openstack.apps.ocp.openstack.lab'
+        cifmw_federation_horizon_url: 'https://horizon-openstack.apps.ocp.openstack.lab'
+      when: cifmw_federation_deploy_type == "uni"
+
+    - name: Set urls for install type crc
+      ansible.builtin.set_fact:
+        cifmw_federation_keycloak_url: 'https://keycloak-openstack.apps-crc.testing'
+        cifmw_federation_keystone_url: 'https://keystone-public-openstack.apps-crc.testing'
+        cifmw_federation_horizon_url: 'https://horizon-openstack.apps-crc.testing'
+      when: cifmw_federation_deploy_type == "crc"
+
+    - name: Create file to customize horizon for Federation resources deployed in the control plane
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/horizon_federation.yaml"
+        mode: preserve
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          - namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/horizon/enabled
+                value: true
+              - op: add
+                path: /spec/horizon/template/memcachedInstance
+                value: memcached
+              - op: add
+                path: /spec/horizon/template/customServiceConfig
+                value: |
+                  OPENSTACK_KEYSTONE_URL = "{{ cifmw_federation_keystone_url }}/v3"
+                  WEBSSO_ENABLED = True
+                  WEBSSO_CHOICES = (
+                    ("credentials", _("Keystone Credentials")),
+                    ("OIDC", _("OpenID Connect")),
+                  )
+                  WEBSSO_IDP_MAPPING = {
+                    "OIDC": ("{{ cifmw_keystone_OIDC_provider_name }}", "openid"),
+                  }
