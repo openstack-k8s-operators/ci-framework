@@ -99,6 +99,25 @@
           }}
       register: cifmw_edpm_deploy_crs_kustomize_result
 
+    - name: Get dataplane-ansible-ssh-private-key-secret public part of the key
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      register: pub_key_slurp
+      ansible.builtin.shell: >
+        oc get secret
+        dataplane-ansible-ssh-private-key-secret
+        -o json | jq -r '.data["ssh-publickey"] | @base64d'
+
+    - name: Inject dataplane_ansible_ssh_public_key_secret in cloud-admin
+      become: true
+      delegate_to: "{{ current_compute_host }}"
+      loop: "{{ groups['computes'] }}"
+      loop_control:
+        loop_var: current_compute_host
+      ansible.posix.authorized_key:
+        user: "cloud-admin"
+        key: "{{ pub_key_slurp.stdout }}"
+
     - name: Log the CR that is about to be applied
       when: not cifmw_edpm_deploy_dryrun
       ansible.builtin.debug:
