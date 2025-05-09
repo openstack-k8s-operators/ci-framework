@@ -16,6 +16,7 @@ That is provided by `openshift_login` role.
 * `cifmw_os_net_subnetpool_config`: (list) It contains the definitions for subnet pools.
     See an example in roles/os_net_setup/defaults/main.yml
 * `cifmw_os_net_setup_dry_run`: (bool) Disable the generation of the commands.
+* `cifmw_os_net_setup_namespace`: (str) Namespace in which to access the OSP cloud. Defaults to `openstack`.
 
 ## Molecule
 

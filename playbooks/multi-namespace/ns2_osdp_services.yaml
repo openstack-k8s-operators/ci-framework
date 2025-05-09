@@ -1,0 +1,30 @@
+---
+- name: Acquire previously-deployed OpenStackDataPlaneServices for openstack2 namespace
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Fetch the already deployed services for further usage
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get osdps
+          --namespace openstack2
+          --no-headers
+          -o custom-columns=":metadata.name"
+      changed_when: false
+      register: _ci_gen_kustomize_deployed_services_stdout
+
+    - name: Expose the deployed services as a fact
+      ansible.builtin.set_fact:
+        ci_gen_kustomize_edpm_nodeset_predeployed_services2: >-
+          {{
+            _ci_gen_kustomize_deployed_services_stdout.stdout_lines | default ([])
+          }}
+
+    - name: Feed generated content to main play
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/pre_stage_8_run_get_openstackdataplaneservices.yml"
+        content: |
+          ci_gen_kustomize_edpm_nodeset_predeployed_services2: {{ ci_gen_kustomize_edpm_nodeset_predeployed_services2 }}
+        mode: "0644"

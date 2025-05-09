@@ -1,0 +1,71 @@
+---
+# source: multi-namespace/edpm-nodeset-values/values.yaml.j2
+{% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
+{% set instances_names = []                                                            %}
+{% set _original_nodeset = (original_content.data | default({})).nodeset | default({}) %}
+{% set _original_nodes = _original_nodeset.nodes | default({})                         %}
+{% set _original_services = _original_nodeset['services'] | default([])                %}
+{% set _vm_type = (_original_nodes.keys() | first).split('-')[1]                       %}
+{% for _inst in cifmw_networking_env_definition.instances.keys()                       %}
+{%   if _inst.startswith(_vm_type ~ "-")                                               %}
+{%     set _ = instances_names.append(_inst)                                           %}
+{%   endif                                                                             %}
+{% endfor                                                                              %}
+data:
+  ssh_keys:
+    authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
+    private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
+    public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
+  nodeset:
+    ansible:
+      ansibleUser: "zuul"
+      ansibleVars:
+        edpm_fips_mode: "{{ 'enabled' if cifmw_fips_enabled|default(false)|bool else 'check' }}"
+        timesync_ntp_servers:
+          - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
+        edpm_network_config_os_net_config_mappings:
+{% for instance in instances_names                                                     %}
+          edpm-{{ instance }}:
+{%   if hostvars[instance] is defined                                                  %}
+            nic1: "{{ hostvars[instance][_ipv.ansible_default_ipvX].macaddress }}"
+{%   endif                                                                             %}
+            nic2: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.mac_addr }}"
+{% endfor                                                                              %}
+{% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
+        edpm_sshd_allowed_ranges:
+{%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
+          - "{{ range }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+    nodes:
+{% for instance in instances_names                                                     %}
+      edpm-{{ instance }}:
+        ansible:
+          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane[_ipv.ip_vX] }}
+        hostName: {{ instance }}
+        networks:
+{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
+          - name: {{ net }}
+            subnetName: subnet1
+            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks[net][_ipv.ip_vX] }}
+{%        if net is match('ctlplane')                                                  %}
+            defaultRoute: true
+{%        endif                                                                        %}
+{%      endfor                                                                         %}
+{% endfor                                                                              %}
+{% if ('repo-setup' not in _original_services) and
+      ('repo-setup' in ci_gen_kustomize_edpm_nodeset_predeployed_services)             %}
+    services:
+      - "repo-setup"
+{%   for svc in _original_services                                                     %}
+      - "{{ svc }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+
+{% if _vm_type.startswith('compute')                                                   %}
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
+{% endif                                                                               %}

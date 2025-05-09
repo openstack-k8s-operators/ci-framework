@@ -1,0 +1,40 @@
+---
+- name: Post-deployment admin setup steps for namespace {{ cifmw_os_net_setup_namespace }}
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Load parameters files
+      ansible.builtin.include_vars:
+        dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+    - name: Create openstack network elements
+      vars:
+        cifmw_os_net_setup_config:
+          - name: public
+            external: true
+            shared: false
+            is_default: true
+            provider_network_type: flat
+            provider_physical_network: datacentre
+            availability_zone_hints: []
+            subnets:
+              - name: public_subnet
+                cidr: "{{ cifmw_os_net_setup_public_cidr }}"
+                allocation_pool_start: "{{ cifmw_os_net_setup_public_start }}"
+                allocation_pool_end: "{{ cifmw_os_net_setup_public_end }}"
+                gateway_ip: "{{ cifmw_os_net_setup_public_gateway }}"
+                enable_dhcp: true
+        cifmw_os_net_subnetpool_config:
+          - name: shared-pool-ipv4
+            default_prefix_length: 26
+            prefixes: '10.1.0.0/20'
+            is_default: true
+            is_shared: true
+          - name: shared-pool-ipv6
+            default_prefix_length: 64
+            prefixes: 'fdfe:391f:8400::/56'
+            is_default: true
+            is_shared: true
+      ansible.builtin.import_role:
+        name: os_net_setup
+      when: not cifmw_skip_os_net_setup | default('false') | bool
