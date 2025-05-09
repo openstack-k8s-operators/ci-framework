@@ -10,3 +10,60 @@
     test_operator_workflow: "{{ stage_vars_dict.cifmw_test_operator_tobiko_workflow }}"
     test_operator_config_playbook: tobiko-tests.yml
   ansible.builtin.include_tasks: run-test-operator-job.yml
+
+- name: Cleanup tobiko workloads
+  when: cifmw_test_operator_tobiko_cleanup | bool
+  block:
+    - name: Cleanup Loadbalancers created by Tobiko tests
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        for lb in $({{ cifmw_test_operator_tobiko_openstack_cmd }} loadbalancer list | \
+            grep "tobiko" | awk -F '|' '{print $2}')
+        do
+            {{ cifmw_test_operator_tobiko_openstack_cmd }} loadbalancer delete --cascade --wait $lb
+        done
+      failed_when: false
+
+    - name: Cleanup Heat stacks created by Tobiko tests
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        {{ cifmw_test_operator_tobiko_openstack_cmd }} stack list | \
+            grep "tobiko" | awk -F '|' '{print $2}' | \
+            xargs -r timeout 180 {{ cifmw_test_operator_tobiko_openstack_cmd }} stack delete -y --wait
+      register: result
+      retries: 5
+      delay: 5
+      until: result.rc == 0
+      failed_when: false
+
+    - name: Cleanup subnet pools created by Tobiko tests
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        {{ cifmw_test_operator_tobiko_openstack_cmd }} subnet pool list | \
+            grep "tobiko" | awk -F '|' '{print $2}' | \
+            xargs -r {{ cifmw_test_operator_tobiko_openstack_cmd }} subnet pool delete
+      failed_when: false
+
+    - name: Cleanup Security Groups created by Tobiko tests
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        {{ cifmw_test_operator_tobiko_openstack_cmd }} security group list | \
+            grep "tobiko" | awk -F '|' '{print $2}' | \
+            xargs -r {{ cifmw_test_operator_tobiko_openstack_cmd }} security group delete
+      failed_when: false
+
+    - name: Cleanup Glance images created by Tobiko tests
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        {{ cifmw_test_operator_tobiko_openstack_cmd }} image list | \
+            grep "tobiko" | awk -F '|' '{print $2}' | \
+            xargs -r {{ cifmw_test_operator_tobiko_openstack_cmd }} image delete
+      failed_when: false
+
+    - name: Cleanup Manila shares created by Tobiko tests
+      ansible.builtin.shell: |
+        set -o pipefail && \
+        {{ cifmw_test_operator_tobiko_openstack_cmd }} share list | \
+            grep "tobiko" | awk -F '|' '{print $2}' | \
+            xargs -r {{ cifmw_test_operator_tobiko_openstack_cmd }} share delete --force
+      failed_when: false
