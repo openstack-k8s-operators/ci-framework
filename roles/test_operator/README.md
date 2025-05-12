@@ -10,7 +10,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_version`: (String) The commit hash corresponding to the version of test-operator the user wants to use. This parameter is only used when `cifmw_test_operator_bundle` is also set.
 * `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
-* `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. Default value: `8`
+* `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. NOTE: This parameter is deprecated, please use `cifmw_test_operator_tempest_concurrency` instead. Default value: `8`
 * `cifmw_test_operator_cleanup`: (Bool) Delete all resources created by the role at the end of the testing. Default value: `false`
 * `cifmw_test_operator_tempest_cleanup`: (Bool) Run tempest cleanup after test execution (tempest run) to delete any resources created by tempest that may have been left out.
 * `cifmw_test_operator_default_groups`: (List) List of groups in the include list to search for tests to be executed. Default value: `[ 'default' ]`
@@ -34,7 +34,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
   * `type`: (String) The framework name you would like to call, currently the options are: tempest, ansibletest, horizontest, tobiko.
   * `test_vars_file`: (String) Path to the file used for testing, this file should contain the testing params for this stage. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
   * `test_vars`: (String) Testing parameters for this specific stage if a `test_vars` is used the specified parameters would override the ones in the `test_vars_file`. Only parameters specific for the controller can be used (Tempest, Ansibletest, Horizontest and Tobiko).
-  > Important note! Only variables with the following structure can be used to override inside a stage: `cifmw_test_operator_[test-operator CR name]_[parameter name]`. For example, these variables cannot be overridden per stage: `cifmw_test_operator_concurrency`, `cifmw_test_operator_default_registry`, `cifmw_test_operator_default_namespace`, `cifmw_test_operator_default_image_tag`.
+  > Important note! Only variables with the following structure can be used to override inside a stage: `cifmw_test_operator_[test-operator CR name]_[parameter name]`. For example, these variables cannot be overridden per stage: `cifmw_test_operator_default_registry`, `cifmw_test_operator_default_namespace`, `cifmw_test_operator_default_image_tag`.
   * `pre_test_stage_hooks`: (List) List of pre hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
   * `post_test_stage_hooks`: (List) List of post hooks to run as described [hooks README](https://github.com/openstack-k8s-operators/ci-framework/tree/main/roles/run_hook#hooks-expected-format).
  Default value:
@@ -52,6 +52,7 @@ cifmw_test_operator_stages:
 * `cifmw_test_operator_tempest_container`: (String) Name of the tempest container. Default value: `openstack-tempest`
 * `cifmw_test_operator_tempest_image`: (String) Tempest image to be used. Default value: `{{ cifmw_test_operator_tempest_registry }}/{{ cifmw_test_operator_tempest_namespace }}/{{ cifmw_test_operator_tempest_container }}`
 * `cifmw_test_operator_tempest_image_tag`: (String) Tag for the `cifmw_test_operator_tempest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
+* `cifmw_test_operator_tempest_concurrency`: (Integer) The number of worker processes running tests concurrently. Default value: `8`
 * `cifmw_test_operator_tempest_include_list`: (String) List of tests to be executed. Setting this will not use the `list_allowed` plugin. Default value: `''`
 * `cifmw_test_operator_tempest_exclude_list`: (String) List of tests to be skipped. Setting this will not use the `list_skipped` plugin. Default value: `''`
 * `cifmw_test_operator_tempest_expected_failures_list`: (String) List of tests for which failures will be ignored. Default value: `''`
@@ -95,7 +96,7 @@ Default value: {}
         {{ cifmw_test_operator_tempest_include_list | default('') }}
       excludeList: |
         {{ cifmw_test_operator_tempest_exclude_list | default('') }}
-      concurrency: "{{ cifmw_test_operator_concurrency }}"
+      concurrency: "{{ cifmw_test_operator_tempest_concurrency | default(8) }}"
       externalPlugin: "{{ cifmw_test_operator_tempest_external_plugin | default([]) }}"
       extraRPMs: "{{ cifmw_test_operator_tempest_extra_rpms | default([]) }}"
       extraImages: "{{ cifmw_test_operator_tempest_extra_images | default([]) }}"
