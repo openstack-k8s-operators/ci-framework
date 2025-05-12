@@ -1,0 +1,208 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    name: "{{ cifmw_ipa_namespace }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+
+- name: Get IPA operator deployment config from repository
+  ansible.builtin.git:
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/freeipa-operator"
+    repo: "https://github.com/freeipa/freeipa-operator"
+    version: "{{ cifmw_ipa_operator_version }}"
+    force: true
+
+- name: Wait for SecurityContextConstraints API to be available
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command: oc api-resources
+  register: api_resources_check
+  until: >
+    api_resources_check.rc == 0 and
+    'securitycontextconstraints' in api_resources_check.stdout
+  retries: 60
+  delay: 10
+  changed_when: false
+  check_mode: false
+  ignore_errors: true
+
+- name: Fail if SCCs did not become available
+  ansible.builtin.fail:
+    msg: "Timeout: SecurityContextConstraints API (securitycontextconstraints) did not become available after waiting."
+  when: "'securitycontextconstraints' not in api_resources_check.stdout"
+
+- name: Report success
+  ansible.builtin.debug:
+    msg: "SecurityContextConstraints API is available."
+  when: "'securitycontextconstraints' in api_resources_check.stdout"
+
+- name: Install IPA operator
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |-
+      set -eo pipefail
+      cd "{{ ansible_user_dir }}/ci-framework-data/tmp/freeipa-operator"
+      oc create -f config/rbac/scc.yaml
+      (cd config/default && kustomize edit set namespace "{{ cifmw_ipa_namespace }}")
+      (cd config/manager && kustomize edit set image controller=quay.io/freeipa/freeipa-operator:nightly)
+      kustomize build config/default | kubectl apply -f -
+
+- name: Wait for it to be deployed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: idm-operator-controller-manager
+    namespace: "{{ cifmw_ipa_namespace }}"
+    wait: true
+    wait_condition:
+      type: "Available"
+      reason: "MinimumReplicasAvailable"
+    wait_timeout: 60
+
+- name: Add IDM admin password secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: idm-secret
+        namespace: "{{ cifmw_ipa_namespace }}"
+      data:
+        IPA_DM_PASSWORD: "{{ cifmw_ipa_admin_password | b64encode }}"
+        IPA_ADMIN_PASSWORD: "{{ cifmw_ipa_admin_password | b64encode }}"
+
+- name: Read IPA instance template
+  ansible.builtin.template:
+    src: ipa.yaml.j2
+    dest: "{{ ansible_user_dir }}/ci-framework-data/tmp/ipa.yaml"
+    mode: "0644"
+
+- name: Install IPA pod
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: |-
+      oc apply -n {{ cifmw_ipa_namespace }} -f {{ ansible_user_dir }}/ci-framework-data/tmp/ipa.yaml
+
+- name: Wait on pod to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    kind: Pod
+    name: idm-main-0
+    namespace: "{{ cifmw_ipa_namespace }}"
+    wait: true
+    wait_timeout: 300
+
+- name: Get ipa route
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: idm
+    namespace: "{{ cifmw_ipa_namespace }}"
+  register: idm_route
+
+- name: Wait for IPA pod to be avalable
+  ansible.builtin.uri:
+    url: "https://{{ idm_route.resources.0.spec.host }}"
+    follow_redirects: true
+    method: GET
+    validate_certs: "{{ cifmw_ipa_url_validate_certs }}"
+  register: _result
+  until: _result.status == 200
+  retries: 100
+  delay: 10
+
+- name: Ensure IPA LDAP/LDAPS service is exposed
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ipa-directory-service
+        namespace: "{{ cifmw_ipa_namespace | default('ipa') }}"
+      spec:
+        selector:
+          app: idm
+        ports:
+          - name: ldap
+            protocol: TCP
+            port: 389
+            targetPort: 389
+          - name: ldaps
+            protocol: TCP
+            port: 636
+            targetPort: 636
+
+- name: Wait or fail
+  block:
+    - name: Wait for FreeIPA server install completion in pod logs
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: "oc logs idm-main-0 -n cert-manager --tail=-1"
+      register: ipa_pod_logs
+      until: >
+        ipa_pod_logs.rc == 0 and
+        ("The ipa-server-install command was successful" in ipa_pod_logs.stdout or
+         "The ipa-server-install command failed" in ipa_pod_logs.stdout)
+      retries: 60
+      delay: 10
+      changed_when: false
+      check_mode: false
+
+    - name: Fail if IPA install reported an error in logs
+      ansible.builtin.fail:
+        msg: |
+          FreeIPA installation failed according to pod logs. Last 50 lines:
+          {{ (ipa_pod_logs.stdout_lines | default([]))[-50:] | join('\n') }}
+      when: "'The ipa-server-install command failed' in ipa_pod_logs.stdout"
+
+    - name: Report success if IPA install completed
+      ansible.builtin.debug:
+        msg: "FreeIPA installation appears successful in pod logs."
+      when: "'The ipa-server-install command was successful' in ipa_pod_logs.stdout"
+
+  rescue:
+    - name: Get the last 100 lines from IPA pod logs on failure/timeout
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: "oc logs idm-main-0 -n cert-manager --tail=100"
+      register: pod_log_tail_on_failure
+      changed_when: false
+      ignore_errors: true
+
+    - name: Print logs and fail task due to timeout or error
+      ansible.builtin.fail:
+        msg: |
+          Timeout or unexpected error waiting for FreeIPA server installation.
+          Last 100 log lines from 'idm-main-0':
+          {{ pod_log_tail_on_failure.stdout | default("Could not retrieve pod logs.") }}
