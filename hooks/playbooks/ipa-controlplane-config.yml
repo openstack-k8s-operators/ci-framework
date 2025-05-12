@@ -1,0 +1,91 @@
+---
+- name: Create kustomization to update Keystone to use LDAP
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Create file to customize keystone for IPA deployed in the control plane
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/keystone_ldap.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          - namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/keystone/template/extraMounts
+                value:
+                  - name: v1
+                    region: r1
+                    extraVol:
+                      - propagation:
+                        - Keystone
+                        extraVolType: Conf
+                        volumes:
+                        - name: keystone-domains
+                          secret:
+                            secretName: keystone-domains
+                        mounts:
+                        - name: keystone-domains
+                          mountPath: "/etc/keystone/domains"
+                          readOnly: true
+              - op: add
+                path: /spec/keystone/template/customServiceConfig
+                value: |
+                  [DEFAULT]
+                  insecure_debug = true
+                  debug = true
+                  [identity]
+                  domain_specific_drivers_enabled = true
+        mode: "0644"
+
+    - name: Get ipa route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        name: idm
+        namespace: "{{ cifmw_ipa_namespace | default('cert-manager') }}"
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+      register: idm_route
+
+    - name: Set IPA BaseDN, hostname and secret config key vars
+      ansible.builtin.set_fact:
+        cifmw_ipa_hostname: "{{ idm_route.resources.0.spec.host }}"
+        cifmw_ipa_basedn: "dc={{ idm_route.resources.0.spec.host.split('.')[1:] | join(',dc=') }}"
+        keystone_conf_key: "keystone.{{ cifmw_ipa_domain | default('REDHAT') }}.conf"
+
+    - name: Create Keystone domain config secret for LDAP
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: keystone-domains
+            namespace: openstack
+          type: Opaque
+          stringData: "{{ {keystone_conf_key: keystone_ldap_config_content} }}"
+      vars:
+        keystone_ldap_config_content: |
+          [identity]
+          driver = ldap
+          [ldap]
+          url = ldap://ipa-directory-service.{{ cifmw_ipa_namespace | default('cert-manager') }}.svc.cluster.local
+          user = uid=admin,cn=users,cn=accounts,{{ cifmw_ipa_basedn }}
+          password = {{ cifmw_ipa_admin_password | default('nomoresecrets') }}
+          suffix = {{ cifmw_ipa_basedn }}
+          user_tree_dn = cn=users,cn=accounts,{{ cifmw_ipa_basedn }}
+          user_objectclass = person
+          user_id_attribute = uid
+          user_name_attribute = uid
+          user_mail_attribute = mail
+          group_tree_dn = cn=groups,cn=accounts,{{ cifmw_ipa_basedn }}
+          group_objectclass = groupOfNames
+          group_id_attribute = cn
+          group_name_attribute = cn
+          group_member_attribute = member
+          group_desc_attribute = description
