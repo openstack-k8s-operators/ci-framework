@@ -29,13 +29,20 @@
     name: "{{ cifmw_polarion_deps }}"
     state: present
 
+    # this is a change to get it to work with a comma-separated string
+    # Can I make it work with a list?
+    # This workd with a list; the issue in the cifmw_polarion_results_dir being a list is when the results files are being merged and this var is used for the chdir
+    # It will need to be treated differently at that point.
 - name: Look for test result XML files in artifacts directory
   ansible.builtin.find:
     paths: "{{ cifmw_polarion_jump_result_dir }}"
+    # paths: "{{ cifmw_polarion_jump_result_dir | split(',') | list }}"
     patterns: "*.xml"
     recurse: true
   register: xml_files
 
+  # At the moment, the tests/feature-verification-tests/*.xml file is not being found
+  # despite looking in /home/zuul/ci-framework-data/tests/ recursively
 - name: Deploy jump and report to polarion
   when: xml_files.files | length > 0
   block:
@@ -94,17 +101,31 @@
       ansible.builtin.debug:
         var: pylero_output.stdout_lines
 
+    - name: Create a temp dir to put the results into
+      # Why do the files need to be merged?
+      # We iterate through the merged files again later to report the results.
+      # Can the merging stage be skipped, and just the list of XML files given directly into the "Update test runs" task?
+      # If there needs to be an intermediate file called results_merged, can we just copy the XML files into some temp dir and work from there?
+      ansible builtin.file:
+        state: directory
+        path: "/home/zuul/ci-framework-data/tests/temp_results" 
+
     - name: Merge result XML files of each directory
       ansible.builtin.shell:
-        chdir: "{{ cifmw_polarion_jump_result_dir }}"
+        # Does this need to be executed in the results dir?
+        # The xml_files should have absolute paths
+        # Since the merged results are deleted after, this could be run from anywhere, such as a temp dir.
+        # Technically, this is fine as long as the jump_result_dir is a string.
+        #chdir: "{{ cifmw_polarion_jump_result_dir }}"
+        chdir: "/home/zuul/ci-framework-data/tests/temp_results/"
         cmd: >-
           source "{{ cifmw_polarion_jump_repo_dir }}/jump-venv/bin/activate" &&
-          junitparser merge {{ item.path | dirname }}/*.xml {{item.path | dirname }}/results_merged.xml
+          junitparser merge {{ item.path | dirname }}/*.xml {{ item.path | dirname }}/results_merged.xml
       loop: "{{ xml_files.files }}"
 
     - name: Look for test result XML files in artifacts directory
       ansible.builtin.find:
-        paths: "{{ cifmw_polarion_jump_result_dir }}"
+        paths: "/home/zuul/ci-framework-data/tests/temp_results/"
         patterns: "results_merged.xml"
         recurse: true
       register: merged_xml_files
@@ -138,11 +159,11 @@
         index_var: loop_idx
       register: jump_script
 
-    - name: Remove merged xml files
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ merged_xml_files.files }}"
+   # - name: Remove merged xml files
+   #   ansible.builtin.file:
+   #     path: "{{ item.path }}"
+   #     state: absent
+   #   loop: "{{ merged_xml_files.files }}"
 
     - name: Output of jump
       ansible.builtin.debug:
