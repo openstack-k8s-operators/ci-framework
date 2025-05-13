@@ -21,14 +21,38 @@
         name: 'install_yamls_makes'
         tasks_from: 'make_download_tools'
 
-- name: Run ci_framework infra playbook
-  ansible.builtin.import_playbook: "../../../playbooks/02-infra.yml"
+    - name: Run pre_infra hooks
+      vars:
+        step: pre_infra
+      ansible.builtin.import_role:
+        name: run_hook
+
+- name: Prepare host virtualization
+  hosts: "{{ ('virthosts' in groups) | ternary('virthosts', cifmw_target_host | default('localhost') ) }}"
+  tasks:
+    - name: Run prepare host virtualization
+      vars:
+        step: pre_infra
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: host_virtualization.yml
+      tags:
+        - infra
 
 - name: Build dataset hook
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   connection: local
   tasks:
+    - name: Prepare the platform
+      vars:
+        step: pre_infra
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: infra.yml
+      tags:
+        - infra
+
     - name: Load parameters
       ansible.builtin.include_vars:
         dir: "{{ item }}"
