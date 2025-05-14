@@ -11,6 +11,7 @@ Creates additional networks in a OCP cluster using NetworkAttachmentDefinition
 * `cifmw_ci_multus_ocp_hostname`: (String) The OCP inventory hostname. Used to gather network information specific to those nodes, mostly the interfaces. Defaults to `crc`.
 * `cifmw_ci_multus_cniversion`: (String) The CNI specification version used when creating the resource. Defaults to `0.3.1`.
 * `cifmw_ci_multus_default_nad_type`: (String) Default NAD type used when not specified by the network configuration. Defaults to `macvlan`. You can select the type of each NAD by "multus_type"
+* `cifmw_ci_multus_default_bridge_attach`: (String) Set place to attach the bridge when NAD type is bridge. Defaults to `interface`. You can select the place to attach it by "multus_attach".
 * `cifmw_ci_multus_default_nad_ipam_type`: (String) Default NAD IPAM type to be used when not specified by the network configuration. Defaults to `whereabouts`.
 * `cifmw_ci_multus_default_nad_ipam_type_ip_version``: (String) Default IP version to use in IPAM config. Defaults to `v4`.
 * `cifmw_ci_multus_dryrun`: (Bool) When enabled, tasks that require an OCP environment are skipped. Defaults to `false`.
@@ -37,6 +38,7 @@ cifmw_ci_multus_net_info_patch_1:
           - start: 192.168.122.30
             end: 192.168.122.70
         type: bridge
+        attach: linux-bridge
 ```
 
 ## Limitations
