@@ -1045,6 +1045,7 @@ class SubnetBasedNetworkToolDefinition:
     __FIELD_ROUTES_IPV4 = "routes-v4"
     __FIELD_ROUTES_IPV6 = "routes-v6"
     __FIELD_TYPE = "type"
+    __FIELD_ATTACH = "attach"
 
     def __init__(
         self,
@@ -1069,6 +1070,7 @@ class SubnetBasedNetworkToolDefinition:
         self.__ipv4_routes: typing.List[HostNetworkRoute] = []
         self.__ipv6_routes: typing.List[HostNetworkRoute] = []
         self.__type: typing.Optional[str] = None
+        self.__attach: typing.Optional[str] = None
 
         self.__parse_raw(raw_config)
 
@@ -1093,10 +1095,16 @@ class SubnetBasedNetworkToolDefinition:
             parent_name=self.__object_name,
             alone_field=self.__FIELD_ROUTES,
         )
-
         _validate_fields_one_of(
             [
                 self.__FIELD_TYPE,
+            ],
+            raw_definition,
+            parent_name=self.__object_name,
+        )
+        _validate_fields_one_of(
+            [
+                self.__FIELD_ATTACH,
             ],
             raw_definition,
             parent_name=self.__object_name,
@@ -1117,6 +1125,7 @@ class SubnetBasedNetworkToolDefinition:
             raw_definition, self.__FIELD_ROUTES_IPV6, ip_version=6
         )
         self.__parse_raw_type_field(raw_definition, self.__FIELD_TYPE)
+        self.__parse_raw_type_attach(raw_definition, self.__FIELD_ATTACH)
 
     def __parse_raw_range_field(
         self,
@@ -1214,6 +1223,21 @@ class SubnetBasedNetworkToolDefinition:
                 parent_name=self.__object_name,
             )
             self.__type = type
+
+    @property
+    def attach(self) -> str:
+        """Where to attach the multus bridge"""
+        return self.__attach
+
+    def __parse_raw_type_attach(self, raw_definition, field_name: str):
+        if field_name in raw_definition:
+            attach = _validate_parse_field_type(
+                field_name,
+                raw_definition,
+                str,
+                parent_name=self.__object_name,
+            )
+            self.__attach = attach
 
 
 class MultusNetworkDefinition(SubnetBasedNetworkToolDefinition):
