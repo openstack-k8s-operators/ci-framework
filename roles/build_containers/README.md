@@ -35,6 +35,9 @@ become - Required to install and execute tcib
 * `cifmw_build_containers_hotfix_tag`: (String) The tag of the container image.
 * `cifmw_build_containers_run_hotfix`: (boolean) conditional variable for executing build_containers.
 * `cifmw_build_containers_install_from_source`: (boolean) Install tcib from RPM.
+* `cifmw_build_containers_tag_string`: (String) Human readable string to tag containers
+* `cifmw_build_containers_retag_images`: (Boolean) Whether to tag images again after pushing with hash tag. Default to `false`
+* `cifmw_build_containers_retag_string`: (String) Human readable string to re-tag containers
 
 ### Parameters used in meta-content-provider
 
