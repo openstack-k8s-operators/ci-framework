@@ -90,6 +90,27 @@
     - cifmw_build_containers_buildah_push | default ('false') | bool
     - not cifmw_build_containers_push_containers | bool
 
+- name: Retag pushed images
+  become: true
+  when: cifmw_build_containers_retag_images | default(false) | bool
+  block:
+    - name: "Retag the images with {{ cifmw_build_containers_retag_string }} tag"
+      containers.podman.podman_tag:
+        image: "{{ item }}"
+        target_names:
+          - "{{ item }}:{{ cifmw_build_containers_retag_string }}"
+      loop: "{{ built_images.stdout_lines }}"
+
+    - name: Push retagged images
+      containers.podman.podman_image:
+        name: "{{ item }}"
+        push_args:
+          dest: "{{ cifmw_build_containers_push_registry }}/{{ cifmw_build_containers_registry_namespace }}"
+        tag: "{{ cifmw_build_containers_retag_string }}"
+        pull: false
+        push: true
+      loop: "{{ built_images.stdout_lines }}"
+
 - name: Cleanup tcib directories after container build
   ansible.builtin.import_tasks: cleanup.yml
   when: cifmw_build_containers_cleanup | bool
