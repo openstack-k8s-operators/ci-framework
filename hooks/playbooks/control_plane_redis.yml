@@ -1,0 +1,32 @@
+---
+- name: Kustomize ControlPlane for redis service
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane"
+        state: directory
+        mode: "0755"
+
+    - name: Create kustomize yaml to enable Horizon
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/60-redis-kustomization.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          namespace: {{ namespace }}
+          patches:
+          - target:
+                kind: OpenStackControlPlane
+            patch: |-
+              - op: add
+                path: /spec/redis/enabled
+                value: true
+              - op: replace
+                path: /spec/redis/templates/redis/replicas
+                value: 1
+              - op: replace
+                path: /spec/redis/templates/redis/tls
+                value: {}
+        mode: "0644"
