@@ -27,12 +27,35 @@
 
   rescue:
     - name: Install mock from epel repos
+      when:
+        - ansible_distribution | lower == "centos"
+        - ansible_distribution_major_version is not version('10', '==')
       vars:
         cifmw_ci_setup_epel_pkgs:
           - mock
       ansible.builtin.import_role:
         name: ci_setup
         tasks_from: epel.yml
+
+    - name: Install mock from epel repos
+      become: true
+      when:
+        - ansible_distribution | lower == "centos"
+        - ansible_distribution_major_version is version('10', '==')
+      block:
+        - name: Modify dlrn deps epel repos to include mock packages
+          ansible.builtin.lineinfile:
+            path: /etc/yum.repos.d/delorean-master-testing.repo
+            search_string: 'includepkgs=liboath,gperftools-libs,thrift,libpmemobj,liborc2,libpmem,parquet-libs,libarrow*'
+            line: 'ncludepkgs=liboath,gperftools-libs,thrift,libpmemobj,liborc2,libpmem,parquet-libs,libarrow*,mock*,distribution-gpg-keys,python3-templated-dictionary,python3-backoff'
+
+        - name: refresh cache
+          ansible.builtin.command: "sudo dnf clean all"
+
+        - name: Install Mock from DLRN repos
+          ansible.builtin.package:
+            name: mock
+            state: present
 
 - name: Ensure DLRN package dependencies
   become: true
