@@ -2,19 +2,31 @@
 - name: Create kustomization to update Horizon to use Federation
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   tasks:
-    - name: Set urls for install type uni
+    - name: Read uni vars from federation role
       ansible.builtin.set_fact:
-        cifmw_federation_keycloak_url: 'https://keycloak-openstack.apps.ocp.openstack.lab'
-        cifmw_federation_keystone_url: 'https://keystone-public-openstack.apps.ocp.openstack.lab'
-        cifmw_federation_horizon_url: 'https://horizon-openstack.apps.ocp.openstack.lab'
+        cifmw_federation_domain: "apps.ocp.openstack.lab"
       when: cifmw_federation_deploy_type == "uni"
 
-    - name: Set urls for install type crc
+    - name: Read crc vars from federation role
       ansible.builtin.set_fact:
-        cifmw_federation_keycloak_url: 'https://keycloak-openstack.apps-crc.testing'
-        cifmw_federation_keystone_url: 'https://keystone-public-openstack.apps-crc.testing'
-        cifmw_federation_horizon_url: 'https://horizon-openstack.apps-crc.testing'
+        cifmw_federation_domain: "apps-crc.testing"
       when: cifmw_federation_deploy_type == "crc"
+
+    - name: Read all vars from federation role
+      ansible.builtin.import_role:
+        name: federation
+        vars_from: all-vars.yml
+
+    - name: Set websso settings for single IdP
+      ansible.builtin.set_fact:
+        cifmw_federation_websso_choices: '("OIDC", _("OpenID Connect")),'
+        cifmw_federation_websso_idp_mapping: '"OIDC": ("{{ cifmw_federation_IdpName }}", "openid"),'
+
+    - name: Set websso settings for multiple IdP
+      ansible.builtin.set_fact:
+        cifmw_federation_websso_choices: '("OIDC1", _("OpenID Connect IdP1")),("OIDC2", _("OpenID Connect IdP2")),'
+        cifmw_federation_websso_idp_mapping: '"OIDC1": ("{{ cifmw_federation_IdpName }}", "openid"),"OIDC2": ("{{ cifmw_federation_IdpName2 }}", "openid"),'
+      when: cifmw_federation_deploy_multirealm is true
 
     - name: Create file to customize horizon for Federation resources deployed in the control plane
       ansible.builtin.copy:
@@ -43,8 +55,8 @@
                   WEBSSO_ENABLED = True
                   WEBSSO_CHOICES = (
                     ("credentials", _("Keystone Credentials")),
-                    ("OIDC", _("OpenID Connect")),
+                    {{ cifmw_federation_websso_choices }}
                   )
                   WEBSSO_IDP_MAPPING = {
-                    "OIDC": ("{{ cifmw_keystone_OIDC_provider_name }}", "openid"),
+                    {{ cifmw_federation_websso_idp_mapping }}
                   }
