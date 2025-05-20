@@ -1,0 +1,165 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Common tasks for federation role
+
+- name: Get ingress operator CA certificate
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc extract secret/router-ca --to={{ [ ansible_user_dir , 'ci-framework-data','tmp'] | path_join }} --keys=tls.crt -n openshift-ingress-operator --confirm
+  when: cifmw_federation_extract_ca_cert | default(true)
+
+- name: Store ingress operator CA to file
+  ansible.builtin.copy:
+    src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'tls.crt'] | path_join }}"
+    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
+  when: cifmw_federation_extract_ca_cert | default(true)
+
+- name: Read ingress operator CA cert content
+  ansible.builtin.slurp:
+    src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
+  register: federation_sso_ca
+  when: cifmw_federation_extract_ca_cert | default(true)
+
+- name: Create or update Keycloak CA secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: keycloakca
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      data:
+        KeyCloakCA: "{{ federation_sso_ca.content }}"
+  when: federation_sso_ca is defined
+
+- name: Generate OIDC configuration for realm
+  ansible.builtin.set_fact:
+    oidc_config: |
+      OIDCClaimPrefix "{{ cifmw_federation_keystone_OIDC_ClaimPrefix }}"
+      OIDCResponseType "{{ cifmw_federation_keystone_OIDC_ResponseType }}"
+      OIDCScope "{{ cifmw_federation_keystone_OIDC_Scope }}"
+      OIDCClaimDelimiter "{{ cifmw_federation_keystone_OIDC_ClaimDelimiter }}"
+      OIDCPassUserInfoAs "{{ cifmw_federation_keystone_OIDC_PassUserInfoAs }}"
+      OIDCPassClaimsAs "{{ cifmw_federation_keystone_OIDC_PassClaimsAs }}"
+      OIDCCryptoPassphrase "{{ cifmw_federation_keystone_OIDC_CryptoPassphrase }}"
+      {% if cifmw_federation_multi_realm | default(false) %}
+      OIDCMetadataDir "/var/lib/httpd/metadata"
+      OIDCRedirectURI "{{ cifmw_federation_keystone_url }}/v3/redirect_uri"
+      {% else %}
+      OIDCProviderMetadataURL "{{ cifmw_federation_keystone_OIDC_ProviderMetadataURL }}"
+      OIDCClientID "{{ cifmw_federation_keystone_OIDC_ClientID }}"
+      OIDCClientSecret "{{ cifmw_federation_keystone_OIDC_ClientSecret }}"
+      OIDCOAuthClientID "{{ cifmw_federation_keystone_OIDC_ClientID }}"
+      OIDCOAuthClientSecret "{{ cifmw_federation_keystone_OIDC_ClientSecret }}"
+      OIDCOAuthIntrospectionEndpoint "{{ cifmw_federation_keystone_OIDC_OAuthIntrospectionEndpoint }}"
+      OIDCRedirectURI "{{ cifmw_federation_keystone_url }}/v3/auth/OS-FEDERATION/identity_providers/{{ cifmw_federation_IdpName }}/protocols/openid/websso/"
+      {% endif %}
+      LogLevel {{ cifmw_federation_log_level | default('warn') }}
+
+- name: Generate location match configurations for realms
+  ansible.builtin.set_fact:
+    location_matches: |
+      {% for realm in cifmw_federation_realms %}
+      <LocationMatch "/v3/auth/OS-FEDERATION/identity_providers/{{ realm.idp_name }}/protocols/openid/websso">
+        AuthType "openid-connect"
+        Require valid-user
+      </LocationMatch>
+
+      <Location ~ "/v3/OS-FEDERATION/identity_providers/{{ realm.idp_name }}/protocols/openid/auth">
+        AuthType oauth20
+        Require valid-user
+      </Location>
+
+      {% endfor %}
+      {% if cifmw_federation_multi_realm | default(false) %}
+      <Location ~ "/redirect_uri">
+        Require valid-user
+        AuthType openid-connect
+      </Location>
+      {% endif %}
+
+      <LocationMatch "/v3/auth/OS-FEDERATION/websso/openid">
+        AuthType "openid-connect"
+        Require valid-user
+      </LocationMatch>
+
+- name: Wait for service to be available
+  ansible.builtin.uri:
+    url: "{{ service_url }}"
+    follow_redirects: none
+    method: GET
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+  register: _result
+  until: _result.status == 200
+  retries: "{{ service_wait_retries | default(48) }}"
+  delay: "{{ service_wait_delay | default(5) }}"
+  when: service_url is defined
+
+- name: Create namespace if not exists
+  kubernetes.core.k8s:
+    name: "{{ namespace_name }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+  when: namespace_name is defined
+
+- name: Apply Kubernetes manifest from template
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition: "{{ manifest_definition }}"
+  when: manifest_definition is defined
+
+- name: Copy file to OpenStack client pod
+  kubernetes.core.k8s_cp:
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+    pod: openstackclient
+    remote_path: "{{ pod_dest_path }}"
+    local_path: "{{ local_src_path }}"
+  when: 
+    - pod_dest_path is defined
+    - local_src_path is defined
+
+- name: Download OpenID configuration
+  ansible.builtin.uri:
+    url: "{{ oidc_metadata_url }}"
+    method: GET
+    return_content: true
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+  register: openid_config_result
+  when: oidc_metadata_url is defined
+
+- name: Create Keycloak admin credentials secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: credential-sso
+        namespace: "{{ cifmw_federation_keycloak_namespace }}"
+      data:
+        ADMIN_USERNAME: "{{ cifmw_federation_keycloak_admin_username | b64encode }}"
+        ADMIN_PASSWORD: "{{ cifmw_federation_keycloak_admin_password | b64encode }}" 
