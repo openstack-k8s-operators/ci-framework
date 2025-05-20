@@ -65,7 +65,9 @@
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   delegate_to: localhost
-  when: cifmw_openshift_kubeconfig is defined
+  when:
+    - cifmw_openshift_kubeconfig is defined
+    - swift_endpoints_count.stdout == "0"
   ansible.builtin.command: "oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack {{ item.os_command }} show {{ item.os_command_object }} -c id -f value"
   register: all_uuids
   loop:
@@ -83,6 +85,58 @@
   when:
     - cifmw_cephadm_certificate | length > 0
     - cifmw_cephadm_key | length > 0
+
+- name: Update Swift endpoints if exists
+  delegate_to: localhost
+  when:
+    - cifmw_openshift_kubeconfig is defined
+    - not swift_in_ctlplane.stdout | bool
+    - swift_endpoints_count.stdout != "0"
+  block:
+    - name: Get UUID for Swift 'public' endpoint
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc exec -t openstackclient -- \
+        openstack endpoint list -f json | \
+        jq -r '.[] | select(.["Service Name"] == "swift" and .Interface == "public") | .ID'
+      register: uuid_swift_public_ep
+      changed_when: false
+
+    - name: Get UUID for Swift 'internal' endpoint
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc exec -t openstackclient -- \
+        openstack endpoint list -f json | \
+        jq -r '.[] | select(.["Service Name"] == "swift" and .Interface == "internal") | .ID'
+      register: uuid_swift_internal_ep
+      changed_when: false
+
+    - name: Update Swift endpoints url
+      cifmw.general.ci_script:
+        extra_args:
+          KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        output_dir: "/home/zuul/ci-framework-data/artifacts"
+        script: |-
+          oc -n {{ cifmw_cephadm_ns }} rsh openstackclient \
+            openstack endpoint set \
+            --url {{ cifmw_cephadm_urischeme }}://{{ (
+              cifmw_external_dns_vip_ext.values() | first
+              if cifmw_external_dns_vip_ext is defined
+              else cifmw_cephadm_rgw_vip | ansible.utils.ipaddr('address')
+            ) }}:8080/swift/v1/AUTH_%\(tenant_id\)s \
+            {{ uuid_swift_public_ep.stdout }}
+          oc -n {{ cifmw_cephadm_ns }} rsh openstackclient \
+            openstack endpoint set \
+            --url {{ cifmw_cephadm_urischeme }}://{{ (
+              cifmw_external_dns_vip_int.values() | first
+              if cifmw_external_dns_vip_int is defined
+              else cifmw_cephadm_rgw_vip | ansible.utils.ipaddr('address')
+            ) }}:8080/swift/v1/AUTH_%\(tenant_id\)s \
+            {{ uuid_swift_internal_ep.stdout }}
 
 - name: Configure object store to use rgw
   cifmw.general.ci_script:
