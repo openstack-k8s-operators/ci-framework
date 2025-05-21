@@ -1,0 +1,39 @@
+#!/bin/bash
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# To prevent date sorting issues with OpenShift logs which only have
+# second precision, we pause for one second to ensure our entry
+# follows OpenShift log events.
+sleep 1
+
+CURRENT_EVENT=( "$@" )
+
+if [ -z "${CURRENT_EVENT}" ]; then
+    echo "Please provide a event"
+    CURRENT_EVENT="UNKNOWN"
+fi
+
+UPDATE_EVENT_FILE="{{ cifmw_update_artifacts_basedir }}/current_update_event.log"
+UPDATE_EVENT_LOCK_FILE="{{ cifmw_update_artifacts_basedir }}/current_update_event.lock"
+
+# Use flock to safely append the update event
+(
+    flock -x 200
+    echo "$(date --iso-8601=n)|${CURRENT_EVENT[@]}" >> "${UPDATE_EVENT_FILE}"
+) 200>"${UPDATE_EVENT_LOCK_FILE}"
+
+# Again, to ensure our entry precedes OpenShift log events.
+sleep 1
