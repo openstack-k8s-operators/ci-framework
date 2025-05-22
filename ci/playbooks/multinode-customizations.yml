@@ -215,6 +215,23 @@
       ansible.builtin.include_tasks: tasks/set_crc_insecure_registry.yml
       when: content_provider_registry_ip is defined
 
+    - name: Get dataplane-ansible-ssh-private-key-secret public part of the key
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      register: pub_key_slurp
+      ansible.builtin.shell: >
+        oc get secret
+        dataplane-ansible-ssh-private-key-secret
+        -o json | jq -r '.data["ssh-publickey"] | @base64d'
+
+    - name: debug public key
+      ansible.builtin.debug:
+        msg: "{{ pub_key_slurp.stdout }}"
+
+    - name: Register dataplane-ansible-ssh-private-key-secret public part of the key as a fact
+      ansible.builtin.set_fact:
+        dataplane_ansible_ssh_public_key_secret: "{{ pub_key_slurp.stdout }}"
+
 - hosts: controller
   name: "Tweak Controller"
   gather_facts: true
@@ -332,11 +349,17 @@
         name: cloud-admin
         shell: /bin/bash
 
-    - name: Inject key in cloud-admin
+    - name: Inject controller key in cloud-admin
       become: true
       ansible.posix.authorized_key:
         user: "cloud-admin"
         key: "{{ hostvars['controller']['persistent_ssh_key'] }}"
+
+    - name: Inject dataplane_ansible_ssh_public_key_secret in cloud-admin
+      become: true
+      ansible.posix.authorized_key:
+        user: "cloud-admin"
+        key: "{{ hostvars['crc']['dataplane_ansible_ssh_public_key_secret'] }}"
 
     - name: Allow cloud-admin on sudo
       become: true
