@@ -23,10 +23,37 @@
         name: cifmw_setup
         tasks_from: bootstrap.yml
 
-- name: Import infra entrypoint playbook
-  ansible.builtin.import_playbook: playbooks/02-infra.yml
-  tags:
-    - infra
+    - name: Run pre_infra hooks
+      vars:
+        step: pre_infra
+      ansible.builtin.import_role:
+        name: run_hook
+      tags:
+        - infra
+
+- name: Prepare host virtualization
+  hosts: "{{ ('virthosts' in groups) | ternary('virthosts', cifmw_target_host | default('localhost') ) }}"
+  tasks:
+    - name: Run prepare host virtualization
+      vars:
+        step: pre_infra
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: host_virtualization.yml
+      tags:
+        - infra
+
+- name: Run cifmw_setup infra.yml
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Prepare the platform
+      vars:
+        step: pre_infra
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: infra.yml
+      tags:
+        - infra
 
 - name: Import package build playbook
   ansible.builtin.import_playbook: playbooks/03-build-packages.yml

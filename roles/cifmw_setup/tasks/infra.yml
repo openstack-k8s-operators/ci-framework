@@ -1,0 +1,107 @@
+---
+- name: Load parameters files
+  ansible.builtin.include_vars:
+    dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+- name: Load Networking Environment Definition
+  vars:
+    cifmw_networking_mapper_assert_env_load: false
+  ansible.builtin.import_role:
+    name: networking_mapper
+    tasks_from: load_env_definition.yml
+
+- name: Deploy OCP using Hive
+  when:
+    - cifmw_use_hive is defined
+    - cifmw_use_hive | bool
+  ansible.builtin.include_role:
+    name: hive
+
+- name: Prepare CRC
+  when:
+    - cifmw_use_crc is defined
+    - cifmw_use_crc | bool
+  ansible.builtin.include_role:
+    name: rhol_crc
+
+- name: Deploy OpenShift cluster using dev-scripts
+  when:
+    - cifmw_use_devscripts is defined
+    - cifmw_use_devscripts | bool
+  ansible.builtin.include_role:
+    name: devscripts
+
+- name: Login into Openshift cluster
+  tags:
+    - always
+  vars:
+    cifmw_openshift_login_force_refresh: true
+  ansible.builtin.import_role:
+    name: openshift_login
+
+- name: Setup Openshift cluster
+  ansible.builtin.import_role:
+    name: openshift_setup
+
+- name: Deploy Observability operator.
+  when:
+    - cifmw_deploy_obs is defined
+    - cifmw_deploy_obs | bool
+  ansible.builtin.include_role:
+    name: openshift_obs
+
+- name: Deploy Metal3 BMHs
+  when:
+    - cifmw_config_bmh is defined
+    - cifmw_config_bmh | bool
+  ansible.builtin.include_role:
+    name: deploy_bmh
+
+- name: Install certmanager operator role
+  when:
+    - cifmw_config_certmanager is defined
+    - cifmw_config_certmanager | bool
+  ansible.builtin.include_role:
+    name: cert_manager
+
+- name: Configure hosts networking using nmstate
+  when:
+    - cifmw_config_nmstate is defined
+    - cifmw_config_nmstate | bool
+  ansible.builtin.include_role:
+    name: ci_nmstate
+
+- name: Configure multus networks
+  when:
+    - cifmw_config_multus | default(false) | bool
+  ansible.builtin.include_role:
+    name: ci_multus
+
+- name: Deploy Sushy Emulator and configure controller as hypervisor
+  when:
+    - cifmw_enable_virtual_baremetal_support | default(false) | bool
+  block:
+    - name: Deploy Sushy Emulator service pod
+      vars:
+        cifmw_sushy_emulator_hypervisor_address: "{{ hostvars['controller'].ansible_host }}"
+        cifmw_sushy_emulator_hypervisor_target: controller
+        cifmw_sushy_emulator_install_type: ocp
+      ansible.builtin.include_role:
+        name: sushy_emulator
+
+    - name: Setup Libvirt on controller
+      ansible.builtin.include_role:
+        name: libvirt_manager
+
+- name: Prepare container package builder
+  when:
+    - cifmw_pkg_build_list is defined
+    - cifmw_pkg_build_list | length > 0
+  ansible.builtin.include_role:
+    name: pkg_build
+
+- name: Run post_infra hooks
+  vars:
+    step: post_infra
+  ansible.builtin.import_role:
+    name: run_hook
