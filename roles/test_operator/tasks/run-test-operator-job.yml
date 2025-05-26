@@ -37,6 +37,11 @@
     definition: "{{ test_operator_cr }}"
   when: not cifmw_test_operator_dry_run | bool
 
+- name: Record start time of the pod
+  ansible.builtin.set_fact:
+    pod_start_time: "{{ lookup('pipe', 'date +%s') | int }}"
+  when: not cifmw_test_operator_dry_run | bool
+
 - name: Wait for the last Pod to be Completed - {{ run_test_fw }}
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -51,9 +56,32 @@
   delay: 10
   until: >
     testpod.resources[0].status.phase | default(omit) == "Succeeded" or
-    testpod.resources[0].status.phase | default(omit) == "Failed"
+    testpod.resources[0].status.phase | default(omit) == "Failed" or
+    (
+      (lookup('pipe', 'date +%s') | int) > (pod_start_time + 600) and
+      (
+        testpod.resources[0].status.containerStatuses | default([]) |
+        selectattr('state.waiting.reason', 'defined') |
+        selectattr('state.waiting.reason', 'in', ['ImagePullBackOff', 'ErrImagePull']) |
+        list | length > 0
+      )
+    )
   ignore_errors: true
   register: testpod
+  when: not cifmw_test_operator_dry_run | bool
+
+- name: Check whether image pull error - {{ run_test_fw }}
+  ansible.builtin.set_fact:
+    testpod_image_error: >-
+      {{
+        (testpod.resources[0].status.phase not in ['Succeeded', 'Failed']) and
+        (
+          testpod.resources[0].status.containerStatuses | default([]) |
+          selectattr('state.waiting.reason', 'defined') |
+          selectattr('state.waiting.reason', 'in', ['ImagePullBackOff', 'ErrImagePull']) |
+          list | length > 0
+        )
+      }}
   when: not cifmw_test_operator_dry_run | bool
 
 - name: Check whether timed out - {{ run_test_fw }}
@@ -65,6 +93,7 @@
 - name: Collect logs
   when:
     - not cifmw_test_operator_dry_run | bool
+    - not testpod_image_error
     - not testpod_timed_out
   block:
     - name: Reset volumes and volume_mounts to an empty list
