@@ -6,7 +6,7 @@ NAMESPACE                ?= openstack
 PASSWORD                 ?= 12345678
 SECRET                   ?= osp-secret
 OUT                      ?= ${PWD}/out
-TIMEOUT                  ?= 300s
+TIMEOUT                  ?= 600s
 DBSERVICE           ?= galera
 ifeq ($(DBSERVICE), galera)
 DBSERVICE_CONTAINER = openstack-galera-0
