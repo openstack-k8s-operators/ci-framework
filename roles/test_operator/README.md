@@ -13,6 +13,24 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. NOTE: This parameter is deprecated, please use `cifmw_test_operator_tempest_concurrency` instead. Default value: `8`
 * `cifmw_test_operator_cleanup`: (Bool) Delete all resources created by the role at the end of the testing. Default value: `false`
 * `cifmw_test_operator_tempest_cleanup`: (Bool) Run tempest cleanup after test execution (tempest run) to delete any resources created by tempest that may have been left out.
+* `cifmw_test_operator_crs_path`: (String) The path into which the tests CRs file will be created in. Default value: `{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/test-operator-crs`
+* `cifmw_test_operator_log_pod_definition`: (Object) The CR definition template for creating the test log pod. Default value:
+```
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
+    namespace: "{{ cifmw_test_operator_namespace }}"
+  spec:
+    containers:
+      - name: test-operator-logs-container
+        image: "{{ cifmw_test_operator_logs_image }}"
+        command: ["sleep"]
+        args: ["infinity"]
+        volumeMounts: "{{ volume_mounts }}"
+    volumes: "{{ volumes }}"
+    tolerations: "{{ cifmw_test_operator_tolerations | default(omit) }}"
+```
 * `cifmw_test_operator_default_groups`: (List) List of groups in the include list to search for tests to be executed. Default value: `[ 'default' ]`
 * `cifmw_test_operator_default_jobs`: (List) List of jobs in the exclude list to search for tests to be excluded. Default value: `[ 'default' ]`
 * `cifmw_test_operator_dry_run`: (Boolean) Whether test-operator should run or not. Default value: `false`
