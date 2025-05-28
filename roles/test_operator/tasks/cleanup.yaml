@@ -1,0 +1,24 @@
+---
+- name: List all CR files in the test operator CRs path
+  ansible.builtin.find:
+    paths: "{{ cifmw_test_operator_crs_path }}"
+    patterns: "*.yaml"
+  register: test_operator_cr_files
+
+- name: Delete all CRs in OCP
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    state: absent
+    src: "{{ item.path }}"
+    wait: true
+    wait_timeout: 600
+  loop: "{{ test_operator_cr_files.files }}"
+  failed_when: false
+
+- name: Delete test operator CRs files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ test_operator_cr_files.files }}"

@@ -27,236 +27,110 @@
   ansible.builtin.debug:
     msg: "{{ test_operator_cr }}"
 
-- name: Start tests - {{ run_test_fw }}
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    state: present
-    wait: true
-    definition: "{{ test_operator_cr }}"
+- name: Not dry run block
   when: not cifmw_test_operator_dry_run | bool
-
-- name: Wait for the last Pod to be Completed - {{ run_test_fw }}
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-    label_selectors:
-      - "workflowStep={{ [(test_operator_workflow | length) - 1, 0] | max }}"
-      - "instanceName={{ test_operator_instance_name }}"
-  retries: "{{ (cifmw_test_operator_timeout / 10) | round | int }}"
-  delay: 10
-  until: >
-    testpod.resources[0].status.phase | default(omit) == "Succeeded" or
-    testpod.resources[0].status.phase | default(omit) == "Failed"
-  ignore_errors: true
-  register: testpod
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Check whether timed out - {{ run_test_fw }}
-  ansible.builtin.set_fact:
-    testpod_timed_out: >-
-      {{ testpod.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Collect logs
-  when:
-    - not cifmw_test_operator_dry_run | bool
-    - not testpod_timed_out
   block:
-    - name: Reset volumes and volume_mounts to an empty list
-      ansible.builtin.set_fact:
-        volumes: []
-        volume_mounts: []
+    - name: Make sure test-operator CR directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_test_operator_crs_path }}"
+        state: directory
+        mode: '0755'
 
-    - name: Get information about PVCs that store the logs
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit)}}"
-        namespace: "{{ cifmw_test_operator_namespace }}"
-        kind: PersistentVolumeClaim
-        label_selectors:
-          - "instanceName={{ test_operator_instance_name }}"
-      register: logsPVCs
+    - name: Write test-operator CR to file
+      ansible.builtin.copy:
+        content: "{{ test_operator_cr }}"
+        dest: "{{ cifmw_test_operator_crs_path }}/{{ test_operator_instance_name }}.yaml"
+        mode: '0644'
 
-    - name: Set up volume mounts and volumes for all PVCs
-      ansible.builtin.set_fact:
-        volume_mounts: >
-          {{
-            (volume_mounts | default([])) + [{
-              'name': "logs-volume-" ~ index,
-              'mountPath': "/mnt/logs-{{ test_operator_instance_name }}-step-" ~ index
-            }]
-          }}
-        volumes: >
-          {{
-            (volumes | default([])) + [{
-              'name': "logs-volume-" ~ index,
-              'persistentVolumeClaim': {
-                'claimName': pvc.metadata.name
-              }
-            }]
-          }}
-      loop: "{{ logsPVCs.resources }}"
-      loop_control:
-        loop_var: pvc
-        index_var: index
-
-    - name: Start test-operator-logs-pod
+    - name: Start tests - {{ run_test_fw }}
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
         context: "{{ cifmw_openshift_context | default(omit)}}"
         state: present
         wait: true
-        definition:
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
-            namespace: "{{ cifmw_test_operator_namespace }}"
-          spec:
-            containers:
-              - name: test-operator-logs-container
-                image: "{{ cifmw_test_operator_logs_image }}"
-                command: ["sleep"]
-                args: ["infinity"]
-                volumeMounts: "{{ volume_mounts }}"
-            volumes: "{{ volumes }}"
-            tolerations: "{{ cifmw_test_operator_tolerations | default(omit) }}"
+        src: "{{ cifmw_test_operator_crs_path }}/{{ test_operator_instance_name }}.yaml"
 
-    - name: Ensure that the test-operator-logs-pod is Running
+    - name: Wait for the last Pod to be Completed - {{ run_test_fw }}
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit) }}"
         context: "{{ cifmw_openshift_context | default(omit) }}"
         namespace: "{{ cifmw_test_operator_namespace }}"
         kind: Pod
-        name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
-        wait: true
-      register: logs_pod
-      until: logs_pod.resources[0].status.phase == "Running"
+        label_selectors:
+          - "workflowStep={{ [(test_operator_workflow | length) - 1, 0] | max }}"
+          - "instanceName={{ test_operator_instance_name }}"
+      retries: "{{ (cifmw_test_operator_timeout / 10) | round | int }}"
       delay: 10
-      retries: 20
+      until: >
+        testpod.resources[0].status.phase | default(omit) == "Succeeded" or
+        testpod.resources[0].status.phase | default(omit) == "Failed"
+      ignore_errors: true
+      register: testpod
 
-    - name: Get logs from test-operator-logs-pod
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      vars:
-        pod_path: mnt/logs-{{ test_operator_instance_name }}-step-{{ index }}
-      ansible.builtin.shell: >
-        oc cp -n {{ cifmw_test_operator_namespace }}
-        test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}:{{ pod_path }}
-        {{ cifmw_test_operator_artifacts_basedir }}
-      loop: "{{ logsPVCs.resources }}"
-      loop_control:
-        index_var: index
+    - name: Check whether timed out - {{ run_test_fw }}
+      ansible.builtin.set_fact:
+        testpod_timed_out: >-
+          {{ testpod.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
 
-- name: Get list of all pods
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-  register: pod_list
-  when: not cifmw_test_operator_dry_run | bool
+    - name: Collect logs
+      when:
+        - not testpod_timed_out
+      ansible.builtin.include_tasks: collect-logs.yaml
 
-- name: Get test results from all test pods (Success / Fail)
-  register: test_pod_results
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    kind: Pod
-    label_selectors:
-      - "instanceName={{ test_operator_instance_name }}"
-  when: not cifmw_test_operator_dry_run | bool
-
-- name: Get status from test pods
-  when: not cifmw_test_operator_dry_run | bool
-  ansible.builtin.set_fact:
-    pod_status: >-
-      {{
-        test_pod_results.resources |
-        map(attribute='status.phase') |
-        list | unique
-      }}
-
-- name: Check whether test pods finished successfully
-  when: not cifmw_test_operator_dry_run | bool
-  ansible.builtin.set_fact:
-    successful_execution: >-
-      {{
-        pod_status | length == 1 and
-        pod_status | first == 'Succeeded'
-      }}
-
-- name: Fail fast if a pod did not succeed - {{ run_test_fw }}
-  when:
-    - not cifmw_test_operator_dry_run | bool
-    - cifmw_test_operator_fail_fast | bool
-  ansible.builtin.assert:
-    that: successful_execution
-
-- name: Save result - {{ run_test_fw }}
-  when: not cifmw_test_operator_dry_run | bool
-  ansible.builtin.set_fact:
-    test_operator_results: >-
-      {{
-          test_operator_results | default({}) |
-          combine({run_test_fw: successful_execution})
-      }}
-
-- name: Delete tempest and/or tobiko pods
-  when:
-    - cifmw_test_operator_cleanup | bool
-    - not cifmw_test_operator_dry_run | bool
-  block:
-    - name: Delete {{ run_test_fw }}
-      kubernetes.core.k8s:
+    - name: Get list of all pods
+      kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit)}}"
-        kind: "{{ test_operator_kind_name }}"
-        state: absent
-        api_version: test.openstack.org/v1beta1
-        name: "{{ test_operator_instance_name }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
         namespace: "{{ cifmw_test_operator_namespace }}"
-        wait: true
-        wait_timeout: 600
+        kind: Pod
+      register: pod_list
 
-    - name: Delete CRD for {{ run_test_fw }}
-      kubernetes.core.k8s:
+    - name: Get test results from all test pods (Success / Fail)
+      register: test_pod_results
+      kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit)}}"
-        context: "{{ cifmw_openshift_context | default(omit)}}"
-        kind: CustomResourceDefinition
-        state: absent
-        api_version: v1
-        name: "{{ test_operator_crd_name }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
         namespace: "{{ cifmw_test_operator_namespace }}"
-        wait: true
-        wait_timeout: 600
+        kind: Pod
+        label_selectors:
+          - "instanceName={{ test_operator_instance_name }}"
 
-- name: Delete test-operator-logs-pod
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    kind: Pod
-    state: absent
-    api_version: v1
-    name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
-    namespace: "{{ cifmw_test_operator_namespace }}"
-    wait: true
-    wait_timeout: 600
-  when:
-    - cifmw_test_operator_cleanup | bool and not cifmw_test_operator_dry_run | bool or
-      cifmw_test_operator_delete_logs_pod | bool
+    - name: Get status from test pods
+      ansible.builtin.set_fact:
+        pod_status: >-
+          {{
+            test_pod_results.resources |
+            map(attribute='status.phase') |
+            list | unique
+          }}
+
+    - name: Check whether test pods finished successfully
+      ansible.builtin.set_fact:
+        successful_execution: >-
+          {{
+            pod_status | length == 1 and
+            pod_status | first == 'Succeeded'
+          }}
+
+    - name: Fail fast if a pod did not succeed - {{ run_test_fw }}
+      when:
+        - cifmw_test_operator_fail_fast | bool
+      ansible.builtin.assert:
+        that: successful_execution
+
+    - name: Save result - {{ run_test_fw }}
+      ansible.builtin.set_fact:
+        test_operator_results: >-
+          {{
+              test_operator_results | default({}) |
+              combine({run_test_fw: successful_execution})
+          }}
+
+    - name: Delete tempest and/or tobiko pods
+      when:
+        - cifmw_test_operator_cleanup | bool
+      ansible.builtin.include_tasks: cleanup-run.yaml
