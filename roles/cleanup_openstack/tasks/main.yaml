@@ -1,0 +1,109 @@
+---
+- name: Include required vars
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  loop:
+    - roles/kustomize_deploy/defaults/main.yml
+    - roles/deploy_bmh/defaults/main.yml
+
+- name: Load architecture automation file
+  register: _automation
+  ansible.builtin.slurp:
+    path: "{{ cifmw_architecture_automation_file }}"
+
+- name: Prepare automation data
+  vars:
+    _parsed: "{{ _automation.content | b64decode | from_yaml }}"
+  ansible.builtin.set_fact:
+    cifmw_deploy_architecture_steps: >-
+      {{ _parsed['vas'][cifmw_architecture_scenario] }}
+
+- name: Clean up testing resources
+  ansible.builtin.include_role:
+    name: test_operator
+    tasks_from: cleanup
+
+- name: Set baremetal hosts facts
+  vars:
+    _cifmw_deploy_bmh_bm_hosts: >-
+      {{
+        cifmw_baremetal_hosts | default({}) | dict2items |
+        rejectattr('key', 'in', ['crc', 'controller', 'ocp']) |
+        items2dict
+      }}
+  ansible.builtin.set_fact:
+    cifmw_deploy_bmh_bm_hosts_list: "{{ _cifmw_deploy_bmh_bm_hosts.keys() | list | default([]) }}"
+
+- name: Get bmh crs
+  ansible.builtin.find:
+    path: "{{ cifmw_deploy_bmh_dest_dir }}"
+    patterns: "*.yml"
+    excludes: "bmh-secret*"
+  register: bmh_crs
+
+- name: Get bmh secrets crs
+  ansible.builtin.find:
+    path: "{{ cifmw_deploy_bmh_dest_dir }}"
+    patterns: "bmh-secret*"
+  register: bmh_secrets_crs
+
+- name: Detach bmh to skip deprovisioning
+  ansible.builtin.import_tasks: detach_bmh.yaml
+  when: cifmw_cleanup_openstack_detach_bmh
+
+- name: Delete deployment CRs
+  vars:
+    _stages_crs: >-
+      {{
+        cifmw_deploy_architecture_steps['stages'] |
+        reverse |
+        selectattr('build_output', 'defined') |
+        map(attribute='build_output') |
+        map('basename') |
+        list
+      }}
+    _stages_crs_path: >-
+      {{
+        [cifmw_kustomize_deploy_kustomizations_dest_dir]
+        | product(_stages_crs)
+        | map('join', '/')
+        | unique
+      }}
+    _external_dns_crs:
+      - /home/zuul/ci-framework-data/artifacts/manifests/cifmw_external_dns/ceph-local-dns.yml
+      - /home/zuul/ci-framework-data/artifacts/manifests/cifmw_external_dns/ceph-local-cert.yml
+    _operators_crs:
+      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
+      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+    _bmh_crs: >-
+      {{
+        bmh_crs.files |
+        map(attribute='path') |
+        list
+      }}
+    _bmh_secrets_crs: >-
+      {{
+        bmh_secrets_crs.files |
+        map(attribute='path') |
+        list
+      }}
+    _crs_to_delete: >-
+      {{
+        _external_dns_crs +
+        _stages_crs_path +
+        _bmh_crs +
+        _bmh_secrets_crs +
+        _operators_crs
+      }}
+  ansible.builtin.import_tasks: cleanup_crs.yaml
+
+- name: Remove logs and tests directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/home/zuul/ci-framework-data/logs"
+    - "/home/zuul/ci-framework-data/tests"
+  become: true
