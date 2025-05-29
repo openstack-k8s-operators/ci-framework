@@ -1,0 +1,31 @@
+---
+- name: Ensure that kustomization files are present
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ _crs_to_delete }}"
+  register: _crs_to_delete_files
+
+- name: Cleaning operators resources
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: absent
+    src: "{{ item.stat.path }}"
+    wait: true
+    wait_timeout: 600
+  loop: "{{ _crs_to_delete_files.results }}"
+  register: _cleanup_results
+  until: "_cleanup_results is success"
+  retries: 3
+  delay: 120
+  when:
+    - item.stat.exists
+
+- name: Cleanup generated CRs if requested
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ _crs_to_delete_files.results }}"
+  when:
+    - item.stat.exists
