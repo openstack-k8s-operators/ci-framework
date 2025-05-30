@@ -70,11 +70,20 @@
         loop_var: group
         label: "{{ group.key }}"
 
+    - name: Override network version protocol vars to ipv6
+      ansible.builtin.set_fact:
+        network_version: network_v6
+        ip_version: ip_v6
+        dns_version: dns_v6
+        gw_version: gw_v6
+        prefix_length_version: prefix_length_v6
+      when: cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+
     - name: Generate DeployedServerPortMap field
       vars:
         _node_instance_net: "{{ cifmw_networking_env_definition.instances[node] }}"
         _key_name: "{{ node }}-ctlplane"
-        _ctlplane_ip: "{{ _node_instance_net.networks.ctlplane.ip_v4 }}"
+        _ctlplane_ip: "{{ _node_instance_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
         _server_port: >-
           {%- set port = {_key_name: {}} -%}
           {%- set _ = port[_key_name].update({
@@ -82,10 +91,10 @@
               { 'ip_address': _ctlplane_ip }
             ],
             'subnets': [
-              {'cidr': _ctlplane_net.network_v4}
+              {'cidr': _ctlplane_net[network_version|default("network_v4")]}
             ],
             'network': {
-              'tags': [ _ctlplane_net.network_v4 ]
+              'tags': [ _ctlplane_net[network_version|default("network_v4")] ]
             }}) -%}
           {{ port }}
       ansible.builtin.set_fact:
@@ -105,14 +114,14 @@
         _node_port: >
           {%- set nodeport = {node: {}} -%}
           {% for network, net_info in _node_instance_net.networks.items() if network != 'ocpbm' %}
-            {%- set subnet = cifmw_networking_env_definition.networks[network].network_v4 -%}
+            {%- set subnet = cifmw_networking_env_definition.networks[network][network_version|default("network_v4")] -%}
             {%- set network_name = ['storage_mgmt'] if network == 'storagemgmt' else [network] -%}
             {%- set network_name = ['internal_api'] if network == 'internalapi' else [network] -%}
             {%- set _ = nodeport[node].update(
               {
                 network_name[0]: {
-                'ip_address': net_info.ip_v4,
-                'ip_address_uri': net_info.ip_v4,
+                'ip_address': net_info[ip_version|default("ip_v4")],
+                'ip_address_uri': net_info[ip_version|default("ip_v4")],
                 'ip_subnet': subnet
                 }
               }
@@ -135,8 +144,8 @@
         _cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
         _dns_server: >-
           {{
-            (_ctlplane_net.dns_v4 | length > 0) |
-             ternary(_ctlplane_net.dns_v4, _ctlplane_net.gw_v4)
+            (_ctlplane_net[dns_version|default("dns_v4")] | length > 0) |
+             ternary(_ctlplane_net[dns_version|default("dns_v4")], _ctlplane_net[gw_version|default("gw_v4")])
           }}
       ansible.builtin.set_fact:
         _ctlplanenet_attributes:
@@ -146,7 +155,7 @@
           subnets:
             ctlplane-subnet:
               dns_nameservers: "{{ _dns_server }}"
-              gateway_ip: "{{ _ctlplane_net.gw_v4 }}"
+              gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
 
     - name: Create new config download file
       vars:
