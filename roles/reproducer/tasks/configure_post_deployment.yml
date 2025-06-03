@@ -1,0 +1,27 @@
+---
+- name: Prepare scripts on controller-0
+  delegate_to: controller-0
+  block:
+    - name: Push script
+      vars:
+        run_directory: "{{ _cifmw_reproducer_framework_location }}"
+        exports:
+          ANSIBLE_LOG_PATH: "{{ ansible_user_dir }}/ansible-post-deployment.log"
+        default_extravars:
+          - "@{{ ansible_user_dir }}/ci-framework-data/parameters/reproducer-variables.yml"
+          - "@{{ ansible_user_dir }}/ci-framework-data/parameters/openshift-environment.yml"
+        extravars: "{{ cifmw_reproducer_play_extravars }}"
+        playbook: "post-deployment.yml"
+      ansible.builtin.template:
+        dest: "/home/zuul/post_deployment.sh"
+        src: "script.sh.j2"
+        mode: "0755"
+        owner: "zuul"
+        group: "zuul"
+
+    - name: Rotate some logs
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - ansible-post-deployment.log
