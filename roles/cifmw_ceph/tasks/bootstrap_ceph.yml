@@ -1,0 +1,149 @@
+---
+- name: Set IPv4 facts
+  when: ansible_all_ipv4_addresses | length > 0
+  ansible.builtin.set_fact:
+    all_addresses: ansible_all_ipv4_addresses
+    cidr: 24
+
+- name: Set IPv6 facts
+  when: ansible_all_ipv4_addresses | length == 0
+  ansible.builtin.set_fact:
+    all_addresses: ansible_all_ipv6_addresses
+    cidr: 64
+
+- name: Generate a cephx key
+  cephx_key:
+  register: cephx
+  no_log: true
+
+- name: Set cifmw_cephadm_keys with the cephx key and cifmw_cephadm_pools
+  ansible.builtin.set_fact:
+    cifmw_cephadm_keys:
+      - name: client.openstack
+        key: "{{ cephx.key }}"
+        mode: '0600'
+        caps:
+          mgr: allow *
+          mon: profile rbd
+          osd: "{{ pools | map('regex_replace', '^(.*)$',
+                               'profile rbd pool=\\1') | join(', ') }}"
+  vars:
+    pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
+  no_log: true
+
+# public network always exist because is provided by the ceph_spec role
+- name: Get Storage network range
+  ansible.builtin.set_fact:
+    cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+
+- name: Set IP address of first monitor
+  ansible.builtin.set_fact:
+    cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
+  vars:
+    this_host: "{{ _target_hosts | first }}"
+
+- name: Assert if any EDPM nodes n/w interface is missing in storage network
+  ansible.builtin.assert:
+    that:
+      - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | length > 0
+    fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_rgw_network }}"
+  loop: "{{ _target_hosts }}"
+
+- name: Get already assigned IP addresses
+  ansible.builtin.set_fact:
+    ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
+  loop: "{{ _target_hosts }}"
+
+# cifmw_cephadm_vip is the VIP reserved in the Storage network
+- name: Set VIP var as empty string
+  ansible.builtin.set_fact:
+    cifmw_cephadm_vip: ""
+
+- name: Process VIP
+  ansible.builtin.include_role:
+    name: cifmw_cephadm
+    tasks_from: check_vip
+  loop: "{{ range(1, (ips | length) + 1) | list }}"
+
+- name: Satisfy Ceph prerequisites
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: pre
+
+- name: Bootstrap Ceph
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: bootstrap
+
+- name: Ensure that Ceph orchestrator is responsive
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: monitor_ceph_orch
+
+- name: Apply Ceph spec
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: apply_spec
+
+- name: Create ceph pools
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: pools
+
+- name: Deploy RGW
+  when: cifmw_ceph_daemons_layout.rgw_enabled | default(true) | bool
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: rgw
+  vars:
+    # cifmw_cephadm_vip is computed or passed as an override via -e @extra.yml
+    cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}"
+
+- name: Configure Monitoring Stack
+  when: cifmw_ceph_daemons_layout.dashboard_enabled  | default(false) | bool
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: monitoring
+  vars:
+    cifmw_cephadm_monitoring_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+    cifmw_cephadm_dashboard_crt: "{{ cifmw_cephadm_certificate }}"
+    cifmw_cephadm_dashboard_key: "{{ cifmw_cephadm_key }}"
+
+- name: Create cephfs volume
+  when: (cifmw_ceph_daemons_layout.cephfs_enabled | default(true) | bool) or
+        (cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool)
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: cephfs
+
+- name: Deploy cephnfs
+  when: cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: cephnfs
+  vars:
+    # we reuse the same VIP reserved for rgw
+    cifmw_cephadm_nfs_vip: "{{ cifmw_cephadm_vip }}/{{ cidr }}"
+
+- name: Create Cephx Keys for OpenStack
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: keys
+
+- name: Export configuration as vars for cifmw_ceph_client
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: export
+
+- name: Ensure that Ceph orchestrator is responsive
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: monitor_ceph_orch
+
+- name: Show the Ceph cluster status
+  ansible.builtin.import_role:
+    name: cifmw_cephadm
+    tasks_from: post
+  vars:
+    cifmw_cephadm_dashboard_crt: "{{ cifmw_cephadm_certificate }}"
+    cifmw_cephadm_dashboard_key: "{{ cifmw_cephadm_key }}"
