@@ -18,17 +18,27 @@
   when:
     - cifmw_adoption_osp_deploy_rhsm_org is defined
     - cifmw_adoption_osp_deploy_rhsm_key is defined
-  become: true
-  no_log: true
-  community.general.redhat_subscription:
-    activationkey: "{{ cifmw_adoption_osp_deploy_rhsm_key }}"
-    org_id: "{{ cifmw_adoption_osp_deploy_rhsm_org }}"
-    force_register: true
-    state: present
-  retries: 5
-  delay: 30
-  register: _rh_result
-  until: not _rh_result.failed
+  block:
+    - name: Make redhat subscription
+      become: true
+      no_log: true
+      community.general.redhat_subscription:
+        activationkey: "{{ cifmw_adoption_osp_deploy_rhsm_key }}"
+        org_id: "{{ cifmw_adoption_osp_deploy_rhsm_org }}"
+        force_register: true
+        state: present
+      retries: 5
+      delay: 30
+      register: _rh_result
+      until: not _rh_result.failed
+
+    - name: Get current /etc/redhat-release
+      ansible.builtin.command: cat /etc/redhat-release
+      register: _current_rh_release
+
+    - name: Print current /etc/redhat-release
+      ansible.builtin.debug:
+        msg: "{{ _current_rh_release.stdout }}"
 
 - name: Login in container registry
   when:
