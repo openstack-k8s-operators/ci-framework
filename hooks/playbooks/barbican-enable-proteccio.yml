@@ -1,0 +1,96 @@
+---
+- name: Create modified barbican image and get secrets
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Check out the role Git repository
+      ansible.builtin.git:
+        dest: "./rhoso_proteccio_hsm"
+        repo: "{{ cifmw_hsm_proteccio_ansible_role_repo | default('https://github.com/openstack-k8s-operators/ansible-role-rhoso-proteccio-hsm.git', true) }}"
+        version: "{{ cifmw_hsm_proteccio_ansible_role_version| default('main', true) }}"
+
+    - name: Create and upload the new Barbican images
+      ansible.builtin.include_role:
+        name: rhoso_proteccio_hsm
+        tasks_from: create_image
+      vars:
+        barbican_src_api_image_name: "{{ cifmw_barbican_src_api_image_name }}"
+        barbican_src_worker_image_name: "{{ cifmw_barbican_src_worker_image_name }}"
+        barbican_src_image_registry: "{{ content_provider_registry_ip }}:5001"
+        barbican_src_image_namespace: "{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}"
+        barbican_src_image_tag: "{{ cifmw_update_containers_tag | default('component-ci-testing') }}"
+        barbican_dest_api_image_name: "{{ cifmw_barbican_dest_api_image_name }}"
+        barbican_dest_worker_image_name: "{{ cifmw_barbican_dest_worker_image_name }}"
+        barbican_dest_image_registry: "{{ content_provider_registry_ip }}:5001"
+        barbican_dest_image_namespace: "{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}"
+        barbican_dest_image_tag: "{{ cifmw_update_containers_barbican_custom_tag }}"
+        image_registry_verify_tls: "{{ cifmw_image_registry_verify_tls | default('false', true) }}"
+        proteccio_client_src: "{{ cifmw_hsm_proteccio_client_src }}"
+        proteccio_client_iso: "{{ cifmw_hsm_proteccio_client_iso | default('Proteccio3.06.05.iso') }}"
+
+    - name: Create secrets with the HSM certificates and hsm-login credentials
+      ansible.builtin.include_role:
+        name: rhoso_proteccio_hsm
+        tasks_from: create_secrets
+      vars:
+        proteccio_conf_src: "{{ cifmw_hsm_proteccio_conf_src }}"
+        proteccio_client_crt_src: "{{ cifmw_hsm_proteccio_client_crt_src }}"
+        proteccio_client_key_src: "{{ cifmw_hsm_proteccio_client_key_src }}"
+        proteccio_server_crt_src: "{{ cifmw_hsm_proteccio_server_crt_src }}"
+        proteccio_password: "{{ cifmw_hsm_password }}"
+        kubeconfig_path: "{{ cifmw_openshift_kubeconfig }}"
+        oc_dir: "{{ cifmw_path }}"
+        proteccio_data_secret: "{{ cifmw_hsm_proteccio_client_data_secret | default('barbican-proteccio-client-data', true) }}"
+        proteccio_data_secret_namespace: "{{ cifmw_hsm_proteccio_client_data_secret_namespace }}"
+        login_secret: "{{ cifmw_hsm_login_secret | default('barbican-proteccio-login', true) }}"
+        login_secret_field: "{{ cifmw_hsm_login_secret_field | default('PKCS11Pin') }}"
+
+- name: Create kustomization to update Barbican to use proteccio
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Create file to customize barbican resource deployed in the control plane
+      vars:
+        client_data_secret: "{{ cifmw_hsm_proteccio_client_data_secret | default('barbican-proteccio-client-data', true) }}"
+        login_secret: "{{ cifmw_hsm_login_secret | default('barbican-proteccio-login', true) }}"
+      ansible.builtin.copy:
+        mode: '0644'
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/93-barbican-proteccio.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/barbican/template/globalDefaultSecretStore
+                value: pkcs11
+              - op: add
+                path: /spec/barbican/template/enabledSecretStores
+                value:
+                  - pkcs11
+              - op: add
+                path: /spec/barbican/template/pkcs11
+                value:
+                  loginSecret: {{ login_secret }}
+                  clientDataSecret: {{ client_data_secret }}
+                  clientDataPath: /etc/proteccio
+              - op: add
+                path: /spec/barbican/template/customServiceConfig
+                value: |
+                  [p11_crypto_plugin]
+                  plugin_name = PKCS11
+                  library_path = {{ cifmw_hsm_proteccio_library_path | default('/usr/lib64/libnethsm.so', true) }}
+                  token_labels = {{ cifmw_hsm_proteccio_partition }}
+                  mkek_label = {{ cifmw_hsm_mkek_label }}
+                  hmac_label = {{ cifmw_hsm_hmac_label }}
+                  encryption_mechanism = CKM_AES_CBC
+                  hmac_key_type = CKK_GENERIC_SECRET
+                  hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
+                  hmac_mechanism = CKM_SHA256_HMAC
+                  key_wrap_mechanism = {{ cifmw_hsm_key_wrap_mechanism }}
+                  key_wrap_generate_iv = true
+                  always_set_cka_sensitive = true
+                  os_locking_ok = false
