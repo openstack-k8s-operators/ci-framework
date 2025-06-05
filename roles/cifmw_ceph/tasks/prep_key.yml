@@ -1,0 +1,28 @@
+---
+- name: Set ssh key path facts
+  ansible.builtin.set_fact:
+    private_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa"
+    public_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa.pub"
+  run_once: true  # noqa: run-once[task]
+
+- name: Stat private key
+  ansible.builtin.stat:
+    path: "{{ private_key }}"
+  register: private_key_stat
+
+- name: Stat public key
+  ansible.builtin.stat:
+    path: "{{ public_key }}"
+  register: public_key_stat
+
+- name: Create private key if it does not exist
+  ansible.builtin.command:
+    cmd: "ssh-keygen -t rsa -q -N '' -f {{ private_key }}"
+  no_log: true
+  when:
+    - not private_key_stat.stat.exists
+
+- name: Create public key if it does not exist
+  ansible.builtin.shell: "ssh-keygen -y -f {{ private_key }} > {{ public_key }}"
+  when:
+    - not public_key_stat.stat.exists
