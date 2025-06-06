@@ -12,6 +12,7 @@ using `cifmw_repo_setup_src` role default var.
 
 ## Parameters
 * `cifmw_repo_setup_basedir`: (String) Installation base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
+* `cifmw_repo_setup_venv: (String) repo-setup virtualenv. Defaults to `{{ cifmw_repo_setup_basedir }}/venv/repo-setup`.
 * `cifmw_repo_setup_promotion`: (String) Promotion line you want to deploy. Defaults to `current-podified`.
 * `cifmw_repo_setup_branch`: (String) Branch/release you want to deploy. Defaults to `zed`.
 * `cifmw_repo_setup_dlrn_uri`: (String) DLRN base URI. Defaults to `https://trunk.rdoproject.org/`.
