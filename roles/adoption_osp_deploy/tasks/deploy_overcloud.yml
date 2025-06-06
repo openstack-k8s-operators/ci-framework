@@ -46,6 +46,7 @@
       }}
     _network_provision_output: "network_provision_{{ _overcloud_name }}_out.yaml"
     _vips_provision_output: "vips_provision_{{ _overcloud_name }}_out.yaml"
+    _private_overcloud_conf_file: "{{ ansible_user_dir }}/internal-configuration.yaml"
   block:
     - name: Copy roles file
       delegate_to: "osp-undercloud-0"
@@ -53,6 +54,22 @@
         src: "{{ _roles_file }}"
         dest: "{{ _roles_file_dest }}"
         mode: "0644"
+
+    # make sure the private configuration file always exists
+    - name: Prepare the private configuration file
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.file:
+        path: "{{ _private_overcloud_conf_file }}"
+        state: touch
+
+    - name: Copy the private configuration file if it exists
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.copy:
+        src: "{{ cifmw_adoption_osp_deploy_overcloud_additional_env }}"
+        dest: "{{ _private_overcloud_conf_file }}"
+      when:
+        - cifmw_adoption_osp_deploy_overcloud_additional_env is defined
+        - cifmw_adoption_osp_deploy_overcloud_additional_env != ""
 
     - name: Run overcloud deploy
       delegate_to: "osp-undercloud-0"
@@ -69,6 +86,7 @@
           -e {{ ansible_user_dir }}/config_download_{{ _overcloud_name }}.yaml
           -e {{ ansible_user_dir }}/{{ _vips_provision_output }}
           -e {{ ansible_user_dir }}/{{ _network_provision_output }}
+          -e {{ _private_overcloud_conf_file }}
         _source_cmd: "source {{ ansible_user_dir }}/stackrc"
         _default_overcloud_deploy_cmd: "{{ _source_cmd }}; {{ _overcloud_deploy_cmd }}"
       cifmw.general.ci_script:
