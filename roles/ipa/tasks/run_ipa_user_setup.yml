@@ -1,0 +1,55 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Copy user setup script into idm pod
+  kubernetes.core.k8s_cp:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: to_pod
+    pod: idm-main-0
+    namespace: "{{ cifmw_ipa_namespace }}"
+    remote_path: /tmp/user_setup.sh
+    content: |
+      export IPAADMINPW="{{ cifmw_ipa_admin_password }}"
+      export USERPW="{{ cifmw_ipa_user_password }}"
+      echo $IPAADMINPW|kinit admin
+      ipa user-add svc-ldap --first=Openstack --last=LDAP
+      echo $IPAADMINPW | ipa passwd svc-ldap
+      ipa user-add ipauser1 --first=ipa1 --last=user1
+      echo $IPAADMINPW | ipa passwd ipauser1
+      ipa user-add ipauser2 --first=ipa2 --last=user2
+      echo $IPAADMINPW | ipa passwd ipauser2
+      ipa user-add ipauser3 --first=ipa3 --last=user3
+      echo $IPAADMINPW | ipa passwd ipauser3
+      ipa group-add --desc="OpenStack Users" grp-openstack
+      ipa group-add --desc="OpenStack Admin Users" grp-openstack-admin
+      ipa group-add --desc="OpenStack Demo Users" grp-openstack-demo
+      ipa group-add-member --users=svc-ldap grp-openstack
+      ipa group-add-member --users=ipauser1 grp-openstack
+      ipa group-add-member --users=ipauser1 grp-openstack-admin
+      ipa group-add-member --users=ipauser2 grp-openstack
+      ipa group-add-member --users=ipauser2 grp-openstack-demo
+      ipa group-add-member --users=ipauser3 grp-openstack
+      echo -e "$IPAADMINPW\n$USERPW\n$USERPW"|/usr/bin/kinit svc-ldap
+      echo -e "$IPAADMINPW\n$USERPW\n$USERPW"|/usr/bin/kinit ipauser1
+      echo -e "$IPAADMINPW\n$USERPW\n$USERPW"|/usr/bin/kinit ipauser2
+      echo -e "$IPAADMINPW\n$USERPW\n$USERPW"|/usr/bin/kinit ipauser3
+
+- name: Setup openstack test users and groups in IPA
+  kubernetes.core.k8s_exec:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    pod: idm-main-0
+    namespace: "{{ cifmw_ipa_namespace }}"
+    command: bash /tmp/user_setup.sh
