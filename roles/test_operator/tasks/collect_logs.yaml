@@ -1,0 +1,81 @@
+- name: Reset volumes and volume_mounts to an empty list
+  ansible.builtin.set_fact:
+    volumes: []
+    volume_mounts: []
+
+- name: Get information about PVCs that store the logs
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    namespace: "{{ cifmw_test_operator_namespace }}"
+    kind: PersistentVolumeClaim
+    label_selectors:
+      - "instanceName={{ test_operator_instance_name }}"
+  register: logsPVCs
+
+- name: Set up volume mounts and volumes for all PVCs
+  ansible.builtin.set_fact:
+    volume_mounts: >
+      {{
+        (volume_mounts | default([])) + [{
+          'name': "logs-volume-" ~ index,
+          'mountPath': "/mnt/logs-{{ test_operator_instance_name }}-step-" ~ index
+        }]
+      }}
+    volumes: >
+      {{
+        (volumes | default([])) + [{
+          'name': "logs-volume-" ~ index,
+          'persistentVolumeClaim': {
+            'claimName': pvc.metadata.name
+          }
+        }]
+      }}
+  loop: "{{ logsPVCs.resources }}"
+  loop_control:
+    loop_var: pvc
+    index_var: index
+
+- name: Write log pod definition to file
+  ansible.builtin.copy:
+    content: "{{ cifmw_test_operator_log_pod_definition }}"
+    dest: "{{ cifmw_test_operator_crs_path }}/{{ test_operator_instance_name }}-log-pod.yaml"
+    mode: '0644'
+
+- name: Start test-operator-logs-pod
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    state: present
+    wait: true
+    src: "{{ cifmw_test_operator_crs_path }}/{{ test_operator_instance_name }}-log-pod.yaml"
+
+- name: Ensure that the test-operator-logs-pod is Running
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_test_operator_namespace }}"
+    kind: Pod
+    name: "test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}"
+    wait: true
+  register: logs_pod
+  until: logs_pod.resources[0].status.phase == "Running"
+  delay: 10
+  retries: 20
+
+- name: Get logs from test-operator-logs-pod
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  vars:
+    pod_path: mnt/logs-{{ test_operator_instance_name }}-step-{{ index }}
+  ansible.builtin.shell: >
+    oc cp -n {{ cifmw_test_operator_namespace }}
+    test-operator-logs-pod-{{ run_test_fw }}-{{ test_operator_instance_name }}:{{ pod_path }}
+    {{ cifmw_test_operator_artifacts_basedir }}
+  loop: "{{ logsPVCs.resources }}"
+  loop_control:
+    index_var: index
