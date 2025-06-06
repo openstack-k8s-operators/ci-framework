@@ -1,0 +1,38 @@
+- name: Clean OpenStack deployment
+  hosts: "{{ target_host | default('localhost') }}"
+  tasks:
+    - name: Fetch ansible vars
+      ansible.builtin.fetch:
+        flat: true
+        src: "{{ item }}"
+        dest: "{{ ansible_user_dir }}/{{ item | basename }}"
+      loop:
+        - '/home/zuul/ci-framework-data/parameters/reproducer-variables.yml'
+        - '/home/zuul/ci-framework-data/parameters/openshift-environment.yml'
+        - '/home/zuul/ci-framework-data/artifacts/parameters/openshift-login-params.yml'
+
+    - name: Include fetched ansible vars
+      ansible.builtin.include_vars:
+         file: "{{ ansible_user_dir }}/{{ item | basename }}"
+      loop:
+        - '/home/zuul/ci-framework-data/parameters/reproducer-variables.yml'
+        - '/home/zuul/ci-framework-data/parameters/openshift-environment.yml'
+        - '/home/zuul/ci-framework-data/artifacts/parameters/openshift-login-params.yml'
+
+    - name: Clean up testing resources
+      ansible.builtin.include_role:
+        name: test_operator
+        tasks_from: cleanup
+
+    - name: Run Tests
+      vars:
+        pre_tests: "{{ (lookup('vars', 'pre_tempest', default=[])) }}"
+        post_tests: "{{ (lookup('vars', 'post_tempest', default=[])) }}"
+        # cifmw_run_test_role: "{{ cifmw_run_test_role }}"
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: run_tests.yml
+      when:
+        - cifmw_run_tests | default('false') | bool
+      tags:
+        - run-tests
