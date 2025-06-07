@@ -678,12 +678,17 @@ class NetworkingNetworksMapper:
                 for ip_route in tool_net_def.routes_ipv6
             ],
         ]
+        multus_type = []
+        multus_attach = []
+        if tool_type.__name__ == "MappedMultusNetworkConfig":
+            multus_type.append(tool_net_def.type)
+            multus_attach.append(tool_net_def.attach)
 
         if any(
             route_field in tool_type.__dataclass_fields__
             for route_field in ["ipv4_routes", "ipv6_routes"]
         ):
-            args_list = args_list + route_args_list
+            args_list = args_list + route_args_list + multus_type + multus_attach
         return tool_type(*args_list)
 
 
