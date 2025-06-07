@@ -1,4 +1,9 @@
 {% for network_name, network_details in _cifmw_ci_multus_net_info.items() %}
+{% if network_details.tools.get('multus', {}).get('multus_type', None) %}
+{% set multus_type = network_details.tools.multus.multus_type %}
+{% else %}
+{% set multus_type = cifmw_ci_multus_default_nad_type %}
+{% endif %}
 ---
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
@@ -12,12 +17,11 @@ spec:
     {
       "cniVersion": "{{ cifmw_ci_multus_cniversion }}",
       "name": "{{ network_name }}",
-{% if cifmw_ci_multus_default_nad_type == "macvlan" %}
-      "type": "macvlan",
+      "type": "{{ multus_type }}",
+{% if multus_type == "macvlan" %}
       "master": "{{ network_details.interface_name }}",
 {% endif %}
-{% if cifmw_ci_multus_default_nad_type == "bridge" %}
-      "type": "bridge",
+{% if multus_type == "bridge" %}
       "bridge": "{{ network_details.interface_name }}",
 {% endif %}
       "ipam": {
