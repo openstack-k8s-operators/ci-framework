@@ -27,8 +27,8 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
         image: "{{ cifmw_test_operator_logs_image }}"
         command: ["sleep"]
         args: ["infinity"]
-        volumeMounts: "{{ volume_mounts }}"
-    volumes: "{{ volumes }}"
+        volumeMounts: "{{ _test_operator_volume_mounts }}"
+    volumes: "{{ _test_operator_volumes }}"
     tolerations: "{{ cifmw_test_operator_tolerations | default(omit) }}"
 ```
 * `cifmw_test_operator_default_groups`: (List) List of groups in the include list to search for tests to be executed. Default value: `[ 'default' ]`
