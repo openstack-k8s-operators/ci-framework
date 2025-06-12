@@ -1,27 +1,15 @@
 ---
-#
-# NOTE: Playbook migrated to: roles/cifmw_setup/tasks/deploy_architecture.yml
-# DO NOT EDIT THAT PLAYBOOK. IT WOULD BE REMOVED IN NEAR FUTURE.
-#
-- name: Deploy VA
-  hosts: "{{ cifmw_target_host | default('localhost') }}"
-  tasks:
-    - name: Run pre_deploy hooks
-      when:
-        - cifmw_architecture_scenario is defined
-      vars:
-        step: pre_deploy
-      ansible.builtin.import_role:
-        name: run_hook
+- name: Run pre_deploy hooks
+  when:
+    - cifmw_architecture_scenario is defined
+  vars:
+    step: pre_deploy
+  ansible.builtin.import_role:
+    name: run_hook
 
-    # end_play will end only current play, not the main edpm-deploy.yml
-    - name: Early end if not architecture deploy
-      tags:
-        - always
-      when:
-        - cifmw_architecture_scenario is not defined
-      ansible.builtin.meta: end_play
-
+- name: Continue deploying architecture
+  when: cifmw_architecture_scenario is defined
+  block:
     - name: Load Networking Environment Definition
       tags:
         - always
@@ -293,11 +281,7 @@
       ansible.builtin.import_role:
         name: run_hook
 
-- name: Validations workflow
-  hosts: "{{ cifmw_target_host | default('localhost') }}"
-  gather_facts: false
-  tasks:
     - name: Run validations
       ansible.builtin.include_role:
         name: validations
-      when: cifmw_execute_validations | default('false') | bool
+      when: cifmw_execute_validations | default(false) | bool

@@ -30,18 +30,18 @@ clean and adds to an LVMS cluster.
 * `cifmw_use_lvms`: (Boolean) Whether or not to use LVMS (default: `false`)
 
 If the ci-framework is called and `cifmw_use_lvms` is true, then
-the playbooks `06-deploy-architecture.yml` and `06-deploy-edpm.yml`
-call the `ci_lvms_storage` role to create a storage class called
-`lvms-local-storage` and the `ci_gen_kustomize_values` role will
-set the `storageClass` to `lvms-local-storage` in the generated
+the tasks in role `roles/cifmw_setup/tasks/deploy_architecture.yml`
+and playbook `06-deploy-edpm.yml` call the `ci_lvms_storage` role to create
+a storage class called `lvms-local-storage` and the `ci_gen_kustomize_values`
+role will set the `storageClass` to `lvms-local-storage` in the generated
 values.yaml files used to build architecture CRs. The Tempest
 CR file, created by the `test_operator` role, will also set its
 `storageClass` value to `lvms-local-storage`.
 
 If the ci-framework is called and `cifmw_use_lvms` is false, then the
-playbooks `06-deploy-architecture.yml` and `06-deploy-edpm.yml`
-call the `ci_local_storage` role to create a storage class called
-`local-storage` and the `ci_gen_kustomize_values` role will set
+tasks in role `roles/cifmw_setup/tasks/deploy_architecture.yml` and playbook
+`06-deploy-edpm.yml` call the `ci_local_storage` role to create a storage class
+called `local-storage` and the `ci_gen_kustomize_values` role will set
 the `storageClass` to `local-storage` in the generated values.yaml
 files used to build architecture CRs. The Tempest CR file, created by
 the `test_operator` role, will also set its `storageClass` value to
