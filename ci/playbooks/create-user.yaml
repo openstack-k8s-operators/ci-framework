@@ -1,0 +1,31 @@
+---
+- name: Set SF user
+  hosts: all
+  vars:
+    username: sf
+    ssh_authorized_keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIASASQOH2BcOyLKuuDOdWZlPi2orcjcA8q4400T73DLH
+  tasks:
+    - name: Create SF user
+      become: true
+      ansible.builtin.user:
+        name: "{{ username }}"
+        state: present
+        shell: /bin/bash
+
+    - name: Add user to sudo
+      become: true
+      ansible.builtin.lineinfile:
+        dest: "/etc/sudoers.d/90-{{ username }}-user"
+        state: present
+        regexp: "^{{ username }}"
+        line: "{{ username }} ALL=(ALL) NOPASSWD: ALL"
+        validate: 'visudo -cf %s'
+        create: true
+
+    - name: "Set authorized keys to user {{ username }}"
+      when: ssh_authorized_keys
+      ansible.posix.authorized_key:
+        user: "{{ username }}"
+        state: present
+        key: "{{ ssh_authorized_keys }}"
