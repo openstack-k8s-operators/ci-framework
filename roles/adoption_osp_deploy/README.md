@@ -25,6 +25,9 @@ configure the OSP17.1 deployment.
   networks in the ci-framework Network Mapper data to exclude when generating
   the adoption variables. By default it excludes the ci-framework "public"
   network (`ocpbm`).
+* `cifmw_adoption_osp_deploy_overcloud_extra_args`: (String) The content of a
+  file which will be used with the -e option in the overcloud deploy command.
+  This is useful to specify private/restricted parameters.
 
 ### Break point
 
