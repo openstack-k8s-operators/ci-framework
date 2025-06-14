@@ -171,6 +171,8 @@ class MappedNetconfigNetworkConfig:
 
     ipv4_ranges: typing.List[MappedIpv4NetworkRange]
     ipv6_ranges: typing.List[MappedIpv6NetworkRange]
+    ipv4_routes: typing.List[MappedIpv4NetworkRoute]
+    ipv6_routes: typing.List[MappedIpv6NetworkRoute]
 
 
 @dataclasses.dataclass(frozen=True)
