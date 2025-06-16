@@ -1,0 +1,32 @@
+---
+- name: Continue HCI deploy
+  when: cifmw_architecture_scenario is not defined
+  block:
+    - name: Create Ceph secrets and retrieve FSID info
+      when: cifmw_edpm_deploy_hci | default('false') | bool
+      block:
+        - name: Prepare for HCI deploy phase 2
+          ansible.builtin.include_role:
+            name: hci_prepare
+            tasks_from: phase2.yml
+
+        - name: Continue HCI deployment
+          ansible.builtin.include_role:
+            name: edpm_deploy
+          vars:
+            cifmw_edpm_deploy_prepare_run: false
+
+    - name: Run post_deploy hooks
+      vars:
+        step: post_deploy
+      ansible.builtin.import_role:
+        name: run_hook
+
+# If we're doing an architecture deployment, we need to skip validations here.
+# Instead, they will be executed in the 06-deploy-architecture.yml playbook.
+- name: Run validations
+  ansible.builtin.include_role:
+    name: validations
+  when:
+    - cifmw_architecture_scenario is not defined
+    - cifmw_execute_validations | default(false) | bool
