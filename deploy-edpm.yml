@@ -90,10 +90,65 @@
       tags:
         - build-operators
 
-- name: Import deploy edpm playbook
-  ansible.builtin.import_playbook: playbooks/06-deploy-edpm.yml
-  tags:
-    - edpm
+- name: Deploy EDPM
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Deploy EDPM
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: deploy_edpm.yml
+      tags:
+        - edpm
+
+- name: Deploy NFS server on target nodes
+  become: true
+  hosts: "{{ groups[cifmw_nfs_target | default('computes')][0] | default([]) }}"
+  tasks:
+    - name: Run cifmw_nfs role
+      vars:
+        nftables_path: /etc/nftables
+        nftables_conf: /etc/sysconfig/nftables.conf
+      when:
+        - cifmw_edpm_deploy_nfs | default('false') | bool
+      ansible.builtin.import_role:
+        name: cifmw_nfs
+
+- name: Clear ceph target hosts facts to force refreshing in HCI deployments
+  hosts: "{{ cifmw_ceph_target | default('computes')  }}"
+  tasks:
+    # end_play will end only current play, not the main edpm-deploy.yml
+    - name: Early end if architecture deploy
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
+    - name: Clear ceph target hosts facts
+      when: cifmw_edpm_deploy_hci | default('false') | bool
+      ansible.builtin.meta: clear_facts
+
+# TODO: replace this import_playbook with cifmw_ceph role
+- name: Deploy Ceph on target nodes
+  vars:
+    _deploy_ceph: >-
+      {{
+        (cifmw_edpm_deploy_hci | default('false') | bool) and
+        cifmw_architecture_scenario is undefined
+      }}
+    storage_network_range: 172.18.0.0/24
+    storage_mgmt_network_range: 172.20.0.0/24
+  ansible.builtin.import_playbook: playbooks/ceph.yml
+
+- name: Continue HCI deploy
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Continue HCI deploy
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: hci_deploy.yml
+      tags:
+        - edpm
 
 - name: Import VA deployment playbook
   ansible.builtin.import_playbook: playbooks/06-deploy-architecture.yml
