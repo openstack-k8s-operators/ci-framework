@@ -1,0 +1,196 @@
+---
+- name: Wait for MinorUpdateAvailable condition available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ cifmw_update_namespace }}"
+  register: _openstackversion_info
+  retries: 40
+  delay: 15
+  until:
+    - _openstackversion_info.resources[0].status.conditions is defined
+    - >-
+      _openstackversion_info.resources[0].status.conditions |
+      selectattr("type", "equalto", "MinorUpdateAvailable") |
+      selectattr("status", "equalto", "True") | length > 0
+
+# start update by changing targetVersion to new availableVersion
+- name: Change targetVersion to availableVersion
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: >-
+    oc patch openstackversion
+    $(oc get openstackversion
+    -o=jsonpath='{.items[].metadata.name}')
+    --type merge --patch '{"spec":{"targetVersion":_cifmw_update_openstack_version}}'
+
+- name: Wait for ovn update completion on control plane
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ cifmw_update_namespace }}"
+  register: _openstackversion_info
+  retries: 40
+  delay: 15
+  until:
+    - _openstackversion_info.resources[0].status.conditions is defined
+    - >-
+      _openstackversion_info.resources[0].status.conditions |
+      selectattr("type", "equalto", "MinorUpdateOVNControlplane") |
+      selectattr("status", "equalto", "True") | length > 0
+
+- name: Fetch NodeSets for the OVN update run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    nodes_with_ovn=()
+    # Get the names of all OpenStackDataPlaneNodeSet resources
+    openstackdataplanenodesets=$(oc get openstackdataplanenodeset -o custom-columns=NAME:.metadata.name,SERVICES:.spec.services --no-headers)
+    # Loop through each OpenStackDataPlaneNodeSet
+    while read -r node_name services; do
+        # Check if 'ovn' is in the list of services
+        for service in ${services[@]};do
+            if [[ "$service" == *"ovn"* ]]; then
+                nodes_with_ovn+=("- $node_name")
+                break
+            fi
+        done
+    done <<< $openstackdataplanenodesets
+    echo $nodes_with_ovn
+  register: cifmw_ovn_update_node_sets
+  changed_when: false
+
+- name: Create the OpenStackDataPlaneDeployment CR used for ovn udpate
+  ansible.builtin.copy:
+    dest: "{{ cifmw_update_artifacts_basedir }}/ovn_update.yaml"
+    content: "{{ _content | to_nice_yaml }}"
+    mode: "0644"
+  vars:
+    _content:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-ovn-update
+        namespace: "{{ cifmw_update_namespace }}"
+      spec:
+        nodeSets: "{{ cifmw_ovn_update_node_sets.stdout
+        | split('\n')
+        | map('trim')
+        | reject('equalto', '')
+        | list
+        }}"
+        servicesOverride:
+          - ovn
+
+- name: Create the OpenStackDataPlaneDeployment CR to trigger ovn update
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.command: >-
+    oc -n {{ cifmw_update_namespace }}
+    create -f {{ cifmw_update_artifacts_basedir }}/ovn_update.yaml
+
+- name: Wait for ovn update completion on data plane
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ cifmw_update_namespace }}"
+  register: _openstackversion_info
+  retries: 40
+  delay: 15
+  until:
+    - _openstackversion_info.resources[0].status.conditions is defined
+    - >-
+      _openstackversion_info.resources[0].status.conditions |
+      selectattr("type", "equalto", "MinorUpdateOVNDataplane") |
+      selectattr("status", "equalto", "True") | length > 0
+
+- name: Wait for control plane update completion
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ cifmw_update_namespace }}"
+  register: _openstackversion_info
+  retries: 40
+  delay: 15
+  until:
+    - _openstackversion_info.resources[0].status.conditions is defined
+    - >-
+      _openstackversion_info.resources[0].status.conditions |
+      selectattr("type", "equalto", "MinorUpdateControlplane") |
+      selectattr("status", "equalto", "True") | length > 0
+
+- name: Fetch NodeSets for update OpenStackDataPlaneDeployment
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    oc -n {{ cifmw_update_namespace }}
+    get openstackdataplanenodeset -o name
+    | awk -F'/' '{print $2}'
+  register: cifmw_update_node_sets
+  changed_when: false
+
+- name: Create the OpenStackDataPlaneDeployment CR used for udpate
+  ansible.builtin.copy:
+    dest: "{{ cifmw_update_artifacts_basedir }}/edpm_update.yaml"
+    content: "{{ _content | to_nice_yaml }}"
+    mode: "0644"
+  vars:
+    _content:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-update
+        namespace: "{{ cifmw_update_namespace }}"
+      spec:
+        nodeSets: "{{ cifmw_update_node_sets.stdout
+        | split('\n')
+        | map('trim')
+        | reject('equalto', '')
+        | list
+        }}"
+        servicesOverride:
+          - update
+
+- name: Create the OpenStackDataPlaneDeployment CR to trigger OpenStackDataPlaneDeployment update
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.command: >-
+    oc -n {{ cifmw_update_namespace }}
+    create -f {{ cifmw_update_artifacts_basedir }}/edpm_update.yaml
+
+- name: Wait for update completion on data plane
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ cifmw_update_namespace }}"
+  register: _openstackversion_info
+  retries: 40
+  delay: 15
+  until:
+    - _openstackversion_info.resources[0].status.conditions is defined
+    - >-
+      _openstackversion_info.resources[0].status.conditions |
+      selectattr("type", "equalto", "MinorUpdateDataplane") |
+      selectattr("status", "equalto", "True") | length > 0
