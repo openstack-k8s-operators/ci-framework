@@ -24,11 +24,17 @@
         src: "{{ cifmw_operator_build_meta_src }}/go.mod"
       register: go_mod_out
 
-    - name: "{{ operator.name }} - Get base module name from go.mod"  # noqa: name[template]
+    - name: "{{ operator.name }} - Get base module from go.mod"  # noqa: name[template]
       ansible.builtin.set_fact:
-        operator_base_module_name: "{{ go_mod_out['content'] | b64decode | regex_search(cifmw_operator_build_org + '/' + operator.name + '/(\\w*)\\s', '\\1') | first }}"
+        operator_base_module: "{{ go_mod_out['content'] | b64decode | regex_search(cifmw_operator_build_org + '/' + operator.name + '/(\\w*)\\s', '\\1') }}"
+
+    - name: Get the base module name not empty operator_base_module
+      when: operator_base_module is not none
+      ansible.builtin.set_fact:
+        operator_base_module_name: "{{ operator_base_module | first }}"
 
     - name: "{{ operator.name }} - Set default api path"  # noqa: name[template]
+      when: operator_base_module is not none
       ansible.builtin.set_fact:
         operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/{{ operator_base_module_name }}"
 
@@ -49,6 +55,7 @@
     - operator.name != cifmw_operator_build_meta_name
     - operator.pr_owner is defined
     - operator.pr_sha is defined
+    - operator_base_module is not none
 
 - name: "{{ operator.name }} - Get latest commit when no PR is provided"  # noqa: name[template] command-instead-of-module
   ansible.builtin.command:
