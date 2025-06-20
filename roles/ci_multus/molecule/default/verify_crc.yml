@@ -17,6 +17,8 @@
 - name: Verify CRC
   hosts: all
   gather_facts: true
+  vars:
+    _ci_multus_expected_spec: "{{ lookup('file', 'nads_output.yml', rstrip=True) | from_yaml_all | map(attribute='spec.config') }}"
   tasks:
     - name: Include default vars
       ansible.builtin.include_vars:
@@ -43,11 +45,16 @@
             map(attribute='spec.config')
           }}
 
-    - name: Assert expected Network Attachment Definitions content spec with the expected
-      vars:
-        _ci_multus_expected_spec: "{{ lookup('file', 'nads_output.yml', rstrip=True) | from_yaml_all | map(attribute='spec.config') }}"
+    - name: Ensure both lists have the same length
       ansible.builtin.assert:
-        that: _ci_multus_out_spec  == _ci_multus_expected_spec
+        that:
+          - _ci_multus_out_spec | length == _ci_multus_expected_spec | length
+
+    - name: Compare each corresponding element in the lists
+      ansible.builtin.assert:
+        that:
+          - (item.0 | replace('\n', '')) == (item.1 | replace('\n', ''))
+      loop: "{{ _ci_multus_out_spec | zip(_ci_multus_expected_spec) | list }}"
 
     - name: Create a test pod to attach a network
       kubernetes.core.k8s:
