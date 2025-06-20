@@ -1,0 +1,40 @@
+---
+- name: Set up custom CA secret for OpenStack control plane
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _custom_ca_cert_filepath: "{{ custom_ca_cert_filepath | mandatory }}"
+    _namespace: "{{ namespace | default('openstack') }}"
+    _controlplane_name: "{{ controlplane_name | default('controlplane') }}"
+  tasks:
+    - name: Read custom CA certificate file
+      ansible.builtin.slurp:
+        src: "{{ _custom_ca_cert_filepath }}"
+      register: custom_ca_certs
+
+    - name: Create custom CA secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: custom-ca-certs
+            namespace: "{{ _namespace }}"
+          data:
+            CustomCACerts: "{{ custom_ca_certs.content }}"
+
+    - name: Patch OpenStack control plane to use custom CA secret
+      kubernetes.core.k8s:
+        state: patched
+        kind: OpenStackControlPlane
+        api_version: core.openstack.org/v1beta1
+        name: "{{ _controlplane_name }}"
+        namespace: "{{ _namespace }}"
+        definition:
+          spec:
+            tls:
+              podLevel:
+                enabled: true
+              caBundleSecretName: custom-ca-certs
