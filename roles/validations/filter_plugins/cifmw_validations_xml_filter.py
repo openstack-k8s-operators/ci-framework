@@ -21,7 +21,7 @@ EXAMPLES = """
     _internal_results:
       test-1:
         time: 2.54512
-      test-case-2:
+      test-2.yml:
         time: 4.5450345
         error: "error message"
   ansible.builtin.set_fact:
@@ -80,6 +80,7 @@ class FilterModule:
             },
         )
         for name, data in test_results.items():
+            name = name.replace(".yml", "").replace(".yaml", "")
             attributes = {"name": name, "classname": "validations"}
             if "time" in data:
                 attributes["time"] = cls.__float_conversion(data["time"])
