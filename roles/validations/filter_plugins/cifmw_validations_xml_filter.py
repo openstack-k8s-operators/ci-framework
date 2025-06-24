@@ -39,8 +39,8 @@ RETURN = """
       <?xml version='1.0' encoding='utf-8'?>
       <testsuites>
         <testsuite name="validations" failures="0" skipped="0" tests="2" errors="1" time="7.090">
-          <testcase name="test-1" classname="validations.test-1" time="2.545" />
-          <testcase name="test-2" classname="validations.test-2" time="4.545">
+          <testcase name="test-1" classname="validations" time="2.545" />
+          <testcase name="test-2" classname="validations" time="4.545">
             <error message="error message" />
           </testcase>
         </testsuite>
@@ -80,7 +80,7 @@ class FilterModule:
             },
         )
         for name, data in test_results.items():
-            attributes = {"name": name, "classname": f"validations.{name}"}
+            attributes = {"name": name, "classname": "validations"}
             if "time" in data:
                 attributes["time"] = cls.__float_conversion(data["time"])
             tc_elm = ET.SubElement(ts_elm, "testcase", attrib=attributes)
