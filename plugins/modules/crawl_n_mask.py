@@ -63,10 +63,28 @@ success:
 
 import os
 import re
-import yaml
-from typing import Dict, Optional, Any, Union
+import pathlib
+
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
+
+# ### To debug ###
+# #  playbook:
+#    ---
+#    - name: test
+#      hosts: localhost
+#      tasks:
+#        - name: Mask secrets in yaml log files
+#          timeout: 3600
+#          crawl_n_mask:
+#            path: "/tmp/logs/"
+#            isdir: true
+#
+# # args.json:
+#   {"ANSIBLE_MODULE_ARGS": {"path": "/tmp/logs/", "isdir": true}}
+#
+# # execute:
+#   python3 plugins/modules/crawl_n_mask.py ./args.json
+################
 
 # files which are yaml but do not end with .yaml or .yml
 ALLOWED_YAML_FILES = [
@@ -151,20 +169,8 @@ CONNECTION_KEYS = [
 # Masking string
 MASK_STR = "**********"
 
-# general and connection regexes are used to match the pattern that should  ̰be
-# applied to both Protect keys and connection keys, which is the same thing
-# done in SoS reports
-gen_regex = r"(\w*(%s)\s*=\s*)(.*)" % "|".join(PROTECT_KEYS)
-con_regex = r"((%s)\s*://)(\w*):(.*)(@(.*))" % "|".join(CONNECTION_KEYS)
-
 # regex of excluded file extensions
 excluded_file_ext_regex = r"(^.*(%s).*)" % "|".join(EXCLUDED_FILE_EXT)
-
-# regex of keys which will be checked against every key
-# as in yaml files, we have data in format <key> = <value>
-# if a key is sensitive, it will be found using this regex
-key_regex = r"(%s)\d*$" % "|".join(PROTECT_KEYS)
-regexes = [gen_regex, con_regex]
 
 
 def handle_walk_errors(e):
@@ -177,22 +183,59 @@ def crawl(module, path) -> bool:
     and find eligible files for masking.
     """
     changed = False
-    for root, _, files in os.walk(path, onerror=handle_walk_errors):
-        if any(excluded in root.split("/") for excluded in EXCLUDED_DIRS):
+    base_path = os.path.normpath(path)
+    for root, _, files in os.walk(base_path, onerror=handle_walk_errors):
+        # Get relative path from our base path
+        rel_path = os.path.relpath(root, base_path)
+
+        # Check if any parent directory (not the root) is excluded
+        if any(part in EXCLUDED_DIRS for part in rel_path.split(os.sep)):
             continue
 
         for f in files:
             if not re.search(excluded_file_ext_regex, f):
-                file_changed = mask(module, os.path.join(root, f))
-                # even if one file is masked, the final result will be True
-                if file_changed:
+                if mask(module, os.path.join(root, f)):
+                    # even if one file is masked, the final result will be True
                     changed = True
     return changed
 
 
+def _get_masked_string(value):
+    if len(value) <= 4:
+        return value[:2] + MASK_STR
+    return value[:2] + MASK_STR + value[-2:]
+
+
+def partial_mask(value):
+    """
+    Check length of the string. If it is too long, take 2 chars
+    from beginning, then add mask string and add 2 chars from the
+    end.
+    If value is short, take just 2 chars and add mask string
+    """
+    if not value.strip():
+        return
+
+    if "'" in value:
+        parsed_value = value.split("'")
+        if len(parsed_value) > 2 and parsed_value[1] != "":
+            prefix = parsed_value[0]
+            value = _get_masked_string(parsed_value[1])
+            suffix = parsed_value[2]
+            return f"{prefix}'{value}'{suffix}"
+    else:
+        match = re.match(r"^(\s*)(.*?)(\n?)$", value)
+        if match:
+            parts = list(match.groups())
+            prefix = parts[0]
+            value = _get_masked_string(parts[1])
+            suffix = parts[2]
+            return f"{prefix}'{value}'{suffix}"
+
+
 def mask(module, path: str) -> bool:
     """
-    Method responsible to begin masking on a provided
+    Function responsible to begin masking on a provided
     log file. It checks for file type, and calls
     respective masking methods for that file.
     """
@@ -201,124 +244,61 @@ def mask(module, path: str) -> bool:
         path.endswith((tuple(["yaml", "yml"])))
         or os.path.basename(path).split(".")[0] in ALLOWED_YAML_FILES
     ):
-        changed = mask_yaml(module, path)
+        extension = "yaml"
+        changed = mask_file(module, path, extension)
     return changed
 
 
-def process_list(lst: list) -> None:
+def mask_yaml(infile, outfile, changed) -> bool:
     """
-    For each list we get in our yaml dict,
-    this method will check the type of item.
-    If the item in list is dict, it will call
-    apply_mask method to process it, else if
-    we get nested list, process_list will be
-    recursively called.
-    We are not checking for string as secrets
-    are mainly in form <key>: <value> in dict,
-    not in list as item.
+    Read the file, search for colon (':'), take value and
+    mask sensitive data
     """
-    for item in lst:
-        if isinstance(item, dict):
-            apply_mask(item)
-        elif isinstance(item, list):
-            process_list(item)
+    for line in infile:
+        # Skip lines without colon
+        if ":" not in line:
+            outfile.write(line)
+            continue
 
-
-def apply_regex(value: str) -> str:
-    """
-    For each string value passed as argument, try
-    to match the pattern according to the provided
-    regexes and mask any potential sensitive info.
-    """
-    for pattern in regexes:
-        value = re.sub(pattern, r"\1{}".format(MASK_STR), value, flags=re.I)
-    return value
-
-
-def apply_mask(yaml_dict: Dict[str, Any]) -> None:
-    """
-    Check and mask value if key of dict matches
-    with key_regex, else perform action on data
-    type of value. Call _process_list if value
-    is of type list, call _apply_regex for strings,
-    recursively call _apply_mask in case value is
-    of type dict.
-    """
-    for k, v in yaml_dict.items():
-        if re.findall(key_regex, str(k)):
-            yaml_dict[k] = MASK_STR
-
-        elif isinstance(v, str):
-            yaml_dict[k] = apply_regex(v)
-
-        elif isinstance(v, list):
-            process_list(v)
-
-        elif isinstance(v, dict):
-            apply_mask(v)
-
-
-def mask_yaml(module, path) -> bool:
-    """
-    Method to handle masking of yaml files.
-    Begin with reading yaml and storing in
-    list (check _read_yaml for return type
-    info), then process the list to mask
-    secrets, and then write the encoded
-    data back.
-    """
-    yaml_content = read_yaml(module, path)
-    changed = False
-    if not yaml_content:
-        return changed
-    # we are directly calling _process_list as
-    # yaml.safe_load_all returns an Iterator of
-    # dictionaries which we have converted into
-    # a list (return type of _read_yaml)
-    process_list(yaml_content)
-
-    changed = write_yaml(module, path, yaml_content)
-    return changed
-
-
-def read_yaml(module, file_path: str) -> Optional[Union[list, None]]:
-    """
-    Read and Load the yaml file for
-    processing. Using yaml.safe_load_all
-    to handle all documents within a
-    single yaml file stream. Return
-    type (Iterator) is parsed to list
-    to make in-place change easy.
-    """
-    try:
-        assert file_path is not None
-        with open(file_path, "r") as f:
-            return list(yaml.safe_load_all(f))
-    except (FileNotFoundError, yaml.YAMLError) as e:
-        module.warn("Error opening file: %s" % e)
-    return
-
-
-def write_yaml(module, path, encoded_secret: Any) -> bool:
-    """
-    Re-write the processed yaml file in
-    the same path.
-    Writing will occur only if there are
-    changes to the content.
-    """
-    changed = False
-    try:
-        assert path is not None
-        if read_yaml(module, path) != encoded_secret:
-            with open(path, "w") as f:
-                yaml.safe_dump_all(encoded_secret, f, default_flow_style=False)
+        key, sep, value = line.partition(":")
+        masked_value = value
+        for word in PROTECT_KEYS:
+            if key.strip() == word:
+                masked = partial_mask(value)
+                if not masked:
+                    continue
+                masked_value = masked_value.replace(value, masked)
                 changed = True
-    except (IOError, yaml.YAMLError) as e:
-        module.fail_json(
-            msg=f"Error writing to file: {to_native(e, nonstring='simplerepr')}",
-            path=path,
-        )
+
+        outfile.write(f"{key}{sep}{masked_value}")
     return changed
+
+
+def replace_file(temp_path, file_path, changed):
+    if changed:
+        temp_path.replace(file_path)
+    else:
+        temp_path.unlink(missing_ok=True)
+
+
+def mask_file(module, path, extension) -> bool:
+    """
+    Create temporary file, replace sensitive string with masked,
+    then replace the tmp file with original.
+    """
+
+    changed = False
+    file_path = pathlib.Path(path)
+    temp_path = file_path.with_suffix(".tmp")
+    try:
+        with file_path.open("r", encoding="utf-8") as infile:
+            with temp_path.open("w", encoding="utf-8") as outfile:
+                if extension == "yaml":
+                    changed = mask_yaml(infile, outfile, changed)
+                    replace_file(temp_path, file_path, changed)
+                    return changed
+    except Exception as e:
+        print(f"An unexpected error occurred on masking file {file_path}: {e}")
 
 
 def run_module():
@@ -348,9 +328,9 @@ def run_module():
     # validate if the path exists and no wrong value of isdir and path is
     # provided
     if not os.path.exists(path):
-        module.fail_json(msg=f"Provided path doesn't exist", path=path)
+        module.fail_json(msg="Provided path doesn't exist", path=path)
     if os.path.isdir(path) != isdir:
-        module.fail_json(msg=f"Value of isdir/path is incorrect. Please check it")
+        module.fail_json(msg="Value of isdir/path is incorrect. Please check it")
 
     # if the user is working with this module in only check mode we do not
     # want to make any changes to the environment, just return the current
