@@ -46,8 +46,8 @@ edpm_nodes:
     {% endfor %}
 {% endif %}
 
-{% if _vm_groups['osp-networkers'] | default([]) | length > 0 %}
 edpm_nodes_networker:
+{% if _vm_groups['osp-networkers'] | default([]) | length > 0 %}
   {% for networker in _vm_groups['osp-networkers'] | default([]) %}
   {% set node_nets = cifmw_networking_env_definition.instances[networker] %}
   {{ networker }}:
@@ -65,6 +65,23 @@ edpm_nodes_networker:
     {% endfor %}
     {% endfor %}
 {% endif %}
+  {% for controller in _vm_groups['osp-controllers'] %}
+  {% set node_nets = cifmw_networking_env_definition.instances[controller] %}
+  {{ controller }}:
+    hostName: {{ controller }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
+    ansible:
+      ansibleHost: {{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}
+    networks:
+    {% for net in node_nets.networks.keys() if net not in cifmw_adoption_osp_deploy_adoption_vars_exclude_nets %}
+      - fixedIP: {{ node_nets.networks[net][ip_version|default('ip_v4')] }}
+        name: {{ net }}
+        subnetName: subnet1
+{% if net == 'ctlplane' %}
+        defaultRoute: true
+{% endif %}
+    {% endfor %}
+    {% endfor %}
+
 
 upstream_dns: {{ cifmw_networking_env_definition.networks.ctlplane[dns_version|default('dns_v4')] | first }}
 os_cloud_name: {{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}
