@@ -1,0 +1,43 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+- name: Create kustomization to update Keystone to use security compliance configuration 
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Create file to customize keystone for pci dss deployed in the control plane
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/keystone_pci_dss.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          - namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+              name: .*
+            patch: |-
+              - op: add
+                path: /spec/keystone/template/customServiceConfig
+                value: |
+                  [security_compliance]
+                  lockout_failure_attempts = 2
+                  lockout_duration = 5
+                  password_regex = ^.{7,}$
+                  unique_last_password_count = 2
+                  user_minimum_password_age = 0
+                  disable_user_account_days_inactive = 1
+                  password_expires_days = 90
+        mode: "0644"
