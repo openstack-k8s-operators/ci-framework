@@ -14,34 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Read kubeadmin password
-  ansible.builtin.slurp:
-    src: "{{ cifmw_snr_nhc_kubeadmin_password_file }}"
-  register: kubeadmin_password
-  changed_when: false
-
-- name: Decode kubeadmin password
-  ansible.builtin.set_fact:
-    kubeadmin_password_decoded: "{{ kubeadmin_password.content | b64decode | trim }}"
-
-- name: Check if already logged in
-  ansible.builtin.command: oc whoami
-  register: oc_whoami_check
-  failed_when: false
-  changed_when: false
-
-- name: Explicitly login using oc login and update kubeconfig
-  ansible.builtin.command: >
-    oc login --username=kubeadmin --password={{ kubeadmin_password_decoded }}
-  when: "'not_logged_in' in oc_whoami_check.stdout"
-  register: oc_login_output
-  changed_when: "'Login successful' in oc_login_output.stdout"
-
-- name: Debug login output
-  when: "'not_logged_in' in oc_whoami_check.stdout and ansible_verbosity > 0"
-  ansible.builtin.debug:
-    msg: "{{ oc_login_output.stdout }}"
-
 - name: Create the workload-availability namespace
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -58,21 +30,7 @@
   ansible.builtin.debug:
     msg: "{{ namespace_result }}"
 
-- name: Check if the namespace exists
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
-    api_version: v1
-    kind: Namespace
-    name: "{{ cifmw_snr_nhc_namespace }}"
-  register: current_project
-
-- name: Display current namespace status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "Namespace exists: {{ current_project.resources | length > 0 }}"
-
 - name: Switch to namespace {{ cifmw_snr_nhc_namespace }}
-  when: current_project.resources | length > 0
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
     state: present
@@ -426,4 +384,3 @@
   when: ansible_verbosity > 0
   ansible.builtin.debug:
     msg: "{{ nhc_cr_check.resources }}"
-
