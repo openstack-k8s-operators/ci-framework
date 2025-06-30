@@ -14,71 +14,22 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Read federation get token script
-  ansible.builtin.template:
-    src: get-token.sh.j2
-    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'get-token.sh' ] | path_join }}"
-    mode: '0755'
-
-- name: Copy federation get token script file into pod
-  kubernetes.core.k8s_cp:
-    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
-    pod: openstackclient
-    remote_path: "/home/cloud-admin/get-token.sh"
-    local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'get-token.sh' ] | path_join }}"
-
-- name: Read federation test user1 cloudrc template
-  ansible.builtin.template:
-    src: kctestuser1.j2
-    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_keycloak_testuser1_username ] | path_join }}"
-    mode: "0644"
-
-- name: Copy federation test user1 cloudrc file into pod
-  kubernetes.core.k8s_cp:
-    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
-    pod: openstackclient
-    remote_path: "/home/cloud-admin/{{ cifmw_federation_keycloak_testuser1_username }}"
-    local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_keycloak_testuser1_username ] | path_join }}"
-
-- name: Copy system CA bundle
-  ansible.builtin.copy:
-    src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
-    mode: "0444"
-
-- name: Get ingress operator CA cert
-  ansible.builtin.slurp:
-    src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
-  register: federation_sso_ca
-
-- name: Add ingress operator CA to bundle
-  ansible.builtin.blockinfile:
-    path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
-    block: "{{ federation_sso_ca.content | b64decode }}"
-
-- name: Copy CA bundle to openstackclient pod
-  kubernetes.core.k8s_cp:
-    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
-    pod: openstackclient
-    remote_path: "/home/cloud-admin/full-ca-list.crt"
-    local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
-
-- name: Get test user1 token
+- name: Get test user token
   vars:
-    _osp_cmd: "/home/cloud-admin/get-token.sh {{ cifmw_federation_keycloak_testuser1_username }}"
+    _osp_cmd: "/home/cloud-admin/get-token.sh {{ cifmw_federation_keycloak_testuser_username }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
-- name: Read test user1 token info
+- name: Read test user token info
   ansible.builtin.set_fact:
-    federation_sso_testuser1_token_json: "{{ federation_run_ocp_cmd.stdout | from_json }}"
+    federation_sso_testuser_token_json: "{{ federation_run_ocp_cmd.stdout | from_json }}"
 
-- name: Output test user1 token info
+- name: Output test user token info
   ansible.builtin.debug:
-    msg: "{{ federation_sso_testuser1_token_json }}"
+    msg: "{{ federation_sso_testuser_token_json }}"
 
 - name: Get openstack project
   vars:
-    _osp_cmd: "openstack project show {{ federation_sso_testuser1_token_json.project_id}} -f json"
+    _osp_cmd: "openstack project show {{ federation_sso_testuser_token_json.project_id}} -f json"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Read openstack project info
@@ -89,8 +40,8 @@
   ansible.builtin.debug:
     msg: "{{ federation_sso_ssoproject_json }}"
 
-- name: Test user1 successful token
+- name: Test user successful token
   ansible.builtin.assert:
     that:
       - "cifmw_federation_project_name in federation_sso_ssoproject_json.name"
-      - federation_sso_testuser1_token_json.id|length >= 180
+      - federation_sso_testuser_token_json.id|length >= 180
