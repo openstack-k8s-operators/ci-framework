@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+import json
+import glob
+import os
+import argparse
+from datetime import datetime
+
+## Helper functions
+def _extract_node_name_from_file(file_path):
+    """Extract node name from container data filename"""
+    basename = os.path.basename(file_path)
+    if not (basename.startswith('containers_') and basename.endswith('.json')):
+        return None
+
+    name_part = basename.replace('containers_', '').replace('.json', '')
+    parts = name_part.split('_')
+    if len(parts) >= 2:
+        return '_'.join(parts[1:])  # Take everything after the first part as node name
+    return None
+
+def _load_json_file(file_path):
+    """Load and return JSON data from file"""
+    with open(file_path, 'r') as f:
+        return json.load(f)
+
+def _parse_container_list(data):
+    """Parse container data list into a dictionary keyed by container name"""
+    if isinstance(data, list):
+        return {item['Names'][0]: item for item in data}
+    return {}
+
+def _create_report_structure(before_phase, after_phase, all_nodes):
+    """Create the initial report structure"""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "comparison": f"{before_phase} vs {after_phase}",
+        "summary": {
+            "total_nodes": len(all_nodes),
+            "updated_containers": 0,
+            "unchanged_containers": 0,
+            "new_containers": 0,
+            "removed_containers": 0,
+            "restarted_containers": 0
+        },
+        "nodes": {}
+    }
+
+def _container_changed(before_container, after_container):
+    """Check if a container has changed between two states"""
+    before_image = before_container.get('Image', '')
+    after_image = after_container.get('Image', '')
+    before_id = before_container.get('ImageID', '')
+    after_id = after_container.get('ImageID', '')
+
+    return before_image != after_image or before_id != after_id
+
+def _container_restarted(before_container, after_container):
+    """Check if a container was restarted (same image, different start time)"""
+    # If the container changed (different image/imageID), it's not a restart
+    if _container_changed(before_container, after_container):
+        return False
+
+    # Different start times indicate restart
+    before_started = before_container.get('StartedAt', '')
+    after_started = after_container.get('StartedAt', '')
+
+    return (before_started != after_started)
+
+def _create_updated_container_info(name, before_container, after_container):
+    """Create container info for updated containers"""
+    return {
+        "name": name,
+        "before_image": before_container.get('Image', ''),
+        "after_image": after_container.get('Image', ''),
+        "before_id": before_container.get('ImageID', ''),
+        "after_id": after_container.get('ImageID', '')
+    }
+
+def _create_unchanged_container_info(name, container):
+    """Create container info for unchanged containers"""
+    return {
+        "name": name,
+        "image": container.get('Image', ''),
+        "image_id": container.get('ImageID', '')
+    }
+
+def _create_new_container_info(name, container):
+    """Create container info for new containers"""
+    return {
+        "name": name,
+        "image": container.get('Image', ''),
+        "image_id": container.get('ImageID', '')
+    }
+
+def _create_removed_container_info(name, container):
+    """Create container info for removed containers"""
+    return {
+        "name": name,
+        "image": container.get('Image', ''),
+        "image_id": container.get('ImageID', '')
+    }
+
+def _create_restarted_container_info(name, before_container, after_container):
+    """Create container info for restarted containers"""
+    return {
+        "name": name,
+        "before_started_at": before_container.get('StartedAt', ''),
+        "after_started_at": after_container.get('StartedAt', ''),
+    }
+
+def _update_summary_counts(report, node_report):
+    """Update the summary counts in the report"""
+    report["summary"]["updated_containers"] += len(node_report["updated"])
+    report["summary"]["unchanged_containers"] += len(node_report["unchanged"])
+    report["summary"]["new_containers"] += len(node_report["new"])
+    report["summary"]["removed_containers"] += len(node_report["removed"])
+    report["summary"]["restarted_containers"] += len(node_report["restarted"])
+
+def _write_json_report(report, before_phase, after_phase):
+    """Write the JSON report to file"""
+    report_filename = f'container_report_{before_phase}_vs_{after_phase}.json'
+    with open(report_filename, 'w') as f:
+        json.dump(report, f, indent=2)
+    return report_filename
+
+def _write_text_summary(report, before_phase, after_phase):
+    """Write the human-readable summary to file"""
+    summary_filename = f'container_summary_{before_phase}_vs_{after_phase}.txt'
+    with open(summary_filename, 'w') as f:
+        _write_summary_header(f, report, before_phase, after_phase)
+        _write_summary_stats(f, report)
+        _write_node_details(f, report)
+    return summary_filename
+
+def _write_summary_header(f, report, before_phase, after_phase):
+    """Write the summary header"""
+    f.write(f"Container Comparison Report: {before_phase} vs {after_phase}\n")
+    f.write(f"Generated: {report['timestamp']}\n")
+    f.write("=" * 60 + "\n\n")
+
+def _write_summary_stats(f, report):
+    """Write the summary statistics"""
+    summary = report["summary"]
+    f.write(f"Total nodes: {summary['total_nodes']}\n")
+    f.write(f"Updated containers: {summary['updated_containers']}\n")
+    f.write(f"Unchanged containers: {summary['unchanged_containers']}\n")
+    f.write(f"New containers: {summary['new_containers']}\n")
+    f.write(f"Removed containers: {summary['removed_containers']}\n")
+    f.write(f"Restarted containers: {summary['restarted_containers']}\n\n")
+
+def _format_timestamp(timestamp):
+    """Format timestamp to human readable format"""
+    if not timestamp:
+        return "unknown"
+    try:
+        # Handle both string and numeric timestamps
+        if isinstance(timestamp, str):
+            timestamp = int(timestamp)
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return str(timestamp)
+
+def _write_node_details(f, report):
+    """Write detailed node information"""
+    for node, data in report["nodes"].items():
+        if _node_has_changes(data):
+            f.write(f"Node: {node}\n")
+            f.write("-" * 30 + "\n")
+            _write_container_changes(f, data)
+            f.write("\n")
+
+def _node_has_changes(node_data):
+    """Check if a node has any container changes"""
+    return (node_data["updated"] or
+            node_data["new"] or
+            node_data["removed"] or
+            node_data["restarted"])
+
+def _write_container_changes(f, data):
+    """Write container changes for a node"""
+    if data["updated"]:
+        f.write("  Updated containers:\n")
+        for container in data["updated"]:
+            f.write(f"    {container['name']}: {container['before_image']} -> {container['after_image']}\n")
+
+    if data["restarted"]:
+        f.write("  Restarted containers:\n")
+        for container in data["restarted"]:
+            before_time = _format_timestamp(container['before_started_at'])
+            after_time = _format_timestamp(container['after_started_at'])
+            f.write(f"    {container['name']}: started {before_time} -> {after_time}\n")
+
+    if data["new"]:
+        f.write("  New containers:\n")
+        for container in data["new"]:
+            f.write(f"    {container['name']}: {container['image']}\n")
+
+    if data["removed"]:
+        f.write("  Removed containers:\n")
+        for container in data["removed"]:
+            f.write(f"    {container['name']}: {container['image']}\n")
+
+## Main functions.
+def _analyze_node_containers(before_node, after_node):
+    """Analyze container changes for a single node"""
+    node_report = {
+        "updated": [],
+        "unchanged": [],
+        "new": [],
+        "removed": [],
+        "restarted": []
+    }
+
+    # Find updated, unchanged, and restarted containers
+    common_containers = set(before_node.keys()) & set(after_node.keys())
+    for container_name in common_containers:
+        if _container_changed(before_node[container_name], after_node[container_name]):
+            node_report["updated"].append(_create_updated_container_info(
+                container_name, before_node[container_name], after_node[container_name]
+            ))
+        elif _container_restarted(before_node[container_name], after_node[container_name]):
+            node_report["restarted"].append(_create_restarted_container_info(
+                container_name, before_node[container_name], after_node[container_name]
+            ))
+        else:
+            node_report["unchanged"].append(_create_unchanged_container_info(
+                container_name, before_node[container_name]
+            ))
+
+    # Find new containers
+    new_containers = set(after_node.keys()) - set(before_node.keys())
+    for container_name in new_containers:
+        node_report["new"].append(_create_new_container_info(
+            container_name, after_node[container_name]
+        ))
+
+    # Find removed containers
+    removed_containers = set(before_node.keys()) - set(after_node.keys())
+    for container_name in removed_containers:
+        node_report["removed"].append(_create_removed_container_info(
+            container_name, before_node[container_name]
+        ))
+
+    return node_report
+
+def load_container_data(pattern):
+    """Load container data from JSON files matching pattern"""
+    containers = {}
+    for file_path in glob.glob(pattern):
+        node_name = _extract_node_name_from_file(file_path)
+        if not node_name:
+            continue
+        try:
+            container_data = _load_json_file(file_path)
+            containers[node_name] = _parse_container_list(container_data)
+        except (json.JSONDecodeError, FileNotFoundError, KeyError) as e:
+            print(f"Error loading {file_path}: {e}")
+            containers[node_name] = {}
+    return containers
+
+def generate_report(before_phase="before_update", after_phase="after_update"):
+    """Generate container update comparison report"""
+    # Load container data
+    before_containers = load_container_data(f"containers_{before_phase}_*.json")
+    after_containers = load_container_data(f"containers_{after_phase}_*.json")
+
+    # Get all nodes
+    all_nodes = set(list(before_containers.keys()) + list(after_containers.keys()))
+
+    # Create report structure
+    report = _create_report_structure(before_phase, after_phase, all_nodes)
+
+    # Analyze each node
+    for node in all_nodes:
+        before_node = before_containers.get(node, {})
+        after_node = after_containers.get(node, {})
+
+        node_report = _analyze_node_containers(before_node, after_node)
+        report["nodes"][node] = node_report
+        _update_summary_counts(report, node_report)
+
+    # Write reports
+    json_filename = _write_json_report(report, before_phase, after_phase)
+    summary_filename = _write_text_summary(report, before_phase, after_phase)
+
+    # Print results
+    print(f"Container comparison report generated: {before_phase} vs {after_phase}")
+    print(f"Updated: {report['summary']['updated_containers']}, "
+          f"Restarted: {report['summary']['restarted_containers']}, "
+          f"New: {report['summary']['new_containers']}, "
+          f"Removed: {report['summary']['removed_containers']}")
+    print(f"Files: {json_filename}, {summary_filename}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Generate container comparison report')
+    parser.add_argument('--before-phase', default='before_update',
+                       help='Before phase name (default: before_update)')
+    parser.add_argument('--after-phase', default='after_update',
+                       help='After phase name (default: after_update)')
+    args = parser.parse_args()
+
+    generate_report(args.before_phase, args.after_phase)
