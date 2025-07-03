@@ -13,6 +13,7 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_update_containers_base_dir`: The base directory of update_containers role. Default is "ansible_user_dir ~ '/ci-framework-data')".
 * `cifmw_update_containers_dest_path`: The destination file path to create update containers CR file.
 * `cifmw_update_containers_registry`: The container registry to pull containers from. Default to "quay.io".
+* `cifmw_update_containers_name_prefix`: The container name prefix. Default to "openstack".
 * `cifmw_update_containers_org`: The container registry namespace to pull container from. Default to `podified-antelope-centos9`
 * `cifmw_update_containers_tag`: The container tag. Default to "current-podified".
 * `cifmw_update_containers_cindervolumes`: The names of the cinder volumes prefix. Default to `[]`.
