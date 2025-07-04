@@ -14,9 +14,13 @@
     msg: "No OSDPNS resources found in the 'openstack' namespace!"
   when: _cifmw_update_osdpns_all_info.resources | length == 0
 
-- name: Choose the first OSDPNS resource
+- name: Choose the first OSDPNS resource which has edpm_container_registry_logins defined
   ansible.builtin.set_fact:
-    _cifmw_update_osdpns_info: "{{ _cifmw_update_osdpns_all_info.resources[0] }}"
+    _cifmw_update_osdpns_info: >-
+      {{
+      _cifmw_update_osdpns_all_info.resources
+      | community.general.json_query('[?spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins] | [0]')
+      }}
 
 - name: Display which osdpns we're using
   ansible.builtin.debug:
@@ -24,7 +28,7 @@
 
 - name: Determine registry
   ansible.builtin.set_fact:
-    cifmw_update_local_registry: >-
+    osc_podman_login_registry: >-
       {{
       (cifmw_ci_gen_kustomize_values_ooi_image.split('/')[0])
       if cifmw_ci_gen_kustomize_values_ooi_image is defined
@@ -34,31 +38,30 @@
 
 - name: Check if credentials exist
   ansible.builtin.set_fact:
-    brew_username: "{{ login_username }}"
-    brew_password: "{{ login_dict[login_username] }}"
+    osc_podman_login_username: "{{ login_username }}"
+    osc_podman_login_password: "{{ login_dict[login_username] }}"
   vars:
     login_dict: >-
       {{
       _cifmw_update_osdpns_info.spec.nodeTemplate.ansible.ansibleVars.
-      edpm_container_registry_logins[cifmw_update_local_registry]
+      edpm_container_registry_logins[osc_podman_login_registry]
       }}
     login_username: "{{ login_dict.keys()|list|first }}"
   when:
     - _cifmw_update_osdpns_info.spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins is defined
     - login_dict is defined
     - login_dict|length > 0
-    - cifmw_update_local_registry != 'quay.io'
+    - osc_podman_login_registry != 'quay.io'
 
 - name: Log in to registry when needed
   containers.podman.podman_login:
-    # Hardcoded for now
-    registry: "registry.redhat.io"
-    username: "{{ brew_username }}"
-    password: "{{ brew_password }}"
+    registry: "{{ osc_podman_login_registry }}"
+    username: "{{ osc_podman_login_username }}"
+    password: "{{ osc_podman_login_password }}"
   when:
-    - brew_username is defined
-    - brew_password is defined
-    - cifmw_update_local_registry != 'quay.io'
+    - osc_podman_login_username is defined
+    - osc_podman_login_password is defined
+    - osc_podman_login_registry != 'quay.io'
 
 - name: Retrieve the openstackclient Pod
   kubernetes.core.k8s_info:
