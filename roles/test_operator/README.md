@@ -10,7 +10,6 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_version`: (String) The commit hash corresponding to the version of test-operator the user wants to use. This parameter is only used when `cifmw_test_operator_bundle` is also set.
 * `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
-* `cifmw_test_operator_concurrency`: (Integer) Tempest concurrency value. NOTE: This parameter is deprecated, please use `cifmw_test_operator_tempest_concurrency` instead. Default value: `8`
 * `cifmw_test_operator_clean_last_run`: (Bool) Delete all resources created by the previous run at the beginning of the role. Default value: `false`
 * `cifmw_test_operator_cleanup`: (Bool) Delete all resources created by the role at the end of the testing. Default value: `false`
 * `cifmw_test_operator_tempest_cleanup`: (Bool) Run tempest cleanup after test execution (tempest run) to delete any resources created by tempest that may have been left out.
