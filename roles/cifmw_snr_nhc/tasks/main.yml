@@ -25,11 +25,6 @@
         name: "{{ cifmw_snr_nhc_namespace }}"
   register: namespace_result
 
-- name: Display namespace creation result
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ namespace_result }}"
-
 - name: Switch to namespace {{ cifmw_snr_nhc_namespace }}
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -44,11 +39,6 @@
       data:
         namespace: "{{ cifmw_snr_nhc_namespace }}"
 
-- name: Confirm active namespace
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "Switched to namespace: {{ cifmw_snr_nhc_namespace }}"
-
 - name: Create the workload-availability-operator-group resource
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -61,11 +51,6 @@
         namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: operator_group_result
 
-- name: Display OperatorGroup creation result
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ operator_group_result }}"
-
 - name: Check if the OperatorGroup exists
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -73,11 +58,6 @@
     kind: OperatorGroup
     namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: operator_group_check
-
-- name: Display OperatorGroup information
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ operator_group_check.resources }}"
 
 - name: Create the self-node-remediation Subscription
   kubernetes.core.k8s:
@@ -98,11 +78,6 @@
         sourceNamespace: openshift-marketplace
   register: subscription_result
 
-- name: Display Subscription creation result
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ subscription_result }}"
-
 - name: Check if the Subscription exists
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -112,11 +87,6 @@
     name: self-node-remediation-operator
   register: subscription_check
 
-- name: Display Subscription information
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ subscription_check.resources }}"
-
 - name: Check Subscription status
   kubernetes.core.k8s_info:
     api_version: operators.coreos.com/v1alpha1
@@ -125,11 +95,6 @@
     namespace: openshift-operators
   register: snr_subscription
 
-- name: Display Subscription status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ snr_subscription.resources }}"
-
 - name: Verify SelfNodeRemediationTemplate CR exists
   kubernetes.core.k8s_info:
     api_version: remediation.medik8s.io/v1alpha1
@@ -137,22 +102,12 @@
     namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: snr_template
 
-- name: Display SelfNodeRemediationTemplate status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ snr_template.resources }}"
-
 - name: Check ClusterServiceVersion (CSV) status for remediation
   kubernetes.core.k8s_info:
     api_version: operators.coreos.com/v1alpha1
     kind: ClusterServiceVersion
     namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: csv_status
-
-- name: Display CSV status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ csv_status.resources }}"
 
 - name: Verify Self Node Remediation Operator deployment is running
   kubernetes.core.k8s_info:
@@ -176,22 +131,12 @@
   retries: 20
   delay: 15
 
-- name: Display Deployment status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ snr_deployment.resources }}"
-
 - name: Check SelfNodeRemediationConfig CR
   kubernetes.core.k8s_info:
     api_version: remediation.medik8s.io/v1alpha1
     kind: SelfNodeRemediationConfig
     namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: snr_config
-
-- name: Display SelfNodeRemediationConfig status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ snr_config.resources }}"
 
 - name: Verify Self Node Remediation DaemonSet status
   kubernetes.core.k8s_info:
@@ -200,11 +145,6 @@
     namespace: "{{ cifmw_snr_nhc_namespace }}"
     name: self-node-remediation-ds
   register: snr_daemonset
-
-- name: Display DaemonSet status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ snr_daemonset.resources }}"
 
 - name: Verify SelfNodeRemediationConfig CR exists
   kubernetes.core.k8s_info:
@@ -215,11 +155,6 @@
     name: self-node-remediation-config
   register: snr_config_detail
 
-- name: Debug SelfNodeRemediationConfig CR details
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ snr_config_detail.resources }}"
-
 - name: Verify SelfNodeRemediationTemplate exists
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -228,15 +163,16 @@
     namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: snr_template_detail
 
-- name: Debug SelfNodeRemediationTemplate details
+- name: Debug SNR deployment status
   when: ansible_verbosity > 0
   ansible.builtin.debug:
-    msg: "{{ snr_template_detail.resources }}"
-
-- name: Check remediationStrategy in SelfNodeRemediationTemplate
-  when: snr_template_detail.resources | length > 0 and ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "Remediation strategy: {{ snr_template_detail.resources[0].spec.template.spec.remediationStrategy | default('Not defined') }}"
+    msg: |
+      SNR Deployment Status:
+      - Namespace: {{ cifmw_snr_nhc_namespace }}
+      - OperatorGroup: {{ operator_group_check.resources | length > 0 }}
+      - Subscription: {{ subscription_check.resources | length > 0 }}
+      - Template: {{ snr_template_detail.resources | length > 0 }}
+      - Deployment Ready: {{ snr_deployment_check.resources[0].status.availableReplicas | default(0) > 0 if snr_deployment_check.resources | length > 0 else false }}
 
 - name: Create the Node Health Check Subscription
   kubernetes.core.k8s:
@@ -257,11 +193,6 @@
         package: node-healthcheck-operator
   register: nhc_subscription_result
 
-- name: Display Node Health Check Subscription result
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ nhc_subscription_result }}"
-
 - name: Check if the Node Health Check Subscription exists
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -271,11 +202,6 @@
     name: node-health-check-operator
   register: nhc_subscription_check
 
-- name: Display Node Health Check Subscription information
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ nhc_subscription_check.resources }}"
-
 - name: Verify Node Health Check Subscription
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -284,11 +210,6 @@
     namespace: "{{ cifmw_snr_nhc_namespace }}"
     name: node-health-check-operator
   register: nhc_subscription_status
-
-- name: Display Node Health Check Subscription status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ nhc_subscription_status.resources }}"
 
 - name: Check ClusterServiceVersion (CSV) for Node Health Check Operator
   kubernetes.core.k8s_info:
@@ -309,11 +230,6 @@
   retries: 20
   delay: 15
 
-- name: Display Node Health Check CSV status
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ nhc_csv_status.resources | selectattr('metadata.name', 'search', 'health') }}"
-
 - name: Verify Node Health Check Operator Deployment
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -322,10 +238,14 @@
     namespace: "{{ cifmw_snr_nhc_namespace }}"
   register: nhc_deployments
 
-- name: Display Node Health Check Operator Deployment status
+- name: Debug NHC deployment status
   when: ansible_verbosity > 0
   ansible.builtin.debug:
-    msg: "{{ nhc_deployments.resources | selectattr('metadata.name', 'search', 'node-healthcheck') }}"
+    msg: |
+      NHC Deployment Status:
+      - Subscription: {{ nhc_subscription_check.resources | length > 0 }}
+      - CSV Phase: {{ csv_check.resources | selectattr('status.phase', 'equalto', 'Succeeded') | list | length > 0 }}
+      - Deployments: {{ nhc_deployments.resources | selectattr('metadata.name', 'search', 'node-healthcheck') | list | length }}
 
 - name: Create Node Health Check CR to use SNR
   kubernetes.core.k8s:
@@ -367,11 +287,6 @@
   retries: 10
   delay: 10
 
-- name: Display Node Health Check CR creation result
-  when: ansible_verbosity > 0
-  ansible.builtin.debug:
-    msg: "{{ nhc_cr_creation }}"
-
 - name: Verify Node Health Check CR existence
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
@@ -380,7 +295,13 @@
     name: nodehealthcheck-sample
   register: nhc_cr_check
 
-- name: Display Node Health Check CR status
+- name: Summary of deployment status
   when: ansible_verbosity > 0
   ansible.builtin.debug:
-    msg: "{{ nhc_cr_check.resources }}"
+    msg: |
+      Deployment Summary:
+      - Namespace: {{ cifmw_snr_nhc_namespace }}
+      - SNR Operator: {{ 'Ready' if (snr_deployment_check.resources | length > 0 and snr_deployment_check.resources[0].status.availableReplicas | default(0) > 0) else 'Not Ready' }}
+      - NHC Operator: {{ 'Ready' if (csv_check.resources | selectattr('status.phase', 'equalto', 'Succeeded') | list | length > 0) else 'Not Ready' }}
+      - NHC CR: {{ 'Created' if (nhc_cr_check.resources | length > 0) else 'Not Created' }}
+      - Remediation Template: {{ 'Available' if (snr_template_detail.resources | length > 0) else 'Not Available' }}
