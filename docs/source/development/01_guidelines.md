@@ -57,7 +57,8 @@ module. For the rest, I'll use `import_*`.
 ### Ansible role
 
 Please take the time to ensure [molecule tests](./02_molecule.md) are present
-and cover as many corner cases as possible.
+and cover as many corner cases as possible. That would require to setup
+your local environment, which can be created using [guide](./01_nested_crc.md)
 
 ### Ansible custom plugins
 
