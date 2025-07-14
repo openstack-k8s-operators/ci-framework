@@ -114,17 +114,30 @@
       # openstack-ansibleee-operator and openstack-operator project
       # for openstack-ansibleee-operator, it will return openstack-ansibleee
       # and for openstack-operator, openstack will be returned
+      #
+      # Note(Chandan Kumar): Append cifmw_operator_build_operators var
+      # into set_fact task if cifmw_operator_build_operators var is set from
+      # zuul side.
       when:
         - zuul is defined
         - "'project' in zuul"
         - "'short_name' in zuul.project"
         - "'operator' in zuul.project.short_name"
       ansible.builtin.set_fact:
-        cifmw_operator_build_operators:
-          - name: "openstack-operator"
-            src: "~/src/github.com/{{ cifmw_operator_build_org }}/openstack-operator"
-            image_base: >-
-              {{ zuul.project.short_name | split('-') | reject('search','operator') | join('-') }}
+        cifmw_operator_build_operators: >-
+          {{
+            (cifmw_operator_build_operators | default([])) |
+            rejectattr('name', 'equalto', 'openstack-operator') | list +
+            [{
+              'name': 'openstack-operator',
+              'src': '~/src/github.com/{{ cifmw_operator_build_org }}/openstack-operator',
+              'image_base': zuul.project.short_name | split('-') | reject('search','operator') | join('-')
+            }]
+          }}
+
+    - name: Debug the var for cifmw_operator_build_operators
+      ansible.builtin.debug:
+        var: cifmw_operator_build_operators
 
     - name: Build Operators
       ansible.builtin.include_role:
