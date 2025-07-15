@@ -14,6 +14,43 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
+
+- name: Get designate DNS services if exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_test_operator_namespace }}"
+    kind: Service
+    label_selectors:
+      - "component=designate-backendbind9"
+  ignore_errors: true
+  register: designate_dns_services
+
+- name: Check if there are any designate DNS services
+  ansible.builtin.set_fact:
+    designate_dns_services_exist: >-
+      {{ designate_dns_services.resources | length > 0 }}
+
+- name: If there are DNS services, collect the IP addresses
+  when: designate_dns_services_exist | bool
+  block:
+    - name: Collect the Ingress entries for the DNS services
+      ansible.builtin.set_fact:
+        designate_dns_services_ingress_ips: >-
+          {{ designate_dns_services.resources | map(attribute='status.loadBalancer.ingress') | list }}
+
+    - name: Extract the IPs from the Ingress entries
+      ansible.builtin.set_fact:
+        designate_dns_services_ips: >-
+            {{ designate_dns_services_ips | default([]) + [ item[0].ip ]  }}
+      loop: "{{ designate_dns_services_ingress_ips }}"
+
+    - name: Debug
+      ansible.builtin.debug:
+        msg: "{{ designate_dns_services_ips }}"
+
+
 - name: Configuring tests to be executed via skiplist
   when: >
    stage_vars_dict.cifmw_test_operator_tempest_include_list is not defined or
@@ -139,6 +176,22 @@
                     'whitebox_neutron_plugin_options.proxy_host_address ' + controller_ip
                   }}}, recursive=true)
       }}
+
+- name: If present, designate DNS services IP to the overrides section in Tempest CR
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - designate_dns_services_exist | bool
+  ansible.builtin.set_fact:
+    test_operator_cr: >-
+      {{
+          test_operator_cr |
+          combine({'spec': {'tempestconfRun': {'overrides': combined_overrides }}}, recursive=true)
+      }}
+  vars:
+    combined_overrides: |
+      {{ test_operator_cr.spec.tempestconfRun.overrides | default('') }}
+      dns.nameservers {{ designate_dns_services_ips | join(",") }}
+      designate.nameservers {{ designate_dns_services_ips | join(",") }}
 
 - name: Add controller IP to each workflow step overrides section
   when:
