@@ -1,68 +1,4 @@
 ---
-- name: Gather NodeSet resource information
-  kubernetes.core.k8s_info:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    namespace: "openstack"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    kind: "OpenStackDataPlaneNodeSet"
-    api_version: "dataplane.openstack.org/v1beta1"
-  register: _cifmw_update_osdpns_all_info
-
-- name: Fail if no OSDPNS resources are found
-  ansible.builtin.fail:
-    msg: "No OSDPNS resources found in the 'openstack' namespace!"
-  when: _cifmw_update_osdpns_all_info.resources | length == 0
-
-- name: Choose the first OSDPNS resource which has edpm_container_registry_logins defined
-  ansible.builtin.set_fact:
-    _cifmw_update_osdpns_info: >-
-      {{
-      _cifmw_update_osdpns_all_info.resources
-      | community.general.json_query('[?spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins] | [0]')
-      }}
-
-- name: Display which osdpns we're using
-  ansible.builtin.debug:
-    msg: "Found OSDPNS named: '{{ _cifmw_update_osdpns_info.metadata.name }}'"
-
-- name: Determine registry
-  ansible.builtin.set_fact:
-    cifmw_update_login_registry: >-
-      {{
-      (cifmw_ci_gen_kustomize_values_ooi_image.split('/')[0])
-      if cifmw_ci_gen_kustomize_values_ooi_image is defined
-      else 'quay.io'
-      | trim
-      }}
-
-- name: Check if credentials exist
-  ansible.builtin.set_fact:
-    cifmw_update_login_username: "{{ login_username }}"
-    cifmw_update_login_password: "{{ login_dict[login_username] }}"
-  vars:
-    login_dict: >-
-      {{
-      _cifmw_update_osdpns_info.spec.nodeTemplate.ansible.ansibleVars.
-      edpm_container_registry_logins[cifmw_update_login_registry]
-      }}
-    login_username: "{{ login_dict.keys()|list|first }}"
-  when:
-    - _cifmw_update_osdpns_info.spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins is defined
-    - login_dict is defined
-    - login_dict|length > 0
-    - cifmw_update_login_registry != 'quay.io'
-
-- name: Log in to registry when needed
-  containers.podman.podman_login:
-    registry: "{{ cifmw_update_login_registry }}"
-    username: "{{ cifmw_update_login_username }}"
-    password: "{{ cifmw_update_login_password }}"
-  when:
-    - cifmw_update_login_username is defined
-    - cifmw_update_login_password is defined
-    - cifmw_update_login_registry != 'quay.io'
-
 - name: Retrieve the openstackclient Pod
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -80,7 +16,22 @@
 
 - name: Set the openstackclient image fact
   ansible.builtin.set_fact:
-    openstackclient_image: "{{ _cifmw_update_openstackclient_pod.resources[0].spec.containers[0].image }}"
+    openstackclient_image: "{{ _cifmw_update_openstackclient_pod | community.general.json_query('resources[0].spec.containers[0].image') | default('') }}"
+
+- name: Login to registry.redhat.io if needed
+  when: "'registry.redhat.io' in openstackclient_image"
+  block:
+    - name: Fail if cifmw_registry_token.credentials is not defined
+      ansible.builtin.fail:
+        msg: "cifmw_registry_token.credentials is not defined, cannot login to registry.redhat.io"
+      when: "'credentials' not in cifmw_registry_token | default({})"
+
+    - name: Login to registry.redhat.io
+      containers.podman.podman_login:
+        username: "{{ cifmw_registry_token.credentials.username }}"
+        password: "{{ cifmw_registry_token.credentials.password }}"
+        registry: "registry.redhat.io"
+      no_log: true
 
 - name: Collect and save OpenStack config files
   ansible.builtin.include_tasks: collect_openstackclient_config.yml
