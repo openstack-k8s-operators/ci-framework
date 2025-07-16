@@ -56,7 +56,7 @@ options:
 EXAMPLES = r"""
 - name: Run custom script
   register: script_output
-  ci_script:
+  cifmw.general.ci_script:
     output_dir: "/home/zuul/ci-framework-data/artifacts"
     script: |
       mkdir /home/zuul/test-dir
