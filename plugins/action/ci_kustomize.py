@@ -105,7 +105,7 @@ EXAMPLES = r"""
 # Apply the kustomizations in `/home/user/source/k8s-manifets-dir` to the
 # `target_path` manifest and output the result in `output_pat`
 - name: Apply the file and variables kustomizations to multiple CRs
-  ci_kustomize:
+  cifmw.general.ci_kustomize:
     target_path: /home/user/source/k8s-manifets-dir/manifest.yaml
     output_path: /home/user/source/k8s-manifets-dir/out.yaml
 
@@ -113,7 +113,7 @@ EXAMPLES = r"""
 # `/home/user/source/k8s-manifets-dir` and `extra_dir` dirs to the
 # manifests available in the `target_path` dir
 - name: Apply the file and variables kustomizations to multiple CRs
-  ci_kustomize:
+  cifmw.general.ci_kustomize:
     target_path: /home/user/source/k8s-manifets-dir
     kustomizations:
       - apiVersion: kustomize.config.k8s.io/v1beta1

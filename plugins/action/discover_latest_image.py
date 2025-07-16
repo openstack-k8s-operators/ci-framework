@@ -31,7 +31,7 @@ options: Please refer to ansible.builtin.uri options
 EXAMPLES = r"""
 - name: Get latest CentOS 9 Stream image
   register: discovered_images
-  discover_latest_image:
+  cifmw.general.discover_latest_image:
     base_url: "https://cloud.centos.org/centos/{{ ansible_distribution_major_version }}-stream/x86_64/images"
     image_prefix: "CentOS-Stream-GenericCloud-"
     images_file: "CHECKSUM"
