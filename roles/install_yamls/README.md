@@ -41,7 +41,7 @@ The created role directory contains multiple task files, similar to
   delay: "{{ make_crc_storage_delay | default(omit) }}"
   until: "{{ make_crc_storage_until | default(true) }}"
   register: "make_crc_storage_status"
-  ci_script:
+  cifmw.general.ci_script:
     output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
     chdir: "/home/zuul/src/github.com/openstack-k8s-operators/install_yamls"
     script: make crc_storage
@@ -119,7 +119,7 @@ Let's look at below example:-
       delay: "{{ make_ansibleee_cleanup_delay | default(omit) }}"
       until: "{{ make_ansibleee_cleanup_until | default(true) }}"
       register: "make_ansibleee_cleanup_status"
-      ci_script:
+      cifmw.general.ci_script:
         output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
         chdir: "/home/zuul/src/github.com/openstack-k8s-operators/install_yamls"
         script: "make ansibleee_cleanup"

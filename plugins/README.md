@@ -57,7 +57,7 @@ Any of the `ansible.builtin.uri` module is supported.
 ```YAML
 - name: Get latest CentOS 9 Stream image
   register: discovered_image
-  discover_latest_image:
+  cifmw.general.discover_latest_image:
     url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
     image_prefix: "CentOS-Stream-GenericCloud"
 
