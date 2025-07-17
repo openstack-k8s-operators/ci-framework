@@ -1,8 +1,16 @@
 import typing
+import os, sys
 
-from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
-    ansible_encoding,
-)
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../module_utils"))
+
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+        ansible_encoding,
+    )
+except ImportError:
+    from ...module_utils.encoding import (
+        ansible_encoding,
+    )
 
 
 class NetworkMappingError(Exception, ansible_encoding.RawConvertibleObject):

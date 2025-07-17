@@ -9,15 +9,23 @@ import glob
 import json
 import os
 import re
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../module_utils"))
 
 from ansible.plugins.action import ActionBase
 from ansible.errors import AnsibleActionFail
 from ansible.module_utils import basic
 from ansible.utils.display import Display
 
-from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
-    ansible_encoding,
-)
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+        ansible_encoding,
+    )
+except ImportError:
+    from ..module_utils.encoding import (
+        ansible_encoding,
+    )
 
 
 DOCUMENTATION = r"""

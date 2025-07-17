@@ -4,14 +4,27 @@ import copy
 import dataclasses
 import ipaddress
 import typing
+import os, sys
 
-from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
-    ansible_encoding,
-)
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../module_utils"))
 
-from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
-    exceptions,
-)
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+        ansible_encoding,
+    )
+except ImportError:
+    from ...module_utils.encoding import (
+        ansible_encoding,
+    )
+
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
+        exceptions,
+    )
+except ImportError:
+    from ...module_utils.net_map import (
+        exceptions,
+    )
 
 __CONFIG_IP_VERSION_SUFFIX_4 = "v4"
 __CONFIG_IP_VERSION_SUFFIX_6 = "v6"

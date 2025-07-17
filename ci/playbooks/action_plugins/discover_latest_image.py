@@ -1,0 +1,1 @@
+../../../plugins/action/discover_latest_image.py

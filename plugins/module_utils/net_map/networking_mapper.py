@@ -5,13 +5,24 @@ import json
 import random
 import re
 import typing
+import os, sys
 
-from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
-    exceptions,
-    ip_pools,
-    networking_definition,
-    networking_env_definitions,
-)
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../module_utils"))
+
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
+        exceptions,
+        ip_pools,
+        networking_definition,
+        networking_env_definitions,
+    )
+except ImportError:
+    from ...module_utils.net_map import (
+        exceptions,
+        ip_pools,
+        networking_definition,
+        networking_env_definitions,
+    )
 
 
 @dataclasses.dataclass

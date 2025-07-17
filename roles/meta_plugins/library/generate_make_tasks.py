@@ -1,0 +1,1 @@
+../../../plugins/modules/generate_make_tasks.py

@@ -201,7 +201,9 @@ import re
 import shutil
 import subprocess
 import typing
+import sys
 
+sys.path.append(os.path.join(os.path.dirname(__file__), "../module_utils"))
 
 import dataclasses
 import pathlib
@@ -209,9 +211,14 @@ import yaml
 
 from ansible.plugins.action import ActionBase
 
-from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
-    ansible_encoding,
-)
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+        ansible_encoding,
+    )
+except ImportError:
+    from ..module_utils.encoding import (
+        ansible_encoding,
+    )
 
 
 @dataclasses.dataclass

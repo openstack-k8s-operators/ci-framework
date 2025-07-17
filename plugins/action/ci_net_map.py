@@ -240,16 +240,32 @@ complete_map:
     type: bool
 """
 
+import os, sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../module_utils"))
+
 from ansible.errors import AnsibleActionFail
 from ansible.plugins.action import ActionBase
 
-from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
-    ansible_encoding,
-)
-from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
-    exceptions,
-    networking_mapper,
-)
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+        ansible_encoding,
+    )
+except ImportError:
+    from ..module_utils.encoding import (
+        ansible_encoding,
+    )
+
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.net_map import (
+        exceptions,
+        networking_mapper,
+    )
+except ImportError:
+    from ..module_utils.net_map import (
+        exceptions,
+        networking_mapper,
+    )
 
 
 class ActionModule(ActionBase):

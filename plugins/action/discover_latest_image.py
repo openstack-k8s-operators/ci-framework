@@ -3,14 +3,22 @@
 
 from __future__ import absolute_import, division, print_function
 import re
+import os, sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../module_utils"))
 
 
 from ansible.errors import AnsibleError
 from ansible.plugins.action import ActionBase
 
-from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
-    ansible_encoding,
-)
+try:
+    from ansible_collections.cifmw.general.plugins.module_utils.encoding import (
+        ansible_encoding,
+    )
+except ImportError:
+    from ..module_utils.encoding import (
+        ansible_encoding,
+    )
 
 
 __metaclass__ = type
