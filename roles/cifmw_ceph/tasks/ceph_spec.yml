@@ -1,0 +1,96 @@
+---
+- name: Set IPv4 facts
+  when: ansible_all_ipv4_addresses | length > 0
+  ansible.builtin.set_fact:
+    ssh_network_range: 192.168.122.0/24
+    # storage_network_range: 172.18.0.0/24
+    storage_mgmt_network_range: 172.20.0.0/24
+    all_addresses: "{{ ansible_all_ipv4_addresses }}"
+    ms_bind_ipv4: true
+    ms_bind_ipv6: false
+
+- name: Set IPv6 facts
+  when: ansible_all_ipv4_addresses | length == 0
+  ansible.builtin.set_fact:
+    ssh_network_range: "2620:cf:cf:aaaa::/64"
+    # storage_network_range: "2620:cf:cf:cccc::/64"
+    storage_mgmt_network_range: "2620:cf:cf:dddd::/64"
+    all_addresses: "{{ ansible_all_ipv6_addresses }}"
+    ms_bind_ipv4: false
+    ms_bind_ipv6: true
+
+- name: Amsinha Test all_addresses var
+  ansible.builtin.debug:
+    var: all_addresses
+
+- name: Amsinha Test ssh_network_range var
+  ansible.builtin.debug:
+    var: ssh_network_range
+
+- name: Amsinha debug hosts
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
+- name: Build a dict mapping hostname to its IP which is in management network range
+  ansible.builtin.set_fact:
+    host_to_ip:
+      "{{ host_to_ip | default({}) |
+        combine(
+          {
+            item :
+            hostvars[item][all_addresses] | ansible.utils.ipaddr(ssh_network_range) | first
+          }
+        )
+       }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
+- name: Load network ranges from Networking Environment Definition if not provided
+  when: >-
+    storage_network_range is not defined or
+    storage_mgmt_network_range is not defined
+  block:
+    - name: Load Networking Environment Definition
+      vars:
+        cifmw_networking_mapper_assert_env_load: false
+      ansible.builtin.import_role:
+        name: networking_mapper
+        tasks_from: load_env_definition.yml
+
+    - name: Set IPv4 network ranges vars
+      when:
+        - cifmw_networking_env_definition is defined
+        - ansible_all_ipv4_addresses | length > 0
+      ansible.builtin.set_fact:
+        storage_network_range: >-
+          {{
+            cifmw_networking_env_definition.networks.storage.network_v4
+          }}
+        storage_mgmt_network_range: >-
+          {{
+            cifmw_networking_env_definition.networks.storagemgmt.network_v4
+          }}
+
+    - name: Set IPv6 network ranges vars
+      when:
+        - cifmw_networking_env_definition is defined
+        - ansible_all_ipv4_addresses | length == 0
+      ansible.builtin.set_fact:
+        storage_network_range: >-
+          {{
+            cifmw_networking_env_definition.networks.storage.network_v6
+          }}
+        storage_mgmt_network_range: >-
+          {{
+            cifmw_networking_env_definition.networks.storagemgmt.network_v6
+          }}
+
+    - name: Import cifmw_ceph_spec role
+      vars:
+        cifmw_ceph_spec_host_to_ip: "{{ host_to_ip }}"
+        cifmw_ceph_spec_public_network: "{{ storage_network_range | default(ssh_network_range) }}"
+        cifmw_ceph_spec_private_network: "{{ storage_mgmt_network_range | default('') }}"
+      ansible.builtin.import_role:
+        name: cifmw_ceph_spec
