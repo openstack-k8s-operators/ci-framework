@@ -1,0 +1,1 @@
+../../../plugins/action/ci_kustomize.py
