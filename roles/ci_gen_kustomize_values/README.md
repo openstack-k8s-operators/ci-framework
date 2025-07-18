@@ -8,7 +8,7 @@ None
 
 ```{warning}
 The top level parameter `cifmw_architecture_scenario` is required in order
-to select the proper VA scenario to deploy. If not provided, the role will fail
+to select the proper architecture-based scenario to deploy. If not provided, the role will fail
 with a message.
 ```
 
