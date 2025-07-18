@@ -47,6 +47,65 @@
         (cifmw_devscripts_repo_dir, 'logs' ) | path_join
       }}
   block:
+    - name: Do workaround when SNO set
+      when: cifmw_devscripts_sno
+      block:
+        - name: Copy workaround script
+          ansible.builtin.copy:
+            content: |
+              TARGET="192.168.111.2"
+              MAX_FAILURES=10
+              FAILURES=0
+              while true; do
+                  if ping -c1 -W1 "$TARGET" > /dev/null 2>&1; then
+                      echo "bootstrap in progress..."
+                      sleep 1
+                  else
+                      FAILURES=$FAILURES+1
+                  fi
+
+                  if [[ $FAILURES -ge $MAX_FAILURES ]]; then
+                      echo "Bootstrap probably is completed. Continue..."
+                      break
+                  fi
+
+                  sleep 1
+              done
+
+              sudo sed -i 's/192.168.111.2/192.168.111.10/g' /etc/cifmw-dnsmasq.d/host_records.conf
+              sudo systemctl restart cifmw-dnsmasq.service
+
+              ssh-keyscan -H 192.168.111.10 >> {{ ansible_user_dir }}/.ssh/known_hosts
+
+              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+                  core@192.168.111.10 \
+                  bash -c "echo '192.168.111.10 api-int.ocp.openstack.lab api.ocp.openstack.lab' | sudo tee -a /etc/hosts"
+
+              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+                  core@192.168.111.10 sudo sed -i 's/192.168.111.2/192.168.111.10/g' /etc/coredns/Corefile
+
+              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+                  core@192.168.111.10 sudo mkdir -p /etc/docker
+
+              export KUBECONFIG={{ ansible_user_dir }}/src/github.com/openshift-metal3/dev-scripts/ocp/ocp/auth/kubeconfig
+              oc -n openshift-dns rollout restart daemonsets dns-default
+              oc -n openshift-dns rollout restart daemonsets node-resolver
+
+              sleep 120
+
+            dest: "{{ cifmw_devscripts_repo_dir }}/07-sno-workaround.sh"
+
+        - name: Add the workaround script execution into 06_create_cluster.sh script
+          ansible.builtin.replace:
+            path: "{{ cifmw_devscripts_repo_dir }}/06_create_cluster.sh"
+            regexp: '^create_cluster \${OCP_DIR}'
+            replace: |
+              timeout 1800 bash -c "source utils.sh && create_cluster ${OCP_DIR}" || true
+              bash -x 07-sno-workaround.sh
+              # Right now, quit 06_create_cluster.sh, otherwise it will get timeout.
+              # Other steps are not needed (so far)
+              exit 0
+
     - name: Run devscripts make all
       cifmw.general.ci_script:
         chdir: "{{ cifmw_devscripts_repo_dir }}"
