@@ -1,12 +1,12 @@
 # kustomize_deploy
 
-Ansible role designed to deploy VA scenarios using the kustomize tool.
+Ansible role designed to deploy architecture-based scenarios using the kustomize tool.
 
 ## Parameters
 
 ```{warning}
 The top level parameter `cifmw_architecture_scenario` is required in order
-to select the proper VA scenario to deploy. If not provided, the role will fail
+to select the proper architecture-based scenario to deploy. If not provided, the role will fail
 with a message.
 ```
 
@@ -15,7 +15,7 @@ with a message.
 - `cifmw_kustomize_deploy_basedir`: _(string)_ Base directory for the
   ci-framework artifacts. Defaults to `~/ci-framework-data/`
 - `cifmw_kustomize_deploy_architecture_repo_url`: _(string)_ URL of The
-  "architecture" repository, where the VA scenarios are defined.
+  "architecture" repository, where the architecture-based scenarios are defined.
   Defaults to `https://github.com/openstack-k8s-operators/architecture`
 - `cifmw_kustomize_deploy_architecture_repo_dest_dir`: _(string)_ Directory
   where the architecture repo is cloned on the controller node.
@@ -26,7 +26,7 @@ with a message.
   Relative path of the common CRs in the architecture repo. Defaults to
   `/examples/common`
 - `cifmw_kustomize_deploy_architecture_examples_path`: _(string)_ Relative
-  path of the VA scenario list in the operator repo. Defaults to `/examples/va`
+  path of the architecture-based scenario list in the operator repo. Defaults to `/examples/va`
 - `cifmw_kustomize_deploy_kustomizations_dest_dir`: _(string)_ Path for the
   generated CR files. Defaults to
   `cifmw_kustomize_deploy_destfiles_basedir + /artifacts/kustomize_deploy`
