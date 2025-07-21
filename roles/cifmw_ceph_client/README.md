@@ -39,6 +39,10 @@ None
   (default `/tmp/edpm_service_values_post_ceph.yaml`); this file will not
   be created unless `cifmw_ceph_client_service_values_post_ceph_path_src`
   is set
+* `cifmw_ceph_client_rgw_bucket_name`: name of S3 bucket
+* `cifmw_ceph_client_rgw_store_cacert`: CA certificate file when accessing
+   an HTTPS-based S3 endpoint.Certificate is mounted to the Pod in
+   `/etc/pki/tls/certs/ca-bundle.crt`
 
 ## Examples
 
