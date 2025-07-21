@@ -1,0 +1,116 @@
+---
+- name: Ensure cifmw_cephadm_fsid variable is set if none was provided
+  hosts: "{{ groups['cephs'][0] }}"
+  block:
+    - name: Load vars from ceph admin role
+      ansible.builtin.include_vars: ../../cifmw_cephadm/defaults/main.yml
+
+    - name: List Ceph daemon instances on this host
+      ansible.builtin.command:
+        cmd: "{{ cifmw_cephadm_bin }} ls --no-detail"
+      register: cephadm_ls
+      delegate_to: ceph-0
+      no_log: true
+      become: true
+
+    - name: Set list of found FSIDs
+      when:
+        - cephadm_ls is defined
+        - cephadm_ls.stdout is defined
+        - cephadm_ls.stdout != '[]'
+      ansible.builtin.set_fact:
+        cifmw_cephadm_fsid_list: |-
+          {{
+            cephadm_ls.stdout |
+            from_json |
+            map(attribute='fsid') |
+            sort | unique
+          }}
+
+    - name: Fail if >1 FSID was discovered
+      when: cifmw_cephadm_fsid_list | length > 1
+      ansible.builtin.fail:
+        msg: |
+          Multiple FSIDs were found. This Ansible role does not
+          support management of multiple Ceph clusters on one host.
+
+    - name: Set FSID to the discovered value
+      when: cifmw_cephadm_fsid_list | length == 1
+      ansible.builtin.set_fact:
+        cifmw_cephadm_fsid: "{{ cifmw_cephadm_fsid_list[0] }}"
+
+    - name: Import Ceph cli task
+      ansible.builtin.include_role:
+        name: cifmw_cephadm
+        tasks_from: ../../cifmw_cephadm/tasks/ceph_cli.yml
+      vars:
+        ceph_command: radosgw-admin
+
+    - name: Check if Ceph S3 glance user exists
+      ignore_errors: true
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }} user info --uid glance
+      register: cifmw_ceph_s3_glance
+
+    - name: Create S3 secrets for glance user
+      when: cifmw_ceph_s3_user.rc > 0
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }} user create --uid="glance" --display-name "glance"
+
+    - name: Get S3 user info
+      ansible.builtin.command:
+        cmd: >-
+          radosgw-admin user info --uid="user"
+      register: rgw_user_info
+      no_log: true
+
+    - name: Import Ceph cli task
+      ansible.builtin.include_role:
+        name: cifmw_cephadm
+        tasks_from: ceph_cli.yml
+      vars:
+        ceph_command: ceph
+
+    - name: Get ceph RGW endpoint API endpoint
+      ansible.builtin.command: >-
+        {{ cifmw_cephadm_ceph_cli }} config get client.rgw.rgw rgw_keystone_url
+      register: reg_ceph_rgw_s3_endpoint
+      changed_when: "'stdout' in reg_ceph_rgw_s3_endpoint"
+      failed_when: (reg_ceph_rgw_s3_endpoint.rc | int) >= 1
+
+- name: Create S3 Ceph facts
+  ansible.builtin.set_fact:
+    ceph_s3_access_key: "{{ (rgw_user_info.stdout | from_json).keys[0].access_key }}"
+    ceph_s3_secret_key: "{{ (rgw_user_info.stdout | from_json).keys[0].secret_key }}"
+    ceph_s3_bucket: "{{ cifmw_ceph_client_rgw_bucket_name }}"
+    ceph_s3_endpoint: "{{ reg_ceph_rgw_s3_endpoint.stdout }}"
+  no_log: true
+
+- name: Create glance secrets for ceph S3 backend
+  ansible.builtin.template:
+    src: templates/k8s_ceph_rgw_glance_secret.j2
+    dest: "{{ cifmw_ceph_client_fetch_dir }}/k8s_ceph_rgw_glance_secret.yaml"
+    mode: "0600"
+    force: true
+  no_log: true
+
+- name: Create glance S3 secrets
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ _auth_results.openshift_auth.api_key }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    apply: true
+    src: "{{ cifmw_ceph_client_fetch_dir }}/k8s_ceph_rgw_glance_secret.yaml"
+  register: k8s_glance_s3_secret_cleanup
+  no_log: true
+
+- name: Delete the rendered secret file if cleanup enabled
+  ansible.builtin.file:
+    path: "{{ cifmw_ceph_client_fetch_dir }}/k8s_ceph_rgw_glance_secret.yaml"
+    state: absent
+  when: k8s_glance_s3_secret_cleanup | default(true)
