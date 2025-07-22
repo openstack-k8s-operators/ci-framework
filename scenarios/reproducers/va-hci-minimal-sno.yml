@@ -1,6 +1,14 @@
 ---
 cifmw_parent_scenario: "scenarios/reproducers/va-hci-base.yml"
 
+cifmw_devscripts_sno: true
+cifmw_reproducer_allow_one_ocp: true
+# Time for "killing" metal3 bootstrap script, because
+# it would not finish itself (workaround needed).
+# Check 07-sno-workaround.sh provided by
+# roles/devscripts/tasks/main.yml play.
+cifmw_devscripts_sno_bootstrap_timeout: 1800
+
 # HERE if you want to override kustomization, you can uncomment this parameter
 # and push the data structure you want to apply.
 # cifmw_architecture_user_kustomize:
@@ -19,6 +27,7 @@ cifmw_parent_scenario: "scenarios/reproducers/va-hci-base.yml"
 # cifmw_deploy_architecture_stopper:
 
 cifmw_libvirt_manager_configuration:
+  # NOTE: Important not to add '<dns enable="no"/>' into 'ocpbm' network.
   networks:
     osp_trunk: |
       <network>
@@ -38,7 +47,6 @@ cifmw_libvirt_manager_configuration:
         <name>ocpbm</name>
         <forward mode='nat'/>
         <bridge name='ocpbm' stp='on' delay='0'/>
-        <dns enable="no"/>
         <ip family='ipv4' address='192.168.111.1' prefix='24'>
         </ip>
       </network>
@@ -49,8 +57,9 @@ cifmw_libvirt_manager_configuration:
         <bridge name='ocppr'/>
       </network>
   vms:
+    # https://github.com/openshift-metal3/dev-scripts/blob/master/common.sh#L470
     ocp:
-      amount: 3
+      amount: 1
       admin_user: core
       image_local_dir: "{{ cifmw_basedir }}/images/"
       disk_file_name: "ocp_master"
@@ -58,18 +67,17 @@ cifmw_libvirt_manager_configuration:
       extra_disks_num: 3
       extra_disks_size: "50G"
       cpus: 16
-      memory: 38
+      memory: 32
       root_part_id: 4
       uefi: true
       nets:
         - ocppr
         - ocpbm
         - osp_trunk
-        - osp_trunk
     compute:
       uefi: "{{ cifmw_use_uefi }}"
       root_part_id: "{{ cifmw_root_partition_id }}"
-      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
       image_url: "{{ cifmw_discovered_image_url }}"
       sha256_image_name: "{{ cifmw_discovered_hash }}"
       image_local_dir: "{{ cifmw_basedir }}/images/"
