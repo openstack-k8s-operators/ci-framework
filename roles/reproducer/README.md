@@ -25,6 +25,9 @@ None
 * `cifmw_reproducer_supported_hypervisor_os`: (List) List of supported hypervisor operating systems and their minimum version.
 * `cifmw_reproducer_minimum_hardware_requirements`: (Dict) Define minimum hardware requirements for specific scenarios. Example below
 * `cifmw_reproducer_computes_rhos_release_args`: (String) Arguments to use when installing rhos-release repos on compute nodes. Not defined by default, and `cifmw_repo_setup_rhos_release_args` is used instead.
+* `cifmw_reproducer_allow_one_ocp` (Bool) Allow to deploy OpenShift cluster just with one master node.
+  NOTE: When using devscript, remember to set `cifmw_devscripts_sno` to `true`, otherwise it would fail.
+  If you don't set `cifmw_devscripts_sno` to `true`, minimum value for `ocp` nodes is `2`.
 
 ### Advanced parameters
 Those parameters shouldn't be used, unless the user is able to understand potential issues in their environment.
@@ -55,40 +58,4 @@ Please follow the [documentation about the overall "reproducer" feature](https:/
 #### Local repositories on your laptop
 ```YAML
 local_home_dir: "{{ lookup('env', 'HOME') }}"
-local_base_dir: "{{ local_home_dir }}/src/github.com/openstack-k8s-operators"
-remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
-cifmw_reproducer_repositories:
-  - src: "{{ local_base_dir }}/ci-framework"
-    dest: "{{ remote_base_dir }}"
-  - src: "{{ local_base_dir }}/install_yamls"
-    dest: "{{ remote_base_dir }}"
-```
-Notes:
-* `ansible_user_dir` isn't really usable due to the use of `delegate_to` in order to sync those local repositories.
-* You therefore really want to use absolute paths - while the `dest` may be relative with the use of a plain `rsync` command
 
-#### Github code
-```YAML
-remote_base_dir: "/home/zuul/src/github.com/openstack-k8s-operators"
-cifmw_reproducer_repositories:
-  # Fetch specific version
-  - src: "https://github.com/cjeanner/ci-framework"
-    dest: "{{ remote_base_dir }}/ci-framework"
-    version: some-version
-  # Fetch a pull-request and checkout the specific content
-  - src: "https://github.com/foo/install_yamls"
-    dest: "{{ remote_base_dir }}/install_yamls"
-    refspec: pull/510/head:my-patch
-    version: my-patch
-  # Just get HEAD
-  - src: "https://github.com/openstack-k8s-operators/openstack-operators"
-    dest: "{{ remote_base_dir }}/openstack-operators"
-```
-
-#### Example `cifmw_reproducer_minimum_hardware_requirements`:
-```YAML
-cifmw_reproducer_minimum_hardware_requirements:
-  vcpu: 16
-  memory: "32 GB"
-  disk: "200 GB"
-```
