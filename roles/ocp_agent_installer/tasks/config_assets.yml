@@ -1,0 +1,94 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Template ovn-k8s customization
+  when: ocp_agent_installer_enable_ovn_k8s_overrides | bool
+  ansible.builtin.template:
+    src: ovn-k8s-config.j2
+    dest: >-
+      {{
+        [
+          ocp_agent_installer_config_assets_dir,
+          'ovn_k8s_config.yaml'
+        ] | ansible.builtin.path_join
+      }}
+    mode: '0644'
+
+- name: Copy Etcd customization
+  when: ocp_agent_installer_enable_etcd_hardware_speed_slow | bool
+  ansible.builtin.copy:
+    src: etcd-config.yaml
+    dest: >-
+      {{
+        [
+          ocp_agent_installer_config_assets_dir,
+          '95-etcd_config.yaml'
+        ] | ansible.builtin.path_join
+      }}
+    mode: '0644'
+
+- name: Template ImageContentSourcePolicy customization
+  when: ocp_agent_installer_enable_image_content_source_policy | bool
+  ansible.builtin.template:
+    src: image-content-source-policy.yaml.j2
+    dest: >-
+      {{
+        [
+          ocp_agent_installer_config_assets_dir,
+          '95-image-content-source-policy.yaml'
+        ] | ansible.builtin.path_join
+      }}
+    mode: '0644'
+
+- name: Additional trusted CA
+  when:
+    - ocp_agent_installer_enable_additional_trusted_ca | bool
+    - ocp_agent_installer_ocp_additional_trusted_ca is defined
+    - ocp_agent_installer_ocp_additional_trusted_ca | length > 0
+  block:
+    - name: Initialize _ocp_additional_trusted_ca_map fact
+      ansible.builtin.set_fact:
+        _ocp_additional_trusted_ca_map: {}
+
+    - name: Append to _ocp_additional_trusted_ca_map fact
+      ansible.builtin.include_tasks: additional_ca.yml
+      loop: "{{ ocp_agent_installer_ocp_additional_trusted_ca }}"
+      loop_control:
+        loop_var: ca
+
+    - name: Template additional CA config map
+      ansible.builtin.template:
+        src: additional-trusted-ca-config-map.yaml.j2
+        dest: >-
+          {{
+            [
+              ocp_agent_installer_config_assets_dir,
+              '93-additional-ca-config-map.yaml'
+            ] | ansible.builtin.path_join
+          }}
+        mode: '0644'
+
+    - name: Copy additional CA config image
+      ansible.builtin.copy:
+        src: additional-trusted-ca-config-image.yaml
+        dest: >-
+          {{
+            [
+              ocp_agent_installer_config_assets_dir,
+              '94-additional-ca-config-image.yaml'
+            ] | ansible.builtin.path_join
+          }}
+        mode: '0644'

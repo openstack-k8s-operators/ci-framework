@@ -1,0 +1,31 @@
+---
+variant: openshift
+version: 4.17.0
+metadata:
+  name: 91-{{ role | default('master') }}-lv-cinder-volumes
+  labels:
+    machineconfiguration.openshift.io/role: {{ role | default('master') }}
+storage:
+  disks:
+{% for _disk in ocp_agent_installer_cinder_volume_pvs %}
+    - device: {{ _disk }}
+      wipe_table: true
+{% endfor %}
+systemd:
+  units:
+    - name: lv-cinder-volumes.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Create logical volume with name cinder-volumes.
+        After=var.mount systemd-udev-settle.service
+
+        [Service]
+        Type=oneshot
+        ExecCondition=/bin/bash -c '! /usr/sbin/vgdisplay cinder-volumes'
+        ExecStartPre=/usr/sbin/pvcreate {{ ocp_agent_installer_cinder_volume_pvs | join(' ') }}
+ExecStart=/usr/sbin/vgcreate cinder-volumes {{ ocp_agent_installer_cinder_volume_pvs | join(' ') }}
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+---
+variant: openshift
+version: 4.17.0
+metadata:
+  name: 90-{{ role | default('master') }}-nable-iscsi
+  labels:
+    machineconfiguration.openshift.io/role: {{ role | default('master') }}
+storage:
+  files:
+    - path: /etc/iscsi/iscsid.conf
+      overwrite: true
+      mode: 384
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          # Default to 3 retries and 5 seconds each (15 seconds in total),
+          # which is convenient for testing, as any healthy deployment and
+          # backend should be able to login to the backend in that amount of
+          # time, and if there is a broken path it will not take 2 minutes to
+          # give up, just around 15 seconds.
+          node.session.initial_login_retry_max = 3
+          node.conn[0].timeo.login_timeout = 5
+          # The default CHAP algorithms include MD5 will does not work under
+          # FIPS. Set this parameter to exclude MD5 and SHA-1.
+          node.session.auth.chap_algs = SHA3-256,SHA256
+systemd:
+  units:
+    - enabled: true
+      name: iscsid.service

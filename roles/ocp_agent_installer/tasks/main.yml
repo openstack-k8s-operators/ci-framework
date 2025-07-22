@@ -1,0 +1,162 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert config is defined
+  ansible.builtin.assert:
+    that:
+      - ocp_agent_installer_pull_secret is defined
+      - ocp_agent_installer_pull_secret | length > 0
+      - ocp_agent_installer_install_config is defined
+      - ocp_agent_installer_install_config | length > 0
+      - ocp_agent_installer_agent_config is defined
+      - ocp_agent_installer_agent_config | length > 0
+
+- name: Include client install tasks
+  ansible.builtin.include_tasks: install_client.yml
+
+- name: Include installer install tasks
+  ansible.builtin.include_tasks: install_installer.yml
+
+- name: Include config asset tasks
+  ansible.builtin.include_tasks: config_assets.yml
+
+- name: Include machine config tasks
+  ansible.builtin.include_tasks: machine_configs.yml
+
+- name: Include additional ca tasks
+  ansible.builtin.include_tasks: additional_ca.yml
+
+- name: Install package requirements for agent installer
+  become: true
+  ansible.builtin.dnf:
+    name:
+      - nmstate
+      - butane
+    state: present
+
+- name: Create the cluster directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user | default(ansible_user_id) }}"
+    group: "{{ ansible_user | default(ansible_user_id) }}"
+    mode: '0755'
+  loop:
+    - "{{ ocp_agent_installer_bin_dir }}"
+    - "{{ ocp_agent_installer_kube_config_dir }}"
+    - "{{ ocp_agent_installer_cluster_dir }}"
+    - "{{ ocp_agent_installer_manifests_dir }}"
+    - "{{ ocp_agent_installer_agent_installer_dir }}"
+    - "{{ ocp_agent_installer_cluster_custom_config_dir }}"
+    - "{{ ocp_agent_installer_butane_dir }}"
+    - "{{ ocp_agent_installer_machine_configs_dir }}"
+    - "{{ ocp_agent_installer_config_assets_dir }}"
+
+- name: Generate install-config.yaml file
+  ansible.builtin.copy:
+    content: |
+      apiVersion: v1
+      baseDomain: {{ ocp_agent_installer_install_config.baseDomain }}
+      compute:
+      {{ ocp_agent_installer_install_config.compute | to_nice_yaml(indent=2) | indent(width=2) }}
+      controlPlane:
+      {{ ocp_agent_installer_install_config.controlPlane | to_nice_yaml(indent=2) | indent(width=2) }}
+      metadata:
+        name: {{ ocp_agent_installer_install_config.metadata.name }}
+      networking:
+      {{ ocp_agent_installer_install_config.networking | to_nice_yaml(indent=2) | indent(width=2) }}
+      platform:
+      {{ ocp_agent_installer_install_config.platform | to_nice_yaml(indent=2) | indent(width=2) }}
+      pullSecret: '{{ ocp_agent_installer_pull_secret | b64decode }}'
+      sshKey: '{{ ocp_agent_installer_install_config.sshKey }}'
+    dest: "{{ ocp_agent_installer_cluster_dir }}/install-config.yaml"
+    owner: "{{ ansible_user | default(ansible_user_id) }}"
+    group: "{{ ansible_user | default(ansible_user_id) }}"
+    mode: '0600'
+
+- name: Generate agent-config.yaml file
+  ansible.builtin.copy:
+    content: |
+      apiVersion: v1alpha1
+      kind: AgentConfig
+      metadata:
+        name: {{ ocp_agent_installer_agent_config.metadata.name }}
+      {{ ocp_agent_installer_agent_config | to_nice_yaml(indent=2) | indent(width=2) }}
+    dest: "{{ ocp_agent_installer_cluster_dir }}/agent-config.yaml"
+    owner: "{{ ansible_user | default(ansible_user_id) }}"
+    group: "{{ ansible_user | default(ansible_user_id) }}"
+    mode: '0600'
+
+- name: Generate custom manifests
+  ansible.builtin.shell: |
+    cd {{ ocp_agent_installer_cluster_dir }}
+    {{ ocp_agent_installer_bin_dir }}/openshift-install create manifests
+
+- name: Copy machine_configs to manifests dir
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ocp_agent_installer_machine_configs_dir }}/"
+    dest: "{{ ocp_agent_installer_manifests_dir }}/"
+    mode: '0644'
+
+- name: Copy config assets to manifests dir
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ ocp_agent_installer_config_assets_dir }}/"
+    dest: "{{ ocp_agent_installer_manifests_dir }}/"
+    mode: '0644'
+
+- name: Include pxe assets tasks
+  ansible.builtin.include_tasks: pxe_assets.yml
+  when: ocp_agent_installer_bootstrap_assets == 'pxe'
+
+- name: Include iso assets tasks
+  ansible.builtin.include_tasks: iso_assets.yml
+  when: ocp_agent_installer_bootstrap_assets == 'iso'
+
+- name: Copy auth/kubeconfig to ~/.kube/config
+  ansible.builtin.copy:
+    remote_src: true
+    src: >-
+      {{
+        [
+          ocp_agent_installer_cluster_dir,
+          'auth',
+          'kubeconfig'
+        ] | ansible.builtin.path_join
+      }}
+    dest: >-
+      {{
+        [
+          ocp_agent_installer_kube_config_dir,
+          'config'
+        ] | ansible.builtin.path_join
+      }}
+    mode: '0600'
+
+- name: Wait for bootstrap-complete
+  ansible.builtin.command:
+    cmd: >
+      {{ ocp_agent_installer_bin_dir }}/openshift-install --dir {{ ocp_agent_installer_cluster_dir }} agent wait-for bootstrap-complete --log-level=info
+
+- name: Wait for install-complete
+  ansible.builtin.command:
+    cmd: >
+      {{ ocp_agent_installer_bin_dir }}/openshift-install --dir {{ ocp_agent_installer_cluster_dir }} agent wait-for install-complete
+
+- name: Add ingress certificate to CA trust
+  when: ocp_agent_installer_add_ingress_cert_to_ca_trust | bool
+  ansible.builtin.include_tasks: ingress_cert.yml
