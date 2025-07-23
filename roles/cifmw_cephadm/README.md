@@ -7,7 +7,8 @@ The
 [openstack-k8s-operators HCI documentation](https://github.com/openstack-k8s-operators/docs/blob/main/hci.md)
 describes how to run Ceph on EDPM nodes but leaves it to the reader
 to install Ceph with `cephadm`. The `cifmw_cephadm` role and
-`ceph.yml` playbook may be used to automate the Ceph installation.
+`hooks/playbooks/ceph.yml` hook playbook may be used to automate the
+Ceph installation.
 
 Before this role is run the following roles should be run.
 
@@ -19,8 +20,8 @@ After this role is run, the `cifmw_ceph_client` role can generate
 a k8s CR which OpenStack can use to connect to the deployed Ceph
 cluster.
 
-The `ceph.yml` playbook in the playbooks directory provides a complete
-working example which does all of the above and has been tested on
+The `ceph.yml` hook playbook in the `hooks/playbooks` directory provides
+a complete working example which does all of the above and has been tested on
 a three EDPM node deployment from
 [install_yamls](https://github.com/openstack-k8s-operators/install_yamls).
 
@@ -29,8 +30,8 @@ Requires an Ansible user who can become root to install Ceph server.
 
 ## Parameters
 
-The `ceph.yml` playbook defaults these parameters so that they do not
-need to be changed for a typical EDPM deployment.
+The `hooks/playbooks/ceph.yml` hook playbook defaults these parameters so
+that they do not need to be changed for a typical EDPM deployment.
 
 * `cifmw_cephadm_default_container`: If this is value is `true`, then
   `cephadm bootstrap` is not passed the `--image` parameter and whatever
@@ -136,13 +137,13 @@ cifmw_cephadm_keys:
 
 ## Examples
 
-See `ceph.yml` in the playbooks directory.
+See `ceph.yml` in the `hooks/playbooks` directory.
 
 ## Tips for using standalone
 
 ### Pick the appropriate storage network
 
-In the `ceph.yml` playbook, set the `storage_network_range` variable.
+In the `hooks/playbooks/ceph.yml` hook playbook, set the `storage_network_range` variable.
 
 * If network isolation is not being used, then set the
   `storage_network_range` variable to `192.168.122.0/24` (the default
@@ -196,20 +197,39 @@ export ANSIBLE_HOST_KEY_CHECKING=False
 
 ### Run the Ceph playbook
 
+#### Direct playbook execution using ansible-playbook
 ```
 cd ~/ci-framework/
-ansible-playbook playbooks/ceph.yml
+ansible-playbook hooks/playbooks/ceph.yml
+```
+
+#### Using run_hook role
+
+```
+- name: Deploy ceph
+  hosts: localhost
+  vars:
+    post_ceph:
+      - name: Run ceph hook playbook
+        type: playbook
+        source: ceph.yml
+  tasks:
+    - name: Run post_ceph hook
+      vars:
+        step: post_ceph
+      ansible.builtin.import_role:
+        name: run_hook
 ```
 
 ## Regarding the disks used as OSDs
 
-By default the `ceph.yml` playbook assumes there are no block devices
-for Ceph to use and calls the `cifmw_block_device` role to create
+By default the `hooks/playbooks/ceph.yml` hook playbook assumes there are
+no block devices for Ceph to use and calls the `cifmw_block_device` role to create
 block devices and has the `cifmw_ceph_spec` role configure a spec
 to use the created block devices.
 
-If `cifmw_ceph_spec_data_devices` is passed to the `ceph.yml`
-playbook, then the `cifmw_block_device` role is not called and
+If `cifmw_ceph_spec_data_devices` is passed to the `hooks/playbooks/ceph.yml`
+hook playbook, then the `cifmw_block_device` role is not called and
 the spec created by the `cifmw_ceph_spec` role will use whatever
 block devices were passed by `cifmw_ceph_spec_data_devices`. Use
 of `cifmw_ceph_spec_data_devices` implies that the block devices

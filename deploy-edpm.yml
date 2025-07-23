@@ -111,17 +111,21 @@
       when: cifmw_edpm_deploy_hci | default(false) | bool
       ansible.builtin.meta: clear_facts
 
-# TODO: replace this import_playbook with cifmw_ceph role
-- name: Deploy Ceph on target nodes
-  vars:
-    _deploy_ceph: >-
-      {{
-        (cifmw_edpm_deploy_hci | default(false) | bool) and
-        cifmw_architecture_scenario is undefined
-      }}
-    storage_network_range: 172.18.0.0/24
-    storage_mgmt_network_range: 172.20.0.0/24
-  ansible.builtin.import_playbook: playbooks/ceph.yml
+- name: Deploy ceph using hooks
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Run post_ceph hooks - deploy Ceph on target nodes
+      vars:
+        step: post_ceph
+        _deploy_ceph: >-
+          {{
+            (cifmw_edpm_deploy_hci | default(false) | bool) and
+            cifmw_architecture_scenario is undefined
+          }}
+        storage_network_range: 172.18.0.0/24
+        storage_mgmt_network_range: 172.20.0.0/24
+      ansible.builtin.import_role:
+        name: run_hook
 
 - name: Continue HCI deploy, deploy architecture and validate workflow
   hosts: "{{ cifmw_target_host | default('localhost') }}"
