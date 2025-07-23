@@ -1,0 +1,526 @@
+---
+# Copyright 2023 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create local SSH keypair
+  tags: keypair
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cifmw_admin_user: ceph-admin
+  pre_tasks:
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true)
+      ansible.builtin.meta: end_play
+  tasks:
+    - name: Set ssh key path facts
+      ansible.builtin.set_fact:
+        private_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa"
+        public_key: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa.pub"
+      run_once: true  # noqa: run-once[task]
+
+    - name: Stat private key
+      ansible.builtin.stat:
+        path: "{{ private_key }}"
+      register: private_key_stat
+
+    - name: Stat public key
+      ansible.builtin.stat:
+        path: "{{ public_key }}"
+      register: public_key_stat
+
+    - name: Create private key if it does not exist
+      ansible.builtin.command:
+        cmd: "ssh-keygen -t rsa -q -N '' -f {{ private_key }}"
+      no_log: true
+      when:
+        - not private_key_stat.stat.exists
+
+    - name: Create public key if it does not exist
+      ansible.builtin.shell: "ssh-keygen -y -f {{ private_key }} > {{ public_key }}"
+      when:
+        - not public_key_stat.stat.exists
+
+- name: Distribute SSH keypair to target nodes
+  tags: admin
+  hosts: "{{ cifmw_ceph_target | default('computes') }}"
+  gather_facts: false
+  become: true
+  vars:
+    cifmw_admin_user: ceph-admin
+    _target_group: "{{ cifmw_ceph_target | default('computes') }}"
+    _target: "{{ groups[_target_group] | default([]) | first }}"
+    ansible_ssh_private_key_file: >-
+      {{
+        hostvars[_target]['ansible_ssh_private_key_file'] |
+        default(lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY'))
+      }}
+  pre_tasks:
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true)
+      ansible.builtin.meta: end_play
+
+    - name: Get local private key
+      ansible.builtin.slurp:
+        src: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa"
+      register: private_key_get
+      delegate_to: localhost
+      no_log: true
+
+    - name: Get local public key
+      ansible.builtin.slurp:
+        src: "{{ lookup('env', 'HOME') }}/.ssh/{{ cifmw_admin_user }}-id_rsa.pub"
+      register: public_key_get
+      delegate_to: localhost
+  roles:
+    - role: cifmw_create_admin
+      cifmw_admin_user: ceph-admin
+      cifmw_admin_pubkey: "{{ public_key_get['content'] | b64decode }}"
+      cifmw_admin_prikey: "{{ private_key_get['content'] | b64decode }}"
+      cifmw_admin_distribute_private_key: true
+      no_log: true
+
+- name: Create Block Device on target nodes
+  tags: block
+  hosts: "{{ cifmw_ceph_target | default('computes')  }}"
+  gather_facts: true
+  become: true
+  pre_tasks:
+    # If ceph is not being deployed, then skip this play
+    # Or if cifmw_ceph_spec_data_devices is overridden, then skip this play
+    # Assume cifmw_ceph_spec_data_devices implies block devices are already present
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true) or
+          (cifmw_ceph_spec_data_devices is defined and
+           cifmw_ceph_spec_data_devices | length > 0)
+      ansible.builtin.meta: end_play
+  tasks:
+    - name: Set cifmw_num_osds_perhost
+    # By defualt 1 OSD is created per node in case of multinode.
+    # 3 OSDS will be created for single node env to accomodate
+    # more ceph resources and avoid PG errors.
+      ansible.builtin.set_fact:
+        cifmw_num_osds_perhost: |
+          {% if groups[cifmw_ceph_target | default('computes')] | length == 1 %}
+          {% set num_osds =  3 %}
+          {% else %}
+          {% set num_osds = 1 %}
+          {% endif %}
+          {{ num_osds }}
+    - name: Create Block Device on EDPM Nodes
+      vars:
+        _target_group: "{{ cifmw_ceph_target | default('computes') }}"
+        _target: "{{ groups[_target_group] | default([]) | first }}"
+        ansible_ssh_private_key_file: >-
+          {{
+            hostvars[_target]['ansible_ssh_private_key_file'] |
+            default(lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY'))
+          }}
+        cifmw_block_device_image_file: /var/lib/ceph-osd-{{ i }}.img
+        cifmw_block_device_loop: /dev/loop{{ i + 3 }}
+        cifmw_block_lv_name: ceph_lv{{ i }}
+        cifmw_block_vg_name: ceph_vg{{ i }}
+        cifmw_block_systemd_unit_file: /etc/systemd/system/ceph-osd-losetup-{{ i }}.service
+      ansible.builtin.include_role:
+        name: cifmw_block_device
+      loop_control:
+        loop_var: i
+      loop: "{{ range(0, cifmw_num_osds_perhost|int) }}"
+
+- name: Build Ceph spec and conf from gathered IPs of the target inventory group
+  tags: spec
+  hosts: localhost
+  gather_facts: true
+  pre_tasks:
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true)
+      ansible.builtin.meta: end_play
+
+    - name: Set IPv4 facts
+      when:
+        - ansible_all_ipv4_addresses | length > 0
+        - not ceph_ipv6 | default(false)
+      ansible.builtin.set_fact:
+        ssh_network_range: 192.168.122.0/24
+        # storage_network_range: 172.18.0.0/24
+        storage_mgmt_network_range: 172.20.0.0/24
+        all_addresses: ansible_all_ipv4_addresses
+        ms_bind_ipv4: true
+        ms_bind_ipv6: false
+
+    - name: Set IPv6 facts
+      when:
+        - ansible_all_ipv6_addresses | length > 0
+        - ceph_ipv6 | default(false)
+      ansible.builtin.set_fact:
+        ssh_network_range: "2620:cf:cf:aaaa::/64"
+        # storage_network_range: "2620:cf:cf:cccc::/64"
+        storage_mgmt_network_range: "2620:cf:cf:dddd::/64"
+        all_addresses: ansible_all_ipv6_addresses
+        ms_bind_ipv4: false
+        ms_bind_ipv6: true
+
+    - name: Build a dict mapping hostname to its IP which is in management network range
+      ansible.builtin.set_fact:
+        host_to_ip:
+          "{{ host_to_ip | default({}) |
+            combine(
+              {
+                item :
+                hostvars[item][all_addresses] | ansible.utils.ipaddr(ssh_network_range) | first
+              }
+            )
+           }}"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+
+    - name: Load network ranges from Networking Environment Definition if not provided
+      when: >-
+        storage_network_range is not defined or
+        storage_mgmt_network_range is not defined
+      block:
+        - name: Load Networking Environment Definition
+          vars:
+            cifmw_networking_mapper_assert_env_load: false
+          ansible.builtin.import_role:
+            name: networking_mapper
+            tasks_from: load_env_definition.yml
+
+        - name: Set IPv4 network ranges vars
+          when:
+            - cifmw_networking_env_definition is defined
+            - ansible_all_ipv4_addresses | length > 0
+            - not ceph_ipv6 | default(false)
+          ansible.builtin.set_fact:
+            storage_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storage.network_v4
+              }}
+            storage_mgmt_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storagemgmt.network_v4
+              }}
+
+        - name: Set IPv6 network ranges vars
+          when:
+            - cifmw_networking_env_definition is defined
+            - ansible_all_ipv6_addresses | length > 0
+            - ceph_ipv6 | default(false)
+          ansible.builtin.set_fact:
+            storage_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storage.network_v6
+              }}
+            storage_mgmt_network_range: >-
+              {{
+                cifmw_networking_env_definition.networks.storagemgmt.network_v6
+              }}
+
+  roles:
+    - role: cifmw_ceph_spec
+      cifmw_ceph_spec_host_to_ip: "{{ host_to_ip }}"
+      cifmw_ceph_spec_public_network: "{{ storage_network_range | default(ssh_network_range) }}"
+      cifmw_ceph_spec_private_network: "{{ storage_mgmt_network_range | default('') }}"
+
+- name: Fetch network facts of all computes
+  tags: cephadm
+  hosts: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+  gather_facts: false
+  pre_tasks:
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true)
+      ansible.builtin.meta: end_play
+  tasks:
+    - name: Fetch network facts of all computes
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - network
+
+- name: Bootstrap Ceph and apply spec
+  tags: cephadm
+  hosts: "{{ (groups[cifmw_ceph_target | default('computes')] | default([]))[:1] }}"
+  gather_facts: false
+  vars:
+    _target_hosts: "{{ groups[cifmw_ceph_target | default('computes')] | default([]) }}"
+    _target: "{{ _target_hosts | first }}"
+    ansible_ssh_private_key_file: >-
+      {{
+        hostvars[_target]['ansible_ssh_private_key_file'] |
+        default(lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY'))
+      }}
+    cifmw_cephadm_spec_ansible_host: /tmp/ceph_spec.yml
+    cifmw_cephadm_bootstrap_conf: /tmp/initial_ceph.conf
+    cifmw_ceph_client_vars: /tmp/ceph_client.yml
+    cifmw_cephadm_default_container: true
+    cifmw_cephadm_pools:
+      - name: vms
+        pg_autoscale_mode: true
+        target_size_ratio: 0.2
+        application: rbd
+      - name: volumes
+        pg_autoscale_mode: true
+        target_size_ratio: 0.3
+        application: rbd
+        trash_purge_enabled: true
+      - name: backups
+        pg_autoscale_mode: true
+        target_size_ratio: 0.1
+        application: rbd
+      - name: images
+        target_size_ratio: 0.2
+        pg_autoscale_mode: true
+        application: rbd
+      - name: cephfs.cephfs.meta
+        target_size_ratio: 0.1
+        pg_autoscale_mode: true
+        application: cephfs
+      - name: cephfs.cephfs.data
+        target_size_ratio: 0.1
+        pg_autoscale_mode: true
+        application: cephfs
+  pre_tasks:
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true)
+      ansible.builtin.meta: end_play
+
+    - name: Set IPv4 facts
+      when:
+        - ansible_all_ipv4_addresses | length > 0
+        - not ceph_ipv6 | default(false)
+      ansible.builtin.set_fact:
+        all_addresses: ansible_all_ipv4_addresses
+        cidr: 24
+
+    - name: Set IPv6 facts
+      when:
+        - ansible_all_ipv6_addresses | length > 0
+        - ceph_ipv6 | default(false)
+      ansible.builtin.set_fact:
+        all_addresses: ansible_all_ipv6_addresses
+        cidr: 64
+
+    - name: Generate a cephx key
+      cephx_key:
+      register: cephx
+      no_log: true
+
+    - name: Set cifmw_cephadm_keys with the cephx key and cifmw_cephadm_pools
+      ansible.builtin.set_fact:
+        cifmw_cephadm_keys:
+          - name: client.openstack
+            key: "{{ cephx.key }}"
+            mode: '0600'
+            caps:
+              mgr: allow *
+              mon: profile rbd
+              osd: "{{ pools | map('regex_replace', '^(.*)$',
+                                   'profile rbd pool=\\1') | join(', ') }}"
+      vars:
+        pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
+      no_log: true
+
+    # for deploying external ceph for 17.1 using cifmw, we need this playbook to create keyring
+    # for manila client and manila_data pool
+    - name: Add client.manila key and manila_data pool for tripleo deployment
+      ansible.builtin.set_fact:
+        cifmw_cephadm_keys: "{{ cifmw_cephadm_keys + [ manila_key ] }}"
+        cifmw_cephadm_pools: "{{ cifmw_cephadm_pools + [ manila_pool ] }}"
+      vars:
+        manila_key:
+          name: client.manila
+          key: "{{ cephx.key }}"
+          mode: '0600'
+          caps:
+            mgr: allow rw
+            mon: allow r
+            osd: allow rw pool=manila_data
+        manila_pool:
+          name: manila_data
+          target_size_ratio: 0.1
+          pg_autoscale_mode: true
+          application: cephfs
+      when: adoption_deploy_ceph_for_tripleo | default (false)
+      no_log: true
+
+    # public network always exist because is provided by the ceph_spec role
+    - name: Get Storage network range
+      ansible.builtin.set_fact:
+        cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+
+    - name: Set IP address of first monitor
+      ansible.builtin.set_fact:
+        cifmw_cephadm_first_mon_ip: "{{ hostvars[this_host][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first }}"
+      vars:
+        this_host: "{{ _target_hosts | first }}"
+
+    - name: Assert if any EDPM nodes n/w interface is missing in storage network
+      ansible.builtin.assert:
+        that:
+          - hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | length > 0
+        fail_msg: "node {{ item }} doesn't have any interface connected to network {{ cifmw_cephadm_rgw_network }}"
+      loop: "{{ _target_hosts }}"
+
+    - name: Get already assigned IP addresses
+      ansible.builtin.set_fact:
+        ips: "{{ ips | default([]) + [ hostvars[item][all_addresses] | ansible.utils.ipaddr(cifmw_cephadm_rgw_network) | first ] }}"
+      loop: "{{ _target_hosts }}"
+
+    # cifmw_cephadm_vip is the VIP reserved in the Storage network
+    - name: Set VIP var as empty string
+      ansible.builtin.set_fact:
+        cifmw_cephadm_vip: ""
+
+    - name: Process VIP
+      ansible.builtin.include_role:
+        name: cifmw_cephadm
+        tasks_from: check_vip
+      loop: "{{ range(1, (ips | length) + 1) | list }}"
+
+  tasks:
+    - name: Satisfy Ceph prerequisites
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: pre
+
+    - name: Bootstrap Ceph
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: bootstrap
+
+    - name: Ensure that Ceph orchestrator is responsive
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: monitor_ceph_orch
+
+    - name: Apply Ceph spec
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: apply_spec
+
+    - name: Create ceph pools
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: pools
+
+    - name: Deploy RGW
+      when: cifmw_ceph_daemons_layout.rgw_enabled | default(true) | bool
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: rgw
+      vars:
+        # cifmw_cephadm_vip is computed or passed as an override via -e @extra.yml
+        cifmw_cephadm_rgw_vip: "{{ cifmw_cephadm_vip }}"
+
+    - name: Configure Monitoring Stack
+      when: cifmw_ceph_daemons_layout.dashboard_enabled  | default(false) | bool
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: monitoring
+      vars:
+        cifmw_cephadm_monitoring_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+        cifmw_cephadm_dashboard_crt: "{{ cifmw_cephadm_certificate }}"
+        cifmw_cephadm_dashboard_key: "{{ cifmw_cephadm_key }}"
+
+    - name: Create cephfs volume
+      when: (cifmw_ceph_daemons_layout.cephfs_enabled | default(true) | bool) or
+            (cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool)
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: cephfs
+
+    - name: Deploy cephnfs
+      when: cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: cephnfs
+      vars:
+        # we reuse the same VIP reserved for rgw
+        cifmw_cephadm_nfs_vip: "{{ cifmw_cephadm_vip }}/{{ cidr }}"
+
+    - name: Deploy rbd-mirror
+      when: cifmw_ceph_daemons_layout.ceph_rbd_mirror_enabled | default(false) | bool
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: rbd_mirror
+
+    - name: Create Cephx Keys for OpenStack
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: keys
+
+    - name: Export configuration as vars for cifmw_ceph_client
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: export
+
+    - name: Ensure that Ceph orchestrator is responsive
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: monitor_ceph_orch
+
+    - name: Show the Ceph cluster status
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: post
+      vars:
+        cifmw_cephadm_dashboard_crt: "{{ cifmw_cephadm_certificate }}"
+        cifmw_cephadm_dashboard_key: "{{ cifmw_cephadm_key }}"
+
+- name: Render Ceph client configuration
+  tags: client
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cifmw_ceph_client_vars: /tmp/ceph_client.yml
+    cifmw_ceph_client_fetch_dir: /tmp
+    cifmw_ceph_client_k8s_secret_name: ceph-conf-files
+    cifmw_ceph_client_k8s_namespace: openstack
+    cifmw_ceph_client_cluster: "{{ cifmw_cephadm_cluster | default('ceph') }}"
+  pre_tasks:
+    # end_play will end this current playbook and go the the next
+    # imported play.
+    - name: Early stop ceph related work
+      when:
+        - not _deploy_ceph | default(true)
+      ansible.builtin.meta: end_play
+  tasks:
+    - name: Export configuration for ceph client
+      ansible.builtin.import_role:
+        name: cifmw_ceph_client
+    - name: Output usage
+      ansible.builtin.debug:
+        msg: >-
+          Import ceph secret into k8s
+          'kubectl create -f /tmp/k8s_ceph_secret.yml'
