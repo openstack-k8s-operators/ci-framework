@@ -1,0 +1,51 @@
+---
+- name: Prepare
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Install Python pip and dependencies using dnf
+      ansible.builtin.dnf:
+        name:
+          - python3-pip
+          - python3-devel
+          - gcc
+        state: present
+
+    - name: Install Python dependencies
+      ansible.builtin.pip:
+        name:
+          - kubernetes>=12.0.0
+          - pyyaml>=5.4.0
+          - jsonpatch
+        state: present
+        executable: /usr/bin/pip3
+
+    - name: Create mock kubeconfig file
+      ansible.builtin.copy:
+        content: |
+          apiVersion: v1
+          clusters:
+          - cluster:
+              certificate-authority-data: >-
+                LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN5RENDQWJBQ0NRRHVOSFpkOUhxL0RMQS0tLS0tCk9QRFJBUUVGSUFBVGVHMUVNQkdBMVVFQ0F3S1JteGlUMXBWZERsb1cweENLQWNEVEExUXpFOTQKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQ==
+              server: https://api.test.example.com:6443
+            name: test-cluster
+          contexts:
+          - context:
+              cluster: test-cluster
+              user: test-user
+            name: test-context
+          current-context: test-context
+          kind: Config
+          users:
+          - name: test-user
+            user:
+              token: test-token
+        dest: /tmp/kubeconfig
+        mode: '0600'
+
+    - name: Create mock kubeadmin password file
+      ansible.builtin.copy:
+        content: "test-password123"
+        dest: /tmp/kubeadmin-password
+        mode: '0600'

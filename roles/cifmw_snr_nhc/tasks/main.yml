@@ -1,0 +1,596 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Cleanup existing resources before installation
+  when: cifmw_snr_nhc_cleanup_before_install | bool
+  block:
+    - name: Check if NodeHealthCheck exists and is active
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: remediation.medik8s.io/v1alpha1
+        kind: NodeHealthCheck
+        name: nodehealthcheck-sample
+      register: nhc_check
+      ignore_errors: true
+
+    - name: Check for active SelfNodeRemediations
+      when: nhc_check.resources | length > 0
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: self-node-remediation.medik8s.io/v1alpha1
+        kind: SelfNodeRemediation
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      register: active_remediations
+      ignore_errors: true
+
+    - name: Display active remediations info
+      when:
+        - nhc_check.resources | length > 0
+        - active_remediations.resources | length > 0
+      ansible.builtin.debug:
+        msg: |
+          Found {{ active_remediations.resources | length }} active SelfNodeRemediation(s):
+          {% for remediation in active_remediations.resources %}
+          - Name: {{ remediation.metadata.name }}
+            Node: {{ remediation.spec.nodeName | default('Unknown') }}
+            Status: {{ remediation.status.phase | default('Unknown') }}
+          {% endfor %}
+
+    - name: Disable NodeHealthCheck to stop active remediations
+      when: nhc_check.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: remediation.medik8s.io/v1alpha1
+        kind: NodeHealthCheck
+        name: nodehealthcheck-sample
+        state: present
+        resource_definition:
+          apiVersion: remediation.medik8s.io/v1alpha1
+          kind: NodeHealthCheck
+          metadata:
+            name: nodehealthcheck-sample
+          spec:
+            minHealthy: 100%
+            remediationTemplate:
+              apiVersion: self-node-remediation.medik8s.io/v1alpha1
+              name: self-node-remediation-automatic-strategy-template
+              namespace: "{{ cifmw_snr_nhc_namespace }}"
+              kind: SelfNodeRemediationTemplate
+            selector:
+              matchExpressions:
+                - key: node-role.kubernetes.io/worker
+                  operator: Exists
+            unhealthyConditions:
+              - type: Ready
+                status: "False"
+                duration: 999999s
+              - type: Ready
+                status: Unknown
+                duration: 999999s
+      failed_when: false
+
+    - name: Wait for active remediations to stop
+      when: nhc_check.resources | length > 0
+      ansible.builtin.pause:
+        seconds: 30
+      failed_when: false
+
+    - name: Delete existing NodeHealthCheck resources
+      when: nhc_check.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: remediation.medik8s.io/v1alpha1
+        kind: NodeHealthCheck
+        name: nodehealthcheck-sample
+        state: absent
+      failed_when: false
+      register: nhc_deletion
+
+    - name: Check for blocking remediations when deletion fails
+      when:
+        - nhc_check.resources | length > 0
+        - nhc_deletion is failed
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: self-node-remediation.medik8s.io/v1alpha1
+        kind: SelfNodeRemediation
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      register: blocking_remediations
+      failed_when: false
+
+    - name: Display blocking remediation details
+      when:
+        - nhc_check.resources | length > 0
+        - nhc_deletion is failed
+        - blocking_remediations.resources | length > 0
+      ansible.builtin.debug:
+        msg: |
+          BLOCKING REMEDIATIONS DETAILS:
+          The following {{ blocking_remediations.resources | length }} remediation(s) are preventing NodeHealthCheck deletion:
+          {% for remediation in blocking_remediations.resources %}
+          - Name: {{ remediation.metadata.name }}
+            Node: {{ remediation.spec.nodeName | default('Unknown') }}
+            Status: {{ remediation.status.phase | default('Unknown') }}
+            Created: {{ remediation.metadata.creationTimestamp | default('Unknown') }}
+            {% if remediation.status.conditions is defined %}
+            Conditions:
+            {% for condition in remediation.status.conditions %}
+              - Type: {{ condition.type }}
+                Status: {{ condition.status }}
+                Reason: {{ condition.reason | default('N/A') }}
+                Message: {{ condition.message | default('N/A') }}
+                Last Transition: {{ condition.lastTransitionTime | default('N/A') }}
+            {% endfor %}
+            {% endif %}
+          {% endfor %}
+
+    - name: Display warning if NodeHealthCheck deletion failed due to active remediation
+      when:
+        - nhc_check.resources | length > 0
+        - nhc_deletion is failed
+      ansible.builtin.debug:
+        msg: |
+          WARNING: NodeHealthCheck 'nodehealthcheck-sample' could not be deleted due to active remediation.
+          The webhook 'vnodehealthcheck.kb.io' is preventing deletion.
+          {% if blocking_remediations.resources | length > 0 %}
+          Found {{ blocking_remediations.resources | length }} active remediation(s) blocking deletion.
+          {% else %}
+          No active remediations found, but webhook is still blocking deletion.
+          {% endif %}
+          The NodeHealthCheck will remain active and the installation will continue.
+          You may need to manually delete it later when no remediations are running.
+
+    - name: Skip NodeHealthCheck deletion retry if webhook blocks it
+      when:
+        - nhc_check.resources | length > 0
+        - nhc_deletion is failed
+      ansible.builtin.debug:
+        msg: "Skipping NodeHealthCheck deletion retry - webhook protection is active"
+
+    - name: Check if SelfNodeRemediationConfig exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: self-node-remediation.medik8s.io/v1alpha1
+        kind: SelfNodeRemediationConfig
+        name: self-node-remediation-config
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      register: snr_config_check
+      failed_when: false
+
+    - name: Delete existing SelfNodeRemediationConfig resources
+      when: snr_config_check.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: self-node-remediation.medik8s.io/v1alpha1
+        kind: SelfNodeRemediationConfig
+        name: self-node-remediation-config
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+        state: absent
+      failed_when: false
+
+    - name: Check if SelfNodeRemediationTemplate exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: self-node-remediation.medik8s.io/v1alpha1
+        kind: SelfNodeRemediationTemplate
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      register: snr_template_check
+      failed_when: false
+
+    - name: Delete existing SelfNodeRemediationTemplate resources
+      when: snr_template_check.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: self-node-remediation.medik8s.io/v1alpha1
+        kind: SelfNodeRemediationTemplate
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+        state: absent
+      failed_when: false
+
+    - name: Check if Subscriptions exist
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      register: subscription_check
+      failed_when: false
+
+    - name: Delete existing Subscriptions
+      when: subscription_check.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        name: "{{ item }}"
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+        state: absent
+      loop:
+        - self-node-remediation-operator
+        - node-health-check-operator
+      failed_when: false
+
+    - name: Check if OperatorGroup exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: operators.coreos.com/v1
+        kind: OperatorGroup
+        name: workload-availability-operator-group
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      register: operator_group_check
+      failed_when: false
+
+    - name: Delete existing OperatorGroup
+      when: operator_group_check.resources | length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: operators.coreos.com/v1
+        kind: OperatorGroup
+        name: workload-availability-operator-group
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+        state: absent
+      failed_when: false
+
+- name: Cleanup entire namespace
+  when: cifmw_snr_nhc_cleanup_namespace | bool
+  block:
+    - name: Delete the entire workload-availability namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: v1
+        kind: Namespace
+        name: "{{ cifmw_snr_nhc_namespace }}"
+        state: absent
+      failed_when: false
+
+    - name: Wait for namespace deletion to complete
+      when: cifmw_snr_nhc_cleanup_namespace | bool
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+        api_version: v1
+        kind: Namespace
+        name: "{{ cifmw_snr_nhc_namespace }}"
+      register: namespace_deletion_check
+      until: namespace_deletion_check.resources | length == 0
+      retries: 10
+      delay: 5
+      failed_when: false
+
+- name: Create the workload-availability namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    state: present
+    resource_definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ cifmw_snr_nhc_namespace }}"
+  register: namespace_result
+
+- name: Switch to namespace {{ cifmw_snr_nhc_namespace }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    state: present
+    kind: ConfigMap
+    namespace: kube-system
+    resource_definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: kube-public
+      data:
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+
+- name: Create the workload-availability-operator-group resource
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    state: present
+    resource_definition:
+      apiVersion: operators.coreos.com/v1
+      kind: OperatorGroup
+      metadata:
+        name: workload-availability-operator-group
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: operator_group_result
+
+- name: Check if the OperatorGroup exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: operators.coreos.com/v1
+    kind: OperatorGroup
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: operator_group_check
+
+- name: Create the self-node-remediation Subscription
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    state: present
+    resource_definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: self-node-remediation-operator
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      spec:
+        channel: stable
+        installPlanApproval: Automatic
+        name: self-node-remediation
+        package: self-node-remediation
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+  register: subscription_result
+
+- name: Check if the Subscription exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: self-node-remediation-operator
+  register: subscription_check
+
+- name: Check Subscription status
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: self-node-remediation-operator
+    namespace: openshift-operators
+  register: snr_subscription
+
+- name: Verify SelfNodeRemediationTemplate CR exists
+  kubernetes.core.k8s_info:
+    api_version: remediation.medik8s.io/v1alpha1
+    kind: SelfNodeRemediationTemplate
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: snr_template
+
+- name: Check ClusterServiceVersion (CSV) status for remediation
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: csv_status
+
+- name: Verify Self Node Remediation Operator deployment is running
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: self-node-remediation-controller-manager
+  register: snr_deployment
+
+- name: Wait for Self Node Remediation deployment to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: self-node-remediation-controller-manager
+  register: snr_deployment_check
+  until: >-
+    snr_deployment_check.resources[0].status.availableReplicas is defined and
+    snr_deployment_check.resources[0].status.availableReplicas > 0
+  retries: 20
+  delay: 15
+
+- name: Check SelfNodeRemediationConfig CR
+  kubernetes.core.k8s_info:
+    api_version: remediation.medik8s.io/v1alpha1
+    kind: SelfNodeRemediationConfig
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: snr_config
+
+- name: Verify Self Node Remediation DaemonSet status
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: DaemonSet
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: self-node-remediation-ds
+  register: snr_daemonset
+
+- name: Verify SelfNodeRemediationConfig CR exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: self-node-remediation.medik8s.io/v1alpha1
+    kind: SelfNodeRemediationConfig
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: self-node-remediation-config
+  register: snr_config_detail
+
+- name: Verify SelfNodeRemediationTemplate exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: self-node-remediation.medik8s.io/v1alpha1
+    kind: SelfNodeRemediationTemplate
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: snr_template_detail
+
+- name: Debug SNR deployment status
+  when: ansible_verbosity > 0
+  ansible.builtin.debug:
+    msg: |
+      SNR Deployment Status:
+      - Namespace: {{ cifmw_snr_nhc_namespace }}
+      - OperatorGroup: {{ operator_group_check.resources | length > 0 }}
+      - Subscription: {{ subscription_check.resources | length > 0 }}
+      - Template: {{ snr_template_detail.resources | length > 0 }}
+      - Deployment Ready: {{ snr_deployment_check.resources[0].status.availableReplicas | default(0) > 0 if snr_deployment_check.resources | length > 0 else false }}
+
+- name: Create the Node Health Check Subscription
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    state: present
+    resource_definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: node-health-check-operator
+        namespace: "{{ cifmw_snr_nhc_namespace }}"
+      spec:
+        channel: stable
+        installPlanApproval: Automatic
+        name: node-healthcheck-operator
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+        package: node-healthcheck-operator
+  register: nhc_subscription_result
+
+- name: Check if the Node Health Check Subscription exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: node-health-check-operator
+  register: nhc_subscription_check
+
+- name: Verify Node Health Check Subscription
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+    name: node-health-check-operator
+  register: nhc_subscription_status
+
+- name: Check ClusterServiceVersion (CSV) for Node Health Check Operator
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: nhc_csv_status
+
+- name: Wait for CSV to reach Succeeded phase
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: csv_check
+  until: csv_check.resources | selectattr('status.phase', 'equalto', 'Succeeded') | list | length > 0
+  retries: 20
+  delay: 15
+
+- name: Verify Node Health Check Operator Deployment
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ cifmw_snr_nhc_namespace }}"
+  register: nhc_deployments
+
+- name: Debug NHC deployment status
+  when: ansible_verbosity > 0
+  ansible.builtin.debug:
+    msg: |
+      NHC Deployment Status:
+      - Subscription: {{ nhc_subscription_check.resources | length > 0 }}
+      - CSV Phase: {{ csv_check.resources | selectattr('status.phase', 'equalto', 'Succeeded') | list | length > 0 }}
+      - Deployments: {{ nhc_deployments.resources | selectattr('metadata.name', 'search', 'node-healthcheck') | list | length }}
+
+- name: Check if NodeHealthCheck CR already exists before creating
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: remediation.medik8s.io/v1alpha1
+    kind: NodeHealthCheck
+    name: nodehealthcheck-sample
+  register: existing_nhc_cr_check
+  ignore_errors: true
+
+- name: Create Node Health Check CR to use SNR
+  when: existing_nhc_cr_check.resources | length == 0
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    state: present
+    resource_definition:
+      apiVersion: remediation.medik8s.io/v1alpha1
+      kind: NodeHealthCheck
+      metadata:
+        name: nodehealthcheck-sample
+      spec:
+        minHealthy: 51%
+        remediationTemplate:
+          apiVersion: self-node-remediation.medik8s.io/v1alpha1
+          name: self-node-remediation-automatic-strategy-template
+          namespace: "{{ cifmw_snr_nhc_namespace }}"
+          kind: SelfNodeRemediationTemplate
+        selector:
+          matchExpressions:
+            - key: node-role.kubernetes.io/worker
+              operator: Exists
+        unhealthyConditions:
+          - type: Ready
+            status: "False"
+            duration: 30s
+          - type: Ready
+            status: Unknown
+            duration: 30s
+  register: nhc_cr_creation
+
+- name: Display info if NodeHealthCheck CR already exists
+  when: existing_nhc_cr_check.resources | length > 0
+  ansible.builtin.debug:
+    msg: |
+      NodeHealthCheck CR 'nodehealthcheck-sample' already exists and will not be recreated.
+      This is expected if cleanup was skipped due to active remediations.
+
+- name: Wait for Node Health Check CR to be created
+  when: existing_nhc_cr_check.resources | length == 0
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: remediation.medik8s.io/v1alpha1
+    kind: NodeHealthCheck
+    name: nodehealthcheck-sample
+  register: nhc_cr_ready
+  until: nhc_cr_ready.resources | length > 0
+  retries: 10
+  delay: 10
+
+- name: Verify Node Health Check CR existence
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: remediation.medik8s.io/v1alpha1
+    kind: NodeHealthCheck
+    name: nodehealthcheck-sample
+  register: nhc_cr_check
+
+- name: Check if existing NodeHealthCheck still exists after installation
+  when:
+    - cifmw_snr_nhc_cleanup_before_install | bool
+    - nhc_check.resources | length > 0
+    - nhc_deletion is failed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
+    api_version: remediation.medik8s.io/v1alpha1
+    kind: NodeHealthCheck
+    name: nodehealthcheck-sample
+  register: existing_nhc_final_check
+  ignore_errors: true
+
+- name: Summary of deployment status
+  when: ansible_verbosity > 0
+  ansible.builtin.debug:
+    msg: |
+      Deployment Summary:
+      - Namespace: {{ cifmw_snr_nhc_namespace }}
+      - SNR Operator: {{ 'Ready' if (snr_deployment_check.resources | length > 0 and snr_deployment_check.resources[0].status.availableReplicas | default(0) > 0) else 'Not Ready' }}
+      - NHC Operator: {{ 'Ready' if (csv_check.resources | selectattr('status.phase', 'equalto', 'Succeeded') | list | length > 0) else 'Not Ready' }}
+      - NHC CR: {{ 'Created' if (nhc_cr_check.resources | length > 0) else 'Not Created' }}
+      - Remediation Template: {{ 'Available' if (snr_template_detail.resources | length > 0) else 'Not Available' }}
+      {% if cifmw_snr_nhc_cleanup_before_install | bool and nhc_check.resources | length > 0 and nhc_deletion is failed %}
+      - Existing NHC Status: {{ 'Still Exists' if (existing_nhc_final_check.resources | length > 0) else 'Removed' }}
+      {% endif %}
