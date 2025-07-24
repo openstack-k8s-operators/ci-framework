@@ -63,7 +63,7 @@ the `test_operator` role, will also set its `storageClass` value to
 
 ### Kubernetes parameters
 
-* `cifmw_lvms_namespace`: (String) The Kubernetes namespace where the LVMS cluster and operator pods will run (default `openshift-storage`)
+* `cifmw_lvms_namespace`: (String) The Kubernetes namespace where the LVMS cluster and operator pods will run (default `openshift-lvm-storage`)
 
 ### kubernetes.core.k8s_info parameters
 
