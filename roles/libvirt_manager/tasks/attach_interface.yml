@@ -60,6 +60,13 @@
 
 - name: "Attach interface {{ network.name }} on {{ vm_name }}"  # noqa: name[template]
   vars:
+    _net_index: >-
+      {{
+          _extracted_xml.matches | default([]) |
+          selectattr('source.' + _type, 'defined') |
+          selectattr('source.' + _type, 'equalto', _local_bridge_name) |
+          length | int
+      }}
     _net_name: >-
       {{
         (cifmw_libvirt_manager_net_prefix_add | bool) |
@@ -72,28 +79,21 @@
         ternary(_net_name, _net_bridge_map[_net_name])
       }}
     _type: "{{ cifmw_libvirt_manager_network_interface_types[network.name] | default('bridge') }}"
-    _attached_bridges: >-
-      {{
-        _extracted_xml.matches | default([]) |
-        selectattr('source.' + _type, 'defined') |
-        selectattr('source.' + _type, 'equalto', _local_bridge_name)
-      }}
     _clean_vm: "{{ vm_name | replace('cifmw-', '') }}"
     _mac_seed: "{{ '52:54:%02i' % vm_item|default(0)|int }}"
     _lm_mac_address: >-
       {% if cifmw_libvirt_manager_mac_map[_clean_vm] is defined -%}
+      {% set net_index = _net_index | int %}
       {% set known_mac = cifmw_libvirt_manager_mac_map[_clean_vm] |
                          selectattr('network', 'equalto', network.name) |
                          map(attribute='mac')
       -%}
       {% endif -%}
       {% if known_mac is defined and known_mac | length > 0 -%}
-      {{  known_mac | first }}
+      {{  known_mac[net_index] }}
       {% else -%}
       {{  _mac_seed | community.general.random_mac }}
       {% endif -%}
-  when:
-    - _attached_bridges | length == 0
   ansible.builtin.command:
     cmd: >-
       virsh -c qemu:///system
