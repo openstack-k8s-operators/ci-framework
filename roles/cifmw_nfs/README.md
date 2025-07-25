@@ -17,7 +17,7 @@ sudo privilege is required for this role.
     nftables_path: /etc/nftables
     nftables_conf: /etc/sysconfig/nftables.conf
   when:
-    - cifmw_edpm_deploy_nfs | default('false') | bool
+    - cifmw_edpm_deploy_nfs | default(false) | bool
   ansible.builtin.import_role:
     name: cifmw_nfs
 ```
