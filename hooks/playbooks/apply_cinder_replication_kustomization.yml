@@ -1,0 +1,73 @@
+---
+- name: Configure and Apply Cinder Replication
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Find all ceph variable files
+      register: _ceph_vars_files
+      ansible.builtin.find:
+        paths: "/tmp"
+        patterns: "{{ cifmw_ceph_client_pattern | default('ceph_client_az*.yml') }}"
+        recurse: false
+
+    - name: Load all ceph vars from files
+      loop: "{{ _ceph_vars_files.files | map(attribute='path') | list }}"
+      register: _ceph_vars
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+
+    - name: Combine ceph variables into a list of dictionaries
+      loop: "{{ _ceph_vars.results }}"
+      ansible.builtin.set_fact:
+        _ceph_vars_list: "{{ _ceph_vars_list | default([]) | union([item.ansible_facts]) }}"
+
+    - name: Get FSID for secondary cluster
+      ansible.builtin.set_fact:
+        secondary_fsid: "{{ _ceph_vars_list | selectattr('cifmw_ceph_client_cluster', 'equalto', cifmw_replication_secondary_cluster) | map(attribute='cifmw_ceph_client_fsid') | first }}"
+
+    - name: Get current OpenStackControlPlane configuration
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: oc get openstackcontrolplane -n openstack -o yaml
+      register: current_controlplane_config
+
+    - name: Parse existing Cinder backend configuration
+      ansible.builtin.set_fact:
+        existing_backend_config: "{{ current_controlplane_config.stdout | from_yaml | json_query('items[0].spec.cinder.template.cinderVolumes.' + cifmw_replication_primary_backend + '.customServiceConfig') }}"
+
+    - name: Add replication device line to existing configuration
+      ansible.builtin.set_fact:
+        updated_backend_config: |
+          {{ existing_backend_config | trim }}
+          replication_device = backend_id:{{ cifmw_replication_backend_id | default('replication') }},conf:/etc/ceph/{{ cifmw_replication_secondary_cluster }}.conf,user:{{ cifmw_replication_ceph_user | default('openstack') }},secret_uuid:{{ secondary_fsid }}
+
+    - name: Build cinder volumes configuration directly
+      ansible.builtin.set_fact:
+        cinder_volumes_dict: "{{ cinder_volumes_dict | default({}) | combine({cifmw_replication_primary_backend: {'customServiceConfig': updated_backend_config}}) }}"
+
+    - name: Apply replication configuration directly
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: core.openstack.org/v1beta1
+          kind: OpenStackControlPlane
+          metadata:
+            name: controlplane
+            namespace: openstack
+          spec:
+            cinder:
+              template:
+                cinderVolumes: "{{ cinder_volumes_dict }}"
+        merge_type: merge
+
+    - name: Wait for OpenStackControlPlane to reconcile
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: oc wait --for=condition=Ready openstackcontrolplane/controlplane -n openstack --timeout=1200s
