@@ -1,0 +1,160 @@
+---
+- name: Add Ceph replication target hosts to one group
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    # Load Ceph client variables to get FSIDs for each cluster
+    - name: Find all ceph variable files
+      register: _ceph_vars_files
+      ansible.builtin.find:
+        paths: "/tmp"
+        patterns: "{{ cifmw_ceph_client_pattern | default('ceph_client_az*.yml') }}"
+        recurse: false
+
+    - name: Load all ceph vars from files
+      loop: "{{ _ceph_vars_files.files | map(attribute='path') | list }}"
+      register: _ceph_vars
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+
+    - name: Combine ceph variables into a list of dictionaries
+      loop: "{{ _ceph_vars.results }}"
+      ansible.builtin.set_fact:
+        _ceph_vars_list: "{{ _ceph_vars_list | default([]) | union([item.ansible_facts]) }}"
+
+    - name: Get FSID for primary cluster
+      ansible.builtin.set_fact:
+        primary_fsid: "{{ _ceph_vars_list | selectattr('cifmw_ceph_client_cluster', 'equalto', cifmw_replication_primary_cluster) | map(attribute='cifmw_ceph_client_fsid') | first }}"
+
+    - name: Get FSID for secondary cluster
+      ansible.builtin.set_fact:
+        secondary_fsid: "{{ _ceph_vars_list | selectattr('cifmw_ceph_client_cluster', 'equalto', cifmw_replication_secondary_cluster) | map(attribute='cifmw_ceph_client_fsid') | first }}"
+
+    - name: Add primary host to ceph_replication_targets
+      ansible.builtin.add_host:
+        name: "{{ groups[cifmw_replication_primary_group] | first }}"
+        groups: ceph_replication_targets
+        site_role: primary
+        ceph_fsid: "{{ primary_fsid }}"
+
+    - name: Add secondary host to ceph_replication_targets
+      ansible.builtin.add_host:
+        name: "{{ groups[cifmw_replication_secondary_group] | first }}"
+        groups: ceph_replication_targets
+        site_role: secondary
+        ceph_fsid: "{{ secondary_fsid }}"
+
+- name: Enable mirroring and setup peer between clusters
+  hosts: ceph_replication_targets
+  become: true
+  vars:
+    # Host filesystem paths (what Ansible sees)
+    bootstrap_token_path_host: /tmp/bootstrap_token_site
+    token_tmp_path: /tmp/rbd_mirror_bootstrap_token
+    # Container filesystem paths (what cephadm container sees)
+    bootstrap_token_path_container: /rootfs/tmp/bootstrap_token_site
+    # Configurable pool name
+    replication_pool: "{{ cifmw_replication_pool | default('volumes') }}"
+  tasks:
+    # Add validation that cephadm is available
+    - name: Verify cephadm is available
+      ansible.builtin.command:
+        cmd: which cephadm
+      register: cephadm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if cephadm not found
+      ansible.builtin.fail:
+        msg: "cephadm command not found on {{ inventory_hostname }}"
+      when: cephadm_check.rc != 0
+
+    - name: Enable image mirroring
+      ansible.builtin.command:
+        cmd: cephadm shell -- rbd mirror pool enable {{ replication_pool }} image
+      register: enable_mirror_result
+      failed_when: enable_mirror_result.rc != 0
+      changed_when: "'already enabled' not in enable_mirror_result.stderr"
+
+    - name: Create bootstrap token (only on primary)
+      ansible.builtin.shell:
+        cmd: cephadm shell -- sh -c "rbd mirror pool peer bootstrap create --site-name {{ ceph_fsid }} {{ replication_pool }}" > {{ bootstrap_token_path_host }}
+      when: site_role == "primary"
+      register: create_token_result
+
+    - name: Verify token file was created on primary
+      ansible.builtin.stat:
+        path: "{{ bootstrap_token_path_host }}"
+      register: token_file_stat
+      when: site_role == "primary"
+
+    - name: Fail if token creation failed
+      ansible.builtin.fail:
+        msg: "Bootstrap token file was not created successfully"
+      when:
+        - site_role == "primary"
+        - not token_file_stat.stat.exists
+
+    - name: Fetch token from primary
+      ansible.builtin.fetch:
+        src: "{{ bootstrap_token_path_host }}"
+        dest: "{{ token_tmp_path }}"
+        flat: true
+      when: site_role == "primary"
+
+    - name: Verify token file exists on controller (debug)
+      ansible.builtin.stat:
+        path: "{{ token_tmp_path }}"
+      register: controller_token_stat
+      delegate_to: localhost
+      when: site_role == "secondary"
+
+    - name: Fail if token not available on controller
+      ansible.builtin.fail:
+        msg: "Bootstrap token file not found on controller at {{ token_tmp_path }}"
+      when:
+        - site_role == "secondary"
+        - not controller_token_stat.stat.exists
+
+    - name: Copy token to secondary
+      ansible.builtin.copy:
+        src: "{{ token_tmp_path }}"
+        dest: "{{ bootstrap_token_path_host }}"
+        mode: '0600'
+        owner: root
+        group: root
+      when: site_role == "secondary"
+
+    - name: Verify token file was copied to secondary
+      ansible.builtin.stat:
+        path: "{{ bootstrap_token_path_host }}"
+      register: secondary_token_stat
+      when: site_role == "secondary"
+
+    - name: Fail if token copy failed
+      ansible.builtin.fail:
+        msg: "Bootstrap token file was not copied to secondary at {{ bootstrap_token_path_host }}"
+      when:
+        - site_role == "secondary"
+        - not secondary_token_stat.stat.exists
+
+    - name: Import token (only on secondary) - using container path
+      ansible.builtin.command:
+        cmd: cephadm shell -- rbd mirror pool peer bootstrap import --site-name {{ ceph_fsid }} {{ replication_pool }} {{ bootstrap_token_path_container }}
+      when: site_role == "secondary"
+      register: import_token_result
+      failed_when: import_token_result.rc != 0
+
+    # Cleanup files
+    - name: Clean up token file on remote hosts
+      ansible.builtin.file:
+        path: "{{ bootstrap_token_path_host }}"
+        state: absent
+      when: site_role in ['primary', 'secondary']
+
+    - name: Clean up controller file
+      ansible.builtin.file:
+        path: "{{ token_tmp_path }}"
+        state: absent
+      delegate_to: localhost
+      run_once: true
