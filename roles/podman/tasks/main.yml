@@ -25,3 +25,36 @@
     - cifmw_podman_enable_linger | bool
   ansible.builtin.command:
     cmd: "loginctl enable-linger {{ cifmw_podman_user_linger }}"
+
+- name: Configure User Namespace for EL 10
+  when: ansible_distribution_major_version is version('10', '==')
+  vars:
+    target_user: "{{ ansible_user }}"
+    sub_id_start: 100000
+    sub_id_count: 65536
+  block:
+    - name: "Ensure subordinate UID entry exists for {{ target_user }}"
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/subuid
+        line: "{{ target_user }}:{{ sub_id_start }}:{{ sub_id_count }}"
+        state: present
+        create: true
+        mode: '0644'
+      register: subuid_status
+
+    - name: "Ensure subordinate GID entry exists for {{ target_user }}"
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/subgid
+        line: "{{ target_user }}:{{ sub_id_start }}:{{ sub_id_count }}"
+        state: present
+        create: true
+        mode: '0644'
+      register: subgid_status
+
+    - name: "Run podman system migrate if subuid/subgid files were changed"
+      ansible.builtin.command:
+        cmd: podman system migrate
+      when: subuid_status.changed or subgid_status.changed
+      changed_when: true
