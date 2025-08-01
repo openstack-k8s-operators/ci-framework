@@ -1,0 +1,128 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set multi-realm mode flag
+  ansible.builtin.set_fact:
+    cifmw_federation_multi_realm: true
+
+- name: Include shared federation tasks
+  ansible.builtin.include_tasks: shared_tasks.yml
+
+- name: Generate OIDC configuration for multi-realm
+  ansible.builtin.include_tasks: shared_tasks.yml
+  vars:
+    task_name: "Generate OIDC configuration for realm"
+
+- name: Generate location match configurations for multi-realm
+  ansible.builtin.include_tasks: shared_tasks.yml
+  vars:
+    task_name: "Generate location match configurations for realms"
+
+- name: Create file to customize keystone for multi-realm federation in the control plane
+  ansible.builtin.copy:
+    dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/keystone_multirealm_federation.yaml"
+    content: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      - namespace: {{ cifmw_federation_run_osp_cmd_namespace }}
+      patches:
+      - target:
+          kind: OpenStackControlPlane
+          name: .*
+        patch: |-
+          - op: add
+            path: /spec/tls
+            value: {}
+          - op: add
+            path: /spec/tls/caBundleSecretName
+            value: keycloakca
+          - op: add
+            path: /spec/keystone/template/httpdCustomization
+            value:
+              customConfigSecret: keystone-httpd-override
+          - op: add
+            path: /spec/keystone/template/federatedRealmConfig
+            value: federation-realm-data
+          - op: add
+            path: /spec/keystone/template/customServiceConfig
+            value: |
+              [DEFAULT]
+              insecure_debug={{ cifmw_federation_insecure_debug }}
+              debug={{ cifmw_federation_debug_enabled }}
+              [federation]
+              trusted_dashboard={{ cifmw_federation_horizon_url }}/dashboard/auth/websso/
+              [openid]
+              remote_id_attribute=HTTP_OIDC_ISS
+              [auth]
+              methods = password,token,oauth1,mapped,application_credential,openid
+    mode: "0644"
+
+- name: Create Keystone httpd override secret for multi-realm Federation
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: keystone-httpd-override
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      type: Opaque
+      stringData:
+        federation.conf: |
+          {{ oidc_config }}
+          {{ location_matches }}
+
+- name: Download OpenID configurations for all realms
+  ansible.builtin.include_tasks: shared_tasks.yml
+  vars:
+    task_name: "Download OpenID configuration"
+    oidc_metadata_url: "{{ item }}"
+  loop:
+    - "{{ cifmw_federation_keystone_OIDC_ProviderMetadataURL }}"
+    - "{{ cifmw_federation_keystone_OIDC_ProviderMetadataURL2 }}"
+  register: openid_configs
+
+- name: Generate federation configuration data
+  ansible.builtin.set_fact:
+    federation_config_data:
+      "{{ cifmw_federation_keystone_idp1_conf_filename }}":
+        scope: "openid email profile"
+      "{{ cifmw_federation_keystone_idp1_client_filename }}":
+        client_id: "{{ cifmw_federation_keystone_OIDC_ClientID }}"
+        client_secret: "{{ cifmw_federation_keystone_OIDC_ClientSecret }}"
+      "{{ cifmw_federation_keystone_idp1_provider_filename }}": "{{ openid_configs.results[0].openid_config_result.content | from_json }}"
+      "{{ cifmw_federation_keystone_idp2_conf_filename }}":
+        scope: "openid email profile"
+      "{{ cifmw_federation_keystone_idp2_client_filename }}":
+        client_id: "{{ cifmw_federation_keystone_OIDC_ClientID2 }}"
+        client_secret: "{{ cifmw_federation_keystone_OIDC_ClientSecret2 }}"
+      "{{ cifmw_federation_keystone_idp2_provider_filename }}": "{{ openid_configs.results[1].openid_config_result.content | from_json }}"
+
+- name: Create federation realm data secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: federation-realm-data
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      stringData:
+        federation-config.json: "{{ federation_config_data | to_nice_json }}"

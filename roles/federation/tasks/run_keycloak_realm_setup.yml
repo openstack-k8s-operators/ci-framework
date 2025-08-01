@@ -14,7 +14,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create a Keycloak realm
+- name: Create Keycloak realms
   community.general.keycloak_realm:
     auth_client_id: admin-cli
     validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
@@ -22,12 +22,15 @@
     auth_realm: master
     auth_username: "{{ cifmw_federation_keycloak_admin_username }}"
     auth_password: "{{ cifmw_federation_keycloak_admin_password }}"
-    id: "{{ cifmw_federation_keycloak_realm }}"
-    realm: "{{ cifmw_federation_keycloak_realm }}"
+    id: "{{ item.name }}"
+    realm: "{{ item.name }}"
     enabled: true
     state: present
+  loop: "{{ cifmw_federation_realms }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-- name: Create Keycloak client
+- name: Create Keycloak clients
   community.general.keycloak_client:
     auth_client_id: admin-cli
     validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
@@ -36,20 +39,20 @@
     auth_username: "{{ cifmw_federation_keycloak_admin_username }}"
     auth_password: "{{ cifmw_federation_keycloak_admin_password }}"
     state: present
-    realm: "{{ cifmw_federation_keycloak_realm }}"
-    client_id: "{{ cifmw_federation_keycloak_client_id }}"
-    id: 3fb4f68d-ad2c-46e7-a579-ea418f5d150b
-    name: 'RHOSO Client'
-    description: 'RHOSO client for keystone federation'
+    realm: "{{ item.name }}"
+    client_id: "{{ item.client_id }}"
+    name: 'RHOSO Client for {{ item.name }}'
+    description: 'RHOSO client for keystone federation in {{ item.name }} realm'
     root_url: "{{ cifmw_federation_keystone_url }}"
     admin_url: "{{ cifmw_federation_keystone_url }}"
     base_url: '/dashboard/project'
     enabled: true
     client_authenticator_type: client-secret
-    secret: "{{ cifmw_federation_keycloak_client_secret }}"
+    secret: "{{ item.client_secret }}"
     redirect_uris:
-      - "{{ cifmw_federation_keystone_url }}/v3/auth/OS-FEDERATION/identity_providers/kcIDP/protocols/openid/websso/"
+      - "{{ cifmw_federation_keystone_url }}/v3/auth/OS-FEDERATION/identity_providers/{{ item.idp_name }}/protocols/openid/websso/"
       - "{{ cifmw_federation_keystone_url }}/v3/auth/OS-FEDERATION/websso/openid"
+      - "{{ cifmw_federation_keystone_url }}/v3/redirect_uri"
       - "{{ cifmw_federation_horizon_url }}/dashboard/auth/websso/"
     web_origins:
       - "{{ cifmw_federation_keystone_url }}"
@@ -58,8 +61,11 @@
     public_client: false
     implicit_flow_enabled: true
     protocol: openid-connect
+  loop: "{{ cifmw_federation_realms }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-- name: Create a Keycloak group1
+- name: Create Keycloak groups
   community.general.keycloak_group:
     auth_client_id: admin-cli
     validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
@@ -68,22 +74,16 @@
     auth_username: "{{ cifmw_federation_keycloak_admin_username }}"
     auth_password: "{{ cifmw_federation_keycloak_admin_password }}"
     state: present
-    name: "{{ cifmw_federation_keycloak_testgroup1_name }}"
-    realm: "{{ cifmw_federation_keycloak_realm }}"
+    name: "{{ user.group }}"
+    realm: "{{ realm.name }}"
+  loop: "{{ cifmw_federation_realms | subelements('test_users') }}"
+  loop_control:
+    loop_var: user
+    label: "{{ user.1.group }} in {{ user.0.name }}"
+  vars:
+    realm: "{{ user.0 }}"
 
-- name: Create a Keycloak group2
-  community.general.keycloak_group:
-    auth_client_id: admin-cli
-    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
-    auth_keycloak_url: "{{ cifmw_federation_keycloak_url }}/auth"
-    auth_realm: master
-    auth_username: "{{ cifmw_federation_keycloak_admin_username }}"
-    auth_password: "{{ cifmw_federation_keycloak_admin_password }}"
-    state: present
-    name: "{{ cifmw_federation_keycloak_testgroup2_name }}"
-    realm: "{{ cifmw_federation_keycloak_realm }}"
-
-- name: Create keycloak user1
+- name: Create Keycloak users
   community.general.keycloak_user:
     auth_client_id: admin-cli
     validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
@@ -92,41 +92,23 @@
     auth_username: "{{ cifmw_federation_keycloak_admin_username }}"
     auth_password: "{{ cifmw_federation_keycloak_admin_password }}"
     state: present
-    realm: "{{ cifmw_federation_keycloak_realm }}"
-    username: "{{ cifmw_federation_keycloak_testuser1_username }}"
-    firstName: firstname1
-    lastName: lastname1
-    email: "{{ cifmw_federation_keycloak_testuser1_username }}@ocp.openstack.lab"
+    realm: "{{ realm.name }}"
+    username: "{{ user.1.username }}"
+    firstName: "{{ user.1.username | title }}"
+    lastName: "User"
+    email: "{{ user.1.username }}@{{ realm.name }}.openstack.lab"
     enabled: true
     emailVerified: false
     credentials:
       - type: password
-        value: "{{ cifmw_federation_keycloak_testuser1_password }}"
+        value: "{{ user.1.password }}"
         temporary: false
     groups:
-      - name: "{{ cifmw_federation_keycloak_testgroup1_name }}"
+      - name: "{{ user.1.group }}"
         state: present
-
-- name: Create keycloak user2
-  community.general.keycloak_user:
-    auth_client_id: admin-cli
-    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
-    auth_keycloak_url: "{{ cifmw_federation_keycloak_url }}/auth"
-    auth_realm: master
-    auth_username: "{{ cifmw_federation_keycloak_admin_username }}"
-    auth_password: "{{ cifmw_federation_keycloak_admin_password }}"
-    state: present
-    realm: "{{ cifmw_federation_keycloak_realm }}"
-    username: "{{ cifmw_federation_keycloak_testuser2_username }}"
-    firstName: firstname2
-    lastName: lastname2
-    email: "{{ cifmw_federation_keycloak_testuser2_username }}@ocp.openstack.lab"
-    enabled: true
-    emailVerified: false
-    credentials:
-      - type: password
-        value: "{{ cifmw_federation_keycloak_testuser2_password }}"
-        temporary: false
-    groups:
-      - name: "{{ cifmw_federation_keycloak_testgroup2_name }}"
-        state: present
+  loop: "{{ cifmw_federation_realms | subelements('test_users') }}"
+  loop_control:
+    loop_var: user
+    label: "{{ user.1.username }} in {{ user.0.name }}"
+  vars:
+    realm: "{{ user.0 }}"

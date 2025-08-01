@@ -1,0 +1,42 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Validate pre-deploy configuration
+  ansible.builtin.assert:
+    that:
+      - cifmw_federation_realms is defined
+      - cifmw_federation_realms | length > 0
+    fail_msg: "Federation realms configuration is required for pre-deploy"
+    success_msg: "Pre-deploy configuration validation passed"
+
+- name: Set deployment type detection
+  ansible.builtin.set_fact:
+    cifmw_federation_deploy_type: "{{ 'crc' if (ansible_user_dir + '/.crc') | path_exists else 'ocp' }}"
+  when: cifmw_federation_deploy_type is not defined
+
+- name: Run SSO pod setup on OpenShift
+  ansible.builtin.include_tasks: run_keycloak_setup.yml
+
+- name: Run SSO realm setup for all realms
+  ansible.builtin.include_tasks: run_keycloak_realm_setup.yml
+
+- name: Display pre-deploy completion summary
+  ansible.builtin.debug:
+    msg:
+      - "Federation pre-deploy setup completed successfully"
+      - "Keycloak URL: {{ cifmw_federation_keycloak_url }}"
+      - "Deployment type: {{ cifmw_federation_deploy_type }}"
+      - "Configured realms: {{ cifmw_federation_realms | map(attribute='name') | list | join(', ') }}"
