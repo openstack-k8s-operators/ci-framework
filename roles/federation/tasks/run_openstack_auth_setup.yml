@@ -1,0 +1,115 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Validate OpenStack client pod availability
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    name: openstackclient
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: openstackclient_pod
+  failed_when: 
+    - openstackclient_pod.resources | length == 0
+    - "'Running' not in (openstackclient_pod.resources | map(attribute='status.phase') | list)"
+
+- name: Generate authentication setup files
+  block:
+    - name: Read federation get token script template
+      ansible.builtin.template:
+        src: get-token.sh.j2
+        dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'get-token.sh' ] | path_join }}"
+        mode: '0755'
+
+    - name: Generate test user cloudrc files
+      ansible.builtin.template:
+        src: "{{ item.template }}"
+        dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', item.username ] | path_join }}"
+        mode: "0644"
+      loop:
+        - template: kctestuser1.j2
+          username: "{{ cifmw_federation_keycloak_testuser1_username }}"
+        - template: kctestuser2.j2
+          username: "{{ cifmw_federation_keycloak_testuser2_username }}"
+      loop_control:
+        label: "{{ item.username }}"
+
+  rescue:
+    - name: Handle template generation failure
+      ansible.builtin.fail:
+        msg: "Failed to generate authentication setup files. Check template availability."
+
+- name: Copy files to OpenStack client pod
+  block:
+    - name: Copy get token script to pod
+      ansible.builtin.include_tasks: shared_tasks.yml
+      vars:
+        task_name: "Copy file to OpenStack client pod"
+        pod_dest_path: "/home/cloud-admin/get-token.sh"
+        local_src_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'get-token.sh' ] | path_join }}"
+
+    - name: Copy test user cloudrc files to pod
+      ansible.builtin.include_tasks: shared_tasks.yml
+      vars:
+        task_name: "Copy file to OpenStack client pod"
+        pod_dest_path: "/home/cloud-admin/{{ item }}"
+        local_src_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', item ] | path_join }}"
+      loop:
+        - "{{ cifmw_federation_keycloak_testuser1_username }}"
+        - "{{ cifmw_federation_keycloak_testuser2_username }}"
+      loop_control:
+        label: "{{ item }}"
+
+  rescue:
+    - name: Handle file copy failure
+      ansible.builtin.fail:
+        msg: "Failed to copy files to OpenStack client pod. Check pod accessibility and permissions."
+
+- name: Setup CA certificates
+  block:
+    - name: Copy system CA bundle
+      ansible.builtin.copy:
+        src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+        dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
+        mode: "0444"
+
+    - name: Get ingress operator CA cert
+      ansible.builtin.slurp:
+        src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
+      register: federation_sso_ca
+
+    - name: Add ingress operator CA to bundle
+      ansible.builtin.blockinfile:
+        path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
+        block: "{{ federation_sso_ca.content | b64decode }}"
+
+    - name: Copy CA bundle to openstackclient pod
+      ansible.builtin.include_tasks: shared_tasks.yml
+      vars:
+        task_name: "Copy file to OpenStack client pod"
+        pod_dest_path: "/home/cloud-admin/full-ca-list.crt"
+        local_src_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
+
+  rescue:
+    - name: Handle CA setup failure
+      ansible.builtin.fail:
+        msg: "Failed to setup CA certificates. Check certificate files and pod access."
+
+- name: Display auth setup completion
+  ansible.builtin.debug:
+    msg:
+      - "OpenStack authentication setup completed successfully"
+      - "Files copied to openstackclient pod in {{ cifmw_federation_run_osp_cmd_namespace }} namespace"
+      - "CA certificates configured for secure communication"
