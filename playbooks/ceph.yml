@@ -341,6 +341,29 @@
         pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
       no_log: true
 
+    # for deploying external ceph for 17.1 using cifmw, we need this playbook to create keyring
+    # for manila client and manila_data pool
+    - name: Add client.manila key and manila_data pool for tripleo deployment
+      ansible.builtin.set_fact:
+        cifmw_cephadm_keys: "{{ cifmw_cephadm_keys + [ manila_key ] }}"
+        cifmw_cephadm_pools: "{{ cifmw_cephadm_pools + [ manila_pool ] }}"
+      vars:
+        manila_key:
+          name: client.manila
+          key: "{{ cephx.key }}"
+          mode: '0600'
+          caps:
+            mgr: allow rw
+            mon: allow r
+            osd: allow rw pool=manila_data
+        manila_pool:
+          name: manila_data
+          target_size_ratio: 0.1
+          pg_autoscale_mode: true
+          application: cephfs
+      when: adoption_deploy_ceph_for_tripleo | default (false)
+      no_log: true
+
     # public network always exist because is provided by the ceph_spec role
     - name: Get Storage network range
       ansible.builtin.set_fact:
