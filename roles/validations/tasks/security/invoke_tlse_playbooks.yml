@@ -1,11 +1,46 @@
-- name: Invoke the automation playbook (dataplane certs) on controller-0
+- name: Load CI framework parameters
+  ansible.builtin.include_vars:
+    dir: "{{ cifmw_basedir }}/artifacts/parameters"
+
+- name: Create base ansible config file for security automation
+  ansible.builtin.copy:
+    content: |
+      [defaults]
+      callbacks_enabled = custom_junit
+      callback_plugins = {{ ansible_user_dir}}/src/github.com/infrawatch/feature-verification-tests/callback_plugins
+      # additional paths to search for roles
+      roles_path = ../roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles:{{ ansible_user_dir}}/src/github.com/openstack-k8s-operators/ci-framework/roles
+
+      [custom_junit]
+      # Base classname for all security TLSE validations
+      classname = security.tlse_validations
+      # Output directory for the JUnit XML files.
+      output_dir = {{ cifmw_basedir }}/artifacts/junit/security_tlse
+    dest: "{{ ansible_user_dir }}/src/gitlab.cee.redhat.com/OSP-DFG-security/automation/ansible.cfg"
+    mode: '0644'
+
+- name: Invoke the automation playbook (test_control_plane_regenerates_private_certificates_after_secret_deletion)
   environment:
     PATH: "{{ cifmw_path }}"
+    # Override the 'name' for the JUnit report specifically for this playbook run
+    ANSIBLE_CUSTOM_JUNIT_NAME: "test_control_plane_regenerates_private_certificates_after_secret_deletion"
   cifmw.general.ci_script:
     executable: "/bin/bash"
     output_dir: "{{ cifmw_basedir }}/artifacts"
     script: |
       set -ex -o pipefail
       cd "{{ ansible_user_dir }}/src/gitlab.cee.redhat.com/OSP-DFG-security/automation"
-      ansible-playbook -vv playbooks/renew_internal_cert_outer.yml || echo "renew_internal_cert_outer failed, continuing..."
-      ansible-playbook -vv playbooks/data_plane_cert_testing_with_delete.yml
+      ansible-playbook -vv playbooks/test_control_plane_regenerates_private_certificates_after_secret_deletion.yml
+
+- name: Invoke the automation playbook (test_data_plane_cert_testing_with_delete)
+  environment:
+    PATH: "{{ cifmw_path }}"
+    # Override the 'name' for the JUnit report specifically for this playbook run
+    ANSIBLE_CUSTOM_JUNIT_NAME: "test_data_plane_cert_testing_with_delete"
+  cifmw.general.ci_script:
+    executable: "/bin/bash"
+    output_dir: "{{ cifmw_basedir }}/artifacts"
+    script: |
+      set -ex -o pipefail
+      cd "{{ ansible_user_dir }}/src/gitlab.cee.redhat.com/OSP-DFG-security/automation"
+      ansible-playbook -vv playbooks/test_data_plane_cert_testing_with_delete.yml
