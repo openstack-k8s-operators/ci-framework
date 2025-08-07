@@ -87,6 +87,7 @@ cifmw_test_operator_stages:
 * `cifmw_test_operator_tempest_extra_configmaps_mounts`: (List) A list of configmaps that should be mounted into the tempest test pods. Default value: `[]`
 * `cifmw_test_operator_tempest_extra_mounts`: (List) A list of additional volume mounts for the tempest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_tempest_debug`: (Bool) Run Tempest in debug mode, it keeps the operator pod sleeping infinity (it must only set to `true`only for debugging purposes). Default value: `false`
+* `cifmw_test_operator_tempest_timing_data`: (Boolean) Enables saving stestr timing data to save time in subsequent Tempest test runs. Default value: `false`
 * `cifmw_test_operator_tempest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When untouched it clears the default values set on the test-operator side. This means that the tempest test pods run with unspecified resource limits. Default value: `{requests: {}, limits: {}}`
 * `cifmw_tempest_tempestconf_config`: Deprecated, please use `cifmw_test_operator_tempest_tempestconf_config` instead
 * `cifmw_test_operator_tempest_tempestconf_config`: (Dict) This parameter can be used to customize the execution of the `discover-tempest-config` run. Please consult the test-operator documentation. For example, to pass a custom configuration for `tempest.conf`, use the `overrides` section:
