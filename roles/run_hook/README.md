@@ -24,6 +24,56 @@ name:
 * `pre_infra_01_my_hook` will end as `01 my hook`
 * `post_infra_my_hook` will end as `My hook`
 
+## Hook execution order
+
+After merging change [1](https://github.com/openstack-k8s-operators/ci-framework/pull/3195),
+hook role will respect naming to avoid additional playbook execution.
+
+### Before matching exact name
+
+Example, how execution was done before patch. Hook order was:
+
+```yaml
+post_deploy_ceph:
+  - name: 80 Run ceph hook playbook
+    type: playbook
+    source: ceph.yml
+
+post_deploy:
+  - name: 81 Kustomize OpenStack CR with Ceph
+    type: playbook
+    source: control_plane_ceph_backends.yml
+```
+
+Result:
+
+```
+TASK [run_hook : Loop on hooks for step post_deploy_ceph _raw_params={{ hook.type }}.yml] ***
+(...)(item={'name': '80 Run ceph hook playbook', 'type': 'playbook', 'source': 'ceph.yml'}
+(...)
+
+TASK [run_hook : Loop on hooks for step post_deploy _raw_params={{ hook.type }}.yml] ***
+{'name': '81 Kustomize OpenStack CR with Ceph', 'type': 'playbook', 'source': 'control_plane_ceph_backends.yml'}
+{'name': '82 Kustomize and update Control Plane', 'type': 'playbook', 'source': 'control_plane_kustomize_deploy.yml'}
+{'name': 'Ceph', 'type': 'playbook', 'source': 'ceph.yml'}
+```
+
+It means, that the `ceph` playbook was executed twice, which is unexpected.
+
+### After matching exact name
+
+```
+TASK [run_hook : Loop on hooks for step post_deploy_ceph _raw_params={{ hook.type }}.yml] ***
+(...)(item={'name': '80 Run ceph hook playbook', 'type': 'playbook', 'source': 'ceph.yml'}
+(...)
+
+TASK [run_hook : Loop on hooks for step post_deploy _raw_params={{ hook.type }}.yml] ***
+{'name': '81 Kustomize OpenStack CR with Ceph', 'type': 'playbook', 'source': 'control_plane_ceph_backends.yml'}
+{'name': '82 Kustomize and update Control Plane', 'type': 'playbook', 'source': 'control_plane_kustomize_deploy.yml'}
+```
+
+The playbook was executed once.
+
 ## Hooks expected format
 
 ### Playbook
