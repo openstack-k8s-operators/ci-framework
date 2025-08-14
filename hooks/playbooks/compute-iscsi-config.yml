@@ -12,8 +12,27 @@
         - 'node.session.initial_login_retry_max = 3'
         - 'node.conn[0].timeo.login_timeout = 5'
 
-    - name: Restart iscsid container to refresh /etcd/iscsid.conf
+    # Traditionally, iscsid runs in a container via the edpm_iscsid service,
+    # but there's an effort to move it onto the EDPM host. This restarts
+    # the daemon regardless of where it's running.
+
+    - name: Gather services facts
+      ansible.builtin.service_facts:
+
+    - name: Restart iscsid container to refresh /etc/iscsi/iscsid.conf
       become: true
-      ansible.builtin.systemd:
+      ansible.builtin.systemd_service:
         name: edpm_iscsid
         state: restarted
+      when:
+        - ansible_facts.services["edpm_iscsid.service"] is defined
+        - ansible_facts.services["edpm_iscsid.service"]["status"] == "enabled"
+
+    - name: Restart iscsid on the host to refresh /etc/iscsi/iscsid.conf
+      become: true
+      ansible.builtin.systemd_service:
+        name: iscsid
+        state: restarted
+      when:
+        - ansible_facts.services["iscsid.service"] is defined
+        - ansible_facts.services["iscsid.service"]["status"] == "enabled"
