@@ -78,6 +78,44 @@
     mode: "0600"
     force: true
 
+- name: Get ceph RGW endpoint API endpoint
+  ansible.builtin.shell:
+    cmd: |
+      set -xe -o pipefail
+      oc rsh -n {{ namespace }} openstackclient openstack endpoint list --interface internal --service swift -c URL -f value | cut -d "/" -f 1,2,3
+  register: reg_ceph_rgw_s3_endpoint
+  changed_when: "'stdout' in reg_ceph_rgw_s3_endpoint"
+  failed_when: (reg_ceph_rgw_s3_endpoint.rc | int) >= 1
+
+- name: Discover ceph RGW settings
+  ansible.builtin.set_fact:
+    ceph_s3_access_key: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters','digits'], length=32) }}"
+    ceph_s3_secret_key: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters','digits'], length=32) }}"
+    ceph_s3_bucket: "{{ cifmw_ceph_client_rgw_bucket_name }}"
+    ceph_s3_endpoint: "{{ reg_ceph_rgw_s3_endpoint.stdout }}"
+
+- name: Create glance secrets for ceph S3 backend
+  ansible.builtin.template:
+    src: templates/k8s_ceph_rgw_glance_secret.j2
+    dest: "{{ cifmw_ceph_client_fetch_dir }}/k8s_ceph_rgw_glance_secret.yaml"
+    mode: "0640"
+    force: true
+
+- name: Create ec2 credentials
+  ansible.builtin.shell: |-
+    set -xe -o pipefail
+    oc rsh -n {{ namespace }} openstackclient openstack credential create --type ec2 --project admin admin '{"access": "{{ ceph_s3_access_key }}", "secret": "{{ ceph_s3_secret_key }}"}'
+  changed_when: false
+
+- name: Apply S3 backend secrets
+  ansible.builtin.shell:
+    cmd: |
+      set -xe -o pipefail
+      oc -n {{ namespace }} apply -f {{ cifmw_ceph_client_fetch_dir }}/k8s_ceph_rgw_glance_secret.yaml
+  register: s3_secrets_oc_apply_result
+  changed_when: ('stdout' in s3_secrets_oc_apply_result) and ('unchanged' not in s3_secrets_oc_apply_result.stdout)
+  failed_when: ( s3_secrets_oc_apply_result.rc | int ) >= 1
+
 - name: Create edpm-values-post-ceph ConfigMap if sample path provided
   ansible.builtin.include_tasks: edpm_values_post_ceph.yml
   when:
