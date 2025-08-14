@@ -301,6 +301,12 @@
         target_size_ratio: 0.1
         pg_autoscale_mode: true
         application: cephfs
+      # we need manila_data pool for cephnfs ganesha in the adoptoin contect for
+      # 17.1 deployment with external ceph
+      - name: manila_data
+        target_size_ratio: 0.1
+        pg_autoscale_mode: true
+        application: cephfs
   pre_tasks:
     # end_play will end this current playbook and go the the next
     # imported play.
@@ -337,6 +343,15 @@
               mon: profile rbd
               osd: "{{ pools | map('regex_replace', '^(.*)$',
                                    'profile rbd pool=\\1') | join(', ') }}"
+     # for deploying external ceph for 17.1 using cifmw, we need this playbook to create keyring
+     # for manila client
+          - name: client.manila
+            key: "{{ cephx.key }}"
+            mode: '0600'
+            caps:
+              mgr: allow rw
+              mon: allow r
+              osd: allow rw pool=manila_data
       vars:
         pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
       no_log: true
