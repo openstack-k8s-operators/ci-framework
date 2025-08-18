@@ -48,13 +48,14 @@
   hosts: ceph_replication_targets
   become: true
   vars:
-    # Host filesystem paths (what Ansible sees)
-    bootstrap_token_path_host: /tmp/bootstrap_token_site
-    token_tmp_path: /tmp/rbd_mirror_bootstrap_token
-    # Container filesystem paths (what cephadm container sees)
-    bootstrap_token_path_container: /rootfs/tmp/bootstrap_token_site
-    # Configurable pool name
+    # Pool configuration
     replication_pool: "{{ cifmw_replication_pool | default('volumes') }}"
+
+    # Derived paths using cifmw variables directly
+    primary_conf_path: "{{ cifmw_replication_ceph_conf_dir | default('/etc/ceph') }}/{{ cifmw_replication_primary_cluster }}.conf"
+    primary_keyring_path: "{{ cifmw_replication_ceph_conf_dir | default('/etc/ceph') }}/{{ cifmw_replication_primary_cluster }}.client.{{ cifmw_replication_client_name | default('openstack') }}.keyring"
+    secondary_conf_path: "{{ cifmw_replication_ceph_conf_dir | default('/etc/ceph') }}/{{ cifmw_replication_secondary_cluster }}.conf"
+    secondary_keyring_path: "{{ cifmw_replication_ceph_conf_dir | default('/etc/ceph') }}/{{ cifmw_replication_secondary_cluster }}.client.{{ cifmw_replication_client_name | default('openstack') }}.keyring"
   tasks:
     # Add validation that cephadm is available
     - name: Verify cephadm is available
@@ -78,13 +79,13 @@
 
     - name: Create bootstrap token (only on primary)
       ansible.builtin.shell:
-        cmd: cephadm shell -- sh -c "rbd mirror pool peer bootstrap create --site-name {{ ceph_fsid }} {{ replication_pool }}" > {{ bootstrap_token_path_host }}
+        cmd: cephadm shell -- sh -c "rbd mirror pool peer bootstrap create --site-name {{ ceph_fsid }} {{ replication_pool }}" > /tmp/bootstrap_token_site
       when: site_role == "primary"
       register: create_token_result
 
     - name: Verify token file was created on primary
       ansible.builtin.stat:
-        path: "{{ bootstrap_token_path_host }}"
+        path: "/tmp/bootstrap_token_site"
       register: token_file_stat
       when: site_role == "primary"
 
@@ -97,64 +98,121 @@
 
     - name: Fetch token from primary
       ansible.builtin.fetch:
-        src: "{{ bootstrap_token_path_host }}"
-        dest: "{{ token_tmp_path }}"
+        src: "/tmp/bootstrap_token_site"
+        dest: "/tmp/rbd_mirror_bootstrap_token"
         flat: true
       when: site_role == "primary"
 
     - name: Verify token file exists on controller (debug)
       ansible.builtin.stat:
-        path: "{{ token_tmp_path }}"
+        path: "/tmp/rbd_mirror_bootstrap_token"
       register: controller_token_stat
       delegate_to: localhost
       when: site_role == "secondary"
 
     - name: Fail if token not available on controller
       ansible.builtin.fail:
-        msg: "Bootstrap token file not found on controller at {{ token_tmp_path }}"
+        msg: "Bootstrap token file not found on controller at /tmp/rbd_mirror_bootstrap_token"
       when:
         - site_role == "secondary"
         - not controller_token_stat.stat.exists
 
     - name: Copy token to secondary
       ansible.builtin.copy:
-        src: "{{ token_tmp_path }}"
-        dest: "{{ bootstrap_token_path_host }}"
-        mode: '0600'
-        owner: root
-        group: root
+        src: "/tmp/rbd_mirror_bootstrap_token"
+        dest: "/tmp/bootstrap_token_site"
+        mode: "0600"
+        owner: "root"
+        group: "root"
       when: site_role == "secondary"
 
     - name: Verify token file was copied to secondary
       ansible.builtin.stat:
-        path: "{{ bootstrap_token_path_host }}"
+        path: "/tmp/bootstrap_token_site"
       register: secondary_token_stat
       when: site_role == "secondary"
 
     - name: Fail if token copy failed
       ansible.builtin.fail:
-        msg: "Bootstrap token file was not copied to secondary at {{ bootstrap_token_path_host }}"
+        msg: "Bootstrap token file was not copied to secondary at /tmp/bootstrap_token_site"
       when:
         - site_role == "secondary"
         - not secondary_token_stat.stat.exists
 
     - name: Import token (only on secondary) - using container path
       ansible.builtin.command:
-        cmd: cephadm shell -- rbd mirror pool peer bootstrap import --site-name {{ ceph_fsid }} {{ replication_pool }} {{ bootstrap_token_path_container }}
+        cmd: cephadm shell -- rbd mirror pool peer bootstrap import --site-name {{ ceph_fsid }} {{ replication_pool }} /rootfs/tmp/bootstrap_token_site
       when: site_role == "secondary"
       register: import_token_result
       failed_when: import_token_result.rc != 0
 
+    # Copy configuration files from secondary to primary
+    - name: Fetch secondary cluster conf from secondary
+      ansible.builtin.fetch:
+        src: "{{ secondary_conf_path }}"
+        dest: "/tmp/{{ cifmw_replication_secondary_cluster }}.conf"
+        flat: true
+      when: site_role == "secondary"
+
+    - name: Fetch secondary cluster keyring from secondary
+      ansible.builtin.fetch:
+        src: "{{ secondary_keyring_path }}"
+        dest: "/tmp/{{ cifmw_replication_secondary_cluster }}.client.{{ cifmw_replication_client_name | default('openstack') }}.keyring"
+        flat: true
+      when: site_role == "secondary"
+
+    - name: Copy secondary cluster conf to primary
+      ansible.builtin.copy:
+        src: "/tmp/{{ cifmw_replication_secondary_cluster }}.conf"
+        dest: "{{ secondary_conf_path }}"
+        mode: "0644"
+        owner: "root"
+        group: "root"
+      when: site_role == "primary"
+
+    - name: Copy secondary cluster keyring to primary
+      ansible.builtin.copy:
+        src: "/tmp/{{ cifmw_replication_secondary_cluster }}.client.{{ cifmw_replication_client_name | default('openstack') }}.keyring"
+        dest: "{{ secondary_keyring_path }}"
+        mode: "0600"
+        owner: "ceph"
+        group: "ceph"
+      when: site_role == "primary"
+
+    - name: Add client configuration to secondary cluster conf on primary
+      ansible.builtin.blockinfile:
+        path: "{{ secondary_conf_path }}"
+        block: |
+          [client.{{ cifmw_replication_client_name | default('openstack') }}]
+          keyring = {{ secondary_keyring_path }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - client.{{ cifmw_replication_client_name | default('openstack') }}"
+        create: false
+      when: site_role == "primary"
+
     # Cleanup files
+    - name: Clean up temporary secondary cluster conf on controller
+      ansible.builtin.file:
+        path: "/tmp/{{ cifmw_replication_secondary_cluster }}.conf"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
+    - name: Clean up temporary secondary cluster keyring on controller
+      ansible.builtin.file:
+        path: "/tmp/{{ cifmw_replication_secondary_cluster }}.client.{{ cifmw_replication_client_name | default('openstack') }}.keyring"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
     - name: Clean up token file on remote hosts
       ansible.builtin.file:
-        path: "{{ bootstrap_token_path_host }}"
+        path: "/tmp/bootstrap_token_site"
         state: absent
       when: site_role in ['primary', 'secondary']
 
     - name: Clean up controller file
       ansible.builtin.file:
-        path: "{{ token_tmp_path }}"
+        path: "/tmp/rbd_mirror_bootstrap_token"
         state: absent
       delegate_to: localhost
       run_once: true
