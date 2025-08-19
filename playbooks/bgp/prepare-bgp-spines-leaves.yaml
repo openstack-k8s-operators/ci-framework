@@ -39,11 +39,9 @@
         sysctl_file: /etc/sysctl.d/sysctl.conf
         state: present
         reload: true
-      loop: "{{ sysctls | dict2items }}"
-      vars:
-        sysctls:
-          net.ipv4.conf.all.rp_filter: '0'
-          net.ipv4.conf.default.rp_filter: '0'
+      with_dict:
+        net.ipv4.conf.all.rp_filter: '0'
+        net.ipv4.conf.default.rp_filter: '0'
       register: result
       retries: 3
       timeout: 60
@@ -94,6 +92,10 @@
           ansible.builtin.package:
             name: frr
             state: present
+          register: frr_present
+          retries: 10
+          delay: 2
+          until: frr_present is success
 
     - name: Enable FRR BGP daemon
       become: true
@@ -189,7 +191,8 @@
       community.general.nmcli:
         autoconnect: true
         conn_name: "{{ router_uplink_conn }}"
-        ip4: "{{ router_uplink_ip }}/30"
+        # mask changed to /24 due to https://github.com/openstack-k8s-operators/architecture/pull/466
+        ip4: "{{ router_uplink_ip }}/24"
         method4: manual
         method6: link-local
         state: present
