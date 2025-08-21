@@ -99,27 +99,40 @@
           "{{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather"
 
   rescue:
-    - name: Create oc_inspect log directory
-      ansible.builtin.file:
-        path: "{{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect"
-        state: directory
-        mode: "0755"
+    - name: Openstack-must-gather failure
+      block:
+        - name: Log openstack-must-gather failure
+          ansible.builtin.debug:
+            msg: "OpenStack must-gather failed, running fallback generic must-gather"
 
-    - name: Inspect the cluster after must-gather failure
-      ignore_errors: true # noqa: ignore-errors
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      cifmw.general.ci_script:
-        output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
-        script: |
-          oc adm inspect namespace/{{ item }} --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
-      loop: >-
-        {{
-          (
-            cifmw_os_must_gather_namespaces | default([]) +
-            (
-              cifmw_os_must_gather_additional_namespaces | split(',') | list
-            )
-          ) | unique
-        }}
+        - name: Run fallback generic must-gather command
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command:
+            cmd: oc adm must-gather --dest-dir {{ ansible_user_dir }}/ci-framework-data/must-gather
+      always:
+        - name: Create oc_inspect log directory
+          ansible.builtin.file:
+            path: "{{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect"
+            state: directory
+            mode: "0755"
+
+        - name: Inspect the cluster after must-gather failure
+          ignore_errors: true # noqa: ignore-errors
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          cifmw.general.ci_script:
+            output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
+            script: |
+              oc adm inspect namespace/{{ item }} --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
+          loop: >-
+            {{
+              (
+                cifmw_os_must_gather_namespaces | default([]) +
+                (
+                  cifmw_os_must_gather_additional_namespaces | split(',') | list
+                )
+              ) | unique
+            }}
