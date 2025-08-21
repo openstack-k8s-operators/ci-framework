@@ -145,6 +145,64 @@
       register: import_token_result
       failed_when: import_token_result.rc != 0
 
+    # Copy configuration files from secondary to primary
+    - name: Fetch az1.conf from secondary
+      ansible.builtin.fetch:
+        src: /etc/ceph/az1.conf
+        dest: /tmp/az1.conf
+        flat: true
+      when: site_role == "secondary"
+
+    - name: Fetch az1.client.openstack.keyring from secondary
+      ansible.builtin.fetch:
+        src: /etc/ceph/az1.client.openstack.keyring
+        dest: /tmp/az1.client.openstack.keyring
+        flat: true
+      when: site_role == "secondary"
+
+    - name: Copy az1.conf to primary
+      ansible.builtin.copy:
+        src: /tmp/az1.conf
+        dest: /etc/ceph/az1.conf
+        mode: '0644'
+        owner: root
+        group: root
+      when: site_role == "primary"
+
+    - name: Copy az1.client.openstack.keyring to primary
+      ansible.builtin.copy:
+        src: /tmp/az1.client.openstack.keyring
+        dest: /etc/ceph/az1.client.openstack.keyring
+        mode: '0600'
+        owner: ceph
+        group: ceph
+      when: site_role == "primary"
+
+    - name: Add client.openstack configuration to az1.conf on primary
+      ansible.builtin.blockinfile:
+        path: /etc/ceph/az1.conf
+        block: |
+          [client.openstack]
+          keyring = /etc/ceph/az1.client.openstack.keyring
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - client.openstack"
+        create: false
+      when: site_role == "primary"
+
+    # Cleanup temporary files
+    - name: Clean up temporary az1.conf on controller
+      ansible.builtin.file:
+        path: /tmp/az1.conf
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
+    - name: Clean up temporary az1.client.openstack.keyring on controller
+      ansible.builtin.file:
+        path: /tmp/az1.client.openstack.keyring
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
     # Cleanup files
     - name: Clean up token file on remote hosts
       ansible.builtin.file:
