@@ -27,6 +27,7 @@
 * `cifmw_nat64_appliance_ssh_pub_keys`: (List) List of SSH public key for the nat64 appliance VM. Defaults to: `[]`.
 * `cifmw_nat64_ipv6_prefix`: (String) IPv6 prefix for nat64. Defaults to: `fc00:abcd:abcd:fc00::/64`.
 * `cifmw_nat64_ipv6_tayga_address`: (String) Tayga IPv6 address. Defaults to: `fc00:abcd:abcd:fc00::3`.
+* `cifmw_nat64_appliance_image_url`: (String) When defined, a specific image is downloaded from that URL and used as the nat64 appliance base image. Defaults to `""`.
 
 ## Building the image
 

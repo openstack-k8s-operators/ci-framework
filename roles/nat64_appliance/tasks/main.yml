@@ -66,12 +66,33 @@
     dest: "{{ cifmw_nat64_appliance_workdir }}/edpm-image-builder"
     version: main
 
+- name: Download nat64 source image
+  when: cifmw_nat64_appliance_image_url | length > 0
+  block:
+    - name: Create nat64 appliance cache directory
+      ansible.builtin.file:
+        path: "{{ cifmw_nat64_appliance_workdir }}/cache"
+        state: directory
+        mode: "0755"
+
+    - name: Download the nat64 source image
+      ansible.builtin.get_url:
+        url: "{{ cifmw_nat64_appliance_image_url }}"
+        dest: "{{ cifmw_nat64_appliance_workdir }}/cache"
+        timeout: 20
+        mode: "0644"
+      register: download_result
+      until: download_result is success
+      retries: 60
+      delay: 10
+
 - name: Build the nat64-appliance image using DIB
   become: "{{ cifmw_nat64_appliance_run_dib_as_root | default(false) | bool }}"
   environment:
     ELEMENTS_PATH: "{{ cifmw_nat64_appliance_workdir }}/elements:{{ cifmw_nat64_appliance_workdir }}/edpm-image-builder/dib/"
-    DIB_IMAGE_CACHE: "{{ cifmw_nat64_appliance_workdir }}/cache"
+    DIB_IMAGE_CACHE: "{{ cifmw_nat64_appliance_workdir ~ '/cache' if cifmw_nat64_appliance_image_url | length == 0 else '' }}"
     DIB_DEBUG_TRACE: '1'
+    DIB_LOCAL_IMAGE: "{{ '' if cifmw_nat64_appliance_image_url | length == 0 else download_result.dest }}"
   cifmw.general.ci_script:
     chdir: "{{ cifmw_nat64_appliance_workdir }}"
     output_dir: "{{ cifmw_nat64_appliance_basedir }}/artifacts"
