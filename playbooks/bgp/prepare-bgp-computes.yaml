@@ -1,16 +1,18 @@
 ---
 - name: Configure computes
-  hosts: "computes{{ networkers_bool | default(false) | bool | ternary(',networkers', '') }}"
+  hosts: >-
+    r0-computes,r1-computes,r2-computes
+    {{ networkers_bool | default(false) | bool | ternary(',r0-networkers,r1-networkers,r2-networkers', '') }}"
   tasks:
     - name: Check default route corresponds with BGP
       ansible.builtin.command:
         cmd: "ip route show default"
-      register: _initial_default_ip_route_result
+      register: initial_default_ip_route_result
       changed_when: false
 
     - name: Early end if default route is already based on BGP
       ansible.builtin.meta: end_play
-      when: "'proto bgp' in _initial_default_ip_route_result.stdout"
+      when: "'proto bgp' in initial_default_ip_route_result.stdout"
 
     - name: Obtain the device with the DHCP default route
       ansible.builtin.shell:
@@ -48,9 +50,9 @@
 
     - name: Remove default route obtained via DHCP from leafs in order to apply BGP
       become: true
-      ansible.builtin.shell:
+      ansible.builtin.shell: # noqa risky-shell-pipe
         cmd: >
-          set -o pipefail && ip route show default |
+          ip route show default |
           grep "proto dhcp" |
           xargs -r ip route del
       changed_when: false
