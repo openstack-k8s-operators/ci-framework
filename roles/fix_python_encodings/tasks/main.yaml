@@ -1,0 +1,71 @@
+---
+- name: Check if cp437 is available
+  ansible.builtin.raw: |-
+    python3 -c 'from encodings import cp437; print(cp437)'
+  register: _import_cp437
+  changed_when: false
+  ignore_errors: true
+
+- name: Fix missing cp437
+  when: _import_cp437 is not success
+  block:
+    - name: Install python3-libs
+      ansible.builtin.raw: |-
+        dnf install --refresh --nobest --allowerasing --assumeyes python3-libs
+      become: true
+      ignore_errors: true
+      register: _dnf_install
+      changed_when:
+        - "'Installed:' in _dnf_install.stdout"
+        - "'Complete!' in _dnf_install.stdout"
+        - "'Nothing to do.' not in _dnf_install.stdout"
+
+    - name: Reinstall python3-libs
+      ansible.builtin.raw: |-
+        dnf reinstall --nobest --allowerasing --assumeyes python3-libs
+      become: true
+      register: _dnf_reinstall
+      changed_when:
+        - "'Reinstalled:' in _dnf_reinstall.stdout"
+        - "'Complete!' in _dnf_reinstall.stdout"
+
+    - name: Check if cp437 is available now
+      ansible.builtin.raw: |-
+        python3 -c 'from encodings import cp437; print(cp437)'
+      register: _import_cp437
+      changed_when: false
+      ignore_errors: true
+
+    # NOTE(sdatko): the tasks below should never be reached hopefully
+    # (i.e. a success in the register above overrides the check within block)
+    - name: Find Python3 installations
+      ansible.builtin.raw: |-
+        find /usr -path '/*/python3*/encodings' -type d
+      register: _python3_encodings
+      changed_when: false
+
+    - name: Show Python3 installations
+      ansible.builtin.debug:
+        msg: "{{ _python3_encodings.stdout_lines }}"
+
+    - name: Fetch cp437.py if needed
+      ansible.builtin.raw: |-
+        cd "{{ item }}"
+        if ! [ -s 'cp437.py' -o -s 'cp437.pyc' ]; then
+            curl --location --remote-name "{{ cp437_url }}"
+        fi
+      become: true
+      vars:
+        cp437_url: https://raw.githubusercontent.com/python/cpython/main/Lib/encodings/cp437.py
+      loop: "{{ _python3_encodings.stdout_lines }}"
+
+    - name: Check if cp437 is finally available
+      ansible.builtin.raw: |-
+        python3 -c 'from encodings import cp437; print(cp437)'
+      register: _import_cp437
+      changed_when: false
+      ignore_errors: true
+
+    - name: Fail due to cp437 still not available
+      ansible.builtin.fail:
+        msg: 'Unable to fix the target host'
