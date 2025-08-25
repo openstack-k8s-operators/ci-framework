@@ -31,7 +31,7 @@ None.
         name: edpm_deploy
 
     - name: Deploy Ceph on edpm nodes
-      ansible.builtin.import_playbook: ceph.yml
+      ansible.builtin.import_playbook: hooks/playbooks/ceph.yml
 
     - name: Prepare for HCI deploy phase 2
       ansible.builtin.import_role:
