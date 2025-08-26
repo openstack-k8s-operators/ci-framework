@@ -509,10 +509,13 @@
     kind: NodeHealthCheck
     name: nodehealthcheck-sample
   register: existing_nhc_cr_check
+  until: existing_nhc_cr_check is succeeded
+  retries: "{{ cifmw_snr_nhc_retries }}"
+  delay: "{{ cifmw_snr_nhc_delay }}"
   ignore_errors: true
 
 - name: Create Node Health Check CR to use SNR
-  when: existing_nhc_cr_check.resources | length == 0
+  when: existing_nhc_cr_check is succeeded and (existing_nhc_cr_check.resources | length == 0)
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_snr_nhc_kubeconfig }}"
     state: present
@@ -540,9 +543,12 @@
             status: Unknown
             duration: 30s
   register: nhc_cr_creation
+  until: nhc_cr_creation is succeeded
+  retries: "{{ cifmw_snr_nhc_retries }}"
+  delay: "{{ cifmw_snr_nhc_delay }}"
 
 - name: Display info if NodeHealthCheck CR already exists
-  when: existing_nhc_cr_check.resources | length > 0
+  when: existing_nhc_cr_check is succeeded and (existing_nhc_cr_check.resources | length > 0)
   ansible.builtin.debug:
     msg: |
       NodeHealthCheck CR 'nodehealthcheck-sample' already exists and will not be recreated.
