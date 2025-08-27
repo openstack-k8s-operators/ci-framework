@@ -1,0 +1,72 @@
+---
+# Setup Cinder volume types and Nova aggregates for dz-storage DT
+# Based on architecture/examples/dt/dz-storage/validate.md
+
+- name: Setup dz-storage environment
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Get service project ID
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        openstackclient
+        openstack project show service -c id -f value
+      register: service_project_result
+
+    - name: Set service project ID
+      ansible.builtin.set_fact:
+        service_project_id: "{{ service_project_result.stdout | trim }}"
+
+    - name: Create Cinder volume types for Glance multistore
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        openstackclient
+        openstack volume type create --private
+        --project "{{ service_project_id }}"
+        --property "RESKEY:availability_zones={{ item.zone }}"
+        {{ item.name }}
+      loop:
+        - { name: "glance-iscsi-az0", zone: "az0" }
+        - { name: "glance-iscsi-az1", zone: "az1" }
+        - { name: "glance-iscsi-az2", zone: "az2" }
+      failed_when: false  # Types might already exist
+
+    - name: Create Nova aggregates for availability zones
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        openstackclient
+        openstack aggregate create {{ item }} --zone {{ item }}
+      loop:
+        - "az0"
+        - "az1"
+        - "az2"
+      failed_when: false  # Aggregates might already exist
+
+    - name: Add compute hosts to availability zone aggregates
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n openstack
+        openstackclient
+        openstack aggregate add host {{ item.az }} {{ item.host }}
+      loop:
+        - { az: "az0", host: "r0-compute-0.ctlplane.example.com" }
+        - { az: "az0", host: "r0-compute-1.ctlplane.example.com" }
+        - { az: "az1", host: "r1-compute-0.ctlplane.example.com" }
+        - { az: "az1", host: "r1-compute-1.ctlplane.example.com" }
+        - { az: "az2", host: "r2-compute-0.ctlplane.example.com" }
+        - { az: "az2", host: "r2-compute-1.ctlplane.example.com" }
+      failed_when: false  # Hosts might already be in aggregates
