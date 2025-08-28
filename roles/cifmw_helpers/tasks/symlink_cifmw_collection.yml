@@ -1,0 +1,29 @@
+---
+- name: Check if the ci-framework exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_helpers_project_dir }}"
+  register: _cifmw_helpers_project_dir_stat
+
+- name: Make symlink to local Ansible collection dir
+  when: _cifmw_helpers_project_dir_stat.stat.exists
+  block:
+    - name: Check if cifmw general collection exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_helpers_ansible_collection_dir }}/cifmw/general/plugins"
+      register: _cifmw_gen_collection
+
+    - name: Check if cifmw general collection exists
+      when: not _cifmw_gen_collection.stat.exists
+      block:
+        - name: Workaround for earlier nested ansible execution
+          ansible.builtin.file:
+            path: "{{ cifmw_helpers_ansible_collection_dir }}/cifmw/general/"
+            state: directory
+            mode: "0755"
+
+        - name: Create symlink to the local .ansible collection dir
+          ansible.builtin.file:
+            src: "{{ cifmw_helpers_project_dir }}/plugins"
+            dest: "{{ cifmw_helpers_ansible_collection_dir }}/cifmw/general/plugins"
+            state: link
+            force: true

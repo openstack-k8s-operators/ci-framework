@@ -1,0 +1,29 @@
+---
+# NOTE: include_vars only reads file where ansible-playbook was executed.
+# In some plays, we are starting to drop nested ansible execution.
+# In that case, include_vars would not work.
+- name: Check directory is available
+  ansible.builtin.stat:
+    path: "{{ provided_dir }}"
+  register: param_dir
+
+- name: List files available in dir and parse
+  when: param_dir.stat.exists
+  block:
+    - name: List available files
+      ansible.builtin.command: |
+        ls {{ provided_dir }}
+      register: _param_dir
+
+    - name: Read vars
+      ansible.builtin.slurp:
+        src: "{{ provided_dir }}/{{ item }}"
+      register: _parsed_vars
+      loop: "{{ _param_dir.stdout_lines }}"
+      no_log: "{{ cifmw_helpers_no_log }}"
+
+    - name: Call task to parse all files as fact
+      ansible.builtin.include_tasks:
+        file: set_dir_facts.yml
+      loop: '{{ _parsed_vars["results"] }}'
+      no_log: "{{ cifmw_helpers_no_log }}"
