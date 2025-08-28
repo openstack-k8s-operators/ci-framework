@@ -1,0 +1,43 @@
+---
+# NOTE: This is a required workaround, that would help us to drop
+# nested Ansible execution. The Zuul executor does not have the
+# cimfw collection installed, so on directly calling the roles, that
+# are using cifmw.general.ci_script or cifmw.general.discover_latest_image
+# or other, it will fail with an error:
+#   couldn't resolve module/action
+# This playbook would make a symlink to .ansible collection dir, so in the
+# next playbook execution, module should be available.
+- name: Make symlink of cifmw general collection to Zuul Ansible workdir
+  hosts: localhost
+  vars:
+    cifmw_project_dir: "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}" # noqa: var-naming[pattern]
+    ansible_collection_dir: "{{ ansible_user_dir }}/.ansible/collections/ansible_collections" # noqa: var-naming[pattern]
+  tasks:
+    - name: Check if the ci-framework exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_project_dir }}" # noqa: var-naming[pattern]
+      register: _cifmw_project_dir_stat
+
+    - name: Make symlink to ansible collection dir
+      when: _cifmw_project_dir_stat.stat.exists
+      block:
+        - name: Check if cifmw general collection exists
+          ansible.builtin.stat:
+            path: "{{ ansible_collection_dir }}/cifmw/general/plugins" # noqa: var-naming[pattern]
+          register: _cifmw_gen_collection
+
+        - name: Check if cifmw general collection exists
+          when: not _cifmw_gen_collection.stat.exists
+          block:
+            - name: Workaround for earlier nested ansible execution
+              ansible.builtin.file:
+                path: "{{ ansible_collection_dir }}/cifmw/general/"
+                state: directory
+                mode: "0755"
+
+            - name: Create symlink to the modules
+              ansible.builtin.file:
+                src: "{{ cifmw_project_dir }}/plugins"
+                dest: "{{ ansible_collection_dir }}/cifmw/general/plugins"
+                state: link
+                force: true
