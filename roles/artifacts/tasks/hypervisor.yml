@@ -1,0 +1,25 @@
+---
+- name: Ensure sos package is installed
+  become: true
+  ansible.builtin.yum:
+    name: sos
+    state: present
+
+- name: Create hypervisor folder
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/ci-framework-data/logs/hypervisor"
+    state: directory
+    mode: "0755"
+
+- name: Generate SOS report
+  become: true
+  ansible.builtin.command:
+    sos report --batch --all-logs
+    --tmp-dir "{{ ansible_user_dir }}/logs/hypervisor/ci-framework-data/artifacts/"
+    --enable-plugins=kvm,libvirt,hardware,networking
+  register: sos_output
+  changed_when: "'sosreport' in sos_output.stdout"
+
+- name: Display SOS report summary
+  ansible.builtin.debug:
+    var: sos_output.stdout_lines
