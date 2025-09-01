@@ -6,6 +6,7 @@ Role to run update
 * `cifmw_update_openstack_update_run_operators_updated`: (Boolean) Set if openstack_update_run make target should not modify openstack-operator csv to fake openstack services container change. Default to `True`.
 * `cifmw_update_openstack_update_run_target_version`: (String) Define openstack target version to run update to.
 * `cifmw_update_openstack_update_run_timeout`: (String) Define `oc wait` global timeout passed to each step of update procedure. It should be a value of a longest step of the procedure. Defaults to `600s`.
+* `cifmw_update_variant`: (String) Defines the update procedure. Can be `'monolithic'` for a single update step, or `'split'` for a two-step (services, system) update. Defaults to `'monolithic'`.
 * `cifmw_update_run_dryrun`: (Boolean) Do a dry run on make openstack_update_run command. Defaults to `False`.
 * `cifmw_update_ping_test`: (Boolean) Activate the ping test during update. Default to `False`.
 * `cifmw_update_create_volume`: (Boolean) Attach a volume to the test OS instance when set to true.  Default to `False`

@@ -1,18 +1,7 @@
-#
-# NOTE: Playbook migrated to: cifmw_setup/tasks/run_logs.yml
-# DO NOT EDIT THAT PLAYBOOK. IT WOULD BE REMOVED IN NEAR FUTURE.
-#
-
-- name: Logging playbook
-  hosts: "{{ cifmw_target_host | default('localhost') }}"
-  gather_facts: true
-  tasks:
-    # end_play will end only current play, not the main edpm-deploy.yml
-    - name: Early exit if no tests
-      when:
-        - zuul_log_collection | default(false) | bool
-      ansible.builtin.meta: end_play
-
+---
+- name: Check if the logging requires
+  when: not (zuul_log_collection | default(false))
+  block:
     - name: Ensure cifmw_basedir param is set
       when:
         - cifmw_basedir is not defined
@@ -21,7 +10,7 @@
 
     - name: Try to load parameters files
       block:
-        - name: Check directory availabilty
+        - name: Check directory availability
           register: param_dir
           ansible.builtin.stat:
             path: "{{ cifmw_basedir }}/artifacts/parameters"
@@ -49,7 +38,6 @@
               now(fmt='%Y-%m-%d_%H-%M')
             ) | path_join
           }}
-
     - name: Generate artifacts
       ansible.builtin.import_role:
         name: artifacts
@@ -67,7 +55,7 @@
     - name: Return a list of log files in home directory
       ansible.builtin.find:
         paths: "{{ ansible_user_dir }}"
-        patterns: '*.log'
+        patterns: "*.log"
       register: _log_files
 
     - name: Ensure ansible facts cache exists
