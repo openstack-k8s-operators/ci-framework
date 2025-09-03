@@ -1,0 +1,23 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  vars_files:
+    - vars.yaml
+  tasks:
+    - name: "Set _tripleo_nodes_stack from persistent fact"
+      ansible.builtin.set_fact:
+        tripleo_nodes_stack: "{{ hostvars[inventory_hostname]._tripleo_nodes_stack }}"
+      when: hostvars[inventory_hostname]._tripleo_nodes_stack is defined
+
+    - name: "Assert gathered nodes for stacks"
+      ansible.builtin.assert:
+        that:
+          - "tripleo_nodes_stack[_stack.stackname] is defined"
+          - "tripleo_nodes_stack[_stack.stackname] | type_debug == 'list'"
+          - "tripleo_nodes_stack[_stack.stackname] | sort == expected_nodes[_stack.stackname] | sort"
+        fail_msg: "Verification failed for gathered nodes in stack {{ _stack.stackname }}"
+        success_msg: "Successfully verified gathered nodes for stack {{ _stack.stackname }}"
+      loop: "{{ stacks }}"
+      loop_control:
+        loop_var: _stack
