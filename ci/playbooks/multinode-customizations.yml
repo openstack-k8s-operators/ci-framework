@@ -1,4 +1,23 @@
 ---
+- name: Exclude updating certain packages
+  hosts: all
+  tasks:
+    - name: Check if yum conf exists
+      become: true
+      ansible.builtin.stat:
+        path: "/etc/yum.conf"
+      register: _yum_conf
+
+    - name: Exclude packages for being upgraded
+      when:
+        - _yum_conf.stat.exists
+        - cifmw_excluded_updating_rpm | default([]) | length > 0
+      become: true
+      ansible.builtin.lineinfile:
+        dest: "/etc/yum.conf"
+        regexp: "^exclude="
+        line: "exclude={{ cifmw_excluded_updating_rpm | join(' ') | default([]) }}"
+
 - hosts: crc
   name: "Tweak CRC node"
   gather_facts: false
