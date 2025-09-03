@@ -1,0 +1,64 @@
+---
+- name: Get main facts for the overcloud stack
+  ansible.builtin.set_fact:
+    _overcloud_name: >-
+      {{
+        _stack.stackname |
+        default('overcloud')
+      }}
+    _network_data_file: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _stack.network_data_file
+        ] | path_join
+      }}
+
+- name: Gather other facts for stack {{ _overcloud_name }}"
+  ansible.builtin.set_fact:
+    _hostname_map_translation: >-
+      {{
+        cifmw_adoption_osp_deploy_scenario.hostname_groups_map |
+        ansible.utils.keep_keys(target=_stack.stack_nodes)
+      }}
+    _role_map_translation: >-
+      {{
+        cifmw_adoption_osp_deploy_scenario.roles_groups_map |
+        ansible.utils.keep_keys(target=_stack.stack_nodes)
+      }}
+    _network_data_file_dest: >-
+      {{
+        [ansible_user_dir,
+         'network_data_' ~  _overcloud_name ~'.yaml'
+        ] | path_join
+      }}
+
+    _network_data_extension: "{{ _network_data_file | splitext | last }}"
+    _vips_data_file: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _stack.vips_data_file
+        ] | path_join
+      }}
+    _vips_data_file_dest: >-
+      {{
+        [ansible_user_dir,
+         'vips_data_' ~ _overcloud_name ~ '.yaml'
+        ] | path_join
+      }}
+    _source_cmd: "source {{ ansible_user_dir }}/stackrc"
+    _network_provision_output: "network_provision_{{ _overcloud_name }}_out.yaml"
+    _vips_provision_output: "vips_provision_{{ _overcloud_name }}_out.yaml"
+
+- name: "Gather nodes for stack {{ _overcloud_name }}"
+  when: group.key is in _hostname_map_translation
+  vars:
+    tripleo_nodes_stack: "{{ _tripleo_nodes_stack | default({}) }}"
+  ansible.builtin.set_fact:
+    _tripleo_nodes_stack: >-
+      {{
+        tripleo_nodes_stack | combine({ _overcloud_name: (tripleo_nodes_stack.get(_overcloud_name, []) + group.value) })
+      }}
+  loop: "{{ _vm_groups | dict2items }}"
+  loop_control:
+    loop_var: group
+    label: "{{ group.key }}"
