@@ -72,8 +72,8 @@
       ansible.builtin.set_fact:
         _tripleo_nodes_stack: >-
           {{
-             _tripleo_nodes_stack | default([]) +
-             group.value
+            (_tripleo_nodes_stack | default({})) |
+            combine({ _overcloud_name: (_tripleo_nodes_stack[_overcloud_name] | default([]) + group.value) })
           }}
       loop: "{{ _vm_groups | dict2items }}"
       loop_control:
@@ -110,7 +110,7 @@
       args:
         apply:
           delegate_to: "{{ _vm }}"
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: _vm
         pause: 1
@@ -121,7 +121,7 @@
       community.general.rhsm_repository:
         name: "{{ cifmw_adoption_osp_deploy_repos }}"
         state: enabled
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: _vm
         pause: 1
@@ -205,7 +205,7 @@
           - os-net-config
           - openvswitch
         state: present
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -216,7 +216,7 @@
         path: "/etc/os-net-config"
         state: directory
         mode: '0755'
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -235,7 +235,7 @@
         src: "os_net_config_overcloud.yml.j2"
         dest: /etc/os-net-config/tripleo_config.yaml
         mode: "0644"
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -244,7 +244,7 @@
       delegate_to: "{{ overcloud_vm }}"
       ansible.builtin.command:
         cmd: "os-net-config -c /etc/os-net-config/tripleo_config.yaml"
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
 
@@ -259,6 +259,6 @@
       ansible.posix.authorized_key:
         user: "{{ ansible_user_id }}"
         key: "{{ undercloud_ssh_pub['content'] | b64decode | trim }}"
-      loop: "{{ _tripleo_nodes_stack }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
