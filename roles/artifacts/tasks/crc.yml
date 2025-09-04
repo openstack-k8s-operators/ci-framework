@@ -1,51 +1,51 @@
 ---
-- name: Create crc logs directory
-  ignore_errors: true  # noqa: ignore-errors
-  ansible.builtin.file:
-    path: "{{ cifmw_artifacts_basedir }}/logs/crc"
-    state: directory
-    mode: "0755"
-
 - name: Ensure controller knows CRC ssh keys
-  ignore_errors: true  # noqa: ignore-errors
+  ignore_errors: true # noqa: ignore-errors
   register: crc_host_key
   ansible.builtin.shell:
     cmd: >-
       ssh-keyscan {{ cifmw_artifacts_crc_host }} >> ~/.ssh/known_hosts
+
 - name: Get CRC things only if we know it
   when:
     - crc_host_key is defined
     - crc_host_key.rc is defined
     - crc_host_key.rc == 0
   block:
-    - name: Recognize new keypair
-      ansible.builtin.stat:
-        path: "{{ cifmw_artifacts_crc_sshkey_ed25519 }}"
-      register: _sshkeypair
+    - name: Create crc logs directory
+      ignore_errors: true # noqa: ignore-errors
+      ansible.builtin.file:
+        path: "{{ cifmw_artifacts_basedir }}/logs/crc"
+        state: directory
+        mode: "0755"
 
-    - name: Set fact if new keypair exists
-      when: _sshkeypair.stat.exists
-      ansible.builtin.set_fact:
-        new_keypair_path: "{{ cifmw_artifacts_crc_sshkey_ed25519 }}"
+    - name: Create crc logs directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/logs/crc"
+        state: directory
+        mode: "0755"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      delegate_to: "{{ cifmw_artifacts_crc_host }}"
 
-    - name: Prepare root ssh accesses
-      ignore_errors: true  # noqa: ignore-errors
-      cifmw.general.ci_script:
-        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
-        script: |-
-          ssh -i {{ new_keypair_path | default(cifmw_artifacts_crc_sshkey) }} {{ cifmw_artifacts_crc_user }}@{{ cifmw_artifacts_crc_host }} <<EOF
-          set -xe;
-          test -d /etc/ssh/sshd_config.d/ && sudo sed -ri 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config.d/* || true;
-          sudo sed -i 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config;
-          sudo systemctl restart sshd;
-          sudo cp -r .ssh /root/;
-          sudo chown -R root: /root/.ssh;
-          EOF
+    - name: Copy logs
+      become: true
+      ansible.builtin.copy:
+        src: /ostree/deploy/rhcos/var/log/pods
+        dest: "{{ ansible_user_dir }}/logs/crc"
+        remote_src: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0644"
+      delegate_to: "{{ cifmw_artifacts_crc_host }}"
+
     - name: Copy logs from CRC VM
-      ignore_errors: true  # noqa: ignore-errors
-      cifmw.general.ci_script:
-        output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
-        script: >-
-          scp -v -r -i {{ new_keypair_path | default(cifmw_artifacts_crc_sshkey) }}
-          root@{{ cifmw_artifacts_crc_host }}:/ostree/deploy/rhcos/var/log/pods
-          {{ cifmw_artifacts_basedir }}/logs/crc/
+      ansible.posix.synchronize:
+        src: "core@{{ cifmw_artifacts_crc_host }}:{{ ansible_user_dir }}/logs/crc/"
+        dest: "{{ cifmw_artifacts_basedir }}/logs/crc/"
+        mode: pull
+        archive: true
+        recursive: true
+      delegate_to: "{{ cifmw_artifacts_crc_host }}"
+      ignore_errors: true # noqa: ignore-errors
