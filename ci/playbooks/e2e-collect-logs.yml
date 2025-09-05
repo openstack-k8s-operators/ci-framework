@@ -20,22 +20,25 @@
         - not cifmw_status.stat.exists
       ansible.builtin.meta: end_host
 
-- name: Run log collection when zuul_log_collection
-  hosts: "{{ cifmw_target_host | default(cifmw_zuul_target_host) | default('controller') }}"
-  gather_facts: true
-  tasks:
-    - name: Run run_logs tasks from cifmw_setup
-      ansible.builtin.command: >
-        ansible localhost
-        -m include_role
-        -a "name=cifmw_setup tasks_from=run_logs.yml"
-        -e "@scenarios/centos-9/base.yml"
-      args:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+    - name: Read base centos-9 scenarios
+      vars:
+        provided_file: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/
+          ci-framework/scenarios/centos-9/base.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_file.yml
+
+    - name: Run log collection
+      ansible.builtin.import_role:
+        name: cifmw_setup
+        tasks_from: run_logs.yml
+      tags:
+        - logs
       environment:
         ANSIBLE_LOG_PATH: "{{ ansible_user_dir }}/ci-framework-data/logs/e2e-collect-logs-must-gather.log"
 
-- name: "Run ci/playbooks/collect-logs.yml on CRC host"
+- name: "Run ci/playbooks/e2e-collect-logs.yml on CRC host"
   hosts: crc
   gather_facts: false
   tasks:
