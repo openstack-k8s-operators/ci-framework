@@ -47,11 +47,122 @@
         (cifmw_devscripts_repo_dir, 'logs' ) | path_join
       }}
   block:
+#    - name: Do workaround when SNO set
+#      when: cifmw_devscripts_sno
+#      block:
+#        - name: Copy workaround script
+#          ansible.builtin.copy:
+#            content: |
+#              TARGET="192.168.111.2"
+#              MAX_FAILURES=10
+#              FAILURES=0
+#              while true; do
+#                  if ping -c1 -W1 "$TARGET" > /dev/null 2>&1; then
+#                      echo "bootstrap in progress..."
+#                      sleep 1
+#                  else
+#                      FAILURES=$FAILURES+1
+#                  fi
+#
+#                  if [[ $FAILURES -ge $MAX_FAILURES ]]; then
+#                      echo "Bootstrap probably is completed. Continue..."
+#                      break
+#                  fi
+#
+#                  sleep 1
+#              done
+#
+#              if [ -f /etc/NetworkManager/dnsmasq.d/openshift-ocp.conf ]; then
+#                  if grep -q '192.168.111.2' /etc/NetworkManager/dnsmasq.d/openshift-ocp.conf ; then
+#                      sudo sed -i 's/192.168.111.2/192.168.111.10/g' /etc/NetworkManager/dnsmasq.d/openshift-ocp.conf;
+#                  fi;
+#                  if grep -q '192.168.111.3' /etc/NetworkManager/dnsmasq.d/openshift-ocp.conf ; then
+#                      sudo sed -i 's/192.168.111.3/192.168.111.10/g' /etc/NetworkManager/dnsmasq.d/openshift-ocp.conf;
+#                  fi;
+#              fi
+#
+#              # hypervisor - cifmw-dnsmasq
+#              sudo find /etc/cifmw-dnsmasq.d -type f -exec sed -i 's/192.168.111.2/192.168.111.10/g' {} \;
+#              sudo find /etc/cifmw-dnsmasq.d -type f -exec sed -i 's/192.168.111.3/192.168.111.10/g' {} \;
+#
+#              # dig apps.ocp.openstack.lab => 192.168.111.10
+#              # dig api.ocp.openstack.lab  => 192.168.111.10
+#
+#              ssh-keyscan -H 192.168.111.10 >> {{ ansible_user_dir }}/.ssh/known_hosts
+#
+#              # /etc/hosts
+#              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+#                  core@192.168.111.10 \
+#                  bash -c "echo '192.168.111.10 api-int.ocp.openstack.lab api.ocp.openstack.lab' | sudo tee -a /etc/hosts"
+#
+#              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+#                  core@192.168.111.10 \
+#                  bash -c "echo '192.168.111.10 apps.ocp.openstack.lab' | sudo tee -a /etc/hosts"
+#
+#              # Coredns
+#              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+#                  core@192.168.111.10 sudo sed -i 's/192.168.111.2/192.168.111.10/g' /etc/coredns/Corefile
+#
+#              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+#                  core@192.168.111.10 sudo sed -i 's/192.168.111.3/192.168.111.10/g' /etc/coredns/Corefile
+#
+#              # workaround for missing docker dir
+#              ssh -i {{ ansible_user_dir }}/ci-framework-data/artifacts/cifmw_ocp_access_key \
+#                  core@192.168.111.10 sudo mkdir -p /etc/docker
+#
+#              sudo systemctl restart cifmw-dnsmasq
+#              sleep 5
+#
+#              export KUBECONFIG={{ ansible_user_dir }}/src/github.com/openshift-metal3/dev-scripts/ocp/ocp/auth/kubeconfig
+#
+#              # Add missing puzzle for ingress. Without that, openshift-ingress-operator
+#              # would be crashing (it is waiting for openshift-ingress router)
+#              oc apply -f https://raw.githubusercontent.com/openshift/router/refs/heads/master/deploy/route_crd.yaml
+#              oc apply -f https://raw.githubusercontent.com/openshift/router/refs/heads/master/deploy/router_rbac.yaml
+#              oc apply -f https://raw.githubusercontent.com/openshift/router/refs/heads/master/deploy/router.yaml
+#
+#              # new
+#              # oc patch ingresscontroller default -n openshift-ingress-operator   --type=merge   -p '{"spec":{"endpointPublishingStrategy":{"type":"HostNetwork"},"replicas":1}}'
+#
+#              # oc patch deployment apiserver -n openshift-apiserver   --type=merge   -p '{"spec":{"template":{"metadata":{"labels":{"openshift-apiserver-anti-affinity":"false"}}}}}'
+#              # oc -n openshift-apiserver rollout restart deployment apiserver
+#
+#              oc -n openshift-dns rollout restart daemonsets dns-default
+#              oc -n openshift-dns rollout restart daemonsets node-resolver
+#
+#              sleep 120
+#
+#            dest: "{{ cifmw_devscripts_repo_dir }}/07-sno-workaround.sh"
+#
+#        - name: Add the workaround script execution into 06_create_cluster.sh script
+#          ansible.builtin.replace:
+#            path: "{{ cifmw_devscripts_repo_dir }}/06_create_cluster.sh"
+#            regexp: '^create_cluster \${OCP_DIR}'
+#            replace: |
+#              #
+#              # NOTE(dpawlik): Right now, quit 06_create_cluster.sh, otherwise
+#              # it will get timeout from devscript role.
+#              # The value is set to 25 min and should be enough to deploy,
+#              # but if not, you can increase to more.
+#              #
+#              timeout {{ cifmw_devscripts_sno_bootstrap_timeout | default(1800) }} bash -c "source utils.sh && create_cluster ${OCP_DIR}" || true
+#              bash -x 07-sno-workaround.sh
+#              exit 0
+
     - name: Run devscripts make all
+      when: not cifmw_devscripts_sno | default(true)
       cifmw.general.ci_script:
         chdir: "{{ cifmw_devscripts_repo_dir }}"
         output_dir: "{{ cifmw_devscripts_artifacts_dir }}"
         script: "timeout {{ cifmw_devscripts_installer_timeout }} make all"
+
+    - name: Run devscripts make agent when SNO
+      when: cifmw_devscripts_sno | default(false)
+      cifmw.general.ci_script:
+        chdir: "{{ cifmw_devscripts_repo_dir }}"
+        output_dir: "{{ cifmw_devscripts_artifacts_dir }}"
+        script: "timeout {{ cifmw_devscripts_installer_timeout }} make agent"
+
   always:
     - name: Gather logs
       register: _deploy_logs
