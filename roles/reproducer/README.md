@@ -6,6 +6,7 @@ None
 
 ## Parameters
 
+* `cifmw_reproducer_user`: (String) User used for reproducer role. Defaults to `zuul`
 * `cifmw_reproducer_basedir`: (String) Base directory. Defaults to `cifmw_basedir`, which defaults to `~/ci-framework-data`.
 * `cifmw_reproducer_compute_repos`: (List[mapping]) List of yum repository that must be deployed on the compute nodes during their creation. Defaults to `[]`.
 * `cifmw_reproducer_compute_set_repositories`: (Bool) Deploy repositories (rhos-release) on Compute nodes. Defaults to `true`.
