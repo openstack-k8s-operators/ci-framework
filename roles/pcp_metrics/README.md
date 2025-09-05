@@ -11,6 +11,10 @@ which is an AI coding assistant – and not a concern of this role here.
 Usage
 -----
 
+Please check the hooks provided in this repository for real-world examples:
+- [pcp-metrics-pre.yml](/hooks/playbooks/pcp-metrics-pre.yml)
+- [pcp-metrics-post.yml](/hooks/playbooks/pcp-metrics-post.yml)
+
 To setup and enable PCP on the target host, include the role with setup tasks:
 
 ```
