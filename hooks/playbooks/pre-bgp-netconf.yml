@@ -1,0 +1,45 @@
+---
+- name: Pre BGP Network Configuration
+  gather_facts: false
+  hosts: hypervisors
+  vars:
+    pre_bgp_netconf_dst: /home/zuul/netconf
+  tasks:
+    - name: Set IPv4 forwarding (BGP)
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/90-network.conf
+        state: present
+        reload: true
+
+    - name: Disable reverse path forwarding validation (BGP)
+      ansible.posix.sysctl:
+        name: net.ipv4.conf.all.rp_filter
+        value: '0'
+        sysctl_set: true
+        sysctl_file: /etc/sysctl.d/90-network.conf
+        state: present
+        reload: true
+
+    - name: Ensure pre_bgp_netconf_dst directory exists
+      ansible.builtin.file:
+        path: "{{ pre_bgp_netconf_dst }}"
+        state: directory
+        mode: '0755'
+
+    - name: Populate pre_bgp_netconf_dst directory
+      ansible.builtin.copy:
+        src: "{{ pre_bgp_netconf_src }}/"
+        dest: "{{ pre_bgp_netconf_dst }}/"
+        owner: zuul
+        group: zuul
+        mode: '0644'
+        directory_mode: '0755'
+        remote_src: true
+      vars:
+        pre_bgp_netconf_src: "{{ cifmw_architecture_automation_file
+            | default ('/home/zuul/src/github.com/openstack-k8s-operators/architecture/automation/vars/dz-storage.yaml')
+            | regex_replace('/automation/vars/', '/architecture/automation/net-env/')
+            | regex_replace('\.yaml$', '') }}"
