@@ -183,10 +183,12 @@ Allowed values can be found [here](https://mirror.openshift.com/pub/openshift-v4
         image_local_dir: "{{ cifmw_basedir }}/images/"
         disk_file_name: "ocp_master"
         disksize: "100"
+        disk_bus: virtio
         cpus: 16
         memory: 32
         extra_disks_num: 3
         extra_disks_size: 50G
+        extra_disks_bus: scsi
         nets:
           - ocppr
           - ocpbm
