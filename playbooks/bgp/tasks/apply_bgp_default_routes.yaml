@@ -1,0 +1,84 @@
+---
+- name: Set the retry count
+  ansible.builtin.set_fact:
+    retry_count: "{{ 0 if retry_count is undefined else retry_count|int + 1 }}"
+
+- name: Obtain the device with the DHCP default route
+  ansible.builtin.shell:
+    cmd: >
+      ip {{ _dash_six }} route show default |
+      grep "proto {{ _proto }}" |
+      grep -o "dev \w*" |
+      cut -d" " -f 2
+  ignore_errors: true
+  register: dhcp_default_route_device
+  changed_when: false
+
+- name: Remove DHCP/RA default route if it exists
+  when:
+    - dhcp_default_route_device.rc == 0
+    - dhcp_default_route_device.stdout | trim | length > 0
+  block:
+    - name: Obtain the connection for the DHCP default route device
+      ansible.builtin.command:
+        cmd: >
+          nmcli -g GENERAL.CONNECTION device show {{ item | trim }}
+      register: default_connections
+      changed_when: false
+      loop: "{{ dhcp_default_route_device.stdout_lines }}"
+
+    - name: Ignore dhcp default route from ocpbm interfaces
+      become: true
+      community.general.nmcli:
+        conn_name: "{{ item.stdout | trim }}"
+        gw4_ignore_auto: true
+        gw6_ignore_auto: true
+        never_default4: true
+        state: present
+      loop: "{{ default_connections.results }}"
+
+    # community.general.nmcli does not support never_default6, so a command is needed
+    - name: Set ipv6.never-default to yes for relevant connections
+      become: true
+      ansible.builtin.command:
+        cmd: >
+          nmcli con mod "{{ item.stdout | trim }}" ipv6.never-default yes
+      changed_when: false
+      loop: "{{ default_connections.results }}"
+
+    - name: Restart NetworkManager
+      become: true
+      ansible.builtin.systemd:
+        name: NetworkManager.service
+        state: restarted
+
+- name: Remove default route obtained via DHCP/RA from leafs in order to apply BGP
+  become: true
+  ansible.builtin.shell:
+    cmd: >
+      set -o pipefail &&
+      ip {{ _dash_six }} route show default |
+      (grep "proto {{ _proto }}" || true) |
+      while read route; do
+      ip {{ _dash_six }} route del $route; done
+  changed_when: false
+
+- name: Block to check BGP default route or rescue
+  block:
+    - name: Check new default route corresponds with BGP
+      ansible.builtin.command:
+        cmd: >
+          ip {{ _dash_six }} route show default
+      register: default_ip_route_result
+      changed_when: false
+      until: "'proto bgp' in default_ip_route_result.stdout"
+      retries: 10
+      delay: 1
+  rescue:
+    - name: Fail after 5 retries
+      ansible.builtin.fail:
+        msg: "Failed to apply BGP default routes after 5 retries"
+      when: retry_count|int == 5
+
+    - name: Apply the BGP default routes again
+      ansible.builtin.include_tasks: apply_bgp_default_routes.yaml
