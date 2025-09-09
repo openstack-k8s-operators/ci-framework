@@ -19,3 +19,4 @@ This role doesn't need privilege escalation.
 * `cifmw_edpm_prepare_kustomizations`: (List) Kustomizations to apply on top of the controlplane CRs. Defaults to `[]`.
 * `cifmw_edpm_prepare_wait_controplane_status_change_sec`: (Integer) Time, in seconds, to wait before checking
 openstack control plane deployment status. Useful when using the role to only update the control plane resource, scenario where it may be in a `ready` status. Defaults to `30`.
+* `cifmw_edpm_prepare_extra_kustomizations`: (List) Extra Kustomizations to apply on top of the controlplane CRs. Defaults to `[]`.
