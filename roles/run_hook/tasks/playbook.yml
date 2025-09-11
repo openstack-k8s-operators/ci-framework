@@ -89,7 +89,8 @@
 # even less from a task. So the way to run a playbook from within a playbook
 # is to call a command. Though we may lose some of the data passed to the
 # "main" play.
-- name: "Run {{ hook.name }}"
+- name: "Run hook without retry - {{ hook.name }}"
+  when: not hook.hook_retry | default(false)
   no_log: "{{ cifmw_nolog | default(true) | bool }}"
   cifmw.general.ci_script:
     output_dir: "{{ cifmw_basedir }}/artifacts"
@@ -108,6 +109,31 @@
       -e "hook_name={{ hook_name }}"
       -e "playbook_dir={{ playbook_path | dirname }}"
       {{ playbook_path }}
+
+- name: "Run hook with retry - {{ hook.name }}"
+  when: hook.hook_retry | default(false)
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_basedir }}/artifacts"
+    extra_args:
+      ANSIBLE_CONFIG: "{{ hook.config_file | default(ansible_config_file) }}"
+      ANSIBLE_LOG_PATH: "{{ log_path }}"
+    creates: "{{ hook.creates | default(omit) }}"
+    script: >-
+      ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
+      {% if hook.connection is defined -%}
+      -c {{ hook.connection }}
+      {% endif -%}
+      {{ extra_vars }}
+      -e "cifmw_basedir={{ cifmw_basedir }}"
+      -e "step={{ step }}"
+      -e "hook_name={{ hook_name }}"
+      -e "playbook_dir={{ playbook_path | dirname }}"
+      {{ playbook_path }}
+  register: hook_result
+  retries: 3
+  delay: 10
+  until: hook_result is not failed
 
 - name: Load generated content if any
   block:
