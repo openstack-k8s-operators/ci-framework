@@ -37,6 +37,7 @@ name:
 * `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `hooks/playbooks`. It can be an absolute path.
 * `type`: (String) Type of the hook. In this case, set it to `playbook`.
 * `extra_vars`: (Dict) Structure listing the extra variables you would like to pass down ([extra_vars explained](#extra_vars-explained))
+* `hook_retry` (Boolean) Set true, if the hook execution should be retried on failure
 
 ##### About OpenShift namespaces and install_yamls
 
@@ -55,6 +56,7 @@ Since `install_yamls` might not be initialized, the `run_hook` is exposing two n
 * `source`: (String) Source of the playbook. If it's a filename, the playbook is expected in `hooks/playbooks`. It can be an absolute path.
 * `type`: (String) Type of the hook. In this case, set it to `playbook`.
 * `extra_vars`: (Dict) Structure listing the extra variables you would like to pass down ([extra_vars explained](#extra_vars-explained))
+* `hook_retry` (Boolean) Set true, if the hook execution should be retried on failure
 
 #### Hook callback
 
