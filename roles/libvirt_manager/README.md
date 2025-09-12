@@ -94,6 +94,7 @@ cifmw_libvirt_manager_configuration:
       uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
       bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
       networkconfig: (dict or list[dict], [network-config](https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html#network-config-v2) v2 config, needed if a static ip address should be defined at boot time in absence of a dhcp server in special scenarios. Optional)
+      devices: (dict, optional. Valid libvirt XML string, subset of <devices/>, which list devices which will be attached to the corresponding VM whose index is the key of thedictionary for the specified type. The value of the dictionary items can be a list or a string. Optional, defaults to {})
   networks:
     net_name: <XML definition of the network to create>
 ```
@@ -138,6 +139,13 @@ cifmw_libvirt_manager_configuration:
         - osp_trunk
       extra_disks_num: 5
       extra_disks_size: '1G'
+      devices:
+        "0": >-
+          <hostdev mode='subsystem' type='pci' managed='yes'>
+            <source>
+              <address domain='0x0000' bus='0x17' slot='0x00' function='0x0'/>
+            </source>
+          </hostdev>
     controller:
       image_url: "{{ cifmw_discovered_image_url }}"
       sha256_image_name: "{{ cifmw_discovered_hash }}"
