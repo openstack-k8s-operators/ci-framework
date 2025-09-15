@@ -116,18 +116,25 @@
           loop:
             - "{{ cifmw_reproducer_controller_user_dir }}/ansible-bootstrap.log"
 
+        - name: Read inventory file and add it using add_host module
+          vars:
+            include_inventory_file: "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          ansible.builtin.include_role:
+            name: cifmw_helpers
+            tasks_from: inventory_file.yml
+
         - name: Bootstrap environment on controller-0
           environment:
-            ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+            ANSIBLE_LOG_PATH: "{{ ansible_user_dir }}/ansible-bootstrap.log"
           no_log: "{{ cifmw_nolog | default(true) | bool }}"
-          ansible.builtin.command:
-            chdir: "{{ _cifmw_reproducer_framework_location }}"
-            cmd: >-
-              ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
-              -e @~/ci-framework-data/parameters/reproducer-variables.yml
-              -e @scenarios/reproducers/networking-definition.yml
-              playbooks/01-bootstrap.yml
-            creates: "{{ cifmw_reproducer_controller_user_dir }}/ansible-bootstrap.log"
+          ansible.builtin.import_role:
+            name: cifmw_setup
+            tasks_from: bootstrap.yml
+          vars:
+            ansible_extra_vars:
+              - "{{ ansible_user_dir }}/ci-framework-data/parameters/reproducer-variables.yml"
+              - "scenarios/reproducers/networking-definition.yml"
+          changed_when: false
 
         - name: Install dev tools from install_yamls on controller-0
           environment:
