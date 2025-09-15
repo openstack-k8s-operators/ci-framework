@@ -1,0 +1,143 @@
+---
+# Create and import images to all Glance stores for dz-storage DT testing
+# Based on DCN pre-test approach in ci-framework-jobs/playbooks/dcn/dcn-pre-tests.yaml
+
+- name: Prepare dz-storage images for multi-zone testing
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  vars:
+    cirros_version: "0.6.2"
+    cirros_image_name: "cirros-{{ cirros_version }}-x86_64-disk.img"
+    cirros_download_url: "https://github.com/cirros-dev/cirros/releases/download/{{ cirros_version }}/{{ cirros_image_name }}"
+    openstack_namespace: "{{ cifmw_openstack_namespace | default('openstack') }}"
+  tasks:
+    - name: Check if cirros image already exists
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ openstack_namespace }}
+        openstackclient
+        openstack image show {{ cirros_image_name }}
+      register: _image_exists
+      failed_when: false
+
+    - name: Create and import cirros image to all glance stores
+      when: _image_exists.rc != 0
+      block:
+        - name: Get keystone public URL
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ openstack_namespace }}
+            openstackclient
+            openstack endpoint list --service keystone --interface public -f value -c URL
+          register: keystone_url
+
+        - name: Get admin password from secret
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc get secret osp-secret -n {{ openstack_namespace }} -o jsonpath='{.data.AdminPassword}'
+          register: admin_password_b64
+
+        - name: Decode admin password
+          ansible.builtin.set_fact:
+            admin_password: "{{ admin_password_b64.stdout | b64decode }}"
+
+        - name: Download cirros image to controller
+          ansible.builtin.get_url:
+            url: "{{ cirros_download_url }}"
+            dest: "/tmp/{{ cirros_image_name }}"
+            mode: '0644'
+
+        - name: Copy cirros image to openstackclient pod
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc cp
+            "/tmp/{{ cirros_image_name }}"
+            "{{ openstack_namespace }}/openstackclient:/home/cloud-admin/{{ cirros_image_name }}"
+
+        - name: Create cirros image in default glance store (az0)
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ openstack_namespace }}
+            openstackclient
+            openstack image create
+            --disk-format qcow2
+            --container-format bare
+            --public
+            --file "/home/cloud-admin/{{ cirros_image_name }}"
+            --import
+            "{{ cirros_image_name }}"
+
+        - name: Wait for image to become active
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ openstack_namespace }}
+            openstackclient
+            openstack image show {{ cirros_image_name }} -f value -c status
+          register: image_status
+          until: "'active' in image_status.stdout"
+          retries: 60
+          delay: 10
+
+        - name: Get image ID for import to other stores
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ openstack_namespace }}
+            openstackclient
+            openstack image show {{ cirros_image_name }} -f value -c id
+          register: image_id
+
+        - name: Import image to all glance stores (az0, az1, az2)
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ openstack_namespace }}
+            openstackclient
+            glance --os-auth-url {{ keystone_url.stdout | trim }}
+            --os-project-name admin
+            --os-username admin
+            --os-password {{ admin_password }}
+            --os-user-domain-name default
+            --os-project-domain-name default
+            image-import {{ image_id.stdout | trim }}
+            --all-stores True
+            --import-method copy-image
+
+        - name: Verify image is available in all stores
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+            PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ openstack_namespace }}
+            openstackclient
+            openstack image show {{ image_id.stdout | trim }} -c properties -f value
+          register: image_stores
+
+        - name: Display image store locations
+          ansible.builtin.debug:
+            msg: "Image stores: {{ image_stores.stdout }}"
+
+        - name: Clean up local image file
+          ansible.builtin.file:
+            path: "/tmp/{{ cirros_image_name }}"
+            state: absent
