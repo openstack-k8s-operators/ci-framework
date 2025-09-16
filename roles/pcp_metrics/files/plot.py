@@ -8,6 +8,7 @@ import sys
 from time import asctime
 from typing import Iterable
 from typing import Iterator
+from typing import Union
 
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
@@ -125,7 +126,7 @@ def find_sources(*search_paths: str) -> list[str]:
     return sources
 
 
-def load_csv(path: str, source: str | None = None) -> pd.DataFrame:
+def load_csv(path: str, source: Union[str, None] = None) -> pd.DataFrame:
     '''Reads a CSV file from given path and loads into a DataFrame object.
 
     Parameters
@@ -153,8 +154,8 @@ def load_csv(path: str, source: str | None = None) -> pd.DataFrame:
 def draw(ax: plt.Axes,
          x: Iterable[float],
          y: Iterable[float],
-         color: str | None = None,
-         label: str | None = None,
+         color: Union[str, None] = None,
+         label: Union[str, None] = None,
          ) -> None:
     '''Plots a line chart in the given subplot object.
 
@@ -206,8 +207,8 @@ def set_xaxis(axs: Iterable[plt.Axes]) -> None:
 
 def set_yaxis(ax: plt.Axes,
               ylabel: str = 'value []',
-              ylim_bottom: int | None = 0,
-              ylim_top: int | None = None,
+              ylim_bottom: Union[int, None] = 0,
+              ylim_top: Union[int, None] = None,
               ) -> None:
     '''Configures the Y-axis in the given subplot object.
 
@@ -254,12 +255,12 @@ def subplot(ax: plt.Axes,
             df: pd.DataFrame,
             x: str = 'Time',
             y: str = 'cpu',
-            loop: str | None = None,
-            color: str | ColorCycler | None = None,
+            loop: Union[str, None] = None,
+            color: Union[str, ColorCycler, None] = None,
             reset: bool = False,
             ylabel: str = 'value []',
-            ylim_bottom: int | None = 0,
-            ylim_top: int | None = None,
+            ylim_bottom: Union[int, None] = 0,
+            ylim_top: Union[int, None] = None,
             ) -> None:
     '''Generates a complete chart from one or multiple data series.
 
@@ -321,9 +322,9 @@ def subplot(ax: plt.Axes,
 
 def plot(df: pd.DataFrame,
          output: str,
-         title: str | None = None,
-         loop: str | None = None,
-         color: str | ColorCycler | None = None,
+         title: Union[str, None] = None,
+         loop: Union[str, None] = None,
+         color: Union[str, ColorCycler, None] = None,
          reset: bool = False,
          ) -> None:
     '''Produces the figure and saves it as PDF file under a given output path.
