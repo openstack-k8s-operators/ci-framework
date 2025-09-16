@@ -59,6 +59,22 @@ After:
     (...)
 ```
 
+The example playbook - `playbooks/cifmw_collection_zuul_executor.yml` can look like:
+
+```yaml
+---
+- name: Make cifmw modules to be available
+  hosts: all
+  tasks:
+    - name: Make a symlink to local .ansible collection dir
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: symlink_cifmw_collection.yml
+```
+
+After doing a symbolic link of modules dir to Ansible working dir in `$HOME` dir,
+we should not have `ERROR! couldn't resolve module/action` error anymore.
+
 ## Helper for calling nested Ansible
 
 In many places in the project, there is nested Ansible execution done.
