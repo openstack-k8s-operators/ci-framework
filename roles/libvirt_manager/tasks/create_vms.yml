@@ -180,3 +180,25 @@
           --type cdrom
           --mode readonly
           --persistent
+
+- name: "Attach additional devices if specified"
+  when:
+    - vm_data.devices is defined
+    - vm_data.devices[_vm_specific_index] is defined
+  vars:
+    _vm_name: "cifmw-{{ vm }}"
+    _vm_all_devices: "{{ vm_data.devices[_vm_specific_index] }}"
+    # This is the index of the VM for its type.
+    # For example '1' if the VM is 'compute-1', or '2' if it is 'ocp-master-2'
+    _vm_specific_index: "{{ vm | regex_search('^.+-([0-9]+)','\\1') | first | default('0') | string }}"
+    # Make sure the value is always a list
+    _vm_devices_content: >-
+      {{
+        _vm_all_devices
+        if (_vm_all_devices | type_debug == "list")
+        else [_vm_all_devices]
+      }}
+  ansible.builtin.include_tasks: attach_devices.yml
+  loop: "{{ _vm_devices_content }}"
+  loop_control:
+    loop_var: _vm_device
