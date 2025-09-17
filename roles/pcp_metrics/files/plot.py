@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import csv
+from datetime import datetime
 from glob import glob
 from os import getenv
 import os.path
@@ -19,6 +20,7 @@ import pandas as pd
 #
 # Parameters
 #
+ANNOTATIONS_FILE = getenv('ANNOTATIONS_FILE', 'metrics/annotations.txt')
 METRICS_SRC = (sys.argv[1:] if len(sys.argv) > 1
                else [getenv('METRICS_SRC', 'metrics/*.csv')])
 OUTPUT_DIR = getenv('OUTPUT_DIR', 'metrics/')
@@ -376,6 +378,41 @@ def subplot(ax: plt.Axes,
               yscale=yscale)
 
 
+def annotate(axs: Iterable[plt.Axes]) -> None:
+    '''Draws vertical annotation lines on the interesting time marks.
+
+    Parameters
+    ----------
+    axs : Iterable[plt.Axes]
+        A collection of subplot objects in which the data were plotted.
+    '''
+    if not os.path.isfile(ANNOTATIONS_FILE):
+        print('WARNING No annotations dafa found in file:', ANNOTATIONS_FILE)
+        return
+
+    with open(ANNOTATIONS_FILE) as file:
+        data = file.read().strip().split('\n')
+
+    for annotation in data:
+        time, details = annotation.split(' | ', maxsplit=1)
+        time = datetime.strptime(time, '%Y-%m-%d %H:%M:%S,%f')
+
+        if details.startswith('PLAY'):
+            color = 'darkred'
+
+        elif details.startswith('TASK [kustomize_deploy'):
+            color = 'navy'
+
+        elif details.startswith('TASK [test_operator'):
+            color = 'darkgreen'
+
+        else:  # generic
+            color = 'grey'
+
+        for ax in axs:
+            ax.axvline(time, color=color, ls='--', alpha=0.5)
+
+
 def plot(df: pd.DataFrame,
          output: str,
          title: Union[str, None] = None,
@@ -415,6 +452,8 @@ def plot(df: pd.DataFrame,
 
     if title:
         fig.suptitle(title, fontsize=16)
+
+    annotate(axs)
 
     # NOTE: the argument of Pandas query() & eval() is expected to be a valid
     #       Python expression, which does not allow any special characters
