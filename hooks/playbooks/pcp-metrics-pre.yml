@@ -5,6 +5,42 @@
 #
 # The best place to call this hook is under post_infra actions.
 #
+- name: Hack CoreOS
+  hosts: ocps
+  gather_facts: false
+  tasks:
+    # cifmw_ci_setup_rhel_rhsm_default_repos:
+    # - rhel-*-baseos-rpms
+    # - rhel-*-appstream-rpms
+    - name: Set repositories
+      become: true
+      ansible.builtin.copy:
+        content: |-
+          [baseos]
+          name=CentOS BaseOS
+          baseurl=https://mirror.stream.centos.org/9-stream/BaseOS/$basearch/os/
+          enabled=1
+          gpgcheck=0
+          [appstream]
+          name=CentOS AppStream
+          baseurl=https://mirror.stream.centos.org/9-stream/AppStream/$basearch/os/
+          enabled=1
+          gpgcheck=0
+        dest: /etc/yum.repos.d/pcp.repo
+        mode: '0644'
+
+    - name: Make /usr writable
+      become: true
+      ansible.builtin.command: >-
+        mount -o remount,rw /usr
+
+    - name: Create required directory
+      become: true
+      ansible.builtin.file:
+        path: /var/lib/rpm-state
+        state: directory
+
+
 - name: Start collecting performance metrics
   # hosts: computes,controllers,hypervisors
   hosts: all,!localhost
