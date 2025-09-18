@@ -70,6 +70,12 @@
         dest: "{{ _private_overcloud_conf_file }}"
         mode: "0644"
 
+    - name: Check if OIDC federation env file exists
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/enable-federation-openidc.yaml"
+      register: _oidc_env_stat
+
     - name: Run overcloud deploy
       delegate_to: "osp-undercloud-0"
       vars:
@@ -80,6 +86,7 @@
           --roles-file {{ _roles_file_dest }}
           -n {{ _network_data_file_dest }}
           --ntp-server {{ cifmw_adoption_osp_deploy_ntp_server }}
+          {{ _oidc_env_stat.stat.exists | ternary('-e ' ~ ansible_user_dir ~ '/enable-federation-openidc.yaml', '') }}
           -e {{ _overcloud_vars }}
           -e {{ ansible_user_dir }}/containers-prepare-parameters.yaml
           -e {{ ansible_user_dir }}/config_download_{{ _overcloud_name }}.yaml
