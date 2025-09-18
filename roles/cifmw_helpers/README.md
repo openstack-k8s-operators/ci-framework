@@ -190,3 +190,22 @@ To parse them and set as a fact, use `various_vars.yml` task file.
           "Value for file is: {{ cifmw_repo_setup_os_release }}"
           "Value for dict is: {{ test }}"
 ```
+
+#### Parse inventory file and add it to inventory
+
+Sometimes, the VMs on which action would be done are not available when the
+main Ansible playbook is executed. In that case, to parse the new inventory file
+use `inventory_file.yml` task, then you would be able to use delegation to
+execute tasks on new host.
+
+```yaml
+- name: Test parsing additional inventory file
+  hosts: localhost
+  tasks:
+    - name: Read inventory file and add it using add_host module
+      vars:
+        include_inventory_file: vms-inventory.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: inventory_file.yml
+```
