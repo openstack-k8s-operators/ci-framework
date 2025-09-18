@@ -1,8 +1,21 @@
 ---
 # various_vars
-- name: Filter Ansible variable files and set as fact
+- name: Create temporary to store templated files
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: various
+  register: _various_tmp
+
+- name: Filter Ansible variable files and parse as template
+  ansible.builtin.template:
+    src: "{{ item | replace('@','') }}"
+    dest: "{{ _various_tmp.path }}/{{ item | replace('@','') | basename }}"
+  loop: "{{ various_vars | select('match', '^@.*\\.(yml|yaml)$') | list }}"
+  no_log: "{{ cifmw_helpers_no_log }}"
+
+- name: Read templated vars and set as fact
   vars:
-    provided_file: "{{ item | replace('@','') }}"
+    provided_file: "{{ _various_tmp.path }}/{{ item | replace('@','') | basename }}"
   ansible.builtin.include_tasks: var_file.yml
   loop: "{{ various_vars | select('match', '^@.*\\.(yml|yaml)$') | list }}"
 
@@ -11,3 +24,10 @@
     "{{ item.key }}": "{{ item.value }}"
     cacheable: true
   loop: "{{ (various_vars | select('mapping') | list) | map('dict2items') | flatten }}"
+  no_log: "{{ cifmw_helpers_no_log }}"
+
+- name: Remove temporary directory
+  ansible.builtin.file:
+    path: "{{ _various_tmp.path }}"
+    state: absent
+  when: _various_tmp.path is defined
