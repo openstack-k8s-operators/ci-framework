@@ -85,7 +85,7 @@ cifmw_test_operator_stages:
 * `cifmw_test_operator_tempest_extra_images`: (List) A list of images that should be uploaded to OpenStack before the tests are executed. The value is passed to extraImages parameter in the [Tempest CR](https://openstack-k8s-operators.github.io/test-operator/crds.html#tempest-custom-resource). Default value: `[]`
 * `cifmw_test_operator_tempest_network_attachments`: (List) List of network attachment definitions to attach to the tempest pods spawned by test-operator. Default value: `[]`.
 * `cifmw_test_operator_tempest_extra_rpms`: (List) . A list of URLs that point to RPMs that should be installed before the execution of tempest. Note that this parameter has no effect when `cifmw_test_operator_tempest_external_plugin` is used. Default value: `[]`
-* `cifmw_test_operator_tempest_extra_configmaps_mounts`: (List) A list of configmaps that should be mounted into the tempest test pods. Default value: `[]`
+* `cifmw_test_operator_tempest_extra_configmaps_mounts`: WARNING: This parameter will be deprecated! Please use `cifmw_test_operator_tempest_extra_mounts` parameter instead. (List) A list of configmaps that should be mounted into the tempest test pods. Default value: `[]`
 * `cifmw_test_operator_tempest_extra_mounts`: (List) A list of additional volume mounts for the tempest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_tempest_debug`: (Bool) Run Tempest in debug mode, it keeps the operator pod sleeping infinity (it must only set to `true`only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_tempest_rerun_failed_tests`: (Bool) Activate tempest re-run feature. When activated, tempest will perform another run of the tests that failed during the first execution. Default value: `false`
@@ -196,7 +196,7 @@ Default value: {}
 * `cifmw_test_operator_ansibletest_openstack_config_secret`: (String) The name of the Secret containing the secure.yaml. Default value: "openstack-config-secret"
 * `cifmw_test_operator_ansibletest_debug`: (Bool) Run ansible playbook with -vvvv. Default value: `false`
 * `cifmw_test_operator_ansibletest_workflow`: (List) A parameter that contains a workflow definition. Default value: `[]`
-* `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: (List) Extra configmaps for mounting in the pod. Default value: `[]`
+* `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: WARNING: This parameter will be deprecated! Please use `cifmw_test_operator_ansibletest_extra_mounts` parameter instead. (List) Extra configmaps for mounting in the pod. Default value: `[]`
 * `cifmw_test_operator_ansibletest_extra_mounts`: (List) A list of additional volume mounts for the ansibletest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_ansibletest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
 * `cifmw_test_operator_ansibletest_config`: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value:
