@@ -16,11 +16,9 @@
 
 - name: Ensure directories are present
   ansible.builtin.file:
-    path: "{{ cifmw_os_must_gather_output_dir }}/{{ item }}"
+    path: "{{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather"
     state: directory
     mode: "0755"
-  loop:
-    - logs
 
 - name: Construct project change list
   ansible.builtin.set_fact:
@@ -65,40 +63,12 @@
           oc adm must-gather --image {{ cifmw_os_must_gather_image }}
           --timeout {{ cifmw_os_must_gather_timeout }}
           --host-network={{ cifmw_os_must_gather_host_network }}
-          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs
+          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather
           -- ADDITIONAL_NAMESPACES={{ cifmw_os_must_gather_additional_namespaces }}
           OPENSTACK_DATABASES=$OPENSTACK_DATABASES
           SOS_EDPM=$SOS_EDPM
           SOS_DECOMPRESS=$SOS_DECOMPRESS
-          gather &> {{ cifmw_os_must_gather_output_dir }}/logs/os_must_gather.log
-
-    # directory name will be generated starting from cifmw_os_must_gather_image
-    # variable e.g.:
-    # EXAMPLE 1
-    # original value: "quay.io/openstack-k8s-operators/openstack-must-gather:latest"
-    # pattern value: "quay-io-openstack-k8s-operators-openstack-must-gather*"
-    # EXAMPLE 2
-    # original value: "foo.bar.example.com/repofoo/openstack-must-gather-rhel9:1.0.0"
-    # patterns value: "foo-bar-example-com-repofoo-openstack-must-gather-rhel9*"
-    # TODO: add molecule testing
-    - name: Get exact must-gather output folder name
-      ansible.builtin.find:
-        paths: "{{ cifmw_os_must_gather_output_dir }}/logs"
-        patterns: >-
-          {{
-            cifmw_os_must_gather_image |
-            ansible.builtin.split(':') |
-            first |
-            ansible.builtin.regex_replace('([.]|[/])', '-') ~ '*'
-          }}
-        file_type: directory
-      register: _must_gather_output_folder
-
-    - name: Move must-gather folder name to a fixed name
-      ansible.builtin.command:
-        cmd: >
-          mv "{{ _must_gather_output_folder.files[0].path  }}/"
-          "{{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather"
+          gather &> {{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather/os_must_gather.log
 
   rescue:
     - name: Openstack-must-gather failure
