@@ -1,0 +1,80 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Build realm configurations for single realm OpenStack setup
+  ansible.builtin.set_fact:
+    _federation_openstack_realms_to_process:
+      - realm_id: 1
+        keystone_domain: "{{ cifmw_federation_keystone_domain }}"
+        remote_id: "{{ cifmw_federation_remote_id }}"
+        IdpName: "{{ cifmw_federation_IdpName }}"
+        mapping_name: "{{ cifmw_federation_mapping_name }}"
+        group_name: "{{ cifmw_federation_group_name }}"
+        project_name: "{{ cifmw_federation_project_name }}"
+  when: not cifmw_federation_deploy_multirealm|bool
+
+- name: Build realm configurations for multirealm OpenStack setup
+  ansible.builtin.set_fact:
+    _federation_openstack_realms_to_process:
+      - realm_id: 1
+        keystone_domain: "{{ cifmw_federation_keystone_domain }}"
+        remote_id: "{{ cifmw_federation_remote_id }}"
+        IdpName: "{{ cifmw_federation_IdpName }}"
+        mapping_name: "{{ cifmw_federation_mapping_name }}"
+        group_name: "{{ cifmw_federation_group_name }}"
+        project_name: "{{ cifmw_federation_project_name }}"
+      - realm_id: 2
+        keystone_domain: "{{ cifmw_federation_keystone_domain2 }}"
+        remote_id: "{{ cifmw_federation_remote_id2 }}"
+        IdpName: "{{ cifmw_federation_IdpName2 }}"
+        mapping_name: "{{ cifmw_federation_mapping_name2 }}"
+        group_name: "{{ cifmw_federation_group_name2 }}"
+        project_name: "{{ cifmw_federation_project_name2 }}"
+  when: cifmw_federation_deploy_multirealm|bool
+
+- name: Run federation setup on OSP for all realms
+  ansible.builtin.include_role:
+    name: federation
+    tasks_from: run_openstack_setup.yml
+  vars:
+    cifmw_federation_keystone_domain: "{{ realm.keystone_domain }}"
+    cifmw_federation_remote_id: "{{ realm.remote_id }}"
+    cifmw_federation_IdpName: "{{ realm.IdpName }}"
+    cifmw_federation_mapping_name: "{{ realm.mapping_name }}"
+    cifmw_federation_group_name: "{{ realm.group_name }}"
+    cifmw_federation_project_name: "{{ realm.project_name }}"
+  loop: "{{ _federation_openstack_realms_to_process }}"
+  loop_control:
+    loop_var: realm
+    label: "Realm {{ realm.realm_id }}: {{ realm.IdpName }}"
+
+- name: Run federation OSP User Auth setup
+  ansible.builtin.import_role:
+    name: federation
+    tasks_from: run_openstack_auth_setup.yml
+
+# MultiRole CLI testing is not available. It is only currently supported in Horizon.
+# Auth tests only run in single realm mode - not supported in multirealm
+- name: Run federation OSP User Auth test for first realm
+  ansible.builtin.include_role:
+    name: federation
+    tasks_from: run_openstack_auth_test.yml
+  vars:
+    cifmw_federation_keycloak_testuser_username: "{{ item }}"
+  loop:
+    - "{{ cifmw_federation_keycloak_testuser1_username }}"
+    - "{{ cifmw_federation_keycloak_testuser2_username }}"
+  when: not cifmw_federation_deploy_multirealm|bool

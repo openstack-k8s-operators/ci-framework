@@ -1,0 +1,83 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Run SSO pod setup on Openshift
+  ansible.builtin.import_role:
+    name: federation
+    tasks_from: run_keycloak_setup.yml
+
+- name: Build realm configurations for single realm
+  ansible.builtin.set_fact:
+    _federation_realms_to_process:
+      - realm_id: 1
+        keycloak_realm: "{{ cifmw_federation_keycloak_realm }}"
+        testuser1_username: "{{ cifmw_federation_keycloak_testuser1_username }}"
+        testuser1_password: "{{ cifmw_federation_keycloak_testuser1_password }}"
+        testuser2_username: "{{ cifmw_federation_keycloak_testuser2_username }}"
+        testuser2_password: "{{ cifmw_federation_keycloak_testuser2_password }}"
+        testgroup1_name: "{{ cifmw_federation_keycloak_testgroup1_name }}"
+        testgroup2_name: "{{ cifmw_federation_keycloak_testgroup2_name }}"
+        IdpName: "{{ cifmw_federation_IdpName }}"
+        keystone_client_id: "{{ cifmw_federation_keystone_OIDC_ClientID }}"
+        keystone_client_secret: "{{ cifmw_federation_keystone_OIDC_ClientSecret }}"
+  when: not cifmw_federation_deploy_multirealm|bool
+
+- name: Build realm configurations for multirealm
+  ansible.builtin.set_fact:
+    _federation_realms_to_process:
+      - realm_id: 1
+        keycloak_realm: "{{ cifmw_federation_keycloak_realm }}"
+        testuser1_username: "{{ cifmw_federation_keycloak_testuser1_username }}"
+        testuser1_password: "{{ cifmw_federation_keycloak_testuser1_password }}"
+        testuser2_username: "{{ cifmw_federation_keycloak_testuser2_username }}"
+        testuser2_password: "{{ cifmw_federation_keycloak_testuser2_password }}"
+        testgroup1_name: "{{ cifmw_federation_keycloak_testgroup1_name }}"
+        testgroup2_name: "{{ cifmw_federation_keycloak_testgroup2_name }}"
+        IdpName: "{{ cifmw_federation_IdpName }}"
+        keystone_client_id: "{{ cifmw_federation_keystone_OIDC_ClientID }}"
+        keystone_client_secret: "{{ cifmw_federation_keystone_OIDC_ClientSecret }}"
+      - realm_id: 2
+        keycloak_realm: "{{ cifmw_federation_keycloak_realm2 }}"
+        testuser1_username: "{{ cifmw_federation_keycloak_testuser3_username }}"
+        testuser1_password: "{{ cifmw_federation_keycloak_testuser3_password }}"
+        testuser2_username: "{{ cifmw_federation_keycloak_testuser4_username }}"
+        testuser2_password: "{{ cifmw_federation_keycloak_testuser4_password }}"
+        testgroup1_name: "{{ cifmw_federation_keycloak_testgroup3_name }}"
+        testgroup2_name: "{{ cifmw_federation_keycloak_testgroup4_name }}"
+        IdpName: "{{ cifmw_federation_IdpName2 }}"
+        keystone_client_id: "{{ cifmw_federation_keystone_OIDC_ClientID2 }}"
+        keystone_client_secret: "{{ cifmw_federation_keystone_OIDC_ClientSecret2 }}"
+  when: cifmw_federation_deploy_multirealm|bool
+
+- name: Run SSO realm setup for all configured realms
+  ansible.builtin.include_role:
+    name: federation
+    tasks_from: run_keycloak_realm_setup.yml
+  vars:
+    cifmw_federation_keycloak_realm: '{{ realm.keycloak_realm }}'
+    cifmw_federation_keycloak_testuser1_username: '{{ realm.testuser1_username }}'
+    cifmw_federation_keycloak_testuser1_password: '{{ realm.testuser1_password }}'
+    cifmw_federation_keycloak_testuser2_username: '{{ realm.testuser2_username }}'
+    cifmw_federation_keycloak_testuser2_password: '{{ realm.testuser2_password }}'
+    cifmw_federation_keycloak_testgroup1_name: '{{ realm.testgroup1_name }}'
+    cifmw_federation_keycloak_testgroup2_name: '{{ realm.testgroup2_name }}'
+    cifmw_federation_IdpName: '{{ realm.IdpName }}'
+    cifmw_federation_keystone_client_id: '{{ realm.keystone_client_id }}'
+    cifmw_federation_keystone_client_secret: '{{ realm.keystone_client_secret }}'
+  loop: "{{ _federation_realms_to_process }}"
+  loop_control:
+    loop_var: realm
+    label: "Setting up Keycloak realm {{ realm.realm_id }}: {{ realm.keycloak_realm }}"

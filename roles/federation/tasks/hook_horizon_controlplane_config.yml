@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set websso settings for single IdP
+  ansible.builtin.set_fact:
+    cifmw_federation_websso_choices: '("OIDC", _("OpenID Connect")),'
+    cifmw_federation_websso_idp_mapping: '"OIDC": ("{{ cifmw_federation_IdpName }}", "openid"),'
+  when: cifmw_federation_deploy_multirealm is false
+
+- name: Set websso settings for multiple IdP
+  ansible.builtin.set_fact:
+    cifmw_federation_websso_choices: '("OIDC1", _("OpenID Connect IdP1")),("OIDC2", _("OpenID Connect IdP2")),'
+    cifmw_federation_websso_idp_mapping: '"OIDC1": ("{{ cifmw_federation_IdpName }}", "openid"),"OIDC2": ("{{ cifmw_federation_IdpName2 }}", "openid"),'
+  when: cifmw_federation_deploy_multirealm is true
+
+- name: Create file to customize horizon for Federation resources deployed in the control plane
+  ansible.builtin.copy:
+    dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/horizon_federation.yaml"
+    mode: preserve
+    content: |-
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+      resources:
+      - namespace: {{ namespace }}
+      patches:
+      - target:
+          kind: OpenStackControlPlane
+          name: .*
+        patch: |-
+          - op: add
+            path: /spec/horizon/enabled
+            value: true
+          - op: add
+            path: /spec/horizon/template/memcachedInstance
+            value: memcached
+          - op: add
+            path: /spec/horizon/template/customServiceConfig
+            value: |
+              OPENSTACK_KEYSTONE_URL = "{{ cifmw_federation_keystone_url }}/v3"
+              WEBSSO_ENABLED = True
+              WEBSSO_CHOICES = (
+                ("credentials", _("Keystone Credentials")),
+                {{ cifmw_federation_websso_choices }}
+              )
+              WEBSSO_IDP_MAPPING = {
+                {{ cifmw_federation_websso_idp_mapping }}
+              }
