@@ -1,0 +1,16 @@
+---
+- name: Read inventory file
+  ansible.builtin.slurp:
+    src: "{{ include_inventory_file }}"
+  register: _inventory_file
+
+- name: Parse inventory file content
+  ansible.builtin.set_fact:
+    inventory_data: "{{ _inventory_file.content | b64decode | from_yaml }}"
+
+- name: Process each group with hosts
+  ansible.builtin.include_tasks:
+    file: parse_inventory.yml
+  loop: "{{ inventory_data | dict2items | selectattr('value.hosts', 'defined') | list }}"
+  loop_control:
+    loop_var: group_item

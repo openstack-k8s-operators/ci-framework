@@ -132,7 +132,24 @@ That code, can be replaced by:
     - logs
 ```
 
+#### Read var file and set as fact
+
+Example task execution:
+
+```yaml
+- name: Read base centos-9 scenarios
+  vars:
+    provided_file: >
+      {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/
+      ci-framework/scenarios/centos-9/base.yml
+  ansible.builtin.include_role:
+    name: cifmw_helpers
+    tasks_from: var_file.yml
+```
+
 Of course, before Zuul execute the playbook, it is mandatory to call `playbooks/cifmw_collection_zuul_executor.yml`.
+
+#### Read directory and parse all files and then set as fact
 
 For setting all files in the directory as fact, use `var_dir.yml` tasks.
 Example:
@@ -146,4 +163,49 @@ Example:
   ansible.builtin.include_role:
     name: cifmw_helpers
     tasks_from: var_dir.yml
+```
+
+#### Set as fact various variables
+
+In some places in our workflow, we can have a list that contains
+various variables like files: "@some_file.yml" or dictionaries like "some: var".
+To parse them and set as a fact, use `various_vars.yml` task file.
+
+```yaml
+- name: Example
+  hosts: localhost
+  tasks:
+    - name: Test various vars
+      vars:
+        various_vars:
+          - "@scenarios/centos-9/base.yml"
+          - test: ok
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Print parsed variables
+      ansible.builtin.debug:
+        msg: |
+          "Value for file is: {{ cifmw_repo_setup_os_release }}"
+          "Value for dict is: {{ test }}"
+```
+
+#### Parse inventory file and add it to inventory
+
+Sometimes, the VMs on which action would be done are not available when the
+main Ansible playbook is executed. In that case, to parse the new inventory file
+use `inventory_file.yml` task, then you would be able to use delegation to
+execute tasks on new host.
+
+```yaml
+- name: Test parsing additional inventory file
+  hosts: localhost
+  tasks:
+    - name: Read inventory file and add it using add_host module
+      vars:
+        include_inventory_file: vms-inventory.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: inventory_file.yml
 ```
