@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+"""
+CI Framework Release Tagging Script
+Creates bi-weekly release tags from the stable branch
+"""
+
+set -e
+
+# Configuration
+REPO_PATH="${REPO_PATH:-$(pwd)}"
+STABLE_BRANCH="${STABLE_BRANCH:-stable}"
+TAG_PREFIX="${TAG_PREFIX:-}"
+DRY_RUN="${DRY_RUN:-false}"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log() {
+    echo -e "${BLUE}[$(date +'%H:%M:%S')]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Calculate current week-based version
+get_current_version() {
+    local year=$(date +%Y)
+    local week=$(date +%V)  # ISO week number
+    echo "${year}.${week}.0"
+}
+
+# Check if tag already exists
+tag_exists() {
+    local tag="$1"
+    git tag -l | grep -q "^${tag}$"
+}
+
+# Get the latest commit hash from stable branch
+get_stable_commit() {
+    git rev-parse "${STABLE_BRANCH}"
+}
+
+# Check if stable branch has recent activity
+check_stable_activity() {
+    local days_since_last_commit
+    days_since_last_commit=$(git log -1 --format="%ct" "${STABLE_BRANCH}" | xargs -I {} date -d @{} +%s | xargs -I {} echo $(( ($(date +%s) - {}) / 86400 )))
+
+    if [ "$days_since_last_commit" -gt 14 ]; then
+        warn "Stable branch hasn't been updated in ${days_since_last_commit} days"
+        warn "Last commit: $(git log -1 --format="%h %s (%ar)" "${STABLE_BRANCH}")"
+        return 1
+    fi
+
+    log "Stable branch activity: last commit ${days_since_last_commit} days ago"
+    return 0
+}
+
+# Create release tag
+create_tag() {
+    local version="$1"
+    local commit_hash="$2"
+    local tag_message="Release ${version} - Week $(date +%V), $(date +%Y)
+
+Created from stable branch commit: ${commit_hash}
+Release date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+This release includes all changes that have been automatically
+promoted to the stable branch as of $(date -u +"%Y-%m-%d").
+
+For detailed changes, see:
+git log --oneline ${commit_hash}...$(git tag -l '20*' | tail -1)
+"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        log "DRY RUN: Would create tag ${version} at commit ${commit_hash}"
+        log "Tag message:"
+        echo "$tag_message"
+        return 0
+    fi
+
+    # Create annotated tag
+    if git tag -a "$version" -m "$tag_message" "$commit_hash"; then
+        success "Created tag ${version} at commit ${commit_hash}"
+
+        # Push tag to origin
+        if git push origin "$version"; then
+            success "Pushed tag ${version} to origin"
+            return 0
+        else
+            error "Failed to push tag ${version}"
+            return 1
+        fi
+    else
+        error "Failed to create tag ${version}"
+        return 1
+    fi
+}
+
+# Generate release announcement
+generate_announcement() {
+    local version="$1"
+    local previous_version
+    previous_version=$(git tag -l '20*' | grep -v "$version" | sort -V | tail -1)
+
+    local week_num=$(date +%V)
+    local year=$(date +%Y)
+
+    cat << EOF
+Subject: [CI Framework] Release ${version} Available
+
+Bi-weekly Release: ${version} (Week ${week_num}, ${year})
+Previous Release: ${previous_version} (2 weeks ago)
+
+Release Highlights:
+$(git log --oneline "${previous_version}..stable" --pretty="- %s" | head -10)
+
+Breaking Changes: Check deprecation notices below
+Migration Required: See individual component notices
+
+Next Release: Scheduled for $(date -d '+2 weeks' '+%Y.%V').0 (in 2 weeks)
+Legacy Support: Recent releases remain supported
+
+Usage Instructions:
+- Update your job tags to: ${version}
+- Emergency rollback tags: ${previous_version} and earlier
+- Stable branch: Continue using 'stable' for latest tested code
+
+Questions? Contact the CI Framework team.
+EOF
+}
+
+main() {
+    log "CI Framework Release Tagging Process Starting"
+
+    # Ensure we're in the right directory
+    cd "$REPO_PATH"
+
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        error "Not in a git repository"
+        exit 1
+    fi
+
+    # Fetch latest changes
+    log "Fetching latest changes..."
+    git fetch origin
+
+    # Check out stable branch
+    log "Switching to ${STABLE_BRANCH} branch..."
+    git checkout "$STABLE_BRANCH"
+    git pull origin "$STABLE_BRANCH"
+
+    # Calculate version
+    VERSION=$(get_current_version)
+    log "Target version: ${VERSION}"
+
+    # Check if tag already exists
+    if tag_exists "$VERSION"; then
+        # Try patch version
+        PATCH_VERSION="${VERSION%.*}.1"
+        if tag_exists "$PATCH_VERSION"; then
+            error "Both ${VERSION} and ${PATCH_VERSION} already exist"
+            exit 1
+        fi
+        VERSION="$PATCH_VERSION"
+        log "Base version exists, using patch version: ${VERSION}"
+    fi
+
+    # Check stable branch activity
+    if ! check_stable_activity; then
+        if [ "$FORCE" != "true" ]; then
+            error "Stable branch has not been recently updated. Use FORCE=true to override."
+            exit 1
+        fi
+        warn "Proceeding with stale stable branch due to FORCE=true"
+    fi
+
+    # Get commit hash
+    COMMIT_HASH=$(get_stable_commit)
+    log "Stable branch at commit: ${COMMIT_HASH}"
+
+    # Create the tag
+    if create_tag "$VERSION" "$COMMIT_HASH"; then
+        success "Release ${VERSION} created successfully!"
+
+        # Generate announcement
+        log "Generating release announcement..."
+        ANNOUNCEMENT_FILE="/tmp/cifmw-release-${VERSION}.txt"
+        generate_announcement "$VERSION" > "$ANNOUNCEMENT_FILE"
+        log "Release announcement saved to: ${ANNOUNCEMENT_FILE}"
+
+        log "Next steps:"
+        log "1. Review the release announcement"
+        log "2. Send announcement to stakeholders"
+        log "3. Update documentation if needed"
+
+    else
+        error "Failed to create release ${VERSION}"
+        exit 1
+    fi
+}
+
+# Show usage
+show_usage() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Create a bi-weekly release tag from the stable branch.
+
+Options:
+  -h, --help        Show this help message
+  -n, --dry-run     Show what would be done without making changes
+  -f, --force       Force tagging even if stable branch is stale
+
+Environment Variables:
+  REPO_PATH         Path to repository (default: current directory)
+  STABLE_BRANCH     Name of stable branch (default: stable)
+  DRY_RUN           Set to 'true' for dry run mode
+  FORCE             Set to 'true' to force tagging
+
+Examples:
+  $0                # Create release tag
+  $0 --dry-run      # Show what would be done
+  FORCE=true $0     # Force tag creation even if stable is stale
+EOF
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        -n|--dry-run)
+            DRY_RUN="true"
+            shift
+            ;;
+        -f|--force)
+            FORCE="true"
+            shift
+            ;;
+        *)
+            error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Run main function
+main

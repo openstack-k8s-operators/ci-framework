@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""
+CI Framework Deprecation Helper Tool
+Makes it easy for developers to properly deprecate components
+"""
+
+import os
+import sys
+import argparse
+import subprocess
+from pathlib import Path
+from datetime import datetime
+from textwrap import dedent
+
+
+class DeprecationHelper:
+    def __init__(self):
+        self.current_release = self._get_current_release()
+
+    def _get_current_release(self):
+        """Get current release from git tags"""
+        try:
+            result = subprocess.run(
+                ['git', 'describe', '--tags', '--abbrev=0'],
+                capture_output=True, text=True, check=True
+            )
+            return result.stdout.strip()
+        except:
+            # Fallback to date-based release
+            now = datetime.now()
+            week = now.isocalendar()[1]
+            return f"{now.year}.{week:02d}.0"
+
+    def _calculate_removal_release(self, current_release, releases_ahead=6):
+        """Calculate removal release (6 releases minimum)"""
+        # Parse current release (YYYY.WW.PATCH)
+        parts = current_release.split('.')
+        year = int(parts[0])
+        week = int(parts[1])
+
+        target_week = week + (releases_ahead * 2)  # Bi-weekly releases
+        target_year = year
+
+        # Handle year rollover (52-53 weeks per year)
+        while target_week > 52:
+            target_year += 1
+            target_week -= 52
+
+        return f"{target_year}.{target_week:02d}.0"
+
+    def create_deprecation_notice(self, component_type, component_name, reason, alternative=None):
+        """Create properly formatted deprecation notice"""
+        removal_release = self._calculate_removal_release(self.current_release)
+
+        notice = dedent(f"""
+        # DEPRECATED: {component_name}
+        # Will be removed in release {removal_release}
+        # Reason: {reason}
+        """).strip()
+
+        if alternative:
+            notice += f"\n# Migration: Use {alternative} instead"
+
+        notice += f"\n# See: docs/migration/{component_name.replace('/', '_')}.md"
+
+        return notice, removal_release
+
+    def create_migration_doc(self, component_name, component_type, alternative, removal_release):
+        """Generate migration documentation template"""
+        doc_name = component_name.replace('/', '_')
+        doc_path = f"docs/migration/{doc_name}.md"
+
+        content = dedent(f"""
+        # Migration Guide: {component_name}
+
+        ## Deprecation Notice
+
+        **Component:** `{component_name}`
+        **Type:** {component_type}
+        **Deprecated in:** {self.current_release}
+        **Removal target:** {removal_release}
+        **Status:** ⚠️ Deprecated
+
+        ## Migration Required
+
+        ### Old Usage (Deprecated)
+        ```yaml
+        # Example of old usage - will be removed!
+        - name: Old way
+          include: {component_name}
+        ```
+
+        ### New Usage (Recommended)
+        ```yaml
+        # New recommended approach
+        - name: New way
+          include: {alternative if alternative else 'NEW_COMPONENT_HERE'}
+        ```
+
+        ## Migration Steps
+
+        1. **Identify usage** in your job definitions
+        2. **Replace component reference** with new alternative
+        3. **Update any component-specific parameters**
+        4. **Test your job** with the new component
+        5. **Remove deprecated component** from your job
+
+        ## Key Differences
+
+        | Deprecated Component | New Component | Notes |
+        |---------------------|---------------|-------|
+        | `{component_name}` | `{alternative or 'TBD'}` | TODO: Document differences |
+
+        ## Timeline
+
+        - **{self.current_release}**: Deprecation announced, warnings added
+        - **{removal_release}**: Component removed from main branch
+        - **Legacy access**: Available in tags {self.current_release} and earlier
+
+        ## Support
+
+        - **Documentation**: [CI Framework Docs](../README.md)
+        - **Migration Help**: Contact @ci-framework-team
+        - **Issues**: Create ticket in [CIFMW Jira](https://issues.redhat.com/projects/CIFMW)
+        """).strip()
+
+        return doc_path, content
+
+    def create_conventional_commit_template(self, component_name, action="deprecate"):
+        """Generate proper conventional commit message"""
+        if action == "deprecate":
+            return dedent(f"""
+            feat!: deprecate {component_name}
+
+            BREAKING CHANGE: {component_name} is deprecated and will be removed
+            in 6 releases. Use [ALTERNATIVE] instead.
+
+            - Added runtime deprecation warnings
+            - Created migration guide: docs/migration/{component_name.replace('/', '_')}.md
+            - Scheduled removal: 6 releases from now
+
+            Refs: CIFMW-XXXX
+            """).strip()
+        elif action == "remove":
+            return dedent(f"""
+            feat!: remove deprecated {component_name}
+
+            BREAKING CHANGE: {component_name} has been removed as scheduled.
+            Use [ALTERNATIVE] instead.
+
+            - Component deprecated 6 releases ago
+            - Migration guide available: docs/migration/{component_name.replace('/', '_')}.md
+            - Legacy access via previous release tags
+
+            Refs: CIFMW-XXXX
+            """).strip()
+
+    def interactive_deprecation(self):
+        """Interactive deprecation workflow"""
+        print("🔧 CI Framework Deprecation Helper")
+        print("=====================================\n")
+
+        # Gather information
+        print("📝 Component Information:")
+        component_type = input("Component type (playbook/role/task): ").strip()
+        component_name = input("Component name/path: ").strip()
+        reason = input("Deprecation reason: ").strip()
+        alternative = input("Alternative component (optional): ").strip() or None
+
+        print(f"\n📅 Timeline (current release: {self.current_release}):")
+        removal_release = self._calculate_removal_release(self.current_release)
+        print(f"   Removal target: {removal_release} (6 releases ahead)")
+
+        # Generate content
+        notice, _ = self.create_deprecation_notice(component_type, component_name, reason, alternative)
+        doc_path, doc_content = self.create_migration_doc(component_name, component_type, alternative, removal_release)
+        commit_msg = self.create_conventional_commit_template(component_name)
+
+        print("\n📋 Generated Content:")
+        print("====================")
+
+        print("\n1️⃣ Deprecation Notice (add to component file):")
+        print("-" * 50)
+        print(notice)
+
+        print(f"\n2️⃣ Migration Documentation ({doc_path}):")
+        print("-" * 50)
+        print(doc_content[:500] + "..." if len(doc_content) > 500 else doc_content)
+
+        print("\n3️⃣ Commit Message Template:")
+        print("-" * 50)
+        print(commit_msg)
+
+        # Offer to create files
+        if input("\n✍️  Create migration documentation file? (y/N): ").lower() == 'y':
+            Path("docs/migration").mkdir(parents=True, exist_ok=True)
+            with open(doc_path, 'w') as f:
+                f.write(doc_content)
+            print(f"✅ Created: {doc_path}")
+
+        print("\n📋 Next Steps:")
+        print("1. Add deprecation notice to your component file")
+        print("2. Update your component to show runtime warnings")
+        print("3. Create PR with the generated commit message")
+        print("4. Send stakeholder notification email")
+
+        return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description='CI Framework Deprecation Helper')
+    parser.add_argument('--interactive', '-i', action='store_true',
+                       help='Interactive deprecation workflow')
+    parser.add_argument('--component', help='Component to deprecate')
+    parser.add_argument('--type', choices=['playbook', 'role', 'task'],
+                       help='Component type')
+    parser.add_argument('--reason', help='Deprecation reason')
+    parser.add_argument('--alternative', help='Alternative component')
+
+    args = parser.parse_args()
+
+    helper = DeprecationHelper()
+
+    if args.interactive or not any([args.component, args.type, args.reason]):
+        helper.interactive_deprecation()
+    else:
+        # Non-interactive mode
+        notice, removal_release = helper.create_deprecation_notice(
+            args.type, args.component, args.reason, args.alternative
+        )
+        print("Deprecation Notice:")
+        print(notice)
+
+        doc_path, doc_content = helper.create_migration_doc(
+            args.component, args.type, args.alternative, removal_release
+        )
+        print(f"\nMigration doc would be created at: {doc_path}")
+
+
+if __name__ == '__main__':
+    main()
