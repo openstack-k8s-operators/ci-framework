@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-This document outlines the CI Framework's proposed release cadence and deprecation process, designed to provide stability for downstream consumers while maintaining development velocity. The solution implements a 2-week release cycle with structured deprecation timelines.
+This document outlines the CI Framework's proposed release cadence and deprecation process, designed to provide stability for downstream consumers while maintaining development velocity. The solution implements a bi-weekly release cycle with structured deprecation timelines.
 
 ## Table of Contents
 
@@ -26,10 +26,31 @@ This document outlines the CI Framework's proposed release cadence and deprecati
 
 Based on the CI tooling team discussion on September 17, 2025, the current workflow presents several challenges:
 
-1. **Daily sync instability**: Main branch changes sync daily to stable, causing frequent disruption
-2. **Unpredictable breaking changes**: No advance notice for deprecated components
-3. **Difficult long-term planning**: Teams cannot rely on stable component availability
-4. **Communication gaps**: Breaking changes surprise downstream consumers
+#### Workflow and Stability Disruptions
+
+• **Daily Sync Instability**: The main branch currently syncs daily changes to the stable CI framework branch. This process causes frequent disruption and instability for users. Users complain about constant changes that distrupt their current workflows.
+
+• **Lack of Versioning**: A significant challenge is the lack of project versioning and the practice of pushing changes directly to the main branch. This makes it difficult for end users to easily understand changes or decide when to update their jobs.
+
+• **Predictability Issues**: The lack of a defined release cadence means there is no advance versioning or defined release time between main and stable branches. Consequently, users face unpredictable breaking changes.
+
+#### Deprecation and Development Problems
+
+• **Issues with Deprecation**: The current process creates problems when trying to deprecate and remove playbooks from the CI framework. Confusion was expressed regarding how a new release cadence would even assist with playbook deprecation.
+
+• **Long-Term Project Submission**: The existing structure causes issues when submitting Pull Requests (PRs) for long-term development changes.
+
+• **Conflicting Goals ("Chicken and Egg Problem")**: There is a "chicken and egg problem" of wanting to release breaking changes while simultaneously keeping customers undisrupted. This is exacerbated by the difficulty downstream teams have with long-term planning because they cannot rely on stable component availability.
+
+#### User Compliance and Implementation Concerns
+
+• **Ensuring Updates**: A challenge lies in ensuring all downstream CI jobs update to the designated stable branch or new tags.
+
+• **Communication Gaps**: Breaking changes surprise downstream consumers because of communication gaps and the lack of advance notice for deprecated components.
+
+• **Overhead Concerns**: Concerns were raised regarding the potential overhead and complexity of implementing a new structured system, such as a tagging system.
+
+The proposed solution to these issues involves adopting a stable branch and tags approach, with a predictable bi-weekly release cadence.
 
 ### Team Consensus
 
@@ -57,7 +78,7 @@ main branch (development) → stable branch (auto-promoted when criteria met) �
 
 - **Frequency**: Every 2 weeks (bi-weekly)
 - **Release Cycle**: 2 weeks
-- **Release Day**: Friday of even-numbered weeks
+- **Release Day**: Tuesday of even-numbered weeks
 - **Emergency Releases**: Hot-fix tags as needed
 
 ### Versioning Scheme
@@ -82,9 +103,9 @@ main branch (development) → stable branch (auto-promoted when criteria met) �
 - Stable branch automatically updates when criteria are met
 
 #### Week 2: Release Tagging
-- **Monday-Wednesday**: Continue development, stable branch continues auto-updates
-- **Thursday**: Evaluate current stable branch commit for release tagging
-- **Friday**: Create release tag from stable branch, send release communication
+- **Monday-Wednesday**: Continue development, the stable branch continues its auto-updates
+- **Monday**: Evaluate current stable branch commit for release tagging
+- **Tuesday**: Create release tag from stable branch, send release communication
 
 #### Stable Branch Automation (Ongoing)
 - **Automatic promotion**: Main → stable when validation criteria are met
@@ -107,11 +128,11 @@ FORCE=true ./scripts/create-release-tag
 
 #### Tag Selection Criteria
 - **Source**: Current HEAD of stable branch (automatically promoted)
-- **Timing**: Every Friday at 15:00 UTC via automation
+- **Timing**: Every Tuesday at 15:00 UTC via automation
 - **Validation**:
   - Verify stable branch has recent commits (within last 2 weeks)
   - Ensure stable branch passed all promotion criteria
-  - Check for duplicate tags
+  - Ensure there are no duplicate tags
 - **Naming**: Follow CalVer format `YYYY.WW.PATCH`
 
 #### Hot-fix Tags
@@ -126,13 +147,13 @@ FORCE=true ./scripts/create-release-tag
 |--------|---------|-----------------|----------------|
 | `main` | Active development | Continuous | CI Framework developers only |
 | `stable` | Tested, ready for consumption | Automatic (when criteria met) | Available for consumption |
-| Tags | Fixed release points | Every 2 weeks (Friday) | Required for production jobs |
+| Tags | Fixed release points | Every 2 weeks (Tuesday) | Required for production jobs |
 
 ## Deprecation Process
 
 ### Timeline Overview
 
-**Total Timeline**: 6 releases minimum (12 weeks)
+**Total Timeline**: A minimum of 6 releases (12 weeks)
 
 | Phase | Release | Timeline | Actions Required |
 |-------|---------|----------|------------------|
@@ -296,9 +317,9 @@ Usage Instructions:
 - **Pre-commit Config**: `.pre-commit-config.yaml` (clean separation: gitlint + CI Framework specific tools)
 
 #### 2. CI/CD Pipeline Gates
-- **GitHub Actions**: Deprecation compliance checks on PRs
+- **GitHub Actions**: Perform deprecation compliance checks on PRs
 - **Zuul Integration**: Automated validation for OpenStack CI
-- **Failure Conditions**: Missing migration docs, insufficient timeline
+- **Failure Conditions**: Will fail if missing migration docs or the timeline is insufficient
 
 #### 3. Developer Tools
 
@@ -412,7 +433,7 @@ Update files
 
 **Troubleshooting:**
 ```bash
-# Fix format issues
+# Fix formatting issues
 echo "your message" | npx commitlint
 
 # Generate proper templates
@@ -493,8 +514,8 @@ git commit --no-verify -m "hotfix: critical security patch"
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| On-time releases | 99% | Every Friday bi-weekly release |
-| Release window | <2 hours | Thursday validation to Friday tag |
+| On-time releases | 99% | Every Tuesday bi-weekly release |
+| Release window | <2 hours | Monday validation to Tuesday tag |
 | Zero surprise breakages | 100% | All breaking changes have 12-week notice |
 | Quick adoption | 90% | Teams update to new tags within 2 weeks |
 
@@ -529,9 +550,9 @@ git commit --no-verify -m "hotfix: critical security patch"
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Quality degradation due to speed | High | Automated quality gates, mandatory Thursday validation |
+| Quality degradation due to speed | High | Automated quality gates, mandatory Monday validation |
 | Team fatigue from bi-weekly releases | Medium | Full automation, minimal manual intervention |
-| Insufficient testing time | High | Continuous testing on main, Thursday gate validation |
+| Insufficient testing time | High | Continuous testing on main, Monday gate validation |
 | Communication overload | Medium | Automated announcements, digest format, opt-in notifications |
 
 ### Deprecation Process Risks
@@ -677,7 +698,7 @@ jobs:
    - CI Framework's commitment to predictable releases
 
 2. **Technical Implementation**
-   - Using the `cifmw-deprecate` helper tool
+   - How to use the `cifmw-deprecate` helper tool
    - Writing proper conventional commits
    - Creating migration documentation
 
