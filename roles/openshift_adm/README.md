@@ -16,7 +16,6 @@ This role requires the following parameters to be configured.
 
 * `cifmw_openshift_adm_basedir` (str) Framework base directory, defaults to `cifmw_basedir` or
   `~/ci-framework-data`.
-* `cifmw_openshift_api` (str) Cluster endpoint to be used for communication.
 * `cifmw_openshift_user` (str) Name of the user to be used for authentication.
 * `cifmw_openshift_password` (str) Password of the provided user.
 * `cifmw_openshift_kubeconfig` (str) Absolute path to the kubeconfig file.
@@ -30,6 +29,11 @@ This role requires the following parameters to be configured.
   performed on the cluster.
 * `cifmw_openshift_adm_retry_count` (int) The maximum number of attempts to be
   made for a command to succeed. Default is `100`.
+* `cifmw_openshift_adm_context` (str) The kubeconfig context to use for cluster operations. Default is `admin`.
+
+## Obsolete Parameters
+
+* `cifmw_openshift_api` (str) Previously required cluster endpoint URL. Removed in favor of dynamic API server URL detection from kubeconfig context to ensure correct cluster targeting.
 
 ## Reference
 
