@@ -1,0 +1,46 @@
+---
+- name: Store stestr timing data in repository
+  hosts: localhost
+  gather_facts: false
+  vars:
+    repo_path: "/tmp/timing-data"
+    tests_log_dir: "{{ ansible_user_dir }}/ci-framework-data/tests/test_operator"
+    timing_data_repo: "https://repo.example.org/project/timing-data"
+  tasks:
+    - name: All tasks required for storing timing data
+      # Note(kstrenko): This playbook introduces an additional feature
+      #                 and should not interfere with existing jobs.
+      ignore_errors: true  # noqa: ignore-errors
+      block:
+        - name: Clone timing data repository
+          ansible.builtin.git:
+            repo: "{{ timing_data_repo }}"
+            dest: "{{ repo_path }}"
+            version: "main"
+
+        - name: Configure git settings
+          community.general.git_config:
+            repo: "{{ repo_path }}"
+            scope: local
+            name: "{{ item.name }}"
+            value: "{{ item.value }}"
+          loop:
+            - {name: 'user.name', value: 'Zuul'}
+            - {name: 'user.email', value: 'rhos-dfg-ciops@redhat.com'}
+            - {name: 'remote.origin.url', value: '{{ timing_data_repo }}'}
+
+        - name: Find all 'tempest' directories
+          ansible.builtin.find:
+            paths: "{{ tests_log_dir }}"
+            file_type: directory
+            patterns: "*-tempest*"
+          register: tempest_dirs
+
+        - name: Store timing data for every tempest-test directory
+          ansible.builtin.include_tasks: ../tasks/tempest_store_timing_data_each.yaml
+          vars:
+            stestr_tar_path: "{{ tests_log_dir }}/{{ tempest_tests_name.path | basename }}/stestr.tar.gz"
+            timing_data_repo_dir: "{{ repo_path }}/{{ job_name }}/{{ tempest_tests_name.path | basename }}"
+          loop: "{{ tempest_dirs.files }}"
+          loop_control:
+            loop_var: tempest_tests_name
