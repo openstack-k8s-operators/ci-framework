@@ -3,12 +3,14 @@
 {% set ns = namespace(interfaces={},
                       ocp_index=0,
                       lb_tools={}) %}
+{% set node_groups = groups if 'rhoso-architecture-validate' not in ((zuul | default({})).job | default('')) else test_groups %}
 data:
 {% for host in cifmw_networking_env_definition.instances.keys() -%}
 {# FIXEME: (hjensas/eolivare): We need to ensure the OCP cluster_name and base_domain is available here #}
 {#                    Because devscripts use fqdn for node names when ipv6                              #}
 {%   set hostname = cifmw_networking_env_definition.instances[host]['hostname'] %}
 {%   if host is match('^(ocp|crc).*') %}
+{%     if 'ocp_workers' not in node_groups or host in node_groups.ocp_workers %}
   node_{{ ns.ocp_index }}:
     name: {{ hostname }}.ocp.openstack.lab
 {%     for network in cifmw_networking_env_definition.instances[host]['networks'].values() %}
@@ -42,6 +44,7 @@ data:
     loopback_ipv6: {{ loopback_ipv6 }}
 {%     if node_bgp_orig_content.routes | default(false) %}
     routes: {{ node_bgp_orig_content.routes }}
+{%     endif %}
 {%     endif %}
 {%     set ns.ocp_index = ns.ocp_index+1 %}
 {%   endif %}
