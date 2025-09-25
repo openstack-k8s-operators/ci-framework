@@ -12,6 +12,7 @@
   ansible.builtin.shell:
     cmd: >-
       ssh-keyscan {{ cifmw_artifacts_crc_host }} >> ~/.ssh/known_hosts
+
 - name: Get CRC things only if we know it
   when:
     - crc_host_key is defined
@@ -40,12 +41,16 @@
           sudo systemctl restart sshd;
           sudo cp -r .ssh /root/;
           sudo chown -R root: /root/.ssh;
+          mkdir -p /tmp/crc-logs-artifacts;
+          sudo cp -av /ostree/deploy/rhcos/var/log/pods /tmp/crc-logs-artifacts/;
+          sudo chown -R core:core /tmp/crc-logs-artifacts;
           EOF
+
     - name: Copy logs from CRC VM
       ignore_errors: true  # noqa: ignore-errors
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_artifacts_basedir }}/artifacts"
         script: >-
           scp -v -r -i {{ new_keypair_path | default(cifmw_artifacts_crc_sshkey) }}
-          root@{{ cifmw_artifacts_crc_host }}:/ostree/deploy/rhcos/var/log/pods
+          core@{{ cifmw_artifacts_crc_host }}:/tmp/crc-logs-artifacts
           {{ cifmw_artifacts_basedir }}/logs/crc/

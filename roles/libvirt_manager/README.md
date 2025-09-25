@@ -83,17 +83,20 @@ cifmw_libvirt_manager_configuration:
       image_local_dir: (string, image destination for download. Optional if disk_file_name is set to "blank")
       disk_file_name: (string, target image name. If set to "blank", will create a blank image)
       disksize: (integer, disk size for the VM type. Optional, defaults to 40G)
+      disk_bus: (string, optional. Bus type for / disk. It can be virtio or scsi. Defaults to `virtio`)
       memory: (integer, RAM amount in GB. Optional, defaults to 2)
       cpus: (integer, amount of CPU. Optional, defaults to 2)
       nets: (ordered list of networks to connect to)
       extra_disks_num: (integer, optional. Number of extra disks to be configured.)
       extra_disks_size: (string, optional. Storage capacity to be allocated. Example 1G, 512M)
+      extra_disks_bus: (string, optional. Bus type for extra disks. It can be virtio or scsi. Defaults to `virtio`)
       user: (string, optional. Username to create on the vm which can becomes root. Defaults to `zuul`)
       password: (string, optional, defaults to fooBar. Root password for console access)
       target: (Hypervisor hostname you want to deploy the family on. Optional)
       uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
       bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
       networkconfig: (dict or list[dict], [network-config](https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html#network-config-v2) v2 config, needed if a static ip address should be defined at boot time in absence of a dhcp server in special scenarios. Optional)
+      devices: (dict, optional, defaults to {}. The keys are the VMs of that type that needs devices to be attached, and the values are lists of strings, where each string must contain a valid <hostdev/> libvirt XML element that will be passed to virsh attach-device)
   networks:
     net_name: <XML definition of the network to create>
 ```
@@ -138,6 +141,13 @@ cifmw_libvirt_manager_configuration:
         - osp_trunk
       extra_disks_num: 5
       extra_disks_size: '1G'
+      devices:
+        "0": >-
+          <hostdev mode='subsystem' type='pci' managed='yes'>
+            <source>
+              <address domain='0x0000' bus='0x17' slot='0x00' function='0x0'/>
+            </source>
+          </hostdev>
     controller:
       image_url: "{{ cifmw_discovered_image_url }}"
       sha256_image_name: "{{ cifmw_discovered_hash }}"

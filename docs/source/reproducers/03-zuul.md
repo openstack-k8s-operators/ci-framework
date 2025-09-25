@@ -33,7 +33,7 @@ will be accessible from the private network interface.
 [laptop]$ make setup_molecule
 ```
 ### Create an inventory file in order to consume your hypervisor
-You can create a file in `custom/inventor.yml` for instance (ensure you ignore
+You can create a file in `custom/inventory.yml` for instance (ensure you ignore
 that path from git tree in order to NOT inject that custom inventory).
 
 The file should look like this:
