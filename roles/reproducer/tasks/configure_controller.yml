@@ -356,6 +356,7 @@
         path: "{{ cifmw_reproducer_src_dir }}"
       register: cifmw_reproducer_src_dir_stat
       run_once: true
+      ignore_errors: true
 
     - name: Sync local repositories to other hosts if present
       delegate_to: localhost
@@ -366,6 +367,7 @@
         recursive: true
       loop: "{{ groups['controllers'] }}"
       when:
+        - cifmw_reproducer_src_dir_stat.stat is defined
         - cifmw_reproducer_src_dir_stat.stat.exists
         - cifmw_reproducer_src_dir_stat.stat.isdir
 
@@ -375,6 +377,7 @@
         path: "{{ cifmw_reproducer_src_dir }}/github.com/openstack-k8s-operators/ci-framework/common-requirements.txt"
       register: _local_common_requirements_check
       run_once: true
+      ignore_errors: true
 
     - name: Install ansible dependencies
       register: _async_dep_install
@@ -383,7 +386,7 @@
       ansible.builtin.pip:
         requirements: "{{ have_local | ternary(local, remote) }}"
       vars:
-        have_local: "{{ _local_common_requirements_check.stat.exists }}"
+        have_local: "{{ _local_common_requirements_check.stat is defined and _local_common_requirements_check.stat.exists }}"
         local: "{{ cifmw_reproducer_src_dir }}/github.com/openstack-k8s-operators/ci-framework/common-requirements.txt"
         remote: https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/common-requirements.txt
 
