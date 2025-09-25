@@ -33,7 +33,9 @@ Requires an Ansible user who can become root to install Ceph server.
 The `hooks/playbooks/ceph.yml` hook playbook defaults these parameters so
 that they do not need to be changed for a typical EDPM deployment.
 
-* `cifmw_cephadm_basedir`: (String) Base directory for artifacts and logs. Defaults to `cifmw_basedir`, which defaults to `{{ ansible_user_dir ~ '/ci-framework-data' }}`.
+* `cifmw_cephadm_basedir`: (String) Base directory for artifacts and logs.
+  Defaults to `cifmw_basedir`, which defaults 
+  to `{{ ansible_user_dir ~ '/ci-framework-data' }}`.
 
 * `cifmw_cephadm_default_container`: If this is value is `true`, then
   `cephadm bootstrap` is not passed the `--image` parameter and whatever
