@@ -22,7 +22,7 @@
         regex_replace('^.*-([0-9]+)$',
                       vm_type ~ '-\1')
       }}
-    _user: "{{ 'core' if vm is match('^(crc|ocp).*') else 'zuul' }}"
+    _user: "{{ 'core' if vm is match('^(crc|ocp).*') else vm_data.get('user', 'zuul') }}"
     dataset:
       ssh_dir: "{{ ansible_user_dir }}/.ssh"
       user: "{{ _user }}"
@@ -86,28 +86,29 @@
       ssh core@{{ vm_con_name }}
       "sudo growpart /dev/sda {{ _root_part }}; sudo xfs_growfs /;"
 
-- name: "Inject private key on hosts {{ vm }}"
+- name: Manage ssh keys on controller nodes
   when:
     - vm_type is match('^controller.*$')
     - _cifmw_libvirt_manager_layout.vms[vm_type].start | default(true)
-  delegate_to: "{{ vm_con_name }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.builtin.copy:
-    dest: "/home/zuul/.ssh/id_cifw"
-    content: "{{ priv_key }}"
-    owner: "{{ cifmw_libvirt_manager_user }}"
-    group: "{{ cifmw_libvirt_manager_user }}"
-    mode: "0400"
+  vars:
+    _user: "{{ vm_data.get('user', 'zuul') }}"
+  block:
+    - name: "Inject private key on hosts {{ vm }}"
+      delegate_to: "{{ vm_con_name }}"
+      remote_user: "{{ _init_admin_user }}"
+      ansible.builtin.copy:
+        dest: "/home/{{ _user}}/.ssh/id_cifw"
+        content: "{{ priv_key }}"
+        owner: "{{ _user }}"
+        group: "{{ _user }}"
+        mode: "0400"
 
-- name: "Inject public key on hosts {{ vm }}"
-  when:
-    - vm_type is match('^controller.*$')
-    - _cifmw_libvirt_manager_layout.vms[vm_type].start | default(true)
-  delegate_to: "{{ vm_con_name }}"
-  remote_user: "{{ _init_admin_user }}"
-  ansible.builtin.copy:
-    dest: "/home/zuul/.ssh/id_cifw.pub"
-    content: "{{ pub_key }}"
-    owner: "{{ cifmw_libvirt_manager_user }}"
-    group: "{{ cifmw_libvirt_manager_user }}"
-    mode: "0444"
+    - name: "Inject public key on hosts {{ vm }}"
+      delegate_to: "{{ vm_con_name }}"
+      remote_user: "{{ _init_admin_user }}"
+      ansible.builtin.copy:
+        dest: "/home/{{ _user }}/.ssh/id_cifw.pub"
+        content: "{{ pub_key }}"
+        owner: "{{ _user }}"
+        group: "{{ _user }}"
+        mode: "0444"
