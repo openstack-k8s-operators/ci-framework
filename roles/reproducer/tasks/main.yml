@@ -70,6 +70,16 @@
     name: "libvirt_manager"
     tasks_from: "generate_layout.yml"
 
+- name: Set controller-0 user and basedir facts
+  when:
+    - cifmw_use_libvirt | default(false) | bool
+    - _cifmw_libvirt_manager_layout.vms.controller is defined
+  vars:
+    _controller_user: "{{ _cifmw_libvirt_manager_layout.vms.controller.user | default('zuul') }}"
+  ansible.builtin.set_fact:
+    cifmw_reproducer_controller0_user: "{{ _controller_user }}"
+    cifmw_reproducer_controller0_user_dir: "/home/{{ _controller_user }}"
+
 - name: Assert no conflicting parameters were passed
   tags:
     - always
@@ -281,13 +291,15 @@
             - always
           ansible.builtin.include_tasks: rotate_log.yml
           loop:
-            - "/home/zuul/ansible-bootstrap.log"
+            - "{{ cifmw_reproducer_controller0_user_dir }}/ansible-bootstrap.log"
 
         - name: Bootstrap environment on controller-0
           vars:
             # NOTE: need to overwrite parent vars:
             # ./roles/reproducer/molecule/crc_layout/converge.yml
-            cifmw_basedir: "{{ ansible_user_dir ~ '/ci-framework-data' }}"
+            cifmw_basedir: "{{ cifmw_reproducer_controller0_user_dir ~ '/ci-framework-data' }}"
+            ansible_user_dir: "{{ cifmw_reproducer_controller0_user_dir }}"
+            ansible_user_id: "{{ cifmw_reproducer_controller0_user }}"
           no_log: "{{ cifmw_nolog | default(true) | bool }}"
           ansible.builtin.import_role:
             name: cifmw_setup
@@ -300,7 +312,8 @@
             _devsetup_path: >-
               {{
                 (
-                  cifmw_install_yamls_repo | default('/home/zuul/src/github.com/openstack-k8s-operators/install_yamls'),
+                  cifmw_reproducer_controller0_user_dir,
+                  'src/github.com/openstack-k8s-operators/install_yamls',
                   'devsetup'
                 ) | ansible.builtin.path_join
               }}
@@ -310,13 +323,13 @@
             cmd: >-
               ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
               download_tools.yaml --tags kustomize,kubectl
-            creates: "/home/zuul/bin/kubectl"
+            creates: "{{ cifmw_reproducer_controller0_user_dir }}/bin/kubectl"
 
         - name: Configure CRC network if needed
           when:
             - _use_crc | bool
           vars:
-            cifmw_openshift_kubeconfig: "/home/zuul/.kube/config"
+            cifmw_openshift_kubeconfig: "{{ cifmw_reproducer_controller0_user_dir }}/.kube/config"
           ansible.builtin.include_role:
             name: openshift_setup
             tasks_from: patch_network_operator.yml
@@ -396,8 +409,8 @@
         extravars: "{{ cifmw_reproducer_play_extravars }}"
         playbook: "deploy-edpm.yml"
       ansible.builtin.template:
-        dest: "/home/zuul/deploy-edpm.sh"
+        dest: "{{ cifmw_reproducer_controller0_user_dir }}/deploy-edpm.sh"
         src: "script.sh.j2"
         mode: "0755"
-        owner: "zuul"
-        group: "zuul"
+        owner: "{{ cifmw_reproducer_controller0_user }}"
+        group: "{{ cifmw_reproducer_controller0_user }}"
