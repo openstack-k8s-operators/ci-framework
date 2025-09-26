@@ -100,6 +100,20 @@
   ansible.builtin.command:
     cmd: "oc apply -n {{ cifmw_federation_keycloak_namespace }} -f {{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'sso.yaml' ] | path_join }}"
 
+- name: Grant privileged SCC to namespace default serviceaccount for Keycloak
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc adm policy add-scc-to-user privileged
+      -n {{ cifmw_federation_keycloak_namespace }}
+      -z default
+  register: _scc_assignment
+  changed_when: >-
+    'clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged added'
+    in _scc_assignment.stdout
+
 - name: Add CRC IP address to hosts
   become: true
   ansible.builtin.blockinfile:
