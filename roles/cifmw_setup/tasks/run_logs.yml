@@ -6,23 +6,25 @@
 
 - name: Try to load parameters files
   block:
-    - name: Check directory availability
-      register: param_dir
-      ansible.builtin.stat:
-        path: "{{ cifmw_basedir }}/artifacts/parameters"
-
-    - name: Load parameters files
-      when:
-        - param_dir.stat.exists | bool
-      ansible.builtin.include_vars:
-        dir: "{{ cifmw_basedir }}/artifacts/parameters"
-  always:
-    - name: Set custom cifmw PATH reusable fact
-      when:
-        - cifmw_path is not defined
-      ansible.builtin.set_fact:
-        cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
-        cacheable: true
+    - name: Try to load parameters files
+      block:
+        # NOTE: We should not check, if the parameters dir exists
+        # on remote host, due in later stage, we use "include_vars",
+        # which is reading variable ONLY on localhost.
+        # Ensure, that the directory exists on localhost before continue.
+        - name: Read artifacts parameters dir and set as facts
+          vars:
+            provided_dir: "{{ cifmw_basedir }}/artifacts/parameters"
+          ansible.builtin.include_role:
+            name: cifmw_helpers
+            tasks_from: var_dir.yml
+      always:
+        - name: Set custom cifmw PATH reusable fact
+          when:
+            - cifmw_path is not defined
+          ansible.builtin.set_fact:
+            cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+            cacheable: true
 
 - name: Set destination folder for the logs
   ansible.builtin.set_fact:
