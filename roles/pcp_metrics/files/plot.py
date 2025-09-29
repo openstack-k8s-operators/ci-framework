@@ -517,7 +517,9 @@ def plot(df: pd.DataFrame,
     set_xaxis(axs)
     set_legend(fig, axs)
 
-    fig.set_figwidth(FIG_WIDTH)
+    fig.set_figwidth(max(FIG_WIDTH,
+                         2 * df['Time'].agg(['min', 'max']).diff().dropna()
+                                       .iloc[0].ceil('h').components.hours))
     fig.set_figheight(FIG_HEIGHT)
     fig.savefig(output, format='pdf', **PLOT_OPTIONS)
 
