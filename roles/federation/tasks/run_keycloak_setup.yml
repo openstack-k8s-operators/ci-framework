@@ -52,13 +52,11 @@
   kubernetes.core.k8s_info:
     api_version: operators.coreos.com/v1alpha1
     kind: InstallPlan
+    namespace: "{{ cifmw_federation_operator_namespace }}"
+    label_selectors:
+      - "operators.coreos.com/rhsso-operator.{{ cifmw_federation_operator_namespace }}"
   register: ip_list
-  until: >-
-    {{
-      ip_list.resources |
-      map(attribute='metadata.labels') |
-      select('match', '.*rhsso-operator.*')
-    }}
+  until: ip_list.resources | default([]) | length > 0
   retries: 30
   delay: 40
 
@@ -68,8 +66,9 @@
     PATH: "{{ cifmw_path }}"
   ansible.builtin.shell: >-
     oc patch installplan
-    $(oc get ip
-    -o=jsonpath='{.items[].metadata.name}')
+    $(oc get installplan -n {{ cifmw_federation_operator_namespace }}
+    -o=jsonpath='{.items[0].metadata.name}')
+    -n {{ cifmw_federation_operator_namespace }}
     --type merge --patch '{"spec":{"approved":true}}'
 
 - name: Add sso admin user secret
