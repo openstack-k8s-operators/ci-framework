@@ -21,6 +21,7 @@
     _subnet_gateway: '172.20.1.1'
     _subnet_alloc_pool_start: '172.20.1.150'
     _subnet_alloc_pool_end: '172.20.1.199'
+    _subnet_ip_version: 4
     _provider_physical_network: ironic
     _provider_network_type: flat
   tasks:
@@ -155,6 +156,14 @@
                   --subnet-range {{ _subnet_range }} \
                   --gateway {{ _subnet_gateway }} \
                   --allocation-pool start={{ _subnet_alloc_pool_start }},end={{ _subnet_alloc_pool_end }}
+
+        - name: Create router and attach subnet for IPv6 provisioning network
+          ansible.builtin.shell:
+            cmd: >-
+              openstack router show provisioning &>/dev/null || \
+                (openstack router create provisioning && \
+                 openstack router add subnet provisioning provisioning-subnet)
+          when: _subnet_ip_version | int == 6
 
     - name: Slurp ironic_nodes.yaml from controller-0
       delegate_to: controller-0
