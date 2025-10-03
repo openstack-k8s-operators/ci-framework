@@ -209,3 +209,109 @@ execute tasks on new host.
         name: cifmw_helpers
         tasks_from: inventory_file.yml
 ```
+
+#### Parse string of arguments and convert to list of variables or list of files
+
+In some playbook, when nested Ansible is executed via shell/command module,
+there is a string which contains arguments to parse by the ansible-playbook
+binary. If nested Ansible can be removed, it would be required to parse
+such variables. Below example how nested Ansible execution looks like,
+and how it could be replaced.
+
+NOTE: `test.yaml` is executed on `host-1`.
+
+Example:
+- all files are on same host which execute ansible-playbook
+
+```yaml
+- name: Nested Ansible execution
+  hosts: localhost
+  tasks:
+    - name: Run ansible-playbook
+      vars:
+        cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+      ansible.builtin.command: |
+        ansible-playbook "{{ cmd_args }}" test.yaml
+```
+
+To:
+
+```yaml
+- name: Playbook that does not use nested Ansible - same host
+  hosts: localhost
+  vars:
+    cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+  tasks:
+    # NOTE: The task returns fact: cmd_args_vars and cmd_args_files
+    - name: Read inventory file and add it using add_host module
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: parse_ansible_args_string.yml
+
+    - name: Parse only variables from cmd_args_vars
+      when: cmd_args_vars is defined and cmd_args_vars | length > 0
+      vars:
+        various_vars: "{{ cmd_args_vars }}"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Read var files from cmd_args
+      when: cmd_args_files is defined and cmd_args_files | length > 0
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop: "{{ cmd_args_files }}"
+```
+
+- files are located in remote host - controller
+
+In alternative version, variables are available on remote host (include_vars
+reads only files that are on the host where ansible-playbook was executed):
+
+```yaml
+- name: Nested Ansible execution
+  hosts: controller
+  tasks:
+    - name: Run ansible-playbook
+      vars:
+        cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+      ansible.builtin.command: |
+        ansible-playbook "{{ cmd_args }}" test.yaml
+```
+
+To:
+
+```yaml
+- name: Playbook that does not use nested Ansible - different host
+  hosts: controller
+  vars:
+    cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+  tasks:
+    # NOTE: The task returns fact: cmd_args_vars and cmd_args_files
+    - name: Read inventory file and add it using add_host module
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: parse_ansible_args_string.yml
+
+    - name: Parse only variables from cmd_args_vars
+      when: cmd_args_vars is defined and cmd_args_vars | length > 0
+      vars:
+        various_vars: "{{ cmd_args_vars }}"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Fetch cmd_args_files to executing host
+      when: cmd_args_files is defined and cmd_args_files | length > 0
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "{{ item }}"
+        flat: true
+      loop: "{{ cmd_args_files }}"
+
+    - name: Read fetched var files from cmd_args
+      when: cmd_args_files is defined and cmd_args_files | length > 0
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop: "{{ cmd_args_files }}"
+```
