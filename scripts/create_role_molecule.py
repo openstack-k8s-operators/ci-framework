@@ -21,7 +21,6 @@ import logging
 from jinja2 import Environment, FileSystemLoader
 
 additional_molecule_jobs = [
-    "edpm-ansible-molecule-edpm_kernel",
     "edpm-ansible-molecule-edpm_podman",
     "edpm-ansible-molecule-edpm_ovs",
 ]
