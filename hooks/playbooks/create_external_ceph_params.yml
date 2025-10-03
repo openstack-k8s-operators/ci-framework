@@ -1,0 +1,50 @@
+---
+# Playbook to create external Ceph parameters file
+# This runs the shell script that extracts Ceph credentials and creates the parameter file
+
+- name: Create external Ceph parameters file
+  hosts: localhost
+  gather_facts: false
+  vars:
+    default_script_path: "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/data-plane-adoption'].src_dir }}/scenarios/uni04delta-ipv6/create_external_ceph_params.sh"
+    script_path: "{{ script_path | default(default_script_path) }}"
+
+  tasks:
+    - name: Check if script exists
+      ansible.builtin.stat:
+        path: "{{ script_path }}"
+      register: script_stat
+
+    - name: Fail if script doesn't exist
+      ansible.builtin.fail:
+        msg: "Script not found at {{ script_path }}"
+      when: not script_stat.stat.exists
+
+    - name: Execute external Ceph parameters creation script
+      ansible.builtin.script: "{{ script_path }}"
+      register: script_output
+
+    - name: Display script output
+      ansible.builtin.debug:
+        var: script_output.stdout_lines
+
+    - name: Display script errors if any
+      when: script_output.stderr_lines | length > 0
+      ansible.builtin.debug:
+        msg: "Script stderr: {{ script_output.stderr_lines }}"
+
+    - name: Verify external_ceph_params.yaml was created
+      delegate_to: osp-undercloud-0
+      ansible.builtin.stat:
+        path: "/home/zuul/external_ceph_params.yaml"
+      register: params_file_stat
+
+    - name: Confirm file creation
+      ansible.builtin.debug:
+        msg: "Successfully created external_ceph_params.yaml on osp-undercloud-0"
+      when: params_file_stat.stat.exists
+
+    - name: Fail if file wasn't created
+      ansible.builtin.fail:
+        msg: "Failed to create external_ceph_params.yaml on osp-undercloud-0"
+      when: not params_file_stat.stat.exists
