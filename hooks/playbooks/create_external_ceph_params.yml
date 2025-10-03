@@ -1,0 +1,36 @@
+---
+# This Playbook runs the shell script that extracts Ceph credentials to create the tht parameter file and copy required ceph conf files on osp-controller
+
+- name: Create external Ceph parameters file and copy ceph client conf files
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Execute external Ceph parameters creation script
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/create_external_ceph_params.sh {{ ceph_node }} {{ ceph_mon_host }}"
+      register: script_output
+
+    - name: Display script output
+      ansible.builtin.debug:
+        var: script_output.stdout_lines
+
+    - name: Display script errors if any
+      when: script_output.stderr_lines | length > 0
+      ansible.builtin.debug:
+        msg: "Script stderr: {{ script_output.stderr_lines }}"
+
+    - name: Verify external_ceph_params.yaml was created
+      delegate_to: osp-undercloud-0
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/external_ceph_params.yaml"
+      register: params_file_stat
+
+    - name: Confirm file creation
+      ansible.builtin.debug:
+        msg: "Successfully created external_ceph_params.yaml on osp-undercloud-0"
+      when: params_file_stat.stat.exists
+
+    - name: Fail if file wasn't created
+      ansible.builtin.fail:
+        msg: "Failed to create external_ceph_params.yaml on osp-undercloud-0"
+      when: not params_file_stat.stat.exists
