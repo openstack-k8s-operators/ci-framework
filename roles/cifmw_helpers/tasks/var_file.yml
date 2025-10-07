@@ -1,20 +1,28 @@
 ---
+- name: Fail if file is not yaml or yml extension
+  ansible.builtin.fail:
+    msg: "File needs to be yaml/yml extension"
+  when:
+    - provided_file | trim | regex_search('\.(yml|yaml)$') == None
+
 - name: Check if file is available
   ansible.builtin.stat:
-    path: "{{ provided_file }}"
+    path: "{{ provided_file | trim }}"
   register: _param_file
 
 - name: Read vars
   when: _param_file.stat.exists
   ansible.builtin.slurp:
-    src: "{{ provided_file }}"
+    src: "{{ provided_file | trim }}"
   register: _parsed_vars
   no_log: "{{ cifmw_helpers_no_log }}"
 
 - name: Set vars as fact
   when: "'content' in _parsed_vars"
   ansible.builtin.set_fact:
-    "{{ item.key }}": "{{ item.value }}"
+    "{{ file_item.key }}": "{{ file_item.value }}"
     cacheable: true
   loop: "{{ _parsed_vars['content'] | b64decode | from_yaml | dict2items }}"
   no_log: "{{ cifmw_helpers_no_log }}"
+  loop_control:
+    loop_var: file_item
