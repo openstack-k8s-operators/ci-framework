@@ -48,13 +48,33 @@
   hosts: ceph_replication_targets
   become: true
   vars:
-    # Host filesystem paths (what Ansible sees)
-    bootstrap_token_path_host: /tmp/bootstrap_token_site
-    token_tmp_path: /tmp/rbd_mirror_bootstrap_token
-    # Container filesystem paths (what cephadm container sees)
-    bootstrap_token_path_container: /rootfs/tmp/bootstrap_token_site
-    # Configurable pool name
+    # Path configuration
+    tmp_dir: "{{ cifmw_replication_tmp_dir | default('/tmp') }}"
+    ceph_conf_dir: "{{ cifmw_replication_ceph_conf_dir | default('/etc/ceph') }}"
+    bootstrap_token_path_host: "{{ cifmw_replication_bootstrap_token_host_path | default('/tmp/bootstrap_token_site') }}"
+    token_tmp_path: "{{ cifmw_replication_token_tmp_path | default('/tmp/rbd_mirror_bootstrap_token') }}"
+    bootstrap_token_path_container: "{{ cifmw_replication_bootstrap_token_container_path | default('/rootfs/tmp/bootstrap_token_site') }}"
+    
+    # File permissions and ownership
+    conf_file_mode: "{{ cifmw_replication_conf_file_mode | default('0644') }}"
+    keyring_file_mode: "{{ cifmw_replication_keyring_file_mode | default('0600') }}"
+    token_file_mode: "{{ cifmw_replication_token_file_mode | default('0600') }}"
+    conf_file_owner: "{{ cifmw_replication_conf_file_owner | default('root') }}"
+    conf_file_group: "{{ cifmw_replication_conf_file_group | default('root') }}"
+    keyring_file_owner: "{{ cifmw_replication_keyring_file_owner | default('ceph') }}"
+    keyring_file_group: "{{ cifmw_replication_keyring_file_group | default('ceph') }}"
+    
+    # Pool and client configuration
     replication_pool: "{{ cifmw_replication_pool | default('volumes') }}"
+    client_name: "{{ cifmw_replication_client_name | default('openstack') }}"
+    primary_cluster_name: "{{ cifmw_replication_primary_cluster }}"
+    secondary_cluster_name: "{{ cifmw_replication_secondary_cluster }}"
+    
+    # Derived paths
+    primary_conf_path: "{{ ceph_conf_dir }}/{{ primary_cluster_name }}.conf"
+    primary_keyring_path: "{{ ceph_conf_dir }}/{{ primary_cluster_name }}.client.{{ client_name }}.keyring"
+    secondary_conf_path: "{{ ceph_conf_dir }}/{{ secondary_cluster_name }}.conf"
+    secondary_keyring_path: "{{ ceph_conf_dir }}/{{ secondary_cluster_name }}.client.{{ client_name }}.keyring"
   tasks:
     # Add validation that cephadm is available
     - name: Verify cephadm is available
@@ -120,9 +140,9 @@
       ansible.builtin.copy:
         src: "{{ token_tmp_path }}"
         dest: "{{ bootstrap_token_path_host }}"
-        mode: '0600'
-        owner: root
-        group: root
+        mode: "{{ token_file_mode }}"
+        owner: "{{ conf_file_owner }}"
+        group: "{{ conf_file_group }}"
       when: site_role == "secondary"
 
     - name: Verify token file was copied to secondary
@@ -145,7 +165,64 @@
       register: import_token_result
       failed_when: import_token_result.rc != 0
 
+    # Copy configuration files from secondary to primary
+    - name: Fetch secondary cluster conf from secondary
+      ansible.builtin.fetch:
+        src: "{{ secondary_conf_path }}"
+        dest: "{{ tmp_dir }}/{{ secondary_cluster_name }}.conf"
+        flat: true
+      when: site_role == "secondary"
+
+    - name: Fetch secondary cluster keyring from secondary
+      ansible.builtin.fetch:
+        src: "{{ secondary_keyring_path }}"
+        dest: "{{ tmp_dir }}/{{ secondary_cluster_name }}.client.{{ client_name }}.keyring"
+        flat: true
+      when: site_role == "secondary"
+
+    - name: Copy secondary cluster conf to primary
+      ansible.builtin.copy:
+        src: "{{ tmp_dir }}/{{ secondary_cluster_name }}.conf"
+        dest: "{{ secondary_conf_path }}"
+        mode: "{{ conf_file_mode }}"
+        owner: "{{ conf_file_owner }}"
+        group: "{{ conf_file_group }}"
+      when: site_role == "primary"
+
+    - name: Copy secondary cluster keyring to primary
+      ansible.builtin.copy:
+        src: "{{ tmp_dir }}/{{ secondary_cluster_name }}.client.{{ client_name }}.keyring"
+        dest: "{{ secondary_keyring_path }}"
+        mode: "{{ keyring_file_mode }}"
+        owner: "{{ keyring_file_owner }}"
+        group: "{{ keyring_file_group }}"
+      when: site_role == "primary"
+
+    - name: Add client configuration to secondary cluster conf on primary
+      ansible.builtin.blockinfile:
+        path: "{{ secondary_conf_path }}"
+        block: |
+          [client.{{ client_name }}]
+          keyring = {{ secondary_keyring_path }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - client.{{ client_name }}"
+        create: false
+      when: site_role == "primary"
+
     # Cleanup files
+    - name: Clean up temporary secondary cluster conf on controller
+      ansible.builtin.file:
+        path: "{{ tmp_dir }}/{{ secondary_cluster_name }}.conf"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
+    - name: Clean up temporary secondary cluster keyring on controller
+      ansible.builtin.file:
+        path: "{{ tmp_dir }}/{{ secondary_cluster_name }}.client.{{ client_name }}.keyring"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
     - name: Clean up token file on remote hosts
       ansible.builtin.file:
         path: "{{ bootstrap_token_path_host }}"
