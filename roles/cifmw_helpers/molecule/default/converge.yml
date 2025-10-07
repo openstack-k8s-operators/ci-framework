@@ -1,0 +1,111 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    zuul:
+      projects:
+        github.com/openstack-k8s-operators/ci-framework:
+          src_dir: src/github.com/openstack-k8s-operators/ci-framework
+  tasks:
+    # var file
+    - name: Read file with facts
+      vars:
+        provided_file: /tmp/provided_file.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_file.yml
+
+    - name: Check if some_var is available
+      ansible.builtin.assert:
+        that: some_var is defined and some_var
+
+    # var dir
+    - name: Read all files in directory and set as fact
+      vars:
+        provided_dir: /tmp/provided_dir
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_dir.yml
+
+    - name: Check if variables from dir are available
+      ansible.builtin.assert:
+        that:
+          - first_in_dir is defined and first_in_dir
+          - second_in_dir is defined and second_in_dir
+
+    # various vars
+    - name: Check various files
+      vars:
+        various_vars:
+          - "@/tmp/various_vars.yml"
+          - mytest: true
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Check if variables from various vars exists
+      ansible.builtin.assert:
+        that:
+          - my_various_file is defined and my_various_file
+          - mytest is defined and mytest
+
+    # symlink cifmw collection
+    - name: Make a symlink to local .ansible collection dir
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: symlink_cifmw_collection.yml
+
+    - name: Check if symlink was done
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw"
+      register: _cifmw_collection
+
+    - name: Assert that symlink was done
+      ansible.builtin.assert:
+        that: _cifmw_collection.stat.exists
+
+    # include file
+    - name: Check include file
+      vars:
+        included_file: /tmp/include_file.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_file.yml
+
+    - name: Check if jinja2 vars are translated
+      ansible.builtin.assert:
+        that:
+          - "my_include_file is defined and my_include_file == 'test'"
+          - "my_second_include_file is defined and my_second_include_file == 'test'"
+
+    # include dir
+    - name: Check include dir
+      vars:
+        included_dir: /tmp/included_dir
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+
+    - name: Check if all files were parsed
+      ansible.builtin.assert:
+        that:
+          - "my_include_dir is defined and my_include_dir == 'test'"
+          - "my_second_include_dir is defined and my_second_include_dir == 'test'"
+          - my_fake_include_dir is not defined
+          - my_fake_second_include_dir is not defined
