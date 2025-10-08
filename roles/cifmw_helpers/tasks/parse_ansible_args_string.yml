@@ -1,0 +1,34 @@
+---
+# This would help to parse variables, that
+# are called in nested ansible execution using shell/command
+# module.
+# For example:
+#
+#     cifmw_cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+#
+# to:
+#
+#     cifmw_cmd_args_vars: [{'myvar': 'test'}]
+#     cifmw_cmd_args_files: ['somefile.yml', '/tmp/someotherfile.yml']
+#
+
+- name: Split string of arguments into the lists of vars and files
+  when: cifmw_cmd_args | length > 1
+  ansible.builtin.set_fact:
+    cifmw_cmd_args_vars: "{{ cifmw_cmd_args
+         | split(' -e ')
+         | reject('search', '@')
+         | reject('equalto', '')
+         | map('regex_replace', '^(.*?)=(.*)$', '{\"\\1\": \"\\2\"}')
+         | map('from_yaml')
+         | list
+      }}"
+    cifmw_cmd_args_files: "{{ cifmw_cmd_args
+         | split('-e')
+         | select()
+         | map('trim')
+         | select('match', '^@.*\\.(yml|yaml)$')
+         | list
+         | replace('@', '')
+      }}"
+  no_log: "{{ cifmw_helpers_no_log }}"

@@ -25,3 +25,7 @@ In case you want to remove everything, with the base images.
     reproducer-clean.yml \
     --tags deepscrub
 ```
+
+~~~{tip}
+This includes flushing the Ansible cache. If you perform a quick cleanup and encounter new errors, you should run a deepscrub or re-run the playbook with --flush-cache.
+~~~
