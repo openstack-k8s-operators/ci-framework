@@ -16,7 +16,7 @@
 
 - name: Ensure directories are present
   ansible.builtin.file:
-    path: "{{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather"
+    path: "{{ cifmw_os_must_gather_output_log_dir }}"
     state: directory
     mode: "0755"
 
@@ -63,13 +63,26 @@
           oc adm must-gather --image {{ cifmw_os_must_gather_image }}
           --timeout {{ cifmw_os_must_gather_timeout }}
           --host-network={{ cifmw_os_must_gather_host_network }}
-          --dest-dir {{ cifmw_os_must_gather_output_dir }}/logs/openstack-k8s-operators-openstack-must-gather
+          --dest-dir {{ cifmw_os_must_gather_output_log_dir }}
           -- ADDITIONAL_NAMESPACES={{ cifmw_os_must_gather_additional_namespaces }}
           OPENSTACK_DATABASES=$OPENSTACK_DATABASES
           SOS_EDPM=$SOS_EDPM
           SOS_DECOMPRESS=$SOS_DECOMPRESS
           gather
           2>&1
+
+    - name: Find existing os-must-gather directories
+      ansible.builtin.find:
+        paths: "{{ cifmw_os_must_gather_output_log_dir }}"
+        file_type: directory
+        depth: 1
+      register: _os_gather_latest_dir
+
+    - name: Create a symlink to newest os-must-gather directory
+      ansible.builtin.file:
+        src: "{{ (_os_gather_latest_dir.files | sort(attribute='mtime', reverse=True) | first).path | basename }}"
+        dest: "{{ cifmw_os_must_gather_output_log_dir }}/latest"
+        state: link
 
   rescue:
     - name: Openstack-must-gather failure
