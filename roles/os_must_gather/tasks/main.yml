@@ -44,15 +44,20 @@
   register: oc_installed
   ignore_errors: true
 
+- name: Check if kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+  register: _kubeconfig_stat
+
 - name: Running openstack-must-gather tool
   when:
     - oc_installed is defined
     - oc_installed.rc == 0
-    - cifmw_openshift_kubeconfig is defined
+    - _kubeconfig_stat.stat.exists
   block:
     - name: Run openstack-must-gather command
       environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
         PATH: "{{ cifmw_path }}"
         SOS_EDPM: "all"
         SOS_DECOMPRESS: "0"
@@ -93,7 +98,7 @@
 
         - name: Run fallback generic must-gather command
           environment:
-            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
             PATH: "{{ cifmw_path }}"
           ansible.builtin.command:
             cmd: oc adm must-gather --dest-dir {{ ansible_user_dir }}/ci-framework-data/must-gather
@@ -107,7 +112,7 @@
         - name: Inspect the cluster after must-gather failure
           ignore_errors: true # noqa: ignore-errors
           environment:
-            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
             PATH: "{{ cifmw_path }}"
           cifmw.general.ci_script:
             output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
