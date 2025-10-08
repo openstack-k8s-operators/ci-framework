@@ -33,6 +33,10 @@ Requires an Ansible user who can become root to install Ceph server.
 The `hooks/playbooks/ceph.yml` hook playbook defaults these parameters so
 that they do not need to be changed for a typical EDPM deployment.
 
+* `cifmw_cephadm_basedir`: (String) Base directory for artifacts and logs.
+  Defaults to `cifmw_basedir`, which defaults
+  to `{{ ansible_user_dir ~ '/ci-framework-data' }}`.
+
 * `cifmw_cephadm_default_container`: If this is value is `true`, then
   `cephadm bootstrap` is not passed the `--image` parameter and whatever
   default Ceph container defined inside of `cephadm` is used. Otherwise
@@ -55,8 +59,8 @@ that they do not need to be changed for a typical EDPM deployment.
 
 * `cifmw_cephadm_keys`: see below
 
- `cifmw_cephadm_certs`: The path on the ceph host where TLS/SSL certificates
-   are located. It points to `/etc/pki/tls`.
+* `cifmw_cephadm_certs`: The path on the ceph host where TLS/SSL certificates
+  are located. It points to `/etc/pki/tls`.
 
 * `cifmw_cephadm_certificate`: The SSL/TLS certificate signed by CA which is
    an optional parameter. If it is provided, ceph dashboard and RGW will be
