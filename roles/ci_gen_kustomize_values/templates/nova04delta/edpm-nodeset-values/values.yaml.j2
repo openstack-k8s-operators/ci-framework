@@ -2,26 +2,23 @@
 # source:  nova04delta/edpm-nodeset-values/values.yaml.j2
 {% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
 {% set instances_names = []                                                            %}
-{% set _original_nodeset = (original_content.data | default({})).nodeset | default({}) %}
+{% set _original_nodeset = original_content.data.nodeset | default({})                 %}
 {% set _original_nodes = _original_nodeset.nodes | default({})                         %}
 {% set _original_services = _original_nodeset['services'] | default([])                %}
-{% for _inst in cifmw_networking_env_definition.instances.keys()                       %}
-{%     if _inst.startswith('compute')                                                  %}
-{%         set _ = instances_names.append(_inst)                                       %}
-{%     endif                                                                           %}
+{% set _vm_type = (_original_nodes.keys() | first).split('-')[1]                       %}
+{% for _inst in cifmw_baremetal_hosts.keys()                                           %}
+{%   if 'compute' in _inst                                                             %}
+{%     set _ = instances_names.append(_inst)                                           %}
+{%   endif                                                                             %}
 {% endfor                                                                              %}
-{% set inst_stop_idx = (instances_names | length) // 2                                 %}
-{% set nodeset_one_instances = instances_names[:inst_stop_idx]                         %}
+{% set nodeset_one_instances = [instances_names[0]]                                    %}
 data:
+  baremetalSetTemplate:
+    provisioningInterface: null
   ssh_keys:
     authorized: {{ cifmw_ci_gen_kustomize_values_ssh_authorizedkeys | b64encode }}
     private: {{ cifmw_ci_gen_kustomize_values_ssh_private_key | b64encode }}
     public: {{ cifmw_ci_gen_kustomize_values_ssh_public_key | b64encode }}
-  nova:
-    migration:
-      ssh_keys:
-        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
-        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
   nodeset:
     ansible:
       ansibleUser: "zuul"
@@ -29,36 +26,25 @@ data:
         edpm_fips_mode: "{{ 'enabled' if cifmw_fips_enabled|default(false)|bool else 'check' }}"
         timesync_ntp_servers:
           - hostname: "{{ cifmw_ci_gen_kustomize_values_ntp_srv | default('pool.ntp.org') }}"
-        edpm_network_config_os_net_config_mappings:
-{% for instance in nodeset_one_instances                                               %}
-          edpm-{{ instance }}:
-{%   if hostvars[instance] is defined                                                  %}
-            nic1: "{{ hostvars[instance][_ipv.ansible_default_ipvX].macaddress }}"
-{%   endif                                                                             %}
-            nic2: "{{ cifmw_networking_env_definition.instances[instance].networks.ctlplane.mac_addr }}"
-{% endfor                                                                              %}
+        edpm_bootstrap_command: |
+          # root CA
+          pushd /etc/pki/ca-trust/source/anchors/
+          curl -LOk {{ cifmw_install_ca_url }}
+          update-ca-trust
+          popd
+
+          # install rhos-release repos
+          dnf --nogpgcheck install -y {{ cifmw_repo_setup_rhos_release_rpm }}
+          rhos-release {{ cifmw_repo_setup_rhos_release_args }}
+
+          # see https://access.redhat.com/solutions/253273
+          dnf -y install conntrack-tools
 {% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
         edpm_sshd_allowed_ranges:
 {%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
           - "{{ range }}"
 {%   endfor                                                                            %}
 {% endif                                                                               %}
-    nodes:
-{% for instance in nodeset_one_instances                                               %}
-      edpm-{{ instance }}:
-        ansible:
-          host: {{ cifmw_networking_env_definition.instances[instance].networks.ctlplane[_ipv.ip_vX] }}
-        hostName: {{ instance }}
-        networks:
-{%      for net in cifmw_networking_env_definition.instances[instance].networks.keys() %}
-          - name: {{ net }}
-            subnetName: subnet1
-            fixedIP: {{ cifmw_networking_env_definition.instances[instance].networks[net][_ipv.ip_vX] }}
-{%        if net is match('ctlplane')                                                  %}
-            defaultRoute: true
-{%        endif                                                                        %}
-{%      endfor                                                                         %}
-{% endfor                                                                              %}
 {% if ('repo-setup' not in _original_services) and
       ('repo-setup' in ci_gen_kustomize_edpm_nodeset_predeployed_services)             %}
     services:
@@ -67,21 +53,43 @@ data:
       - "{{ svc }}"
 {%   endfor                                                                            %}
 {% endif                                                                               %}
-{% for host in cifmw_networking_env_definition.instances.keys() if host is match('^compute.*') %}
-{% if cifmw_run_id is defined %}
-{% set _host = host | replace('-' + cifmw_run_id, '') %}
-{% else %}
-{% set _host = host %}
-{% endif %}
-  {{ _host }}:
-    bmc:
-      address: {{ cifmw_baremetal_hosts[host].connection }}
-      credentialsName: {{ _host }}-bmc-secret
-    bootMACAddress: {{ cifmw_baremetal_hosts[host].nics[0].mac }}
-    labels:
-      app: openstack
-      nodeset: {{ host | split('-') | first }}
-    name: {{ host }}
-    rootDeviceHints:
-      deviceName: /dev/sda
-{% endfor %}
+
+  # source roles/deploy_bmh/template/bmh.yml.j2, but it patches kustomize built outputs
+  baremetalhosts:
+{% for host, def in cifmw_baremetal_hosts.items() if 'compute' in host                 %}
+{%   set _host = host | replace('-' + cifmw_run_id, '') if cifmw_run_id is defined else host %}
+    {{ _host }}:
+      bmc:
+        address: {{ cifmw_baremetal_hosts[host].connection }}
+        credentialsName: {{ _host }}-bmc-secret
+        disableCertificateVerification: {{ cifmw_deploy_bmh_disable_certificate_validation | default(true) }}
+{%    for nic in (cifmw_baremetal_hosts[host]['nics'] | default([])) if nic['network'] == cifmw_deploy_bmh_boot_interface | default('provision') %}
+      bootMACAddress: {{ nic.mac }}
+{%    endfor                                                                           %}
+      bootMode: {{ cifmw_baremetal_hosts[host].boot_mode }}
+      online: {{ 'true' if cifmw_baremetal_hosts[host].status | default("") == "running" else 'false' }}
+      labels:
+        app: openstack
+        nodeset: {{ host | split('-') | first }}
+      name: {{ host }}
+{%    if 'root_device_hint' in cifmw_baremetal_hosts[host]                             %}
+{# Ensure integer values are rendered as integers and not as strings #}
+{%    set hint_value = cifmw_baremetal_hosts[host]['root_device_hint']
+        if cifmw_baremetal_hosts[host]['root_device_hint'] | int != 0  else
+        '"' + cifmw_baremetal_hosts[host]['root_device_hint'] + '"'                    %}
+{%    set hint_field = cifmw_baremetal_hosts[host].root_device_hint_field | default(cifmw_deploy_bmh_root_device_hint_field | default('deviceName'))  %}
+      rootDeviceHints:
+        {{ hint_field }}: {{ hint_value }}
+{%    endif                                                                            %}
+{%    if 'nmstate' in cifmw_baremetal_hosts[host] %}
+      preprovisioningNetworkDataName: {{ _host }}-nmstate-secret
+{%    endif                                                                            %}
+{% endfor                                                                              %}
+
+{% if 'compute' in _vm_type                                                            %}
+  nova:
+    migration:
+      ssh_keys:
+        private: {{ cifmw_ci_gen_kustomize_values_migration_priv_key | b64encode }}
+        public: {{ cifmw_ci_gen_kustomize_values_migration_pub_key | b64encode }}
+{% endif                                                                               %}
