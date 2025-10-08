@@ -114,7 +114,7 @@
             - always
           ansible.builtin.include_tasks: rotate_log.yml
           loop:
-            - "/home/zuul/ansible-bootstrap.log"
+            - "{{ cifmw_reproducer_controller_user_dir }}/ansible-bootstrap.log"
 
         - name: Bootstrap environment on controller-0
           environment:
@@ -127,7 +127,7 @@
               -e @~/ci-framework-data/parameters/reproducer-variables.yml
               -e @scenarios/reproducers/networking-definition.yml
               playbooks/01-bootstrap.yml
-            creates: "/home/zuul/ansible-bootstrap.log"
+            creates: "{{ cifmw_reproducer_controller_user_dir }}/ansible-bootstrap.log"
 
         - name: Install dev tools from install_yamls on controller-0
           environment:
@@ -136,7 +136,8 @@
             _devsetup_path: >-
               {{
                 (
-                  cifmw_installyamls_repos,
+                  cifmw_reproducer_controller_user_dir,
+                  'src/github.com/openstack-k8s-operators/install_yamls',
                   'devsetup'
                 ) | ansible.builtin.path_join
               }}
@@ -146,7 +147,7 @@
             cmd: >-
               ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
               download_tools.yaml --tags kustomize,kubectl
-            creates: "/home/zuul/bin/kubectl"
+            creates: "{{ cifmw_reproducer_controller_user_dir }}/bin/kubectl"
 
 # Run from the hypervisor
 - name: Ensure OCP cluster is stable
@@ -201,19 +202,9 @@
       ansible.builtin.include_tasks:
         file: configure_post_deployment.yml
 
-    - name: Set facts related to the reproducer
-      ansible.builtin.set_fact:
-        _ctl_reproducer_basedir: >-
-          {{
-            (
-            '/home/zuul',
-            'ci-framework-data',
-            ) | path_join
-          }}
-
     - name: Ensure directories exist
       ansible.builtin.file:
-        path: "{{ _ctl_reproducer_basedir }}/{{ item }}"
+        path: "{{ cifmw_reproducer_controller_basedir }}/{{ item }}"
         state: directory
         mode: "0755"
       loop:
@@ -247,18 +238,18 @@
           }}
       ansible.builtin.copy:
         mode: "0644"
-        dest: "/home/zuul/ci-framework-data/parameters/reproducer-variables.yml"
+        dest: "{{ cifmw_reproducer_controller_basedir }}/parameters/reproducer-variables.yml"
         content: "{{ _filtered_vars | to_nice_yaml }}"
 
     - name: Create reproducer-variables.yml symlink to old location
       ansible.builtin.file:
-        dest: "/home/zuul/reproducer-variables.yml"
-        src: "/home/zuul/ci-framework-data/parameters/reproducer-variables.yml"
+        dest: "{{ cifmw_reproducer_controller_user_dir }}/reproducer-variables.yml"
+        src: "{{ cifmw_reproducer_controller_basedir }}/parameters/reproducer-variables.yml"
         state: link
 
     - name: Slurp kubeadmin password
       ansible.builtin.slurp:
-        src: /home/zuul/.kube/kubeadmin-password
+        src: "{{ cifmw_reproducer_controller_user_dir }}/.kube/kubeadmin-password"
       register: _kubeadmin_password
 
     - name: Prepare ci-like EDPM deploy
@@ -276,8 +267,8 @@
         extravars: "{{ cifmw_reproducer_play_extravars }}"
         playbook: "deploy-edpm.yml"
       ansible.builtin.template:
-        dest: "/home/zuul/deploy-edpm.sh"
+        dest: "{{ cifmw_reproducer_controller_user_dir }}/deploy-edpm.sh"
         src: "script.sh.j2"
         mode: "0755"
-        owner: "zuul"
-        group: "zuul"
+        owner: "{{ cifmw_reproducer_controller_user }}"
+        group: "{{ cifmw_reproducer_controller_user }}"
