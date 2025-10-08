@@ -70,6 +70,16 @@
       ansible.builtin.set_fact:
         _ci_nmstate_molecule_instance_target_mtu: "{{ (ansible_default_ipv4.mtu - 50) | int }}"
 
+    # device (eth0): interface index 69 renamed iface from 'eth0' to 'enp6s0'
+    - name: Get NetworkManager logs - before networking mapper
+      ansible.builtin.shell: >
+        mkdir -p {{ ansible_user_dir }}/ci-framework-data/logs;
+        ssh -i ~/.crc/machines/crc/id_ed25519
+        -o StrictHostKeyChecking=no
+        -o UserKnownHostsFile=/dev/null
+        core@192.168.130.11 journalctl -u NetworkManager > {{ ansible_user_dir }}/ci-framework-data/logs/NetworkManager-before-mapper.log
+      ignore_errors: true
+
     - name: Prepare the Networking Env Definition for ci_nmstate role
       vars:
         cifmw_networking_definition:
@@ -83,7 +93,7 @@
               gateway: "{{ ansible_default_ipv4.gateway }}"
               dns:
                 - 1.1.1.1
-                - 1.0.0.1
+                - 9.9.9.9
               mtu: "{{ _ci_nmstate_molecule_instance_target_mtu }}" # Set a non-default MTU to test
             testing-untagged:
               network: "172.17.20.0/24"
@@ -114,9 +124,62 @@
       ansible.builtin.include_role:
         name: "networking_mapper"
 
-    - name: Call the role under test
-      ansible.builtin.include_role:
-        name: "ci_nmstate"
+    - name: Configure nmstate interfaces
+      block:
+        - name: Get NetworkManager logs - before nmstate
+          ansible.builtin.shell: >
+            mkdir -p {{ ansible_user_dir }}/ci-framework-data/logs;
+            ssh -i ~/.crc/machines/crc/id_ed25519
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            core@192.168.130.11 journalctl -u NetworkManager > {{ ansible_user_dir }}/ci-framework-data/logs/NetworkManager-before-nmstate.log
+          ignore_errors: true
+
+        - name: Call the role under test
+          ansible.builtin.include_role:
+            name: "ci_nmstate"
+      rescue:
+        - name: Get NetworkManager logs - after nmstate
+          ansible.builtin.shell: >
+            mkdir -p {{ ansible_user_dir }}/ci-framework-data/logs;
+            ssh -i ~/.crc/machines/crc/id_ed25519
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            core@192.168.130.11 journalctl -u NetworkManager > {{ ansible_user_dir }}/ci-framework-data/logs/NetworkManager-after-nmstate.log
+          ignore_errors: true
+
+        - name: Get all pods state
+          ansible.builtin.command: |
+            oc get pods --all-namespaces
+          environment:
+            PATH: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Get NodeNetworkConfigurationPolicy
+          ansible.builtin.command: |
+            oc describe NodeNetworkConfigurationPolicy
+          environment:
+            PATH: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Create missing enp6s0
+          ansible.builtin.shell: >
+            set -o pipefail;
+            oc -n openshift-nmstate exec
+            -i $(oc -n openshift-nmstate get pod -l component=kubernetes-nmstate-handler -o name | head -n 1)
+            -- ip link add enp6s0 type veth
+          ignore_errors: true
+
+        - name: Restart handler daemonset
+          ansible.builtin.shell: >
+            oc -n openshift-nmstate rollout restart daemonset.apps/nmstate-handler
+
+        - name: Wait for handler to be up and ready
+          ansible.builtin.shell: >
+            oc -n openshift-nmstate wait pod -l component=kubernetes-nmstate-handler --for=condition=Ready
+
 
     # Verify the run
     - name: Fetch files stat results
@@ -170,6 +233,9 @@
         kind: NodeNetworkConfigurationPolicy
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         name: "{{ hostvars.crc.ansible_hostname }}"
+        wait: true
+        wait_sleep: 10
+        wait_timeout: 120
       register: _ci_nmstate_molecule_nncp_out
       failed_when: >-
         (_ci_nmstate_molecule_nncp_out is not defined) or
