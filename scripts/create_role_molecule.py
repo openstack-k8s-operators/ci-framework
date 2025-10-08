@@ -20,6 +20,12 @@ import yaml
 import logging
 from jinja2 import Environment, FileSystemLoader
 
+additional_molecule_jobs = [
+    "edpm-ansible-molecule-edpm_kernel",
+    "edpm-ansible-molecule-edpm_podman",
+    "edpm-ansible-molecule-edpm_ovs",
+]
+
 
 def get_project_paths(project_dir=None):
     """
@@ -89,6 +95,12 @@ def regenerate_projects_zuul_jobs_yaml(generated_paths):
         projects_jobs_info[0]["project"]["github-check"]["jobs"].append(
             f"cifmw-molecule-{role_directory.name}"
         )
+
+    if additional_molecule_jobs:
+        for additional_job in additional_molecule_jobs:
+            projects_jobs_info[0]["project"]["github-check"]["jobs"].append(
+                additional_job
+            )
 
     with open(generated_paths["zuul_job_dir"] / "projects.yaml", "w") as projects_file:
         yaml.dump(projects_jobs_info, projects_file)
