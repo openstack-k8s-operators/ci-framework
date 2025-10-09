@@ -1,0 +1,61 @@
+---
+#
+# Playbook that setups the Performance Co-Pilot toolkit on infra.
+# Relies on the corresponding `pcp_metrics` Ansible role.
+#
+# The best place to call this hook is under post_infra actions.
+#
+- name: Patch CoreOS
+  hosts: crc,ocps,ocp_workers
+  gather_facts: false
+  #
+  # NOTE(sdatko): The OCP nodes we use have no yum repositories, so I add some.
+  #               In CoreOS, things typically should be deployed as containers
+  #               or in the layered filesystem via the rpm-ostree package tool.
+  #               However, this requires either a lot of space or system reboot
+  #               while all I need is to install a small service and enable it.
+  #               So, this play allows to setup the PCP easily in our CI jobs,
+  #               even though it may not be the way advised for real-world env.
+  #
+  tasks:
+    - name: Set repositories
+      become: true
+      block:
+        - name: Set repositories (BaseOS)
+          ansible.builtin.yum_repository:
+            file: pcp-coreos-hack
+            name: baseos
+            description: CentOS BaseOS
+            baseurl: https://mirror.stream.centos.org/9-stream/BaseOS/$basearch/os/
+            gpgcheck: no
+
+        - name: Set repositories (AppStream)
+          ansible.builtin.yum_repository:
+            file: pcp-coreos-hack
+            name: appstream
+            description: CentOS AppStream
+            baseurl: https://mirror.stream.centos.org/9-stream/AppStream/$basearch/os/
+            gpgcheck: no
+
+    - name: Make /usr writable
+      become: true
+      ansible.posix.mount:
+        path: /usr
+        state: remounted
+        opts: rw
+
+    - name: Create required directory
+      become: true
+      ansible.builtin.file:
+        path: /var/lib/rpm-state
+        state: directory
+
+
+- name: Start collecting performance metrics
+  hosts: all,!localhost
+  gather_facts: false
+  tasks:
+    - name: Setup PCP
+      ansible.builtin.include_role:
+        name: pcp_metrics
+        tasks_from: setup
