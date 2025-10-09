@@ -210,3 +210,70 @@
               stage_vars_dict |
               combine({'cifmw_test_operator_tempest_workflow': no_resources_workflow})
           }}
+
+- name: Build tempest timing data URL (no workflow)
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - stage_vars_dict.cifmw_test_operator_tempest_timing_data_url is defined
+    - stage_vars_dict.cifmw_test_operator_tempest_timing_data_url
+    - stage_vars_dict.cifmw_test_operator_tempest_workflow | length == 0
+  block:
+    - name: Set the full timing data url
+      ansible.builtin.set_fact:
+        final_timing_data_url: >-
+          {{
+            stage_vars_dict.cifmw_test_operator_tempest_timing_data_url +
+            test_operator_instance_name + '/stestr.tar.gz'
+          }}
+
+    - name: Override the Tempest CR
+      ansible.builtin.set_fact:
+        test_operator_cr: >-
+          {{
+              test_operator_cr |
+              combine({'spec': {'timingDataUrl': final_timing_data_url}}, recursive=true)
+          }}
+        stage_vars_dict: >-
+          {{
+              stage_vars_dict |
+              combine({'cifmw_test_operator_tempest_timing_data_url': final_timing_data_url})
+          }}
+
+
+- name: Build tempest timing data URL (workflow)
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - stage_vars_dict.cifmw_test_operator_tempest_workflow | length > 0
+  block:
+    - name: Add the full timing data url to workflow steps
+      when: item.timingDataUrl is defined
+      vars:
+        final_timing_data_url: >-
+          {{
+            item.timingDataUrl + test_operator_instance_name + '-s0' +
+            (step_number | string) + '-' + item.stepName + '/stestr.tar.gz'
+          }}
+        _timing_data_url_workflow_step: >-
+          {{
+              item |
+              combine({'timingDataUrl': final_timing_data_url}, recursive=true)
+          }}
+      ansible.builtin.set_fact:
+        timing_data_url_workflow: "{{ timing_data_url_workflow | default([]) + [_timing_data_url_workflow_step] }}"
+      loop: "{{ stage_vars_dict.cifmw_test_operator_tempest_workflow | list }}"
+      loop_control:
+        index_var: step_number
+
+    - name: Override the Tempest CR workflow
+      when: timing_data_url_workflow is defined
+      ansible.builtin.set_fact:
+        test_operator_cr: >-
+          {{
+              test_operator_cr |
+              combine({'spec': {'workflow': timing_data_url_workflow}}, recursive=true)
+          }}
+        stage_vars_dict: >-
+          {{
+              stage_vars_dict |
+              combine({'cifmw_test_operator_tempest_workflow': timing_data_url_workflow})
+          }}
