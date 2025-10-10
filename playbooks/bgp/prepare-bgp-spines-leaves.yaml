@@ -1,4 +1,60 @@
 ---
+- name: Start spines and leafs and add them to inventory
+  hosts: localhost
+  vars:
+    leafs_list:
+      - leaf-0
+      - leaf-1
+      - leaf-2
+      - leaf-3
+      - leaf-4
+      - leaf-5
+    spines_list:
+      - spine-0
+      - spine-1
+    routers_list:
+      - router-0
+    fabric_list: "{{ leafs_list + spines_list + routers_list }}"
+  tasks:
+    - name: Start spine and leaf VMs
+      delegate_to: hypervisor
+      become: true
+      community.libvirt.virt:
+        name: "cifmw-{{ item }}"
+        state: running
+      loop: "{{ fabric_list }}"
+
+    - name: Add leafs group to inventory
+      when: '"leafs" not in groups'
+      ansible.builtin.add_host:
+        name: "{{ item }}.utility"
+        group: leafs
+      loop: "{{ leafs_list }}"
+
+    - name: Add spines group to inventory
+      when: '"spines" not in groups'
+      ansible.builtin.add_host:
+        name: "{{ item }}.utility"
+        group: spines
+      loop: "{{ spines_list }}"
+
+    - name: Add routers group to inventory
+      when: '"routers" not in groups'
+      ansible.builtin.add_host:
+        name: "{{ item }}.utility"
+        group: routers
+      loop: "{{ routers_list }}"
+
+    - name: Check SSH connectivity
+      delegate_to: hypervisor
+      ansible.builtin.wait_for:
+        port: 22
+        host: "{{ item }}.utility"
+        search_regex: OpenSSH
+        delay: 10
+        timeout: 120
+      loop: "{{ fabric_list }}"
+
 - name: Common spines and leaves configuration
   hosts: "spines,leafs{{ router_bool | default(false) | ternary(',routers', '') }}"
   tasks:
