@@ -38,13 +38,15 @@
       ansible.builtin.set_fact:
         operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/{{ operator_base_module_name }}"
 
+  # This is telling the openstack operator to look for dependency on a particular branch on github.
+  # This should be the zuul src path.
 - name: "{{ operator.name }} - Update the go.mod file in meta operator for provided PR_SHA"  # noqa: name[template]
   ansible.builtin.shell: |
-    go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ operator.pr_sha }}
+    go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ operator.pr_sha }}
+      go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
       go mod tidy
       popd
     fi
@@ -63,17 +65,24 @@
     chdir: "{{ operator.src }}"
   register: git_head_out
 
+  # The PR sha does not need to be pulled from the zuul.projects, since this __should__ match HEAD
 - name: "{{ operator.name }} - Set pr_sha to be used as image tag"  # noqa: name[template]
   ansible.builtin.set_fact:
-    pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
+    #pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
+    pr_sha: "{{ git_head_out.stdout | trim }}"
+
+- name: Skip if operator.pr_sha matches HEAD
+  when: pr_sha != operator.pr_sha | default('')
+  ansible.builtin.debug:
+    msg: "Something"
 
 - name: "{{ operator.name }} - Update the go.mod file using latest commit if no PR is provided"  # noqa: name[template]
   ansible.builtin.shell: |
-    go mod edit -replace {{ operator_api_path }}={{ operator_api_path }}@{{ pr_sha }}
+    go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}={{ operator_api_path }}@{{ pr_sha }}
+      go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
       go mod tidy
       popd
     fi
