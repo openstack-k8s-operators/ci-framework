@@ -54,21 +54,37 @@ data:
 {%   endfor                                                                            %}
 {% endif                                                                               %}
 
+  # source roles/deploy_bmh/template/bmh.yml.j2, but it patches kustomize built outputs
   baremetalhosts:
-{% for host, def in cifmw_baremetal_hosts.items() if host is match('^compute.*') %}
+{% for host, def in cifmw_baremetal_hosts.items() if 'compute' in host                 %}
 {%   set _host = host | replace('-' + cifmw_run_id, '') if cifmw_run_id is defined else host %}
     {{ _host }}:
       bmc:
         address: {{ cifmw_baremetal_hosts[host].connection }}
         credentialsName: {{ _host }}-bmc-secret
-      bootMACAddress: {{ cifmw_baremetal_hosts[host].nics[0].mac }}
+        disableCertificateVerification: {{ cifmw_deploy_bmh_disable_certificate_validation | default(true) }}
+{%    for nic in (cifmw_baremetal_hosts[host]['nics'] | default([])) if nic['network'] == cifmw_deploy_bmh_boot_interface | default('provision') %}
+      bootMACAddress: {{ nic.mac }}
+{%    endfor                                                                           %}
+      bootMode: {{ cifmw_baremetal_hosts[host].boot_mode }}
+      online: {{ 'true' if cifmw_baremetal_hosts[host].status | default("") == "running" else 'false' }}
       labels:
         app: openstack
         nodeset: {{ host.split('-')[0] }}
       name: {{ host }}
+{%    if 'root_device_hint' in cifmw_baremetal_hosts[host]                             %}
+{# Ensure integer values are rendered as integers and not as strings #}
+{%    set hint_value = cifmw_baremetal_hosts[host]['root_device_hint']
+        if cifmw_baremetal_hosts[host]['root_device_hint'] | int != 0  else
+        '"' + cifmw_baremetal_hosts[host]['root_device_hint'] + '"'                    %}
+{%    set hint_field = cifmw_baremetal_hosts[host].root_device_hint_field | default(cifmw_deploy_bmh_root_device_hint_field | default('deviceName'))  %}
       rootDeviceHints:
-        deviceName: /dev/sda
-{% endfor %}
+        {{ hint_field }}: {{ hint_value }}
+{%    endif                                                                            %}
+{%    if 'nmstate' in cifmw_baremetal_hosts[host] %}
+      preprovisioningNetworkDataName: {{ _host }}-nmstate-secret
+{%    endif                                                                            %}
+{% endfor                                                                              %}
 
 {% if 'compute' in _vm_type                                                            %}
   nova:
