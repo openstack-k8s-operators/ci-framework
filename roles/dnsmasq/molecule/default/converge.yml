@@ -145,6 +145,125 @@
         name: dnsmasq
         tasks_from: manage_host.yml
 
+    - name: Inject nodes with tags for DHCP options
+      vars:
+        cifmw_dnsmasq_dhcp_entries:
+          - network: starwars
+            state: present
+            mac: "0a:19:02:f8:4c:b1"
+            ips:
+              - "192.168.254.21"
+              - "2345:0425:2CA1::0567:5673:0021"
+            name: "r2d2"
+            tag: "droid"
+          - network: starwars
+            state: present
+            mac: "0a:19:02:f8:4c:b2"
+            ips:
+              - "192.168.254.22"
+            name: "c3po"
+            tag: "droid"
+          - network: startrek
+            state: present
+            mac: "0a:19:02:f8:4c:b3"
+            ips:
+              - "192.168.253.31"
+            name: "data"
+            tag: "android"
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_host.yml
+
+    - name: Verify DHCP host entries with tags
+      block:
+        - name: Read r2d2 DHCP host entry
+          become: true
+          ansible.builtin.slurp:
+            path: "/etc/cifmw-dnsmasq.d/dhcp-hosts.d/starwars_r2d2_0a:19:02:f8:4c:b1"
+          register: _r2d2_entry
+
+        - name: Read c3po DHCP host entry
+          become: true
+          ansible.builtin.slurp:
+            path: "/etc/cifmw-dnsmasq.d/dhcp-hosts.d/starwars_c3po_0a:19:02:f8:4c:b2"
+          register: _c3po_entry
+
+        - name: Read data DHCP host entry
+          become: true
+          ansible.builtin.slurp:
+            path: "/etc/cifmw-dnsmasq.d/dhcp-hosts.d/startrek_data_0a:19:02:f8:4c:b3"
+          register: _data_entry
+
+        - name: Decode entries
+          ansible.builtin.set_fact:
+            _r2d2_content: "{{ _r2d2_entry.content | b64decode | trim }}"
+            _c3po_content: "{{ _c3po_entry.content | b64decode | trim }}"
+            _data_content: "{{ _data_entry.content | b64decode | trim }}"
+
+        - name: Assert r2d2 entry has droid tag
+          ansible.builtin.assert:
+            that:
+              - "'set:droid' in _r2d2_content"
+              - "'0a:19:02:f8:4c:b1' in _r2d2_content"
+              - "'192.168.254.21' in _r2d2_content"
+              - "'r2d2' in _r2d2_content"
+            msg: "r2d2 DHCP entry should contain tag 'droid': {{ _r2d2_content }}"
+
+        - name: Assert c3po entry has droid tag
+          ansible.builtin.assert:
+            that:
+              - "'set:droid' in _c3po_content"
+              - "'0a:19:02:f8:4c:b2' in _c3po_content"
+              - "'192.168.254.22' in _c3po_content"
+              - "'c3po' in _c3po_content"
+            msg: "c3po DHCP entry should contain tag 'droid': {{ _c3po_content }}"
+
+        - name: Assert data entry has android tag
+          ansible.builtin.assert:
+            that:
+              - "'set:android' in _data_content"
+              - "'0a:19:02:f8:4c:b3' in _data_content"
+              - "'192.168.253.31' in _data_content"
+              - "'data' in _data_content"
+            msg: "data DHCP entry should contain tag 'android': {{ _data_content }}"
+
+        - name: "Verify entry without tag has no set: prefix"
+          become: true
+          ansible.builtin.slurp:
+            path: "/etc/cifmw-dnsmasq.d/dhcp-hosts.d/starwars_solo_0a:19:02:f8:4c:a8"
+          register: _solo_entry
+
+        - name: "Assert solo entry does not have a tag"
+          vars:
+            _solo_content: "{{ _solo_entry.content | b64decode | trim }}"
+          ansible.builtin.assert:
+            that:
+              - "'set:' not in _solo_content"
+              - "'0a:19:02:f8:4c:a8' in _solo_content"
+              - "'solo' in _solo_content"
+            msg: "solo DHCP entry should not contain any tag: {{ _solo_content }}"
+
+    - name: "Create DHCP options configuration for tagged hosts"
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/cifmw-dnsmasq.d/test-dhcp-options.conf"
+        content: |
+          # Test DHCP options for droids
+          dhcp-option=tag:droid,60,HTTPClient
+          dhcp-option=tag:droid,67,http://192.168.254.1/droid-boot.ipxe
+          # Test DHCP options for androids
+          dhcp-option=tag:android,60,HTTPClient
+          dhcp-option=tag:android,67,http://192.168.253.1/android-boot.ipxe
+        mode: '0644'
+        validate: "/usr/sbin/dnsmasq -C %s --test"
+      notify: Restart dnsmasq
+
+    - name: Verify dnsmasq configuration is valid
+      become: true
+      ansible.builtin.command:
+        cmd: /usr/sbin/dnsmasq -C /etc/cifmw-dnsmasq.conf --test
+      changed_when: false
+
     - name: Add a domain specific forwarder
       vars:
         cifmw_dnsmasq_forwarder:
