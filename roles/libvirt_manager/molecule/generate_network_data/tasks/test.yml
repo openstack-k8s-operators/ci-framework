@@ -94,6 +94,78 @@
             _run_fail: true
             _failure: true
 
+    - name: Validate DHCP options
+      when:
+        - not _run_fail | bool
+        - scenario.check_dhcp_options is defined
+        - scenario.check_dhcp_options | bool
+      block:
+        - name: Check DHCP options configuration file exists
+          become: true
+          ansible.builtin.stat:
+            path: "/etc/cifmw-dnsmasq.d/vm-types-dhcp-options.conf"
+          register: _dhcp_options_file
+
+        - name: Assert DHCP options file exists
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _dhcp_options_file.stat.exists
+            msg: "DHCP options file should exist"
+
+        - name: Read DHCP options file
+          become: true
+          ansible.builtin.slurp:
+            path: "/etc/cifmw-dnsmasq.d/vm-types-dhcp-options.conf"
+          register: _dhcp_options_content
+
+        - name: Decode DHCP options content
+          ansible.builtin.set_fact:
+            _dhcp_opts: "{{ _dhcp_options_content.content | b64decode }}"
+
+        - name: Verify DHCP options content for compute VMs
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - "'dhcp-option=tag:compute,60,HTTPClient' in _dhcp_opts"
+              - "'dhcp-option=tag:compute,67,http://192.168.140.1:8081/boot-artifacts/compute.ipxe' in _dhcp_opts"
+            msg: "DHCP options should contain correct entries for compute VMs"
+
+        - name: Verify DHCP host entry has tag
+          become: true
+          ansible.builtin.shell:
+            cmd: "grep -l 'set:compute' /etc/cifmw-dnsmasq.d/dhcp-hosts.d/osp_trunk_compute-0*"
+          register: _tagged_entry
+          changed_when: false
+          failed_when: _tagged_entry.rc != 0
+
+        - name: Read tagged DHCP host entry
+          become: true
+          ansible.builtin.slurp:
+            path: "{{ _tagged_entry.stdout }}"
+          register: _dhcp_host_entry
+
+        - name: Verify tag format in DHCP host entry
+          vars:
+            _entry_content: "{{ _dhcp_host_entry.content | b64decode | trim }}"
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - "'set:compute' in _entry_content"
+              - "_entry_content.startswith('set:compute,')"
+            msg: "DHCP host entry should start with 'set:compute,': {{ _entry_content }}"
+
+      rescue:
+        - name: Debug DHCP options content
+          when: _dhcp_opts is defined
+          ansible.builtin.debug:
+            var: _dhcp_opts
+
+        - name: Mark run as failed
+          ansible.builtin.set_fact:
+            _run_fail: true
+            _failure: true
+
     - name: Assert we have expected facts set
       block:
         - name: Ensure it failed at the right place

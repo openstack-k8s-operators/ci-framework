@@ -97,6 +97,7 @@ cifmw_libvirt_manager_configuration:
       bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
       networkconfig: (dict or list[dict], [network-config](https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html#network-config-v2) v2 config, needed if a static ip address should be defined at boot time in absence of a dhcp server in special scenarios. Optional)
       devices: (dict, optional, defaults to {}. The keys are the VMs of that type that needs devices to be attached, and the values are lists of strings, where each string must contain a valid <hostdev/> libvirt XML element that will be passed to virsh attach-device)
+      dhcp_options: (list, optional, defaults to []. List of DHCP options to apply to all VMs of this type. Format: ["option_number,value", ...])
   networks:
     net_name: <XML definition of the network to create>
 ```
