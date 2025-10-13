@@ -38,15 +38,29 @@
       ansible.builtin.set_fact:
         operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/{{ operator_base_module_name }}"
 
+
+  # Copy the dep into openstack-operator/deps
+  # This copies the prepared zuul repo into the meta operator dir, which gets copied into the build container
+- name: "{{ operator.name }} - Copy dependancy source into meta operator"
+  ansible.builtin.command: |
+    git clone {{ operator.src }} deps/{{ operator.name }}
+  args:
+    chdir: "{{ cifmw_operator_build_meta_src }}"
+  when:
+    - operator.name != cifmw_operator_build_meta_name
+
   # This is telling the openstack operator to look for dependency on a particular branch on github.
   # This should be the zuul src path.
+  # If we switch to using local sources, they need to be copied into the container for the build.
+  # This can be done by copying the modified operator code into the openstack-operator dir
+  # The replacement here will then point to ./deps/{{ operator.name }}
 - name: "{{ operator.name }} - Update the go.mod file in meta operator for provided PR_SHA"  # noqa: name[template]
   ansible.builtin.shell: |
-    go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+    go mod edit -replace {{ operator_api_path }}=./deps/{{ operator.name }}/{{ operator_base_module_name }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+      go mod edit -replace {{ operator_api_path }}=./deps/{{ operator.name }}/operator_base_module_name
       go mod tidy
       popd
     fi
@@ -68,7 +82,7 @@
   # The PR sha does not need to be pulled from the zuul.projects, since this __should__ match HEAD
 - name: "{{ operator.name }} - Set pr_sha to be used as image tag"  # noqa: name[template]
   ansible.builtin.set_fact:
-    #pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
+    # pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
     pr_sha: "{{ git_head_out.stdout | trim }}"
 
 - name: Skip if operator.pr_sha matches HEAD
@@ -76,13 +90,21 @@
   ansible.builtin.debug:
     msg: "Something"
 
+- name: Show the {{ item.name }} - {{ item.value }}
+  ansible.builtin.debug:
+    var: item
+  with_items:
+    - {name: operator_api_path, value: "{{ operator_api_path | default('') }}" }
+    - {name: operator_base_module_name, value: "{{ operator_base_module_name | default('') }}" }
+    - {name: operator.name, value: "{{ operator.name | default('')}}" }
+
 - name: "{{ operator.name }} - Update the go.mod file using latest commit if no PR is provided"  # noqa: name[template]
   ansible.builtin.shell: |
-    go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+    go mod edit -replace {{ operator_api_path }}=./deps/{{ operator.name }}/{{ operator_base_module_name }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+      go mod edit -replace {{ operator_api_path }}=./deps/{{ operator.name }}/{{ operator_base_module_name }}
       go mod tidy
       popd
     fi
