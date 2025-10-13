@@ -323,3 +323,69 @@ To:
       loop_control:
         loop_var: files_item
 ```
+
+#### Include file
+
+In some cases, yaml file that would have vars would be using
+Jinja2 vars, which means that on setting fact, variable would not be
+"translated". It means, that if variable is:
+
+```yaml
+test: "{{ ansible_user_dir }}"
+```
+
+Result when we will use `var_file.yml`, would be:
+
+```yaml
+{ "test": "{{ ansible_user_dir}}" }
+```
+
+This is not want we would like to have. The `ansible_user_dir` should be "translated",
+so expected value should be:
+
+```yaml
+{ "test": "/home/testuser" }
+```
+
+This helper would include vars properly.
+
+Example:
+
+```yaml
+- name: Test include vars
+  hosts: somehost
+  tasks:
+    - name: Read group_vars all file
+      vars:
+        included_file: group_vars/all.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_file.yml
+
+    - name: Print vars from group_vars all
+      ansible.builtin.debug:
+        msg: |
+          {{ noop_helper_var }}
+```
+
+Similar to what `include_file` is doing, but instead of parsing single file,
+it parse all yaml files available in the directory.
+
+#### Include dir
+
+```yaml
+- name: Test include vars - dr
+  hosts: somehost
+  tasks:
+    - name: Read group_vars dir file
+      vars:
+        included_dir: ./group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+
+    - name: Print vars from group_vars all
+      ansible.builtin.debug:
+        msg: |
+          {{ noop_helper_var }}
+```
