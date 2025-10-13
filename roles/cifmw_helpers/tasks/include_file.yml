@@ -1,0 +1,51 @@
+---
+# This is a workaround for reading Ansible yaml files,
+# that instead of have clear values, it uses jinja2 variables,
+# so reading the file and parse as fact does not work.
+
+- name: Fail if file is not yaml or yml extension
+  ansible.builtin.fail:
+    msg: "File needs to be yaml/yml extension"
+  when:
+    - included_file | trim | regex_search('\.(yml|yaml)$') == None
+
+- name: Check if file is available
+  ansible.builtin.stat:
+    path: "{{ included_file | trim }}"
+  register: _included_file
+
+- name: Read file and include vars
+  when: _included_file.stat.exists
+  block:
+    - name: Create temporary directory
+      ansible.builtin.tempfile:
+        state: directory
+      register: _tmp_dir
+      delegate_to: localhost
+
+    - name: Read vars
+      ansible.builtin.slurp:
+        src: "{{ included_file | trim }}"
+      register: _parsed_vars
+      no_log: "{{ cifmw_helpers_no_log }}"
+
+    - name: Create new variable files with content
+      when: "'content' in _parsed_vars"
+      ansible.builtin.copy:
+        content: "{{ _parsed_vars['content'] | b64decode }}"
+        dest: "{{ _tmp_dir.path }}/{{ included_file | basename }}"
+        mode: "0644"
+      no_log: "{{ cifmw_helpers_no_log }}"
+      delegate_to: localhost
+
+    - name: Include vars
+      when: "'content' in _parsed_vars"
+      ansible.builtin.include_vars:
+        file: "{{ _tmp_dir.path }}/{{ included_file | basename }}"
+      no_log: "{{ cifmw_helpers_no_log }}"
+      delegate_to: localhost
+  always:
+    - name: Remove temporary directory
+      ansible.builtin.file:
+        path: "{{ _tmp_dir.path }}"
+        state: absent
