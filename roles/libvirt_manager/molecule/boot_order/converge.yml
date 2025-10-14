@@ -1,0 +1,238 @@
+---
+# Copyright 2025 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Test boot_order configuration
+  hosts: instance
+  gather_facts: true
+  vars_files:
+    - vars/net-def.yml
+  vars:
+    ansible_user_dir: "{{ lookup('env', 'HOME') }}"
+    cifmw_basedir: "/opt/basedir"
+    cifmw_libvirt_manager_configuration:
+      vms:
+        # Test VM with disk first, then network boot
+        disk_first:
+          amount: 1
+          disksize: 10
+          memory: 1
+          cpus: 1
+          disk_file_name: 'blank'
+          boot_order:
+            - hd
+            - network
+          nets:
+            - public
+            - osp_trunk
+        # Test VM with network first, then disk boot
+        net_first:
+          amount: 1
+          disksize: 10
+          memory: 1
+          cpus: 1
+          disk_file_name: 'blank'
+          boot_order:
+            - network
+            - disk
+          nets:
+            - public
+            - osp_trunk
+        # Test VM with only network boot
+        net_only:
+          amount: 1
+          disksize: 10
+          memory: 1
+          cpus: 1
+          disk_file_name: 'blank'
+          boot_order:
+            - network
+          nets:
+            - public
+        # Test VM without boot_order (should not have boot order attributes)
+        no_boot_order:
+          amount: 1
+          disksize: 10
+          memory: 1
+          cpus: 1
+          disk_file_name: 'blank'
+          nets:
+            - public
+      networks:
+        public: |-
+          <network>
+            <name>public</name>
+            <forward mode='nat'/>
+            <bridge name='public' stp='on' delay='0'/>
+            <dns enable="no"/>
+            <ip
+             family='ipv4'
+             address='{{ _networks.public.range | ansible.utils.nthhost(1) }}'
+             prefix='24'>
+            </ip>
+          </network>
+        osp_trunk: |-
+          <network>
+            <name>osp_trunk</name>
+            <forward mode='nat'/>
+            <bridge name='osp_trunk' stp='on' delay='0'/>
+            <dns enable="no"/>
+            <ip
+             family='ipv4'
+             address='{{ _networks.osp_trunk.range | ansible.utils.nthhost(1) }}'
+             prefix='24'>
+            </ip>
+          </network>
+  tasks:
+    - name: Load networking definition
+      ansible.builtin.include_vars:
+        file: input.yml
+        name: cifmw_networking_definition
+
+    - name: Deploy layout with boot_order configurations
+      ansible.builtin.import_role:
+        name: libvirt_manager
+        tasks_from: deploy_layout
+
+    - name: Verify boot_order configurations
+      block:
+        # Test 1: Verify disk-first VM has correct boot order
+        - name: Get disk_first VM XML
+          register: _disk_first_xml
+          community.libvirt.virt:
+            command: "get_xml"
+            name: "cifmw-disk-first-0"
+            uri: "qemu:///system"
+
+        - name: Check disk boot order in disk-first VM
+          register: _disk_first_disk_boot
+          community.general.xml:
+            xmlstring: "{{ _disk_first_xml.get_xml }}"
+            xpath: "/domain/devices/disk[@device='disk']/boot"
+            content: "attribute"
+
+        - name: Check interface boot order in disk-first VM
+          register: _disk_first_net_boot
+          community.general.xml:
+            xmlstring: "{{ _disk_first_xml.get_xml }}"
+            xpath: "/domain/devices/interface[1]/boot"
+            content: "attribute"
+
+        - name: Assert disk-first VM has correct boot order
+          ansible.builtin.assert:
+            that:
+              - _disk_first_disk_boot.matches[0].boot.order == "1"
+              - _disk_first_net_boot.matches[0].boot.order == "2"
+            quiet: true
+            msg: >-
+              Expected disk boot order=1 and network boot order=2,
+              got disk={{ _disk_first_disk_boot.matches[0].boot.order }}
+              and network={{ _disk_first_net_boot.matches[0].boot.order }}
+
+        # Test 2: Verify network-first VM has correct boot order
+        - name: Get net_first VM XML
+          register: _net_first_xml
+          community.libvirt.virt:
+            command: "get_xml"
+            name: "cifmw-net-first-0"
+            uri: "qemu:///system"
+
+        - name: Check disk boot order in network-first VM
+          register: _net_first_disk_boot
+          community.general.xml:
+            xmlstring: "{{ _net_first_xml.get_xml }}"
+            xpath: "/domain/devices/disk[@device='disk']/boot"
+            content: "attribute"
+
+        - name: Check interface boot order in network-first VM
+          register: _net_first_net_boot
+          community.general.xml:
+            xmlstring: "{{ _net_first_xml.get_xml }}"
+            xpath: "/domain/devices/interface[1]/boot"
+            content: "attribute"
+
+        - name: Assert network-first VM has correct boot order
+          ansible.builtin.assert:
+            that:
+              - _net_first_net_boot.matches[0].boot.order == "1"
+              - _net_first_disk_boot.matches[0].boot.order == "2"
+            quiet: true
+            msg: >-
+              Expected network boot order=1 and disk boot order=2,
+              got network={{ _net_first_net_boot.matches[0].boot.order }}
+              and disk={{ _net_first_disk_boot.matches[0].boot.order }}
+
+        # Test 3: Verify network-only VM has only network boot
+        - name: Get net_only VM XML
+          register: _net_only_xml
+          community.libvirt.virt:
+            command: "get_xml"
+            name: "cifmw-net-only-0"
+            uri: "qemu:///system"
+
+        - name: Check interface boot order in network-only VM
+          register: _net_only_net_boot
+          community.general.xml:
+            xmlstring: "{{ _net_only_xml.get_xml }}"
+            xpath: "/domain/devices/interface[1]/boot"
+            content: "attribute"
+
+        - name: Check disk boot order in network-only VM (should not exist)
+          register: _net_only_disk_boot
+          failed_when: false
+          community.general.xml:
+            xmlstring: "{{ _net_only_xml.get_xml }}"
+            xpath: "/domain/devices/disk[@device='disk']/boot"
+            content: "attribute"
+
+        - name: Assert network-only VM has correct boot order
+          ansible.builtin.assert:
+            that:
+              - _net_only_net_boot.matches[0].boot.order == "1"
+              - _net_only_disk_boot.matches | default([]) | length == 0
+            quiet: true
+            msg: >-
+              Expected only network boot with order=1,
+              got network={{ _net_only_net_boot.matches[0].boot.order }}
+              and disk boot count={{ _net_only_disk_boot.matches | default([]) | length }}
+
+        # Test 4: Verify VM without boot_order has no boot order attributes
+        - name: Get no_boot_order VM XML
+          register: _no_boot_order_xml
+          community.libvirt.virt:
+            command: "get_xml"
+            name: "cifmw-no-boot-order-0"
+            uri: "qemu:///system"
+
+        - name: Check for any boot order attributes in no-boot-order VM
+          register: _no_boot_order_check
+          failed_when: false
+          community.general.xml:
+            xmlstring: "{{ _no_boot_order_xml.get_xml }}"
+            xpath: "/domain/devices//boot"
+            content: "attribute"
+
+        - name: Assert no-boot-order VM has no boot order attributes
+          ansible.builtin.assert:
+            that:
+              - _no_boot_order_check.matches | default([]) | length == 0
+            quiet: true
+            msg: >-
+              Expected no boot order attributes,
+              but found {{ _no_boot_order_check.matches | default([]) | length }} boot elements
+
+        - name: Output success message
+          ansible.builtin.debug:
+            msg: "All boot_order validations passed successfully!"

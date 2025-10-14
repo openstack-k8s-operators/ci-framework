@@ -95,6 +95,7 @@ cifmw_libvirt_manager_configuration:
       target: (Hypervisor hostname you want to deploy the family on. Optional)
       uefi: (boolean, toggle UEFI boot. Optional, defaults to false)
       bootmenu_enable: (string, toggle bootmenu. Optional, defaults to "no")
+      boot_order: (list, optional. Ordered list of boot devices. Valid values are 'hd' or 'disk' for disk boot, and 'network' for network boot. Example: ['hd', 'network'] will attempt disk boot first, then network boot. The boot order is applied after all devices are attached to the VM.)
       networkconfig: (dict or list[dict], [network-config](https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html#network-config-v2) v2 config, needed if a static ip address should be defined at boot time in absence of a dhcp server in special scenarios. Optional)
       devices: (dict, optional, defaults to {}. The keys are the VMs of that type that needs devices to be attached, and the values are lists of strings, where each string must contain a valid <hostdev/> libvirt XML element that will be passed to virsh attach-device)
       dhcp_options: (list, optional, defaults to []. List of DHCP options to apply to all VMs of this type. Format: ["option_number,value", ...])
@@ -167,6 +168,9 @@ cifmw_libvirt_manager_configuration:
       memory: 8
       cpus: 4
       bootmenu_enable: "yes"
+      boot_order:
+        - hd
+        - network
       nets:
         - public
   networks:
