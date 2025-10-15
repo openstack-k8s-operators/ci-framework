@@ -3,6 +3,19 @@
   hosts: "{{ cifmw_zuul_target_host | default('all') }}"
   gather_facts: true
   tasks:
+    # NOTE: Here read vars is not so needed, due nested ansible is executed.
+    # Let's add it just in case, if some other task would be added later.
+    # If nested Ansible would not be executed, we will be using Zuul functionality
+    # to provide global vars [1]
+    # [1] https://zuul-ci.org/docs/zuul/latest/config/job.html#attr-job.include-vars
+    - name: Read group_vars
+      vars:
+        included_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+
     - name: Filter out host if needed
       when:
         - cifmw_zuul_target_host is defined
@@ -19,10 +32,11 @@
 
     - name: Run tcib playbook
       ansible.builtin.command:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        chdir: "{{ cifmw_project_dir_absolute }}"
         cmd: >-
           ansible-playbook ci/playbooks/tcib/tcib.yml
           -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          -e @{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars/all.yml
           -e @scenarios/centos-9/base.yml
           -e @scenarios/centos-9/tcib.yml
           -e "cifmw_rp_registry_ip={{ node_ip }}"

@@ -1,11 +1,35 @@
 ---
-- name: "Run ci/playbooks/e2e-prepare.yml"
-  hosts: controller, primary
+- name: Get all repos on all hosts
+  hosts: all
   gather_facts: true
   tasks:
     - name: Clone repos in the job workspace
       ansible.builtin.include_role:
         name: prepare-workspace
+
+- name: "Run ci/playbooks/e2e-prepare.yml"
+  hosts: controller, primary
+  gather_facts: true
+  tasks:
+    # NOTE: Here read vars is not so needed, due nested ansible is executed.
+    # Let's add it just in case, if some other task would be added later.
+    # If nested Ansible would not be executed, we will be using Zuul functionality
+    # to provide global vars [1]
+    # [1] https://zuul-ci.org/docs/zuul/latest/config/job.html#attr-job.include-vars
+    - name: Read group_vars
+      vars:
+        included_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+    - name: Read group_vars
+      vars:
+        included_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
 
     - name: Create zuul-output directory
       ansible.builtin.file:
@@ -28,7 +52,7 @@
 
     - name: Install requirements
       community.general.make:
-        chdir: "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}"
+        chdir: "{{ cifmw_project_dir_absolute }}"
         target: setup_molecule
 
     - name: Add cronjob to trigger job stats
@@ -37,7 +61,7 @@
         minute: "*"
         job: >-
           /usr/bin/date >> /tmp/crio-stats.log;
-          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scripts/get-stats.sh >>
+          {{ cifmw_project_dir_absolute }}/scripts/get-stats.sh >>
           /tmp/crio-stats.log
       when: cifmw_openshift_crio_stats | default(false)
 

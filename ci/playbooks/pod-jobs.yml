@@ -2,6 +2,19 @@
 - name: Run light checks in pod
   hosts: all
   tasks:
+    # NOTE: Here read vars is not so needed, due nested ansible is executed.
+    # Let's add it just in case, if some other task would be added later.
+    # If nested Ansible would not be executed, we will be using Zuul functionality
+    # to provide global vars [1]
+    # [1] https://zuul-ci.org/docs/zuul/latest/config/job.html#attr-job.include-vars
+    - name: Read group_vars
+      vars:
+        included_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+
     - name: Install packages
       become: true
       ansible.builtin.package:
@@ -16,17 +29,23 @@
         state: directory
         mode: "0755"
 
+    - name: Create workdir directory
+      ansible.builtin.file:
+        path: "{{ cifmw_project_dir_absolute | dirname }}"
+        state: directory
+
+    - name: Create symlink for project dir
+      ansible.builtin.file:
+        src: "/workspace/{{ cifmw_project_dir }}"
+        dest: "{{ cifmw_project_dir_absolute }}"
+        state: link
+
     - name: Run make targets
-      vars:
-        src_dir: >-
-          {{
-            zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir
-          }}
       block:
         - name: Install dependencies
           register: _setup
           community.general.make:
-            chdir: "{{ src_dir }}"
+            chdir: "{{ cifmw_project_dir_absolute }}"
             target: setup_molecule
             params:
               USE_VENV: "no"
@@ -36,7 +55,7 @@
 
         - name: Run check
           community.general.make:
-            chdir: "{{ src_dir }}"
+            chdir: "{{ cifmw_project_dir_absolute }}"
             target: "{{ run_test }}"
             params:
               USE_VENV: "no"
