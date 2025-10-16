@@ -17,16 +17,32 @@
       ansible.builtin.include_vars:
         file: "{{ cifmw_reproducer_molecule_env_file }}"
 
+    - name: Print related variables
+      ansible.builtin.debug:
+        msg: |
+          mol_config_dir: {{ mol_config_dir | default('') }}
+          roles_dir: {{ roles_dir }}
+
     - name: Ensure group_vars dir exists
       ansible.builtin.file:
         path: "{{ roles_dir }}/../../group_vars"
         state: directory
 
-    - name: Print related variables
-      ansible.builtin.debug:
-        msg: |
-          mol_config_dir: {{ mol_config_dir }}
-          roles_dir: {{ roles_dir }}
+    - name: Find all scenarios available in roles_dir
+      ansible.builtin.find:
+        paths: "{{ roles_dir }}/molecule"
+        file_type: directory
+        depth: 1
+      register: _scenarios_dir
+
+    - name: Create symlink to group_vars in each scenarios dir in roles_dir
+      ansible.builtin.file:
+        src: "{{ roles_dir }}/../../group_vars"
+        dest: "{{ _scenarios_item.path }}/group_vars"
+        state: link
+      loop: "{{ _scenarios_dir.files }}"
+      loop_control:
+        loop_var: _scenarios_item
 
     - name: Run molecule
       environment:
@@ -55,5 +71,7 @@
         chdir: "{{ roles_dir }}"
         cmd: >-
           set -o pipefail;
-          molecule -c {{ mol_config_dir }} test --all |
+          molecule
+          {% if mol_config_dir is defined and mol_config_dir %} -c {{ mol_config_dir }} {% endif %}
+          test --all |
           tee {{ ansible_user_dir }}/ci-framework-data/logs/molecule-execution.log
