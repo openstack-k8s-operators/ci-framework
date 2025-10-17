@@ -1,0 +1,42 @@
+---
+#
+# Included by tempest_store_timing_data.yaml playbook
+#
+# There are two variables passed by the loop
+# - stestr_tar_path - a path to the data which will be copied
+# - timing_data_repo_dir - a path to a directory to be created
+#
+- name: Ensure the defined directory exists
+  ansible.builtin.file:
+    path: "{{ timing_data_repo_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Copy timing data to commit
+  ansible.builtin.copy:
+    src: "{{ stestr_tar_path }}"
+    dest: "{{ timing_data_repo_dir }}"
+    mode: '0644'
+
+- name: Add all changes
+  ansible.builtin.command:
+    cmd: git add .
+    chdir: "{{ repo_path }}"
+  changed_when: false
+  # noqa command-instead-of-module
+
+- name: Commit changes
+  ansible.builtin.command:
+    cmd: git commit -m "Automatic update"
+    chdir: "{{ repo_path }}"
+  register: commit_result
+  changed_when: commit_result.rc == 0
+  # noqa command-instead-of-module
+
+- name: Push changes to the repository
+  ansible.builtin.command:
+    cmd: git push origin main
+    chdir: "{{ repo_path }}"
+  when: commit_result.rc == 0
+  changed_when: false
+  # noqa command-instead-of-module
