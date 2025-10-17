@@ -1,0 +1,47 @@
+---
+driver:
+  name: delegated
+  options:
+    managed: false
+    ansible_connection_options:
+      ansible_connection: local
+
+log: true
+
+platforms:
+  - name: instance
+    environment: &env
+      http_proxy: "{{ lookup('env', 'http_proxy') }}"
+      https_proxy: "{{ lookup('env', 'https_proxy') }}"
+
+provisioner:
+  name: ansible
+  # Expose configuration to all jobs by default
+  # Useful when an fix requires to provide some
+  # CIFMW parameter to many roles, such as a broken
+  # CentOS image.
+  # inventory:
+  #   group_vars:
+  #     all:
+  #       cifmw_discover_latest_image_qcow_prefix: "CentOS-Stream-GenericCloud-9-20240506"
+
+  config_options:
+    defaults:
+      fact_caching: jsonfile
+      fact_caching_connection: /tmp/molecule/facts
+      remote_tmp: /tmp
+  log: true
+  env:
+    ANSIBLE_STDOUT_CALLBACK: yaml
+    ANSIBLE_ROLES_PATH: "${ANSIBLE_ROLES_PATH}:${HOME}/zuul-jobs/roles:${HOME}/ci-framework-data/artifacts/roles:${HOME}/src/github.com/openstack-k8s-operators/ci-framework/roles"
+    ANSIBLE_LIBRARY: "${ANSIBLE_LIBRARY:-/usr/share/ansible/plugins/modules}:${HOME}/.ansible/plugins/modules:${HOME}/src/github.com/openstack-k8s-operators/ci-framework/plugins/modules"
+    ANSIBLE_ACTION_PLUGINS: "${ANSIBLE_ACTION_PLUGINS:-/usr/share/ansible/plugins/action}:${HOME}/.ansible/plugins/action:${HOME}/src/github.com/openstack-k8s-operators/ci-framework/plugins/action"
+
+scenario:
+  test_sequence:
+    - prepare
+    - converge
+    - cleanup
+
+verifier:
+  name: ansible
