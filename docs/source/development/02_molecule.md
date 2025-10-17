@@ -77,7 +77,6 @@ cifmw_artifacts_basedir: "{{ ansible_user_dir }}/ci-framework-data/artifacts "
 cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
 nodepool:
   cloud: ""
-roles_dir: /home/$(whoami)/src/github.com/openstack-k8s-operators/ci-framework/roles
 mol_config_dir: /home/$(whoami)/src/github.com/openstack-k8s-operators/ci-framework/.config/molecule/config_local.yml
 cifmw_zuul_target_host: localhost
 EOF
@@ -87,6 +86,7 @@ ansible-galaxy install -r requirements.yml
 # Mock some roles, that are needed for Zuul CI, but not for local deployment
 mkdir -p roles/mirror-info-fork/tasks
 mkdir -p roles/prepare-workspace/tasks
+mkdir -p group_vars
 
 # Execute Ansible to prepare molecule environment
 ansible-playbook -i inventory.yml \
@@ -97,21 +97,35 @@ ansible-playbook -i inventory.yml \
 ### START MOLECULE JOB ###
 ##########################
 
-# Copy molecule job - example: crc_layout
-mkdir -p roles/molecule/default/
-cp -a ./roles/reproducer/molecule/crc_layout/* roles/molecule/default/
+# Execute molecule job
+## Example
+##    role: reproducer, scenario: crc_layout
 
 # It can be done using:
-# - Ansible
+
+### - Ansible - recommended ###
 
 ansible-playbook -i inventory.yml \
+    -e roles_dir="$(pwd)/roles/reproducer" \
     -e@custom-vars.yaml \
     ci/playbooks/molecule-test.yml
 
-# - shell steps
-ln -s roles/molecule .
+#### - shell steps ####
 pip3 install -r test-requirements.txt
-molecule -c .config/molecule/config_local.yml test --all
+cd roles/reproducer
+
+# NOTE: Usually it is: config_local.yml. There is also config_podman.yml scenario
+# NOTE: In some cases, when molecule provides all parameters,
+# do not include config file (skip adding '-c' parameter)
+molecule -c ../../.config/molecule/config_local.yml test --all
+
+# or just one scenario
+molecule -c ../../.config/molecule/config_local.yml test -s crc_layout
+
+# Sometimes it is required to force recreate preparation.
+# For example for crc_layout scenario
+cd roles/reproducer
+molecule prepare --force -s crc_layout
 ```
 
 ### SSH to controller-0 - molecule VM
