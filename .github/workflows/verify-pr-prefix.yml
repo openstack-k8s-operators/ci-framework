@@ -1,0 +1,38 @@
+name: Check if commit message contains role prefix
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+
+jobs:
+  verify-prefix:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run commit message check
+        id: prefixcheck
+        run: |
+          set +e
+          ./scripts/check-role-prefix.sh > result.log 2>&1
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          cat result.log
+
+      - name: Comment on PR if prefix check failed
+        if: steps.prefixcheck.outputs.exit_code != '0'
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: ./result.log
+          reactions: confused
