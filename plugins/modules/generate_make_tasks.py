@@ -42,7 +42,7 @@ EXAMPLES = r"""
 
 - name: Generate make tasks
   generate_make_tasks:
-    install_yamls_path: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls/"
+    install_yamls_path: "{{ cifmw_installyamls_repos }}"
     output_directory: "{{ ansible_user_dir }}/make_installyamls/tasks"
 """  # noqa
 
