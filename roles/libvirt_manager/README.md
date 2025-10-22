@@ -41,6 +41,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_firewalld_zone_libvirt_forward`: (Bool) Enable forwarding in the libvirt firewall zone. Defaults to: `true`
 * `cifmw_libvirt_manager_firewalld_default_zone`: (String) Name of the default firewall zone. Defaults to `public`.
 * `cifmw_libvirt_manager_firewalld_default_zone_masquerade`: (Bool) Enable masquerading on the default firewall zone. Defaults to `true`.
+* `cifmw_libvirt_manager_firewalld_libvirt_zone_masquerade`: (Bool) Enable masquerading on the `libvirt` firewall zone. Defaults to `false`. May be useful in hybrid setups.
 * `cifmw_libvirt_manager_attach_dummy_interface_on_bridges`: (Bool) Attach dummy interface on bridges. Defaults to `true`.
 * `cifmw_libvirt_manager_default_gw_nets`: (List[String]) List of networks used as default gateway. If not set, defaults to the `cifmw_libvirt_manager_pub_net`. Read bellow for more information about that parameter.
 * `cifmw_libvirt_manager_vm_users`: (List[Dict]) Used to override the default list of users enabled in the vm. For its format, refers to cloud-init [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) about `users`. Defaults to `[]`.
