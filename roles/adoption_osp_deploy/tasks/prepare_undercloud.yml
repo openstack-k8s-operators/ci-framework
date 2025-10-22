@@ -80,13 +80,23 @@
 
     # Adoption requires Ceph 7 (Reef) as a requirement. Instead of performing a Ceph
     # upgrade from 6 (the default) to 7, let's try to deploy 7 in greenfield
-    - name: Patch containers-prepare-parameters Ceph container images
+    - name: Patch ceph-related container image tags and names in containers-prepare-parameters.yaml
       ansible.builtin.lineinfile:
         path: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
-        regexp: '^(\s.*)+: rhceph-6-rhel9'
-        line: '\1: rhceph-7-rhel9'
-        backup: true
+        regexp: "{{ img_details.regexp }}"
+        line: "{{ img_details.line }}"
         backrefs: true
+        backup: true
+      loop:
+        - { regexp: '^(\s*ceph_alertmanager_tag:\s*)v4\.\d+', line: '\1v4.15' }
+        - { regexp: '^(\s*ceph_grafana_image:\s*).+', line: '\1grafana-rhel9' }
+        - { regexp: '^(\s*ceph_node_exporter_tag:\s*)v4\.\d+', line: '\1v4.15' }
+        - { regexp: '^(\s*ceph_prometheus_tag:\s*)v4\.\d+', line: '\1v4.15' }
+        - { regexp: '^(\s*ceph_tag:\s)latest', line: '\1 7' }
+        - { regexp: '^(\s*ceph_image:\s*)rhceph-6-rhel9', line: '\1rhceph-7-rhel9' }
+      loop_control:
+        label: "{{ img_details.regexp }}"
+        loop_var: img_details
 
     - name: Ensure os-net-config folder exists
       become: true

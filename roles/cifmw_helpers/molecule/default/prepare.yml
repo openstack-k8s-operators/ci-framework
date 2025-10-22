@@ -1,0 +1,116 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Prepare
+  hosts: all
+  vars:
+    cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+    zuul:
+      projects:
+        github.com/openstack-k8s-operators/ci-framework:
+          src_dir: src/github.com/openstack-k8s-operators/ci-framework
+  roles:
+    - role: test_deps
+    - role: ci_setup
+  tasks:
+    # var_file
+    - name: Create file with vars
+      ansible.builtin.copy:
+        content: |
+          ---
+          some_var: true
+        dest: /tmp/provided_file.yml
+        mode: "0644"
+
+    # var_dir
+    - name: Create directory for var files
+      ansible.builtin.file:
+        path: /tmp/provided_dir
+        state: directory
+        mode: "0755"
+
+    - name: Create first var file in directory
+      ansible.builtin.copy:
+        content: |
+          ---
+          first_in_dir: true
+        dest: /tmp/provided_dir/firstfile.yml
+        mode: "0644"
+
+    - name: Create second var file in directory
+      ansible.builtin.copy:
+        content: |
+          ---
+          second_in_dir: true
+        dest: /tmp/provided_dir/secondfile.yml
+        mode: "0644"
+
+    # various file
+    - name: Create file for various vars
+      ansible.builtin.copy:
+        content: |
+          ---
+          my_various_file: true
+        dest: /tmp/various_vars.yml
+        mode: "0644"
+
+    # symlink cifmw
+    - name: Install required packages
+      become: true
+      ansible.builtin.package:
+        name: git
+
+    # include file
+    - name: Create file with jinja2 var
+      ansible.builtin.copy:
+        content: |
+          ---
+          {% raw %}
+          my_include_file: test
+          my_second_include_file: "{{ my_include_file }}"
+          {% endraw %}
+        dest: /tmp/include_file.yml
+        mode: "0644"
+
+    # include dir
+    - name: Create directory for include dir
+      ansible.builtin.file:
+        path: /tmp/included_dir
+        state: directory
+        mode: "0755"
+
+    - name: Create file with jinja2 var in include dir
+      ansible.builtin.copy:
+        content: |
+          ---
+          {% raw %}
+          my_include_dir: test
+          my_second_include_dir: "{{ my_include_file }}"
+          {% endraw %}
+        dest: /tmp/included_dir/somefile.yml
+        mode: "0644"
+
+    - name: Create file without extension
+      ansible.builtin.copy:
+        content: |
+          ---
+          {% raw %}
+          my_fake_include_dir: fake
+          my_fake_second_include_dir: "{{ my_include_file }}"
+          {% endraw %}
+        dest: /tmp/included_dir/something
+        mode: "0644"

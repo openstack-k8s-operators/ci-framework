@@ -1,0 +1,36 @@
+---
+- name: Delete neutron network agents for Baremetal Nodes
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _namespace: openstack
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Delete baremetal network agents
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ _namespace }}
+
+        echo "Discovering baremetal network agents..."
+
+        # Get all baremetal network agent IDs using JSON format
+        AGENT_IDS=$(oc rsh openstackclient \
+          openstack network agent list --agent-type baremetal -f json -c ID | \
+          jq -r '.[].ID')
+
+        if [ -n "$AGENT_IDS" ]; then
+          echo "Found baremetal network agents:"
+          echo "$AGENT_IDS"
+
+          # Delete each baremetal agent
+          for AGENT_ID in $AGENT_IDS; do
+            echo "Deleting baremetal network agent: $AGENT_ID"
+            oc rsh openstackclient openstack network agent delete "$AGENT_ID"
+          done
+
+          echo "Baremetal network agent cleanup completed"
+        else
+          echo "No baremetal network agents found"
+        fi

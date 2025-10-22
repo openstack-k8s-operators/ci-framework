@@ -16,6 +16,9 @@
     _number_of_computes: 0
     _retries: 25
     _cell_conductor: null
+    # Retry settings for oc commands to handle transient auth failures
+    _oc_retries: 5
+    _oc_delay: 30
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
@@ -29,7 +32,21 @@
           COMPUTES={{ _number_of_computes }}
           RETRIES={{ _retries }}
           COUNTER=0
-          oc project {{ namespace }}
+          OC_RETRIES={{ _oc_retries }}
+          OC_DELAY={{ _oc_delay }}
+
+          # Retry oc project command to handle transient auth failures
+          oc_retry_counter=0
+          until oc project {{ namespace }}; do
+            if [[ "$oc_retry_counter" -ge "$OC_RETRIES" ]]; then
+              echo "Failed to authenticate with OpenShift after $OC_RETRIES attempts"
+              exit 1
+            fi
+            oc_retry_counter=$[$oc_retry_counter +1]
+            echo "OpenShift auth failed, retrying in ${OC_DELAY}s (attempt $oc_retry_counter/$OC_RETRIES)"
+            sleep $OC_DELAY
+          done
+
           until [ $(oc rsh openstackclient openstack compute service list --service nova-compute -f value | wc -l) -eq "$COMPUTES" ]; do
             if [[ "$COUNTER" -ge "$RETRIES" ]]; then
               exit 1
@@ -37,6 +54,7 @@
             COUNTER=$[$COUNTER +1]
             sleep 10
           done
+
     - name: Run nova-manage discover_hosts and wait for host records
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_basedir }}/artifacts"
@@ -46,7 +64,21 @@
           COMPUTES={{ _number_of_computes | int + 4 }}
           RETRIES={{ _retries }}
           COUNTER=0
-          oc project {{ namespace }}
+          OC_RETRIES={{ _oc_retries }}
+          OC_DELAY={{ _oc_delay }}
+
+          # Retry oc project command to handle transient auth failures
+          oc_retry_counter=0
+          until oc project {{ namespace }}; do
+            if [[ "$oc_retry_counter" -ge "$OC_RETRIES" ]]; then
+              echo "Failed to authenticate with OpenShift after $OC_RETRIES attempts"
+              exit 1
+            fi
+            oc_retry_counter=$[$oc_retry_counter +1]
+            echo "OpenShift auth failed, retrying in ${OC_DELAY}s (attempt $oc_retry_counter/$OC_RETRIES)"
+            sleep $OC_DELAY
+          done
+
           until [ $(oc rsh {{ _cell_conductor }} nova-manage cell_v2 list_hosts | wc -l) -eq "$COMPUTES" ]; do
             if [[ "$COUNTER" -ge "$RETRIES" ]]; then
               exit 1

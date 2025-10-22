@@ -24,7 +24,7 @@ The project is under constant development, bugs happen.
 
 If you have such a bad encounter, please fill an `issue in Jira`_.
 
-Chose **OSPRH**  project, add **cifmw** label, and set the Workstream to **CI Framework** and the Team to **OSP CI Framework**.
+Choose **OSPRH** project, add **cifmw** label, and set the Component to **ci-framework** and the AssignedTeam to **rhos-dfg-tooling**.
 
 Please provide the following information:
 

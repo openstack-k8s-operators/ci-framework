@@ -2,117 +2,17 @@
 - name: Create kustomization to update Keystone to use Federation
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   tasks:
-    - name: Set urls for install type uni
+    - name: Set uni domain name var from federation role
       ansible.builtin.set_fact:
-        cifmw_federation_keycloak_url: 'https://keycloak-openstack.apps.ocp.openstack.lab'
-        cifmw_federation_keystone_url: 'https://keystone-public-openstack.apps.ocp.openstack.lab'
-        cifmw_federation_horizon_url: 'https://horizon-openstack.apps.ocp.openstack.lab'
+        cifmw_federation_domain: "apps.ocp.openstack.lab"
       when: cifmw_federation_deploy_type == "uni"
 
-    - name: Set urls for install type crc
+    - name: Set crc domain name var from federation role
       ansible.builtin.set_fact:
-        cifmw_federation_keycloak_url: 'https://keycloak-openstack.apps-crc.testing'
-        cifmw_federation_keystone_url: 'https://keystone-public-openstack.apps-crc.testing'
-        cifmw_federation_horizon_url: 'https://horizon-openstack.apps-crc.testing'
+        cifmw_federation_domain: "apps-crc.testing"
       when: cifmw_federation_deploy_type == "crc"
 
-    - name: Create file to customize keystone for Federation resources deployed in the control plane
-      ansible.builtin.copy:
-        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane/keystone_federation.yaml"
-        content: |-
-          apiVersion: kustomize.config.k8s.io/v1beta1
-          kind: Kustomization
-          resources:
-          - namespace: {{ namespace }}
-          patches:
-          - target:
-              kind: OpenStackControlPlane
-              name: .*
-            patch: |-
-              - op: add
-                path: /spec/tls
-                value: {}
-              - op: add
-                path: /spec/tls/caBundleSecretName
-                value: keycloakca
-              - op: add
-                path: /spec/keystone/template/httpdCustomization
-                value:
-                  customConfigSecret: keystone-httpd-override
-              - op: add
-                path: /spec/keystone/template/customServiceConfig
-                value: |
-                  [DEFAULT]
-                  insecure_debug=true
-                  debug=true
-                  [federation]
-                  trusted_dashboard={{ cifmw_federation_horizon_url }}/dashboard/auth/websso/
-                  sso_callback_template=/etc/keystone/sso_callback_template.html
-                  [openid]
-                  remote_id_attribute=HTTP_OIDC_ISS
-                  [auth]
-                  methods = password,token,oauth1,mapped,application_credential,openid
-        mode: "0644"
-
-    - name: Get ingress operator CA cert
-      ansible.builtin.slurp:
-        src: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
-      register: federation_sso_ca
-
-    - name: Add Keycloak CA secret
-      kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          type: Opaque
-          metadata:
-            name: keycloakca
-            namespace: "openstack"
-          data:
-            KeyCloakCA: "{{ federation_sso_ca.content }}"
-
-    - name: Create Keystone httpd override secret for Federation
-      kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: keystone-httpd-override
-            namespace: openstack
-          type: Opaque
-          stringData:
-            federation.conf: |
-              OIDCClaimPrefix "{{ cifmw_keystone_OIDC_ClaimPrefix }}"
-              OIDCResponseType "{{ cifmw_keystone_OIDC_ResponseType }}"
-              OIDCScope "{{ cifmw_keystone_OIDC_Scope }}"
-              OIDCClaimDelimiter "{{ cifmw_keystone_OIDC_ClaimDelimiter }}"
-              OIDCPassUserInfoAs "{{ cifmw_keystone_OIDC_PassUserInfoAs }}"
-              OIDCPassClaimsAs "{{ cifmw_keystone_OIDC_PassClaimsAs }}"
-              OIDCProviderMetadataURL "{{ cifmw_keystone_OIDC_ProviderMetadataURL }}"
-              OIDCClientID "{{ cifmw_keystone_OIDC_ClientID }}"
-              OIDCClientSecret "{{ cifmw_keystone_OIDC_ClientSecret }}"
-              OIDCCryptoPassphrase "{{ cifmw_keystone_OIDC_CryptoPassphrase }}"
-              OIDCOAuthClientID "{{ cifmw_keystone_OIDC_OAuthClientID }}"
-              OIDCOAuthClientSecret "{{ cifmw_keystone_OIDC_OAuthClientSecret }}"
-              OIDCOAuthIntrospectionEndpoint "{{ cifmw_keystone_OIDC_OAuthIntrospectionEndpoint }}"
-              OIDCRedirectURI "{{ cifmw_federation_keystone_url }}/v3/auth/OS-FEDERATION/identity_providers/{{ cifmw_keystone_OIDC_provider_name }}/protocols/openid/websso/"
-              LogLevel debug
-
-              <LocationMatch "/v3/auth/OS-FEDERATION/identity_providers/{{ cifmw_keystone_OIDC_provider_name }}/protocols/openid/websso">
-                AuthType "openid-connect"
-                Require valid-user
-              </LocationMatch>
-
-              <Location ~ "/v3/OS-FEDERATION/identity_providers/{{ cifmw_keystone_OIDC_provider_name }}/protocols/openid/auth">
-                AuthType oauth20
-                Require valid-user
-              </Location>
-
-              <LocationMatch "/v3/auth/OS-FEDERATION/websso/openid">
-                AuthType "openid-connect"
-                Require valid-user
-              </LocationMatch>
+    - name: Run SSO controlplane setup
+      ansible.builtin.import_role:
+        name: federation
+        tasks_from: hook_controlplane_config.yml

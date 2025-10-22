@@ -168,6 +168,7 @@ supported in libvirt).
 * `mac`: (String) Entry MAC address. Mandatory.
 * `ips`: (List[string]) List of IP addresses associated to the MAC (v4, v6). Mandatory.
 * `name`: (String) Host name. Optional.
+* `tag`: (String) Tag to assign to this host. Tags can be used to apply specific DHCP options to groups of hosts. Optional.
 
 #### Examples
 
@@ -182,7 +183,20 @@ supported in libvirt).
               - "2345:0425:2CA1::0567:5673:cafe"
               - "192.168.254.11"
             name: r2d2
+            tag: droid  # Optional: assign tag for DHCP options
       ansible.builtin.include_role:
         name: dnsmasq
         tasks_from: manage_host.yml
 ```
+
+#### Using tags for DHCP options
+
+When you assign a `tag` to DHCP entries, you can then configure DHCP options for that tag:
+
+```
+# In /etc/cifmw-dnsmasq.d/custom-options.conf
+dhcp-option=tag:droid,60,HTTPClient
+dhcp-option=tag:droid,67,http://192.168.254.1/boot.ipxe
+```
+
+All hosts with the `droid` tag will receive these DHCP options.

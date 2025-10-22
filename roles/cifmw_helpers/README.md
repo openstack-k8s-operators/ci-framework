@@ -59,6 +59,22 @@ After:
     (...)
 ```
 
+The example playbook - `playbooks/cifmw_collection_zuul_executor.yml` can look like:
+
+```yaml
+---
+- name: Make cifmw modules to be available
+  hosts: all
+  tasks:
+    - name: Make a symlink to local .ansible collection dir
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: symlink_cifmw_collection.yml
+```
+
+After doing a symbolic link of modules dir to Ansible working dir in `$HOME` dir,
+we should not have `ERROR! couldn't resolve module/action` error anymore.
+
 ## Helper for calling nested Ansible
 
 In many places in the project, there is nested Ansible execution done.
@@ -116,7 +132,24 @@ That code, can be replaced by:
     - logs
 ```
 
+#### Read var file and set as fact
+
+Example task execution:
+
+```yaml
+- name: Read base centos-9 scenarios
+  vars:
+    provided_file: >
+      {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/
+      ci-framework/scenarios/centos-9/base.yml
+  ansible.builtin.include_role:
+    name: cifmw_helpers
+    tasks_from: var_file.yml
+```
+
 Of course, before Zuul execute the playbook, it is mandatory to call `playbooks/cifmw_collection_zuul_executor.yml`.
+
+#### Read directory and parse all files and then set as fact
 
 For setting all files in the directory as fact, use `var_dir.yml` tasks.
 Example:
@@ -130,4 +163,229 @@ Example:
   ansible.builtin.include_role:
     name: cifmw_helpers
     tasks_from: var_dir.yml
+```
+
+#### Set as fact various variables
+
+In some places in our workflow, we can have a list that contains
+various variables like files: "@some_file.yml" or dictionaries like "some: var".
+To parse them and set as a fact, use `various_vars.yml` task file.
+
+```yaml
+- name: Example
+  hosts: localhost
+  tasks:
+    - name: Test various vars
+      vars:
+        various_vars:
+          - "@scenarios/centos-9/base.yml"
+          - test: ok
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Print parsed variables
+      ansible.builtin.debug:
+        msg: |
+          "Value for file is: {{ cifmw_repo_setup_os_release }}"
+          "Value for dict is: {{ test }}"
+```
+
+#### Parse inventory file and add it to inventory
+
+Sometimes, the VMs on which action would be done are not available when the
+main Ansible playbook is executed. In that case, to parse the new inventory file
+use `inventory_file.yml` task, then you would be able to use delegation to
+execute tasks on new host.
+
+```yaml
+- name: Test parsing additional inventory file
+  hosts: localhost
+  tasks:
+    - name: Read inventory file and add it using add_host module
+      vars:
+        include_inventory_file: vms-inventory.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: inventory_file.yml
+```
+
+#### Parse string of arguments and convert to list of variables or list of files
+
+In some playbook, when nested Ansible is executed via shell/command module,
+there is a string which contains arguments to parse by the ansible-playbook
+binary. If nested Ansible can be removed, it would be required to parse
+such variables. Below example how nested Ansible execution looks like,
+and how it could be replaced.
+
+NOTE: `test.yaml` is executed on `host-1`.
+
+Example:
+- all files are on same host which execute ansible-playbook
+
+```yaml
+- name: Nested Ansible execution
+  hosts: localhost
+  tasks:
+    - name: Run ansible-playbook
+      vars:
+        cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+      ansible.builtin.command: |
+        ansible-playbook "{{ cmd_args }}" test.yaml
+```
+
+To:
+
+```yaml
+- name: Playbook that does not use nested Ansible - same host
+  hosts: localhost
+  vars:
+    cifmw_cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+  tasks:
+    # NOTE: The task returns fact: cifmw_cmd_args_vars and cifmw_cmd_args_files
+    - name: Read inventory file and add it using add_host module
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: parse_ansible_args_string.yml
+
+    - name: Parse only variables from cifmw_cmd_args_vars
+      when: cifmw_cmd_args_vars is defined and cifmw_cmd_args_vars | length > 0
+      vars:
+        various_vars: "{{ cifmw_cmd_args_vars }}"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Read var files from cifmw_cmd_args
+      when: cifmw_cmd_args_files is defined and cifmw_cmd_args_files | length > 0
+      ansible.builtin.include_vars:
+        file: "{{ files_item }}"
+      loop: "{{ cifmw_cmd_args_files }}"
+      loop_control:
+        loop_var: files_item
+```
+
+- files are located in remote host - controller
+
+In alternative version, variables are available on remote host. That requires
+to fetch the files first to host which is executing the Ansible - include_vars
+reads only files that are on the host where ansible-playbook was executed.
+Example:
+
+```yaml
+- name: Nested Ansible execution
+  hosts: controller
+  tasks:
+    - name: Run ansible-playbook
+      vars:
+        cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+      ansible.builtin.command: |
+        ansible-playbook "{{ cmd_args }}" test.yaml
+```
+
+To:
+
+```yaml
+- name: Playbook that does not use nested Ansible - different host
+  hosts: controller
+  vars:
+    cifmw_cmd_args: "-e@somefile.yml -e @/tmp/someotherfile.yml -e myvar=test"
+  tasks:
+    # NOTE: The task returns fact: cifmw_cmd_args_vars and cifmw_cmd_args_files
+    - name: Read inventory file and add it using add_host module
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: parse_ansible_args_string.yml
+
+    - name: Parse only variables from cifmw_cmd_args_vars
+      when: cifmw_cmd_args_vars is defined and cifmw_cmd_args_vars | length > 0
+      vars:
+        various_vars: "{{ cifmw_cmd_args_vars }}"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: various_vars.yml
+
+    - name: Fetch cifmw_cmd_args_files to executing host
+      when: cifmw_cmd_args_files is defined and cifmw_cmd_args_files | length > 0
+      ansible.builtin.fetch:
+        src: "{{ files_item }}"
+        dest: "{{ files_item }}"
+        flat: true
+      loop: "{{ cifmw_cmd_args_files }}"
+      loop_control:
+        loop_var: files_item
+
+    - name: Read fetched var files from cmd_args
+      when: cifmw_cmd_args_files is defined and cifmw_cmd_args_files | length > 0
+      ansible.builtin.include_vars:
+        file: "{{ files_item }}"
+      loop: "{{ cifmw_cmd_args_files }}"
+      loop_control:
+        loop_var: files_item
+```
+
+#### Include file
+
+In some cases, yaml file that would have vars would be using
+Jinja2 vars, which means that on setting fact, variable would not be
+"translated". It means, that if variable is:
+
+```yaml
+test: "{{ ansible_user_dir }}"
+```
+
+Result when we will use `var_file.yml`, would be:
+
+```yaml
+{ "test": "{{ ansible_user_dir}}" }
+```
+
+This is not want we would like to have. The `ansible_user_dir` should be "translated",
+so expected value should be:
+
+```yaml
+{ "test": "/home/testuser" }
+```
+
+This helper would include vars properly.
+
+Example:
+
+```yaml
+- name: Test include vars
+  hosts: somehost
+  tasks:
+    - name: Read group_vars all file
+      vars:
+        included_file: group_vars/all.yml
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_file.yml
+
+    - name: Print vars from group_vars all
+      ansible.builtin.debug:
+        msg: |
+          {{ noop_helper_var }}
+```
+
+Similar to what `include_file` is doing, but instead of parsing single file,
+it parse all yaml files available in the directory.
+
+#### Include dir
+
+```yaml
+- name: Test include vars - dr
+  hosts: somehost
+  tasks:
+    - name: Read group_vars dir file
+      vars:
+        included_dir: ./group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+
+    - name: Print vars from group_vars all
+      ansible.builtin.debug:
+        msg: |
+          {{ noop_helper_var }}
 ```

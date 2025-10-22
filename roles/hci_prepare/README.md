@@ -15,6 +15,7 @@ None.
 * `cifmw_hci_prepare_storage_mgmt_mtu`: (Int) Storage-Management network MTU. Defaults to `1500`.
 * `cifmw_hci_prepare_storage_mgmt_vlan`: (Int) Storage-Management network VLAn. Defaults to `23`.
 * `cifmw_hci_prepare_namespace`: (String) Namespace to use to apply resources if install-yamls is not used. Defaults to `openstack`.
+* `cifmw_hci_prepare_extra_services`: (List) List of additional services to add to the OpenStackDataPlaneNodeSet `services` list during HCI deployment. This allows you to customize which extra services are enabled on the EDPM nodes beyond the default set. Defaults to an empty list.
 
 ## Examples
 ### 1 - How to deploy HCI using hci_prepare and edpm_deploy

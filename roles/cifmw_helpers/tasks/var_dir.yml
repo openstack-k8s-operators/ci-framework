@@ -4,26 +4,38 @@
 # In that case, include_vars would not work.
 - name: Check directory is available
   ansible.builtin.stat:
-    path: "{{ provided_dir }}"
+    path: "{{ provided_dir | trim }}"
   register: param_dir
 
 - name: List files available in dir and parse
   when: param_dir.stat.exists
   block:
-    - name: List available files
-      ansible.builtin.command: |
-        ls {{ provided_dir }}
-      register: _param_dir
+    - name: Find yaml files
+      ansible.builtin.find:
+        paths: "{{ provided_dir | trim }}"
+        patterns: "*.yml,*.yaml"
+        file_type: file
+        recurse: false
+      register: _yaml_files
+
+    - name: Print available yaml files
+      ansible.builtin.debug:
+        msg: |
+          Found yaml files to parse: {{ _yaml_files.files | map(attribute='path') | list }}
 
     - name: Read vars
       ansible.builtin.slurp:
-        src: "{{ provided_dir }}/{{ item }}"
-      register: _parsed_vars
-      loop: "{{ _param_dir.stdout_lines }}"
+        src: "{{ _file_to_parse.path }}"
+      loop: "{{ _yaml_files.files }}"
+      loop_control:
+        loop_var: _file_to_parse
       no_log: "{{ cifmw_helpers_no_log }}"
+      register: _parsed_vars
 
     - name: Call task to parse all files as fact
       ansible.builtin.include_tasks:
         file: set_dir_facts.yml
-      loop: '{{ _parsed_vars["results"] }}'
+      loop: "{{ _parsed_vars['results'] }}"
+      loop_control:
+        loop_var: dir_item
       no_log: "{{ cifmw_helpers_no_log }}"

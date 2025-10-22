@@ -1,0 +1,35 @@
+---
+# This is a workaround for reading Ansible yaml files,
+# that instead of have clear values, it uses jinja2 variables,
+# so reading the file and parse as fact does not work.
+
+- name: Check directory is available
+  ansible.builtin.stat:
+    path: "{{ included_dir | trim }}"
+  register: _included_dir
+
+- name: List files available in dir and parse
+  when: _included_dir.stat.exists
+  block:
+    - name: Find yaml files
+      ansible.builtin.find:
+        paths: "{{ included_dir | trim }}"
+        patterns: "*.yml,*.yaml"
+        file_type: file
+        recurse: false
+      register: _yaml_files
+
+    - name: Print available yaml files
+      ansible.builtin.debug:
+        msg: |
+          Found yaml files to parse: {{ _yaml_files.files | map(attribute='path') | list }}
+
+    - name: Create files on localhost and use include_vars
+      vars:
+        included_file: "{{ _file_to_parse.path }}"
+      ansible.builtin.include_tasks:
+        file: include_file.yml
+      loop: "{{ _yaml_files.files }}"
+      loop_control:
+        loop_var: _file_to_parse
+      no_log: "{{ cifmw_helpers_no_log }}"

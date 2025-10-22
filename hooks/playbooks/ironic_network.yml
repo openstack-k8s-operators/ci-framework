@@ -9,6 +9,9 @@
     _subnet_nameserver: '192.168.122.80'
     _subnet_alloc_pool_start: '172.20.1.100'
     _subnet_alloc_pool_end: '172.20.1.200'
+    _subnet_ip_version: 4
+    _subnet_ipv6_address_mode: null
+    _subnet_ipv6_ra_mode: null
     _provider_physical_network: ironic
     _provider_network_type: flat
     _availability_zone_hints: null  # Comma separated list of strings
@@ -24,7 +27,7 @@
           openstack network create provisioning \
             --share \
             --provider-physical-network {{ _provider_physical_network }} \
-            {% if _availability_zone_hints is not none -%}
+            {% if _availability_zone_hints -%}
             {% for zone in _availability_zone_hints | split(',') -%}
             --availability-zone-hint {{ zone }} \
             {% endfor -%}
@@ -33,7 +36,24 @@
         oc rsh openstackclient \
           openstack subnet create provisioning-subnet \
             --network provisioning \
+            --ip-version {{ _subnet_ip_version }} \
+            {% if _subnet_ipv6_address_mode -%}
+            --ipv6-address-mode {{ _subnet_ipv6_address_mode }} \
+            {% endif -%}
+            {% if _subnet_ipv6_ra_mode -%}
+            --ipv6-ra-mode {{ _subnet_ipv6_ra_mode }} \
+            {% endif -%}
             --subnet-range {{ _subnet_range }} \
             --gateway {{ _subnet_gateway }} \
             --dns-nameserver {{ _subnet_nameserver }} \
             --allocation-pool start={{ _subnet_alloc_pool_start }},end={{ _subnet_alloc_pool_end }}
+
+    - name: Create router for IPv6 provisioning network
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc project {{ _namespace }}
+        oc rsh openstackclient \
+          openstack router create provisioning
+        oc rsh openstackclient \
+          openstack router add subnet provisioning provisioning-subnet
+      when: _subnet_ip_version | int == 6

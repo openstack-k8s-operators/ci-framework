@@ -17,6 +17,7 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_update_containers_org`: The container registry namespace to pull container from. Default to `podified-antelope-centos9`
 * `cifmw_update_containers_tag`: The container tag. Default to "current-podified".
 * `cifmw_update_containers_cindervolumes`: The names of the cinder volumes prefix. Default to `[]`.
+* `cifmw_update_containers_cindervolumes_extra`: Additional cinder volumes containers, meaning names and container URIs. Default to `{}`.
 * `cifmw_update_containers_manilashares`: The names of the manila shares prefix. Default to `[]`.
 * `cifmw_update_containers_agentimage`: Full Agent Image url for updating Agent Image.
 * `cifmw_update_containers_ceilometersgcoreImage`: Full Ceilometersgcore Image url for updating Ceilometersgcore Image.

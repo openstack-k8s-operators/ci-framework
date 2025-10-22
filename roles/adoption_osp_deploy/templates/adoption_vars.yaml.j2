@@ -1,17 +1,23 @@
 #jinja2: trim_blocks:True, lstrip_blocks:True
+{%+ if multi_cell|default(false) +%}
+source_mariadb_ip:
+  {% for stack in _stack_names %}
+    {% if stack == 'overcloud' %}
+      {% set cell = 'default' %}
+      {% set prefix = '' %}
+    {% else %}
+      {% set cell = stack %}
+      {% set prefix = stack ~ '-' %}
+    {% endif %}
+  {{ cell }}: {{ cifmw_networking_env_definition.instances[_vm_groups[prefix ~ 'osp-controllers'] | first].networks.internalapi[ip_version|default('ip_v4')] }}
+  {% endfor %}
+{%+ else +%}
 source_mariadb_ip: {{ _controller_1_internalapi_ip }}
+{%+ endif +%}
+
 source_ovndb_ip: {{ _controller_1_internalapi_ip }}
 edpm_node_hostname: {{ _compute_1_name }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
 edpm_node_ip: {{ _compute_1_ip }}
-
-{% if _vm_groups['osp-computes'] | default([]) | length > 0 %}
-edpm_computes: |
-  {% for compute in _vm_groups['osp-computes'] %}
-  {% set node_nets = cifmw_networking_env_definition.instances[compute] %}
-  ["{{ compute }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"]="{{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}"
-  {% endfor %}
-{% endif %}
-
 {% if _vm_groups['osp-networkers'] | default([]) | length > 0 %}
 edpm_networkers: |
   {% for networker in _vm_groups['osp-networkers'] | default([]) %}
@@ -20,31 +26,60 @@ edpm_networkers: |
   {% endfor %}
 {% endif %}
 
+{%+ if multi_cell|default(false) +%}
+source_galera_members:
+  {% for stack in _stack_names %}
+    {% if stack == 'overcloud' %}
+      {% set cell = 'default' %}
+      {% set prefix = '' %}
+    {% else %}
+      {% set cell = stack %}
+      {% set prefix = stack ~ '-' %}
+    {% endif %}
+  {{ cell }}:
+      {% for controller in _vm_groups[prefix ~ 'osp-controllers'] %}
+      {% set node_nets = cifmw_networking_env_definition.instances[controller] %}
+    - name: "{{ controller }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
+      ip: "{{ node_nets.networks.internalapi[ip_version|default('ip_v4')] }}"
+      {% endfor %}
+  {% endfor %}
+{%+ else +%}
 source_galera_members: |
   {% for controller in _vm_groups['osp-controllers'] %}
-  {% set node_nets = cifmw_networking_env_definition.instances[controller] %}
+    {% set node_nets = cifmw_networking_env_definition.instances[controller] %}
   ["{{ controller }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"]="{{ node_nets.networks.internalapi[ip_version|default('ip_v4')] }}"
   {% endfor %}
+{%+ endif +%}
 
-{% if _vm_groups['osp-computes'] | default([]) | length > 0 %}
 edpm_nodes:
-  {% for compute in _vm_groups['osp-computes'] %}
-  {% set node_nets = cifmw_networking_env_definition.instances[compute] %}
-  {{ compute }}:
-    hostName: {{ compute }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
-    ansible:
-      ansibleHost: {{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}
-    networks:
-    {% for net in node_nets.networks.keys() if net not in cifmw_adoption_osp_deploy_adoption_vars_exclude_nets %}
-      - fixedIP: {{ node_nets.networks[net][ip_version|default('ip_v4')] }}
-        name: {{ net }}
-        subnetName: subnet1
-{% if net == 'ctlplane' %}
-        defaultRoute: true
-{% endif %}
+{% for stack in _stack_names %}
+  {% if stack == 'overcloud' %}
+    {% set cell = _default_cell_name %}
+    {% set prefix = '' %}
+  {% else %}
+    {% set cell = stack %}
+    {% set prefix = stack ~ '-' %}
+  {% endif %}
+  {% if _vm_groups[prefix ~ 'osp-computes'] | default([]) | length > 0 %}
+  {{ cell }}:
+    {% for compute in _vm_groups[prefix ~ 'osp-computes'] %}
+    {% set node_nets = cifmw_networking_env_definition.instances[compute] %}
+    {{ compute }}:
+      hostName: {{ compute }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
+      ansible:
+        ansibleHost: {{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}
+      networks:
+      {% for net in node_nets.networks.keys() if net not in cifmw_adoption_osp_deploy_adoption_vars_exclude_nets %}
+        - fixedIP: {{ node_nets.networks[net][ip_version|default('ip_v4')] }}
+          name: {{ net }}
+          subnetName: subnet1
+        {% if net == 'ctlplane' %}
+          defaultRoute: true
+        {% endif %}
+      {% endfor %}
     {% endfor %}
-    {% endfor %}
-{% endif %}
+  {%+ endif +%}
+{% endfor %}
 
 edpm_nodes_networker:
 {% if _vm_groups['osp-networkers'] | default([]) | length > 0 %}
@@ -84,5 +119,5 @@ edpm_nodes_networker:
 
 
 upstream_dns: {{ cifmw_networking_env_definition.networks.ctlplane[dns_version|default('dns_v4')] | first }}
-os_cloud_name: {{ cifmw_adoption_osp_deploy_scenario.stacks[0].stackname }}
+os_cloud_name: {{ _stack_names[0] }}
 standalone_ip: {{ _undercloud_ip }}
