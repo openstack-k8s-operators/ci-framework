@@ -1,0 +1,132 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# ============================================
+# General Configuration
+# ============================================
+
+# OpenShift namespace where EDPM resources are deployed
+cifmw_fdp_update_edpm_namespace: "openstack"
+
+# NodeSet selector - can be a specific name or 'all' for all nodesets
+cifmw_fdp_update_edpm_nodeset_name: "all"
+
+# Dry run - show changes without applying
+cifmw_fdp_update_edpm_dry_run: false
+
+# ============================================
+# Container Image Updates
+# ============================================
+
+# Enable/disable container image updates
+cifmw_fdp_update_edpm_containers_enabled: true
+
+# Image registry URL (auto-detected from OpenShift if empty)
+cifmw_fdp_update_edpm_image_registry: ""
+
+# Mapping of control plane image keys to EDPM ansible variables
+# Only ovnControllerImage is used on EDPM compute nodes
+cifmw_fdp_update_edpm_image_variable_mapping:
+  ovnControllerImage: edpm_ovn_controller_agent_image
+
+# ============================================
+# Host Package Updates
+# ============================================
+
+# Enable/disable host package updates
+cifmw_fdp_update_edpm_packages_enabled: true
+
+# Repository configuration for host package updates
+cifmw_fdp_update_edpm_repo_name: "fdp-update"
+cifmw_fdp_update_edpm_repo_baseurl: ""  # REQUIRED if packages_enabled is true
+cifmw_fdp_update_edpm_repo_enabled: true
+cifmw_fdp_update_edpm_repo_gpgcheck: false
+cifmw_fdp_update_edpm_repo_priority: 1
+
+# Packages to update on the host
+# These will be added to edpm_bootstrap_packages in the nodeset
+cifmw_fdp_update_edpm_packages:
+  - openvswitch3.5
+  - openvswitch-selinux-extra-policy
+
+# ============================================
+# Hypervisor Firewall Configuration
+# ============================================
+
+# Enable/disable hypervisor firewall setup for registry access
+cifmw_fdp_update_edpm_setup_hypervisor_firewall: true
+
+# Network interface on hypervisor connected to compute nodes (EDPM)
+cifmw_fdp_update_compute_interface: "osp_trunk"
+
+# Network interface on hypervisor connected to OpenShift/registry
+cifmw_fdp_update_registry_interface: "ocpbm"
+
+# Compute nodes network CIDR (source for NAT)
+cifmw_fdp_update_compute_network: "192.168.122.0/24"
+
+# OpenShift/registry network CIDR (destination for NAT)
+cifmw_fdp_update_registry_network: "192.168.201.0/24"
+
+# ============================================
+# Registry Configuration
+# ============================================
+
+# Configure OpenShift registry CA certificate on EDPM nodes
+cifmw_fdp_update_edpm_configure_registry_ca: true
+
+# Configure registry authentication automatically
+# Uses 'oc create token' or 'oc whoami -t' to get a service account token
+cifmw_fdp_update_edpm_configure_registry_auth: true
+
+# ============================================
+# Deployment Configuration
+# ============================================
+
+# Automatically create OpenStackDataPlaneDeployment after updating NodeSets
+# Creates a single deployment for all updated NodeSets
+cifmw_fdp_update_edpm_auto_deploy: true
+
+# Wait for deployment to complete before continuing
+cifmw_fdp_update_edpm_wait_for_deployment: true
+
+# Timeout for deployment completion (in seconds)
+# Default: 3600 seconds (60 minutes / 1 hour)
+cifmw_fdp_update_edpm_deployment_timeout: 3600
+
+# Polling interval when waiting for deployment (in seconds)
+cifmw_fdp_update_edpm_deployment_poll_interval: 30
+
+# Services to run in the deployment
+# For updates, we need to:
+# 1. bootstrap - Install host packages and configure repos
+# 2. configure-os - Configure registry authentication
+# 3. configure-network - Ensure network is configured
+# 4. Service-specific services (ovn, nova, etc) - Pull updated images and restart
+cifmw_fdp_update_edpm_deployment_services:
+  - bootstrap         # MUST be first to install packages and configure repos
+  - configure-os      # MUST be second to authenticate before pulling images
+  - configure-network
+  - ovn
+
+# ============================================
+# Internal Variables (do not override)
+# ============================================
+
+_cifmw_fdp_update_edpm_updated_images: {}
+_cifmw_fdp_update_edpm_nodesets: []
+_cifmw_fdp_update_edpm_updated_nodesets: []
+_cifmw_fdp_update_edpm_external_registry: ""

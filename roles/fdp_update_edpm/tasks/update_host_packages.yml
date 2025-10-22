@@ -1,0 +1,109 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This file patches the nodeset with edpm_bootstrap_* variables
+# The actual package installation happens during deployment via edpm_bootstrap role
+
+# ============================================
+# Get Current Bootstrap Configuration
+# ============================================
+
+- name: Get current bootstrap configuration from nodeset
+  kubernetes.core.k8s_info:
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+    namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+  register: _cifmw_fdp_update_edpm_current_bootstrap_result
+  failed_when: false
+
+# ============================================
+# Merge New Packages with Existing
+# ============================================
+
+- name: Parse current bootstrap packages
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_bootstrap_packages_list: >-
+      {{
+        _cifmw_fdp_update_edpm_current_bootstrap_result.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_bootstrap_packages | default([])
+        if (_cifmw_fdp_update_edpm_current_bootstrap_result.resources | length > 0)
+        else []
+      }}
+
+- name: Merge new packages with existing packages
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_merged_packages: "{{ (_cifmw_fdp_update_edpm_bootstrap_packages_list + cifmw_fdp_update_edpm_packages) | unique }}"
+
+# ============================================
+# Build Repository Configuration
+# ============================================
+
+- name: Parse current bootstrap repos
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_bootstrap_repos_list: >-
+      {{
+        _cifmw_fdp_update_edpm_current_bootstrap_result.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_bootstrap_repos | default([])
+        if (_cifmw_fdp_update_edpm_current_bootstrap_result.resources | length > 0)
+        else []
+      }}
+
+- name: Build new repository configuration
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_new_repo:
+      name: "{{ cifmw_fdp_update_edpm_repo_name }}"
+      baseurl: "{{ cifmw_fdp_update_edpm_repo_baseurl }}"
+      enabled: "{{ cifmw_fdp_update_edpm_repo_enabled | int }}"
+      gpgcheck: "{{ cifmw_fdp_update_edpm_repo_gpgcheck | int }}"
+      priority: "{{ cifmw_fdp_update_edpm_repo_priority }}"
+
+- name: Check if repo already exists in nodeset
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_repo_exists: "{{ _cifmw_fdp_update_edpm_bootstrap_repos_list | selectattr('name', 'equalto', cifmw_fdp_update_edpm_repo_name) | list | length > 0 }}"
+
+- name: Remove existing repo if it exists
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_bootstrap_repos_list: "{{ _cifmw_fdp_update_edpm_bootstrap_repos_list | rejectattr('name', 'equalto', cifmw_fdp_update_edpm_repo_name) | list }}"
+  when: _cifmw_fdp_update_edpm_repo_exists | bool
+
+- name: Add new repo to repos list
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_merged_repos: "{{ _cifmw_fdp_update_edpm_bootstrap_repos_list + [_cifmw_fdp_update_edpm_new_repo] }}"
+
+# ============================================
+# Patch NodeSet with Bootstrap Configuration
+# ============================================
+
+- name: Patch nodeset with bootstrap packages and repos
+  kubernetes.core.k8s:
+    state: patched
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+    namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+    definition:
+      spec:
+        nodeTemplate:
+          ansible:
+            ansibleVars:
+              edpm_bootstrap_packages: "{{ _cifmw_fdp_update_edpm_merged_packages }}"
+              edpm_bootstrap_repos: "{{ _cifmw_fdp_update_edpm_merged_repos }}"
+  when: not cifmw_fdp_update_edpm_dry_run
+
+- name: Display packages and repos configuration
+  ansible.builtin.debug:
+    msg:
+      - "Packages to install on host: {{ _cifmw_fdp_update_edpm_merged_packages }}"
+      - "Repositories configured: {{ _cifmw_fdp_update_edpm_merged_repos | map(attribute='name') | list }}"

@@ -8,7 +8,6 @@
         tasks_from: admin_setup.yml
       tags:
         - admin-setup
-
     - name: Run Test
       ansible.builtin.import_role:
         name: cifmw_setup
@@ -25,6 +24,43 @@
       when: cifmw_run_operators_compliance_scans | default(false) | bool
       tags:
         - compliance
+
+    # FDP Update - OpenStack package updates across all layers
+    - name: FDP Update - Validate required variables
+      when: cifmw_fdp_update_enabled | default(false) | bool
+      block:
+        - name: Validate required variables are set
+          ansible.builtin.assert:
+            that:
+              - cifmw_fdp_update_target_package is defined
+              - cifmw_fdp_update_target_package | length > 0
+              - cifmw_fdp_update_repo_baseurl is defined
+              - cifmw_fdp_update_repo_baseurl | length > 0
+            fail_msg: |
+              Required variables are missing!
+
+              You must set:
+                - cifmw_fdp_update_target_package: Name of the RPM package to update
+                - cifmw_fdp_update_repo_baseurl: Repository base URL containing the updated package
+            success_msg: "Required variables validated successfully"
+
+        - name: Update control plane container images
+          ansible.builtin.import_role:
+            name: fdp_update_container_images
+          vars:
+            cifmw_fdp_update_container_images_target_package: "{{ cifmw_fdp_update_target_package }}"
+            cifmw_fdp_update_container_images_repo_baseurl: "{{ cifmw_fdp_update_repo_baseurl }}"
+            cifmw_fdp_update_container_images_namespace: "{{ cifmw_fdp_update_namespace | default('openstack') }}"
+          when: cifmw_fdp_update_container_images_enabled | default(true) | bool
+
+        - name: Update EDPM (containers and host packages)
+          ansible.builtin.import_role:
+            name: fdp_update_edpm
+          vars:
+            cifmw_fdp_update_edpm_repo_baseurl: "{{ cifmw_fdp_update_repo_baseurl }}"
+          when: cifmw_fdp_update_edpm_enabled | default(true) | bool
+      tags:
+        - fdp-update
 
 - name: Run compliance scan for computes
   hosts: "{{ groups['computes'] | default ([]) }}"

@@ -1,0 +1,56 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Enable OpenShift registry route
+  kubernetes.core.k8s:
+    api_version: imageregistry.operator.openshift.io/v1
+    kind: Config
+    name: cluster
+    state: patched
+    definition:
+      spec:
+        defaultRoute: true
+  register: _cifmw_fdp_update_container_images_enable_route
+  failed_when: false
+
+- name: Wait for route
+  ansible.builtin.pause:
+    seconds: 10
+  when: _cifmw_fdp_update_container_images_enable_route.changed
+
+- name: Get registry route
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: default-route
+    namespace: openshift-image-registry
+  register: _cifmw_fdp_update_container_images_route_info
+  failed_when: false
+
+- name: Extract registry host from route
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_container_images_route:
+      stdout: "{{ _cifmw_fdp_update_container_images_route_info.resources[0].spec.host if _cifmw_fdp_update_container_images_route_info.resources | length > 0 else '' }}"
+
+- name: Set registry URL
+  ansible.builtin.set_fact:
+    cifmw_fdp_update_container_images_image_registry: "{{ _cifmw_fdp_update_container_images_route.stdout }}"
+  when: _cifmw_fdp_update_container_images_route.stdout | length > 0
+
+- name: Verify registry URL
+  ansible.builtin.fail:
+    msg: "Failed to determine registry URL. Set cifmw_fdp_update_container_images_image_registry manually."
+  when: cifmw_fdp_update_container_images_image_registry is not defined or cifmw_fdp_update_container_images_image_registry | length == 0

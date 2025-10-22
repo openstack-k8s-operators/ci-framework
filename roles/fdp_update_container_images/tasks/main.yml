@@ -1,0 +1,78 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# ============================================
+# Validate and Initialize
+# ============================================
+
+- name: Validate parameters and initialize
+  ansible.builtin.include_tasks: validate.yml
+
+# ============================================
+# Detect Registry
+# ============================================
+
+- name: Detect OpenShift registry URL
+  ansible.builtin.include_tasks: detect_registry.yml
+
+# ============================================
+# Configure Registry Authentication
+# ============================================
+
+- name: Configure registry CA certificate
+  ansible.builtin.include_tasks: configure_ca_cert.yml
+
+- name: Authenticate with registry
+  ansible.builtin.include_tasks: authenticate_registry.yml
+
+# ============================================
+# Fetch Images
+# ============================================
+
+- name: Fetch images to process
+  ansible.builtin.include_tasks: fetch_images.yml
+
+# ============================================
+# Process Each Image
+# ============================================
+
+- name: Build and push updated images
+  ansible.builtin.include_tasks: process_image.yml
+  loop: "{{ _cifmw_fdp_update_container_images_image_entries }}"
+  loop_control:
+    loop_var: image_entry
+    label: "{{ image_entry.key }}"
+  when: _cifmw_fdp_update_container_images_image_entries | length > 0
+
+# ============================================
+# Summary
+# ============================================
+
+- name: Display summary
+  ansible.builtin.debug:
+    msg:
+      - "=========================================="
+      - "✓ Container image update complete"
+      - "Target package: {{ cifmw_fdp_update_container_images_target_package }}"
+      - "Images processed: {{ _cifmw_fdp_update_container_images_processed_images }}"
+      - "Updated: {{ _cifmw_fdp_update_container_images_updated_cr_keys | join(', ') if _cifmw_fdp_update_container_images_updated_cr_keys | length > 0 else 'None' }}"
+      - "=========================================="
+
+- name: Cleanup temporary directory
+  ansible.builtin.file:
+    path: "{{ _cifmw_fdp_update_container_images_temp_dir }}"
+    state: absent
+  when: _cifmw_fdp_update_container_images_temp_dir is defined
