@@ -3,6 +3,18 @@
   hosts: "{{ cifmw_zuul_target_host | default('all') }}"
   gather_facts: true
   tasks:
+    # FIXME(amsinha/danpawlik): Current version of zuul does not support include-vars [1] from file,
+    # thus using this hack to read files. Will replace all these hacky var file read with include-vars
+    # once Zuul is upgraded.
+    # [1] https://zuul-ci.org/docs/zuul/latest/config/job.html#attr-job.include-vars
+    - name: Read group_vars
+      vars:
+        provided_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_dir.yml
+
     - name: Filter out host if needed
       when:
         - cifmw_zuul_target_host is defined
@@ -12,9 +24,9 @@
 
     - name: Deploy Meta content provider
       environment:
-        ANSIBLE_CONFIG: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg"
+        ANSIBLE_CONFIG: "{{ cifmw_project_dir_absolute }}/ansible.cfg"
       ansible.builtin.command:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        chdir: "{{ cifmw_project_dir_absolute }}"
         cmd: >-
           ansible-playbook ci/playbooks/meta_content_provider/meta_content_provider.yml
           -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
