@@ -74,7 +74,6 @@ cifmw_internal_registry_login: false
 cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
 cifmw_openshift_setup_skip_internal_registry: true
 cifmw_artifacts_basedir: "{{ ansible_user_dir }}/ci-framework-data/artifacts "
-cifmw_installyamls_repos: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/install_yamls"
 nodepool:
   cloud: ""
 mol_config_dir: /home/$(whoami)/src/github.com/openstack-k8s-operators/ci-framework/.config/molecule/config_local.yml
