@@ -1,0 +1,152 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Authenticate with OpenShift internal registry
+  block:
+    - name: Enable default route for image registry
+      ansible.builtin.command: >-
+        oc patch configs.imageregistry.operator.openshift.io/cluster
+        --type=merge
+        -p='{"spec":{"defaultRoute":true}}'
+      register: _cifmw_upic_enable_route_result
+      changed_when: "'no change' not in _cifmw_upic_enable_route_result.stdout"
+      failed_when: false
+
+    - name: Wait for registry route to be created
+      ansible.builtin.pause:
+        seconds: 10
+      when: _cifmw_upic_enable_route_result.changed
+
+    - name: Get the registry route hostname
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo ""
+      args:
+        executable: /bin/bash
+      register: _cifmw_upic_registry_route_result
+      changed_when: false
+      failed_when: false
+
+    - name: Debug route detection
+      ansible.builtin.debug:
+        msg:
+          - "Route detection result: '{{ _cifmw_upic_registry_route_result.stdout }}'"
+          - "Current registry value: '{{ cifmw_upic_image_registry }}'"
+
+    - name: Set registry URL from detected route
+      ansible.builtin.set_fact:
+        cifmw_upic_image_registry: "{{ _cifmw_upic_registry_route_result.stdout }}"
+      when:
+        - _cifmw_upic_registry_route_result.stdout is defined
+        - _cifmw_upic_registry_route_result.stdout | length > 0
+
+    - name: Verify registry URL is set
+      ansible.builtin.fail:
+        msg: |
+          Failed to determine OpenShift image registry URL.
+          Please set cifmw_upic_image_registry variable manually.
+      when:
+        - cifmw_upic_image_registry is not defined or cifmw_upic_image_registry | length == 0
+
+    - name: Add registry to insecure registries list
+      ansible.builtin.command: >-
+        oc patch image.config.openshift.io cluster
+        --type=json
+        -p='[{"op": "add", "path": "/spec/registrySources/insecureRegistries/-", "value": "{{ cifmw_upic_image_registry }}"}]'
+      register: _cifmw_upic_insecure_registry_result
+      changed_when: "'no change' not in _cifmw_upic_insecure_registry_result.stdout"
+      failed_when: false
+      when:
+        - not cifmw_upic_tls_verify | bool
+
+    - name: Display registry configuration
+      ansible.builtin.debug:
+        msg:
+          - "External registry: {{ cifmw_upic_image_registry }}"
+          - "Internal registry: {{ cifmw_upic_image_registry_internal }}"
+          - "TLS verify: {{ cifmw_upic_tls_verify }}"
+
+    - name: Wait for registry to be ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -k -s -o /dev/null -w "%{http_code}" https://{{ cifmw_upic_image_registry }}/v2/ || echo "000"
+      args:
+        executable: /bin/bash
+      register: _cifmw_upic_registry_health_check
+      changed_when: false
+      failed_when: false
+      retries: 12
+      delay: 5
+      until: _cifmw_upic_registry_health_check.stdout in ["200", "401", "403"]
+
+    - name: Display registry health check result
+      ansible.builtin.debug:
+        msg: "Registry health check returned HTTP {{ _cifmw_upic_registry_health_check.stdout }}"
+
+    - name: Create service account token for registry authentication
+      ansible.builtin.command: >-
+        oc create token builder -n {{ cifmw_upic_namespace }}
+      register: _cifmw_upic_token_result
+      changed_when: false
+
+    - name: Fail if token creation failed
+      ansible.builtin.fail:
+        msg: "Could not retrieve authentication token for namespace {{ cifmw_upic_namespace }}"
+      when:
+        - _cifmw_upic_token_result.stdout is not defined or _cifmw_upic_token_result.stdout | length == 0
+
+    - name: Set auth token fact
+      ansible.builtin.set_fact:
+        _cifmw_upic_auth_token: "{{ _cifmw_upic_token_result.stdout }}"
+
+    - name: Save token to temporary file
+      ansible.builtin.copy:
+        content: "{{ _cifmw_upic_auth_token }}"
+        dest: "{{ _cifmw_upic_temp_dir }}/token"
+        mode: '0600'
+
+    - name: Authenticate podman with OpenShift registry
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "{{ _cifmw_upic_auth_token }}" | \
+        podman login --username=unused --password-stdin \
+        {{ '--tls-verify=false' if not cifmw_upic_tls_verify else '' }} \
+        {{ cifmw_upic_image_registry }}
+      args:
+        executable: /bin/bash
+      register: _cifmw_upic_login_result
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Display authentication failure details
+      ansible.builtin.debug:
+        msg:
+          - "Authentication failed with registry: {{ cifmw_upic_image_registry }}"
+          - "Return code: {{ _cifmw_upic_login_result.rc }}"
+          - "TLS verify: {{ cifmw_upic_tls_verify }}"
+          - "Token length: {{ _cifmw_upic_auth_token | length }} characters"
+          - "Hint: Check if the registry URL is accessible and the service account has proper permissions"
+      when: _cifmw_upic_login_result.rc != 0
+
+    - name: Verify authentication succeeded
+      ansible.builtin.fail:
+        msg: "Failed to authenticate with the registry {{ cifmw_upic_image_registry }}. See debug output above for details."
+      when: _cifmw_upic_login_result.rc != 0
+
+    - name: Display authentication status
+      ansible.builtin.debug:
+        msg: "Successfully authenticated with OpenShift image registry"

@@ -1,0 +1,110 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if custom update service should be created
+  ansible.builtin.set_fact:
+    _cifmw_uec_create_service: "{{ cifmw_uec_repo_baseurl is defined and cifmw_uec_repo_baseurl | length > 0 }}"
+
+- name: Build playbook content for host package updates
+  ansible.builtin.set_fact:
+    _cifmw_uec_playbook_final: |
+      - hosts: all
+        gather_facts: false
+        become: true
+        tasks:
+          - name: Configure custom repository
+            ansible.builtin.copy:
+              dest: "/etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo"
+              mode: '0644'
+              content: |
+                [{{ cifmw_uec_repo_name }}]
+                name={{ cifmw_uec_repo_name }}
+                baseurl={{ cifmw_uec_repo_baseurl }}
+                enabled=1
+                gpgcheck=0
+                priority=1
+
+          - name: Clean dnf cache
+            ansible.builtin.command: dnf clean all
+            changed_when: true
+
+          - name: Update packages from custom repository
+            ansible.builtin.dnf:
+              name: {{ cifmw_uec_packages_to_update | to_json }}
+              state: latest
+              enablerepo: "{{ cifmw_uec_repo_name }}"
+              disablerepo: "*"
+              disable_gpg_check: true
+              update_cache: true
+            register: _update_result
+
+          - name: Restart openvswitch services
+            ansible.builtin.systemd:
+              name: "{% raw %}{{ item }}{% endraw %}"
+              state: restarted
+            loop:
+              - openvswitch
+              - ovs-vswitchd
+              - ovsdb-server
+            when: _update_result.changed
+            failed_when: false
+
+          - name: Wait for OVS services to be running
+            ansible.builtin.systemd:
+              name: openvswitch
+            register: _ovs_status
+            until: _ovs_status.status.ActiveState == "active"
+            retries: 30
+            delay: 2
+            when: _update_result.changed
+  when: _cifmw_uec_create_service | bool
+
+- name: Build OpenStackDataPlaneService for package updates
+  ansible.builtin.set_fact:
+    _cifmw_uec_service_manifest:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      metadata:
+        name: update-host-packages
+        namespace: "{{ cifmw_uec_namespace }}"
+      spec:
+        label: dataplane-deployment-update-host-packages
+        playbookContents: "{{ _cifmw_uec_playbook_final }}"
+  when: _cifmw_uec_create_service | bool
+
+- name: Create or update OpenStackDataPlaneService
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ _cifmw_uec_service_manifest }}"
+  when:
+    - _cifmw_uec_create_service | bool
+    - not cifmw_uec_dry_run | bool
+
+- name: Display service creation message
+  ansible.builtin.debug:
+    msg:
+      - "OpenStackDataPlaneService 'update-host-packages' created/updated"
+      - "Add this service to your deployment's servicesOverride list"
+  when:
+    - _cifmw_uec_create_service | bool
+    - not cifmw_uec_dry_run | bool
+
+- name: Display dry-run service message
+  ansible.builtin.debug:
+    msg: "DRY RUN: Would create OpenStackDataPlaneService 'update-host-packages'"
+  when:
+    - _cifmw_uec_create_service | bool
+    - cifmw_uec_dry_run | bool
