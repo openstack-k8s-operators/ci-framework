@@ -1,0 +1,90 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Disable net.ifnames
+  when: cifmw_ocp_agent_installer_disable_net_ifnames | bool
+  block:
+    - name: Template butane config for net.ifnames
+      vars:
+        role: "{{ item }}"
+      ansible.builtin.template:
+        src: disable-netifnames.bu.j2
+        dest: "{{ cifmw_ocp_agent_installer_butane_dir }}/90-{{ item }}-disable-netifnames.bu"
+        mode: '0644'
+      loop: "{{ cifmw_ocp_agent_installer_net_ifnames_roles }}"
+    - name: Generate MachineConfig for iscsi
+      ansible.builtin.command:
+        cmd: >-
+          butane {{ cifmw_ocp_agent_installer_butane_dir }}/90-{{ item }}-disable-netifnames.bu
+          -o {{ cifmw_ocp_agent_installer_machine_configs_dir }}/90-{{ item }}-disable-netifnames.yaml
+      loop: "{{ cifmw_ocp_agent_installer_net_ifnames_roles }}"
+
+- name: Enable iscsi
+  when: cifmw_ocp_agent_installer_enable_iscsi | bool
+  block:
+    - name: Template butane config for iscsi
+      vars:
+        role: "{{ item }}"
+      ansible.builtin.template:
+        src: enable-iscsi.bu.j2
+        dest: "{{ cifmw_ocp_agent_installer_butane_dir }}/90-{{ item }}-enable-iscsi.bu"
+        mode: '0644'
+      loop: "{{ cifmw_ocp_agent_installer_iscsi_roles }}"
+
+    - name: Generate MachineConfig for iscsi
+      ansible.builtin.command:
+        cmd: >-
+          butane {{ cifmw_ocp_agent_installer_butane_dir }}/90-{{ item }}-enable-iscsi.bu
+          -o {{ cifmw_ocp_agent_installer_machine_configs_dir }}/90-{{ item }}-enable-iscsi.yaml
+      loop: "{{ cifmw_ocp_agent_installer_iscsi_roles }}"
+
+- name: Enable Multipath
+  when: cifmw_ocp_agent_installer_enable_multipath | bool
+  block:
+    - name: Template butane config for multipath
+      vars:
+        role: "{{ item }}"
+      ansible.builtin.template:
+        src: enable-multipath.bu.j2
+        dest: "{{ cifmw_ocp_agent_installer_butane_dir }}/91-{{ item }}-enable-multipath.bu"
+        mode: '0644'
+      loop: "{{ cifmw_ocp_agent_installer_multipath_roles }}"
+
+    - name: Generate MachineConfig for multipath
+      ansible.builtin.command:
+        cmd: >-
+          butane {{ cifmw_ocp_agent_installer_butane_dir }}/91-{{ item }}-enable-multipath.bu
+          -o {{ cifmw_ocp_agent_installer_machine_configs_dir }}/91-{{ item }}-enable-multipath.yaml
+      loop: "{{ cifmw_ocp_agent_installer_multipath_roles }}"
+
+- name: LVM cinder-volumes
+  when: cifmw_ocp_agent_installer_cinder_volume_pvs | length > 0
+  block:
+    - name: Template butane config for LVM cinder-volumes
+      vars:
+        role: "{{ item }}"
+      ansible.builtin.template:
+        src: lv-cinder-volumes.bu.j2
+        dest: "{{ cifmw_ocp_agent_installer_butane_dir }}/92-{{ item }}-lv-cinder-volumes.bu"
+        mode: '0644'
+      loop: "{{ cifmw_ocp_agent_installer_cinder_volume_roles }}"
+
+    - name: Generate MachineConfig for multipath
+      ansible.builtin.command:
+        cmd: >-
+          butane {{ cifmw_ocp_agent_installer_butane_dir }}/92-{{ item }}-lv-cinder-volumes.bu
+          -o {{ cifmw_ocp_agent_installer_machine_configs_dir }}/92-{{ item }}-lv-cinder-volumes.yaml
+      loop: "{{ cifmw_ocp_agent_installer_cinder_volume_roles }}"
