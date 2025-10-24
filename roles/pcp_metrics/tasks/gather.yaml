@@ -1,0 +1,60 @@
+---
+- name: Populate service facts
+  ansible.builtin.service_facts:
+
+- name: Fetch needed facts
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+    filter:
+      - ansible_hostname
+      - ansible_nodename
+  when:
+    - ansible_hostname is not defined
+      or ansible_nodename is not defined
+
+- name: Check if pmrep is installed
+  ansible.builtin.command: >-
+    pmrep --version
+  ignore_errors: true
+  changed_when: false
+  register: _pmrep
+
+- name: Check if archive exists
+  stat:
+    path: "{{ pcp_metrics_archive }}"
+  register: _pcp_archive
+
+- name: Collect metrics when the pmlogger service is running
+  when:
+    - ansible_facts.services['pmlogger.service'] is defined
+    - ansible_facts.services['pmlogger.service']['state'] == 'running'
+    - _pmrep.rc == 0
+    - _pcp_archive.stat.readable | default(false)
+  block:
+    - name: Collect the metrics from host
+      ansible.builtin.command: >-
+        pmrep
+        --archive "{{ pcp_metrics_archive }}"
+        --interval "{{ pcp_metrics_interval }}"
+        --timestamps
+        --timestamp-format '%Y-%m-%d_%H:%M:%S'
+        --timezone UTC
+        --output csv
+        --delimiter ','
+        {{ pcp_metrics_metricspec }}
+      register: _pcp_metrics_pmrep
+      changed_when: false
+
+    - name: Ensure the output directory exist
+      file:
+        path: "{{ pcp_metrics_output_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+
+    - name: Save the collected metrics to a local file
+      copy:
+        content: "{{ _pcp_metrics_pmrep.stdout }}"
+        dest: "{{ pcp_metrics_output_dir }}/{{ ansible_hostname }}.csv"
+      delegate_to: localhost
