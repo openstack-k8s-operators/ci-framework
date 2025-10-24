@@ -1,0 +1,98 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Display current image being processed
+  ansible.builtin.debug:
+    msg: "Processing image: {{ image_entry.key }} ({{ image_entry.value }})"
+
+- name: Process image
+  block:
+    - name: Display build start message
+      ansible.builtin.debug:
+        msg: "Building updated image for {{ image_entry.key }}"
+
+    - name: Create repository file from template
+      ansible.builtin.template:
+        src: repo.j2
+        dest: "{{ _cifmw_upic_temp_dir }}/{{ cifmw_upic_repo_name }}.repo"
+        mode: '0644'
+
+    - name: Create Dockerfile from template
+      ansible.builtin.template:
+        src: Dockerfile.j2
+        dest: "{{ _cifmw_upic_temp_dir }}/Dockerfile"
+        mode: '0644'
+      vars:
+        base_image: "{{ image_entry.value }}"
+
+    - name: Generate new image tag
+      ansible.builtin.set_fact:
+        _cifmw_upic_new_image_tag: "{{ cifmw_upic_image_name_prefix }}-{{ image_entry.key | lower }}-{{ ansible_date_time.epoch }}"
+        _cifmw_upic_new_image_path: "{{ cifmw_upic_image_registry }}/{{ cifmw_upic_namespace }}/{{ cifmw_upic_image_name_prefix }}-{{ image_entry.key | lower }}-{{ ansible_date_time.epoch }}"
+
+    - name: Build new container image
+      ansible.builtin.command: >-
+        podman build
+        -t {{ _cifmw_upic_new_image_path }}
+        -f {{ _cifmw_upic_temp_dir }}/Dockerfile
+        {{ _cifmw_upic_temp_dir }}
+      register: _cifmw_upic_build_result
+      changed_when: _cifmw_upic_build_result.rc == 0
+
+    - name: Check if build succeeded
+      ansible.builtin.fail:
+        msg: "Failed to build new image for {{ image_entry.value }}"
+      when: _cifmw_upic_build_result.rc != 0
+
+    - name: Push new image to registry
+      ansible.builtin.command: >-
+        podman push
+        {{ '--tls-verify=false' if not cifmw_upic_tls_verify else '' }}
+        {{ _cifmw_upic_new_image_path }}
+      register: _cifmw_upic_push_result
+      changed_when: _cifmw_upic_push_result.rc == 0
+
+    - name: Check if push succeeded
+      ansible.builtin.fail:
+        msg: "Failed to push new image {{ _cifmw_upic_new_image_path }}"
+      when: _cifmw_upic_push_result.rc != 0
+
+    - name: Patch OpenStackVersion CR with new image
+      ansible.builtin.command: >-
+        oc patch openstackversion {{ cifmw_upic_openstack_cr_name }}
+        -n {{ cifmw_upic_namespace }}
+        --type=merge
+        -p '{"spec":{"customContainerImages":{"{{ image_entry.key }}":"{{ _cifmw_upic_new_image_path }}"}}}'
+      register: _cifmw_upic_patch_result
+      changed_when: _cifmw_upic_patch_result.rc == 0
+
+    - name: Update tracking lists
+      ansible.builtin.set_fact:
+        _cifmw_upic_modified_images: >-
+          {{
+            _cifmw_upic_modified_images +
+            [image_entry.value ~ ' -> ' ~ _cifmw_upic_new_image_path]
+          }}
+        _cifmw_upic_updated_cr_keys: >-
+          {{
+            _cifmw_upic_updated_cr_keys +
+            [image_entry.key]
+          }}
+        _cifmw_upic_processed_images: "{{ _cifmw_upic_processed_images | int + 1 }}"
+
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: "Successfully updated {{ image_entry.key }} with new image {{ _cifmw_upic_new_image_path }}"

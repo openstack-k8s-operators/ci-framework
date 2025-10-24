@@ -1,0 +1,98 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set NodeSet name
+  ansible.builtin.set_fact:
+    _cifmw_uec_current_nodeset_name: "{{ nodeset.metadata.name }}"
+
+- name: Build EDPM image variables patch
+  ansible.builtin.set_fact:
+    _cifmw_uec_edpm_vars_patch: {}
+
+- name: Add each EDPM variable to patch
+  ansible.builtin.set_fact:
+    _cifmw_uec_edpm_vars_patch: >-
+      {{
+        _cifmw_uec_edpm_vars_patch | combine({
+          cifmw_uec_image_variable_mapping[item.key]: item.value
+        })
+      }}
+  loop: "{{ _cifmw_uec_updated_images | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Display variables to be added to NodeSet {{ _cifmw_uec_current_nodeset_name }}
+  ansible.builtin.debug:
+    msg:
+      - "NodeSet: {{ _cifmw_uec_current_nodeset_name }}"
+      - "Variables to add/update:"
+      - "{{ _cifmw_uec_edpm_vars_patch | to_nice_yaml }}"
+
+- name: Skip update if no variables to patch
+  ansible.builtin.meta: end_host
+  when: _cifmw_uec_edpm_vars_patch | length == 0
+
+- name: Build JSON patch operations
+  ansible.builtin.set_fact:
+    _cifmw_uec_json_patch: []
+
+- name: Create patch operation for each variable
+  ansible.builtin.set_fact:
+    _cifmw_uec_json_patch: >-
+      {{
+        _cifmw_uec_json_patch + [{
+          'op': 'add',
+          'path': '/spec/nodeTemplate/ansible/ansibleVars/' ~ item.key,
+          'value': item.value
+        }]
+      }}
+  loop: "{{ _cifmw_uec_edpm_vars_patch | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Display JSON patch
+  ansible.builtin.debug:
+    msg:
+      - "JSON Patch operations:"
+      - "{{ _cifmw_uec_json_patch | to_nice_json }}"
+  when: not cifmw_uec_dry_run
+
+- name: Apply patch to NodeSet {{ _cifmw_uec_current_nodeset_name }}
+  ansible.builtin.command: >-
+    oc patch openstackdataplanenodeset {{ _cifmw_uec_current_nodeset_name }}
+    -n {{ cifmw_uec_namespace }}
+    --type=json
+    -p='{{ _cifmw_uec_json_patch | to_json }}'
+  register: _cifmw_uec_patch_result
+  changed_when: "'patched' in _cifmw_uec_patch_result.stdout"
+  when: not cifmw_uec_dry_run
+
+- name: Display dry-run message
+  ansible.builtin.debug:
+    msg: "DRY RUN: Would patch NodeSet {{ _cifmw_uec_current_nodeset_name }} with {{ _cifmw_uec_edpm_vars_patch | length }} variables"
+  when: cifmw_uec_dry_run
+
+- name: Record updated NodeSet
+  ansible.builtin.set_fact:
+    _cifmw_uec_updated_nodesets: "{{ _cifmw_uec_updated_nodesets + [_cifmw_uec_current_nodeset_name] }}"
+  when: not cifmw_uec_dry_run
+
+- name: Display patch result
+  ansible.builtin.debug:
+    msg: "Successfully patched NodeSet {{ _cifmw_uec_current_nodeset_name }}"
+  when:
+    - not cifmw_uec_dry_run
+    - _cifmw_uec_patch_result.changed

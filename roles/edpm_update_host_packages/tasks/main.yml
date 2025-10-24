@@ -1,0 +1,54 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Early role stop if disabled
+  when:
+    - not cifmw_edpm_update_host_packages | default(true) | bool
+  ansible.builtin.meta: end_play
+
+- name: Validate required parameters
+  ansible.builtin.assert:
+    that:
+      - cifmw_euhp_repo_baseurl is defined
+      - cifmw_euhp_repo_baseurl | length > 0
+      - cifmw_euhp_packages is defined
+      - cifmw_euhp_packages | length > 0
+    fail_msg: "cifmw_euhp_repo_baseurl and cifmw_euhp_packages must be defined"
+
+- name: Display update configuration
+  ansible.builtin.debug:
+    msg:
+      - "EDPM Host Package Update Configuration"
+      - "Repository: {{ cifmw_euhp_repo_baseurl }}"
+      - "Packages: {{ cifmw_euhp_packages }}"
+      - "Services to restart: {{ cifmw_euhp_services_to_restart }}"
+
+- name: Configure custom repository
+  ansible.builtin.include_tasks: configure_repo.yml
+
+- name: Backup current packages
+  ansible.builtin.include_tasks: backup_packages.yml
+  when: cifmw_euhp_backup_packages | bool
+
+- name: Update packages
+  ansible.builtin.include_tasks: update_packages.yml
+
+- name: Restart services
+  ansible.builtin.include_tasks: restart_services.yml
+  when: cifmw_euhp_restart_services | bool
+
+- name: Display summary
+  ansible.builtin.include_tasks: summary.yml

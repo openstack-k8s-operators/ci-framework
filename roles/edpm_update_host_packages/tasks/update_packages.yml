@@ -1,0 +1,45 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Update packages from custom repository
+  ansible.builtin.dnf:
+    name: "{{ cifmw_euhp_packages }}"
+    state: latest
+    enablerepo: "{{ cifmw_euhp_repo_name }}"
+    disablerepo: "*"
+    disable_gpg_check: "{{ cifmw_euhp_repo_gpgcheck == 0 }}"
+    update_cache: true
+  become: true
+  register: _cifmw_euhp_update_result
+
+- name: Get updated package versions
+  ansible.builtin.shell: |
+    set -o pipefail
+    rpm -qa | grep -E "{{ cifmw_euhp_packages | join('|') }}"
+  args:
+    executable: /bin/bash
+  register: _cifmw_euhp_updated_packages
+  changed_when: false
+  become: true
+
+- name: Display update results
+  ansible.builtin.debug:
+    msg:
+      - "Package update completed"
+      - "Updated packages:"
+      - "{{ _cifmw_euhp_updated_packages.stdout_lines }}"
+      - ""
+      - "Changes: {{ 'Yes' if _cifmw_euhp_update_result.changed else 'No (already up to date)' }}"

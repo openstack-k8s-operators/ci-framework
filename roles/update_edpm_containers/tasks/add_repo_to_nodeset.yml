@@ -1,0 +1,57 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if repository configuration should be added
+  ansible.builtin.set_fact:
+    _cifmw_uec_add_repo: "{{ cifmw_uec_repo_baseurl is defined and cifmw_uec_repo_baseurl | length > 0 }}"
+
+- name: Build repository configuration snippet
+  ansible.builtin.set_fact:
+    _cifmw_uec_repo_snippet: |
+      # Custom update repository
+      echo "[{{ cifmw_uec_repo_name }}]" >> /etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo
+      echo "name={{ cifmw_uec_repo_name }}" >> /etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo
+      echo "baseurl={{ cifmw_uec_repo_baseurl }}" >> /etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo
+      echo "enabled=1" >> /etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo
+      echo "gpgcheck=0" >> /etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo
+      echo "priority=1" >> /etc/yum.repos.d/{{ cifmw_uec_repo_name }}.repo
+  when: _cifmw_uec_add_repo | bool
+
+- name: Build package update commands
+  ansible.builtin.set_fact:
+    _cifmw_uec_update_snippet: |
+      # Update packages from custom repository
+      dnf update -y --disablerepo='*' --enablerepo={{ cifmw_uec_repo_name }} {{ cifmw_uec_packages_to_update | join(' ') }}
+
+      # Restart openvswitch if updated
+      if rpm -q {{ cifmw_uec_packages_to_update | join(' ') }} | grep -q openvswitch; then
+        systemctl restart openvswitch || true
+        systemctl restart ovs-vswitchd || true
+      fi
+  when:
+    - _cifmw_uec_add_repo | bool
+    - cifmw_uec_packages_to_update is defined
+    - cifmw_uec_packages_to_update | length > 0
+
+- name: Display repository configuration snippet
+  ansible.builtin.debug:
+    msg:
+      - "Repository configuration to add to NodeSet:"
+      - "{{ _cifmw_uec_repo_snippet }}"
+      - ""
+      - "Package update commands:"
+      - "{{ _cifmw_uec_update_snippet }}"
+  when: _cifmw_uec_add_repo | bool

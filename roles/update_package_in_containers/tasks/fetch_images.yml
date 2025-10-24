@@ -1,0 +1,73 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get OpenStackVersion CR
+  ansible.builtin.command: >-
+    oc get openstackversion {{ cifmw_upic_openstack_cr_name }}
+    -n {{ cifmw_upic_namespace }}
+    -o json
+  register: _cifmw_upic_cr_result
+  changed_when: false
+
+- name: Parse container images from CR
+  ansible.builtin.set_fact:
+    _cifmw_upic_container_images_raw: "{{ (_cifmw_upic_cr_result.stdout | from_json).status.containerImageVersionDefaults | default({}) }}"
+
+- name: Debug raw container images structure
+  ansible.builtin.debug:
+    msg:
+      - "Container images raw structure keys: {{ _cifmw_upic_container_images_raw.keys() | list }}"
+      - "Number of top-level keys: {{ _cifmw_upic_container_images_raw.keys() | length }}"
+
+- name: Extract container images from versioned structure
+  ansible.builtin.set_fact:
+    _cifmw_upic_container_images: "{{ _cifmw_upic_container_images_raw.values() | first | default({}) }}"
+  when: _cifmw_upic_container_images_raw | length > 0
+
+- name: Set empty container images if none found
+  ansible.builtin.set_fact:
+    _cifmw_upic_container_images: {}
+  when: _cifmw_upic_container_images_raw | length == 0
+
+- name: Build all images list
+  ansible.builtin.set_fact:
+    _cifmw_upic_all_image_entries: "{{ _cifmw_upic_container_images | dict2items }}"
+
+- name: Filter only images to process
+  ansible.builtin.set_fact:
+    _cifmw_upic_image_entries: >-
+      {{
+        _cifmw_upic_all_image_entries | selectattr('key', 'in', cifmw_upic_images_to_scan) | list
+      }}
+
+- name: Set total images count
+  ansible.builtin.set_fact:
+    _cifmw_upic_total_images: "{{ _cifmw_upic_image_entries | length }}"
+
+- name: Display images to process
+  ansible.builtin.debug:
+    msg: "Processing {{ _cifmw_upic_total_images }} images: {{ _cifmw_upic_image_entries | map(attribute='key') | list }}"
+
+- name: Check if any images were found
+  ansible.builtin.debug:
+    msg: "No container images found in OpenStackVersion CR. Nothing to update."
+  when: _cifmw_upic_total_images | int == 0
+
+- name: Initialize tracking variables
+  ansible.builtin.set_fact:
+    _cifmw_upic_modified_images: []
+    _cifmw_upic_updated_cr_keys: []
+    _cifmw_upic_processed_images: 0

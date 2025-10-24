@@ -1,0 +1,107 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Debug updated NodeSets variable
+  ansible.builtin.debug:
+    msg:
+      - "DEBUG: _cifmw_uec_updated_nodesets variable:"
+      - "  Defined: {{ _cifmw_uec_updated_nodesets is defined }}"
+      - "  Value: {{ _cifmw_uec_updated_nodesets | default('UNDEFINED') }}"
+      - "  Length: {{ _cifmw_uec_updated_nodesets | default([]) | length }}"
+
+- name: Check if deployment should be created
+  ansible.builtin.set_fact:
+    _cifmw_uec_should_deploy: "{{ cifmw_uec_auto_deploy and (_cifmw_uec_updated_nodesets | default([]) | length > 0) }}"
+
+- name: Display deployment decision
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "EDPM Deployment Decision"
+      - "=============================================="
+      - "Auto-deploy enabled: {{ cifmw_uec_auto_deploy }}"
+      - "NodeSets updated: {{ _cifmw_uec_updated_nodesets | default([]) }}"
+      - "NodeSets count: {{ _cifmw_uec_updated_nodesets | default([]) | length }}"
+      - "Will create deployment: {{ _cifmw_uec_should_deploy }}"
+      - "=============================================="
+
+- name: Create OpenStackDataPlaneDeployment
+  when:
+    - _cifmw_uec_should_deploy | bool
+    - not cifmw_uec_dry_run | bool
+  block:
+    - name: Generate deployment name
+      ansible.builtin.set_fact:
+        _cifmw_uec_deployment_name: "edpm-update-images-{{ ansible_date_time.epoch }}"
+
+    - name: Build services list
+      ansible.builtin.set_fact:
+        _cifmw_uec_services: "{{ cifmw_uec_deployment_services }}"
+
+    - name: Add host package update service if enabled
+      ansible.builtin.set_fact:
+        _cifmw_uec_services: "{{ _cifmw_uec_services + ['update-host-packages'] }}"
+      when:
+        - cifmw_upic_update_edpm_host_packages | default(true) | bool
+        - cifmw_uec_repo_baseurl is defined
+        - cifmw_uec_repo_baseurl | length > 0
+
+    - name: Display deployment configuration
+      ansible.builtin.debug:
+        msg:
+          - "Creating deployment: {{ _cifmw_uec_deployment_name }}"
+          - "NodeSets: {{ _cifmw_uec_updated_nodesets }}"
+          - "Services: {{ _cifmw_uec_services }}"
+
+    - name: Create deployment manifest
+      ansible.builtin.set_fact:
+        _cifmw_uec_deployment_manifest:
+          apiVersion: dataplane.openstack.org/v1beta1
+          kind: OpenStackDataPlaneDeployment
+          metadata:
+            name: "{{ _cifmw_uec_deployment_name }}"
+            namespace: "{{ cifmw_uec_namespace }}"
+          spec:
+            nodeSets: "{{ _cifmw_uec_updated_nodesets }}"
+            servicesOverride: "{{ _cifmw_uec_services }}"
+
+    - name: Apply deployment
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ _cifmw_uec_deployment_manifest }}"
+      register: _cifmw_uec_deployment_result
+
+    - name: Display deployment created
+      ansible.builtin.debug:
+        msg:
+          - "OpenStackDataPlaneDeployment created: {{ _cifmw_uec_deployment_name }}"
+          - "Monitor with: oc get openstackdataplanedeployment {{ _cifmw_uec_deployment_name }} -n {{ cifmw_uec_namespace }} -w"
+
+- name: Display dry-run message
+  ansible.builtin.debug:
+    msg:
+      - "DRY RUN: Would create OpenStackDataPlaneDeployment with:"
+      - "  Name: edpm-update-images-{{ ansible_date_time.epoch }}"
+      - "  NodeSets: {{ _cifmw_uec_updated_nodesets }}"
+      - "  Services: {{ cifmw_uec_deployment_services }}"
+  when:
+    - _cifmw_uec_should_deploy | bool
+    - cifmw_uec_dry_run | bool
+
+- name: Display skip message
+  ansible.builtin.debug:
+    msg: "Skipping deployment creation (auto_deploy={{ cifmw_uec_auto_deploy }}, updated_nodesets={{ _cifmw_uec_updated_nodesets | length }})"
+  when: not _cifmw_uec_should_deploy | bool

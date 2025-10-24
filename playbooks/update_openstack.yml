@@ -1,0 +1,170 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Master playbook to update OpenStack packages across all layers:
+# - Control plane containers
+# - EDPM compute containers
+# - EDPM compute node hosts
+#
+# Granular control via flags:
+#   cifmw_upic_update_control_plane_images: true/false
+#   cifmw_upic_update_edpm_images: true/false
+#   cifmw_upic_update_edpm_host_packages: true/false
+#
+# Usage Examples:
+#
+# 1. Update everything (default):
+#   ansible-playbook playbooks/update_openstack.yml \
+#     -e cifmw_upic_target_package=ovn24.03 \
+#     -e cifmw_upic_repo_baseurl=http://example.com/repo/
+#
+# 2. Update only control plane:
+#   ansible-playbook playbooks/update_openstack.yml \
+#     -e cifmw_upic_target_package=ovn24.03 \
+#     -e cifmw_upic_repo_baseurl=http://example.com/repo/ \
+#     -e cifmw_upic_update_edpm_images=false \
+#     -e cifmw_upic_update_edpm_host_packages=false
+#
+# 3. Update only EDPM host packages:
+#   ansible-playbook playbooks/update_openstack.yml \
+#     -e cifmw_upic_target_package=openvswitch3.3 \
+#     -e cifmw_upic_repo_baseurl=http://example.com/ovs-repo/ \
+#     -e cifmw_upic_update_control_plane_images=false \
+#     -e cifmw_upic_update_edpm_images=false
+
+- name: Update OpenStack packages across all layers
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+
+  pre_tasks:
+    - name: Early playbook stop if disabled
+      when:
+        - not cifmw_update_container_packages | default(true) | bool
+      ansible.builtin.meta: end_play
+
+    - name: Validate required variables are set
+      ansible.builtin.assert:
+        that:
+          - cifmw_upic_target_package is defined
+          - cifmw_upic_target_package | length > 0
+          - cifmw_upic_repo_baseurl is defined
+          - cifmw_upic_repo_baseurl | length > 0
+        fail_msg: |
+          Required variables are missing!
+
+          You must set:
+            - cifmw_upic_target_package: Name of the RPM package to update
+            - cifmw_upic_repo_baseurl: Repository base URL containing the updated package
+
+          Example:
+            ansible-playbook playbooks/update_openstack.yml \
+              -e cifmw_upic_target_package=ovn24.03 \
+              -e cifmw_upic_repo_baseurl=http://example.com/repo/
+        success_msg: "Required variables validated successfully"
+
+    - name: Display update configuration
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "OpenStack Package Update Configuration"
+          - "=============================================="
+          - "Target Package: {{ cifmw_upic_target_package }}"
+          - "Repository: {{ cifmw_upic_repo_baseurl }}"
+          - ""
+          - "Update Control Flags:"
+          - "  Control Plane Images: {{ cifmw_upic_update_control_plane_images | default(true) }}"
+          - "  EDPM Container Images: {{ cifmw_upic_update_edpm_images | default(true) }}"
+          - "  EDPM Host Packages: {{ cifmw_upic_update_edpm_host_packages | default(true) }}"
+          - ""
+          - "Namespace: {{ cifmw_upic_namespace | default('openstack') }}"
+          - "=============================================="
+
+    - name: Set repository configuration for EDPM updates
+      ansible.builtin.set_fact:
+        cifmw_uec_repo_baseurl: "{{ cifmw_upic_repo_baseurl }}"
+        cifmw_uec_repo_name: "{{ cifmw_upic_repo_name | default('custom-updates') }}"
+      when:
+        - cifmw_upic_repo_baseurl is defined
+        - cifmw_upic_repo_baseurl | length > 0
+
+  roles:
+    # Update control plane container images
+    - role: update_package_in_containers
+      when: cifmw_upic_update_control_plane_images | default(true) | bool
+
+    # Update EDPM NodeSets and create host update service
+    - role: update_edpm_containers
+      when: >
+        (cifmw_upic_update_edpm_images | default(true) | bool) or
+        (cifmw_upic_update_edpm_host_packages | default(true) | bool)
+
+  post_tasks:
+    - name: Build status messages
+      ansible.builtin.set_fact:
+        _upic_cp_status: "{{ 'Updated' if (cifmw_upic_update_control_plane_images | default(true) | bool) else 'Skipped' }}"
+        _upic_edpm_images_status: "{{ 'Updated' if (cifmw_upic_update_edpm_images | default(true) | bool) else 'Skipped' }}"
+        _upic_edpm_packages_status: "{{ 'Service created' if (cifmw_upic_update_edpm_host_packages | default(true) | bool) else 'Skipped' }}"
+        _upic_edpm_enabled: "{{ (cifmw_upic_update_edpm_images | default(true) | bool) or (cifmw_upic_update_edpm_host_packages | default(true) | bool) }}"
+
+    - name: Display completion summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "OpenStack Package Update Completed"
+          - "=============================================="
+          - ""
+          - "Control plane containers: {{ _upic_cp_status }}"
+          - "EDPM container images: {{ _upic_edpm_images_status }}"
+          - "EDPM host packages: {{ _upic_edpm_packages_status }}"
+          - ""
+          - "Package: {{ cifmw_upic_target_package }}"
+          - "Repository: {{ cifmw_upic_repo_baseurl }}"
+          - "Namespace: {{ cifmw_uec_namespace | default('openstack') }}"
+          - "=============================================="
+
+    - name: Display EDPM next steps
+      ansible.builtin.debug:
+        msg:
+          - ""
+          - "=============================================="
+          - "Next Steps: Deploy to EDPM Nodes"
+          - "=============================================="
+          - ""
+          - "Your OpenStackDataPlaneNodeSets and update service are ready."
+          - "To apply changes to EDPM compute nodes, see:"
+          - "  playbooks/UPDATE_EDPM_CONTAINERS.md"
+          - ""
+          - "Quick start - Create a deployment:"
+          - "  oc apply -f - <<EOF"
+          - "  apiVersion: dataplane.openstack.org/v1beta1"
+          - "  kind: OpenStackDataPlaneDeployment"
+          - "  metadata:"
+          - "    name: edpm-update-{{ ansible_date_time.epoch }}"
+          - "    namespace: {{ cifmw_uec_namespace | default('openstack') }}"
+          - "  spec:"
+          - "    nodeSets:"
+          - "      - {{ cifmw_uec_nodeset_name | default('openstack-edpm') }}"
+          - "    servicesOverride:"
+          - "      - download-cache"
+          - "      - update-host-packages"
+          - "      - ovn"
+          - "      - neutron-metadata"
+          - "  EOF"
+          - ""
+          - "Monitor deployment:"
+          - "  oc get openstackdataplanedeployment -n {{ cifmw_uec_namespace | default('openstack') }} -w"
+          - "=============================================="
+      when: _upic_edpm_enabled | bool

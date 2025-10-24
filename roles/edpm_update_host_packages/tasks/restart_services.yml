@@ -1,0 +1,74 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check which services are active
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+  register: _cifmw_euhp_service_status
+  loop: "{{ cifmw_euhp_services_to_restart }}"
+  become: true
+  failed_when: false
+
+- name: Restart active services
+  ansible.builtin.systemd:
+    name: "{{ item.item }}"
+    state: restarted
+  loop: "{{ _cifmw_euhp_service_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  become: true
+  when:
+    - item.status is defined
+    - item.status.ActiveState == "active"
+  register: _cifmw_euhp_restart_result
+
+- name: Wait for services to be running
+  ansible.builtin.systemd:
+    name: "{{ item.item.item }}"
+  register: _cifmw_euhp_service_check
+  until: _cifmw_euhp_service_check.status.ActiveState == "active"
+  retries: 30
+  delay: 2
+  loop: "{{ _cifmw_euhp_restart_result.results }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  become: true
+  when:
+    - item.changed is defined
+    - item.changed
+
+- name: Display restarted services
+  ansible.builtin.debug:
+    msg:
+      - "Restarted services:"
+      - "{{ _cifmw_euhp_restart_result.results | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item.item') | list }}"
+  when: _cifmw_euhp_restart_result.results | selectattr('changed', 'defined') | selectattr('changed') | list | length > 0
+
+- name: Verify OVS status
+  ansible.builtin.command: ovs-vsctl show
+  register: _cifmw_euhp_ovs_status
+  changed_when: false
+  become: true
+  when: "'openvswitch' in cifmw_euhp_services_to_restart"
+
+- name: Display OVS status
+  ansible.builtin.debug:
+    msg:
+      - "OVS Status:"
+      - "{{ _cifmw_euhp_ovs_status.stdout_lines }}"
+  when:
+    - "'openvswitch' in cifmw_euhp_services_to_restart"
+    - _cifmw_euhp_ovs_status.stdout is defined
