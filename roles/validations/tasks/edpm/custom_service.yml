@@ -1,0 +1,253 @@
+- name: Determine name of deployed NodeSet
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc get -n {{ cifmw_validations_namespace }} osdpns --no-headers -o custom-columns=":metadata.name"
+  register: deployed_nodeset_name
+
+# Define a custom service named hello-world. The service has tasks with tags helloworld
+# and byeworld. Subsequent tests will use this service to verify that only tasks with
+# the proper label are executed.
+- name: Create hello-world custom service
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      metadata:
+        name: hello-world
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        playbookContents: |
+          - hosts: all
+            vars:
+              target: "World"
+            become: true
+            tasks:
+      {% raw %}
+              - name: Hello {{ target }}
+                ansible.builtin.shell:
+                  cmd: >-
+                    echo Hello {{ target }}
+                tags: helloworld
+              - name: Bye {{ target }}
+                ansible.builtin.shell:
+                  cmd: >-
+                    echo Bye {{ target }}
+                tags: byeworld
+      {% endraw %}
+      EOF
+
+# Create a deployment that uses custom service hello-world and only executes
+# ansible tasks with tags helloworld
+- name: Create openstackdataplanedeployment for ansible tag test
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: hello-world-ansible-tag
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout | trim }}"
+        ansibleTags: helloworld
+        servicesOverride:
+          - hello-world
+      EOF
+
+- name: Wait for ansible tag test deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment hello-world-ansible-tag
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}s
+
+- name: Get the ansible tag test log
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc logs --namespace={{ cifmw_validations_namespace }} job.batch/hello-world-hello-world-ansible-tag-openstack-edpm
+  register: ansible_tag_test_log
+
+# Need failure msg for xml results file
+- name: Verify the ansible tag test log
+  ansible.builtin.fail:
+    msg: "Bye World in ansible tag test log or Hello World not in ansible tag test log"
+  when: "'Bye World' in ansible_tag_test_log.stdout or 'Hello World' not in ansible_tag_test_log.stdout"
+
+# Create a deployment that uses custom service hello-world and skips
+# ansible tasks with tags helloworld
+- name: Create openstackdataplanedeployment for ansible skip tags test
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: hello-world-skip-tag
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout | trim }}"
+        ansibleSkipTags:
+          helloworld
+        servicesOverride:
+          - hello-world
+      EOF
+
+- name: Wait for ansible skip tag deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment hello-world-skip-tag
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Get the ansible skip tag test log
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc logs --namespace={{ cifmw_validations_namespace }} job.batch/hello-world-hello-world-skip-tag-openstack-edpm
+  register: ansible_skip_tag_test_log
+
+# Need failure msg for xml results file
+- name: Verify the ansible skip tag test log
+  ansible.builtin.fail:
+    msg: "Hello World in ansible skip tag test log or Bye World not in ansible skip tag test log"
+  when: "'Hello World' in ansible_skip_tag_test_log.stdout or 'Bye World' not in ansible_skip_tag_test_log.stdout"
+
+# Create a deployment that uses custom service hello-world and limits
+# ansible task execution to a single compute node
+- name: Create openstackdataplanedeployment for ansible limit test
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: hello-world-ansible-limit
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout | trim }}"
+        ansibleLimit:
+          "{{ cifmw_validations_edpm_check_node }}"
+        servicesOverride:
+          - hello-world
+      EOF
+
+- name: Wait for ansible limit deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment hello-world-ansible-limit
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Get the ansible limit test log
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc logs --namespace={{ cifmw_validations_namespace }} job.batch/hello-world-hello-world-ansible-limit-openstack-edpm
+  register: ansible_limit_test_log
+
+# Need failure msg for xml results file
+- name: Verify the ansible limit test log
+  ansible.builtin.fail:
+    msg: "{{ cifmw_validations_edpm_second_check_node }} in ansible limit test log or {{ cifmw_validations_edpm_check_node }} not in ansible skip tag test log"
+  when: 'cifmw_validations_edpm_second_check_node in ansible_limit_test_log.stdout or cifmw_validations_edpm_check_node not in ansible_limit_test_log.stdout'
+
+# Create a deployment that uses custom service hello-world and uses
+# ansibleExtraVars when the service executes
+- name: Create openstackdataplanedeployment for ansible extra vars test
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: hello-world-extra-vars
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout | trim }}"
+        ansibleExtraVars:
+          target: Mars
+        servicesOverride:
+          - hello-world
+      EOF
+
+- name: Wait for ansibleExtraVar deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment hello-world-extra-vars
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Get the ansibleExtraVars test log
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc logs --namespace={{ cifmw_validations_namespace }} job.batch/hello-world-hello-world-extra-vars-openstack-edpm
+  register: ansible_extra_vars_test_log
+
+# Need failure msg for xml results file
+- name: Verify the ansibleExtraVars test log
+  ansible.builtin.fail:
+    msg: "World in ansibleExtraVars test log or Mars not in ansibleExtraVars test log"
+  when: "'World' in ansible_extra_vars_test_log.stdout or 'Mars' not in ansible_extra_vars_test_log.stdout"
