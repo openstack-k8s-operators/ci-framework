@@ -1,0 +1,112 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This task requires:
+#   _vm_name        Domain name for which boot order needs to be configured
+#   vm_data         VM data containing boot_order configuration
+
+- name: "Get current domain XML for {{ _vm_name }}"
+  become: true
+  register: _domain_xml
+  community.libvirt.virt:
+    command: "get_xml"
+    name: "{{ _vm_name }}"
+    uri: "qemu:///system"
+
+- name: "Configure boot order for {{ _vm_name }}"
+  become: true
+  vars:
+    _workload: "{{ cifmw_libvirt_manager_basedir }}/workload"
+  block:
+    - name: Create temporary file for domain XML
+      ansible.builtin.tempfile:
+        state: file
+        suffix: _domain.xml
+      register: _temp_domain_file
+
+    - name: Write current domain XML to temporary file
+      ansible.builtin.copy:
+        content: "{{ _domain_xml.get_xml }}"
+        dest: "{{ _temp_domain_file.path }}"
+        mode: '0600'
+
+    - name: Remove existing boot elements from os section
+      community.general.xml:
+        path: "{{ _temp_domain_file.path }}"
+        xpath: "/domain/os/boot"
+        state: absent
+
+    - name: Add boot order to disk device
+      when: "'hd' in vm_data.boot_order or 'disk' in vm_data.boot_order"
+      vars:
+        _boot_index: >-
+          {{
+            vm_data.boot_order.index('hd') + 1
+            if 'hd' in vm_data.boot_order
+            else vm_data.boot_order.index('disk') + 1
+          }}
+      community.general.xml:
+        path: "{{ _temp_domain_file.path }}"
+        xpath: "/domain/devices/disk[@device='disk']"
+        add_children:
+          - boot:
+              order: "{{ _boot_index }}"
+
+    - name: Get interface count for boot order
+      when: "'network' in vm_data.boot_order"
+      register: _iface_count
+      community.general.xml:
+        path: "{{ _temp_domain_file.path }}"
+        xpath: "/domain/devices/interface"
+        count: true
+
+    - name: Add boot order to network interfaces
+      when:
+        - "'network' in vm_data.boot_order"
+        - _iface_count.count | default(0) | int > 0
+      vars:
+        _boot_index: "{{ vm_data.boot_order.index('network') + 1 }}"
+      community.general.xml:
+        path: "{{ _temp_domain_file.path }}"
+        xpath: "/domain/devices/interface[1]"
+        add_children:
+          - boot:
+              order: "{{ _boot_index }}"
+
+    - name: Read updated domain XML
+      ansible.builtin.slurp:
+        src: "{{ _temp_domain_file.path }}"
+      register: _updated_domain_xml
+
+    - name: Redefine domain with updated boot order
+      vars:
+        _xml_content: "{{ _updated_domain_xml.content | b64decode }}"
+        # Remove XML declaration if present to avoid encoding issues
+        _clean_xml: >-
+          {{
+            _xml_content | regex_replace('^<\?xml[^?]*\?>\s*', '')
+          }}
+      community.libvirt.virt:
+        command: define
+        xml: "{{ _clean_xml }}"
+        uri: "qemu:///system"
+
+  always:
+    - name: Clean up temporary domain XML file
+      ansible.builtin.file:
+        path: "{{ _temp_domain_file.path }}"
+        state: absent
+      when: _temp_domain_file.path is defined
