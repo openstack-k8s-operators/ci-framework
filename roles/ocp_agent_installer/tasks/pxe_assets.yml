@@ -1,0 +1,66 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create the boot-artifacts directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_ocp_agent_installer_boot_artifacts_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Create PXE assets
+  ansible.builtin.command:
+    chdir: "{{ cifmw_ocp_agent_installer_cluster_dir }}"
+    cmd: >
+      {{ cifmw_ocp_agent_installer_bin_dir }}/openshift-install agent create pxe-files
+
+- name: Set serial console in ipxe
+  ansible.builtin.lineinfile:
+    path: "{{ cifmw_ocp_agent_installer_cluster_dir }}/boot-artifacts/agent.x86_64.ipxe"
+    backrefs: true
+    regexp: "^(kernel.*)$"
+    line: '\1 console=ttyS0'
+
+- name: Disable net.ifnames
+  when: cifmw_ocp_agent_installer_disable_net_ifnames | bool
+  ansible.builtin.lineinfile:
+    path: "{{ cifmw_ocp_agent_installer_cluster_dir }}/boot-artifacts/agent.x86_64.ipxe"
+    backrefs: true
+    regexp: "^(kernel.*)$"
+    line: '\1 net.ifnames=0'
+
+- name: Copy boot-artifacts to the web server - (cifmw_ocp_agent_installer_boot_artifacts_dir)
+  become: true
+  ansible.builtin.copy:
+    remote_src: true
+    src: >-
+      {{
+        [
+          cifmw_ocp_agent_installer_cluster_dir,
+          'boot-artifacts',
+          item
+        ] | ansible.builtin.path_join
+      }}
+    dest: "{{ cifmw_ocp_agent_installer_boot_artifacts_dir }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - agent.x86_64-vmlinuz
+    - agent.x86_64-initrd.img
+    - agent.x86_64-rootfs.img
+    # Copy the iPXE last, the other files should be ready before iPXE try to load them.
+    - agent.x86_64.ipxe
