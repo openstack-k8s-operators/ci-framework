@@ -1,0 +1,25 @@
+- name: Configure additional DHCP host records for hybrid scenarios
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Add host record and restart dnsmasq
+      when:
+        - hypervisor is defined
+        - ocpbm_ip is defined
+      become: true
+      block:
+        - name: Add host record
+          ansible.builtin.lineinfile:
+            create: true
+            path: "{{ cifmw_dnsmasq_basedir | default('/etc/cifmw-dnsmasq.d') }}/host_records.conf"
+            mode: '0644'
+            line: >-
+              host-record={{ hypervisor }},{{ ocpbm_ip }}
+            state: present
+            validate: "/usr/sbin/dnsmasq -C %s --test"
+          register: _add_host_record
+        - name: Restart dnsmasq  # noqa no-handler
+          when: _add_host_record.changed
+          ansible.builtin.systemd_service:
+            name: cifmw-dnsmasq.service
+            state: restarted
