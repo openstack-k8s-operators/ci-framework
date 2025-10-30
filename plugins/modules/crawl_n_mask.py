@@ -13,14 +13,15 @@ DOCUMENTATION = r"""
 ---
 module: crawl_n_mask
 
-short_description: This module mask secrets in yaml files/dirs
+short_description: This module mask secrets in yaml/json/log files/dirs
 
 version_added: "1.0.0"
 
 description:
-    - This module crawls over a directory (default) and find yaml files which may have secrets in it, and proceeds with masking it.
-    - If you pass a yaml file, it will directly check and mask secret in it.
+    - This module crawls over a directory (default) and find yaml/json/log files which may have secrets in it, and proceeds with masking it.
     - If you pass a directory, it will crawl the directory and find eligible files to mask.
+    - For files, it optimizes for large files with long lines and sparse secrets. Optimizied by checking first keywords in each line
+      (C implementation) and then moving to apply expensive regexps, in the lines with sparsed secrets. This also helps with long lines.
 
 options:
     path:
@@ -43,7 +44,7 @@ author:
 """
 
 EXAMPLES = r"""
-- name: Mask secrets in all yaml files within /home/zuul/logs
+- name: Mask secrets in all yaml/json/log files within /home/zuul/logs
   crawl_n_mask:
     path: /home/zuul/logs
     isdir: True
@@ -51,6 +52,10 @@ EXAMPLES = r"""
 - name: Mask my_secrets.yaml
   crawl_n_mask:
     path: /home/zuul/logs/my_secrets.yaml
+
+- name: Mask application.log
+  crawl_n_mask:
+    path: /var/log/application.log
 """
 
 RETURN = r"""
@@ -86,10 +91,6 @@ from ansible.module_utils.basic import AnsibleModule
 #   python3 plugins/modules/crawl_n_mask.py ./args.json
 ################
 
-# files which are yaml but do not end with .yaml or .yml
-ALLOWED_YAML_FILES = [
-    "Standalone",
-]
 # dirs which we do not want to scan
 EXCLUDED_DIRS = [
     "openstack-k8s-operators-openstack-must-gather",
@@ -97,12 +98,20 @@ EXCLUDED_DIRS = [
     "venv",
     ".github",
 ]
-# file extensions which we do not want to process
+# Used to skip Ansible task headers from txt/log masked files
+ANSIBLE_SKIP_PATTERNS = [
+    "| TASK [",  # Ansible task header
+    "TASK: ",  # Alternative format
+    "PLAY [",  # Ansible play header
+]
+# File extensions which we do not want to process
 EXCLUDED_FILE_EXT = [
     ".py",
     ".html",
     ".DS_Store",
-    ".tar.gz",
+    ".tar.*",
+    ".gz",
+    ".rpm",
     ".zip",
     ".j2",
 ]
@@ -148,6 +157,7 @@ PROTECT_KEYS = [
     "CephClusterFSID",
     "CephClientKey",
     "BarbicanSimpleCryptoKek",
+    "BARBICAN_SIMPLE_CRYPTO_ENCRYPTION_KEY",
     "HashSuffix",
     "RabbitCookie",
     "erlang_cookie",
@@ -158,19 +168,50 @@ PROTECT_KEYS = [
     "fernet_keys",
     "sshkey",
     "keytab_base64",
-]
-# connection keys which may be part of the value itself
-CONNECTION_KEYS = [
-    "rabbit",
-    "database_connection",
-    "slave_connection",
-    "sql_connection",
+    "cifmw_openshift_token",
+    "netapp_password",
 ]
 # Masking string
 MASK_STR = "**********"
 
 # regex of excluded file extensions
 excluded_file_ext_regex = r"(^.*(%s).*)" % "|".join(EXCLUDED_FILE_EXT)
+
+# Lowering case here to enhance performance
+# PROTECT_KEYS should be case sensitive to proper mask json and yaml files
+QUICK_KEYWORDS = frozenset([key.lower() for key in PROTECT_KEYS])
+
+# Pre-compiled regex patterns for log file masking. Increased performance.
+LOG_PATTERNS = {
+    # Matches: 'password': 'value' OR \n'password': 'value'
+    # Groups: (1=prefix, 2=open-quote, 3=key, 4=close-quote, 5=open-val-quote, 6=value, 7=close-val-quote)
+    "python_dict_quoted": re.compile(
+        r"((?:\s|\\n)*)(['\"])("
+        + "|".join(PROTECT_KEYS)
+        + r")(['\"])\s*:\s*(['\"])([^'\"]+)(['\"])",
+        re.IGNORECASE,
+    ),
+    # Matches: 'password': 123456789 OR \n'password': 123456789
+    # Groups: (1=prefix, 2=open-quote, 3=key, 4=close-quote, 5=numeric-value)
+    "python_dict_numeric": re.compile(
+        r"((?:\s|\\n)*)(['\"])(" + "|".join(PROTECT_KEYS) + r")(['\"])\s*:\s*(\d{6,})",
+        re.IGNORECASE,
+    ),
+    # Matches: password: value OR netapp_password=secret OR \npassword: value
+    # Groups: (1=prefix, 2=key, 3=value)
+    "plain_key_value": re.compile(
+        r"((?:\s|\\n)*)(" + "|".join(PROTECT_KEYS) + r")\s*[:=]\s*([^\s\\]+)",
+        re.IGNORECASE,
+    ),
+    # Matches: SHA256 tokens (OpenShift style)
+    "sha256_token": re.compile(r"sha256~[A-Za-z0-9_-]+"),
+    # Matches: Bearer <token>
+    "bearer": re.compile(r"Bearer\s+[a-zA-Z0-9_-]{20,}", re.IGNORECASE),
+    # Matches: ://user:pass@host
+    "connection_string": re.compile(
+        r"://([a-zA-Z0-9_-]+):([a-zA-Z0-9_@!#$%^&*]+)@([a-zA-Z0-9.-]+)"
+    ),
+}
 
 
 def handle_walk_errors(e):
@@ -191,10 +232,9 @@ def crawl(module, path) -> bool:
         # Check if any parent directory (not the root) is excluded
         if any(part in EXCLUDED_DIRS for part in rel_path.split(os.sep)):
             continue
-
         for f in files:
             if not re.search(excluded_file_ext_regex, f):
-                if mask(module, os.path.join(root, f)):
+                if mask_file(module, os.path.join(root, f)):
                     # even if one file is masked, the final result will be True
                     changed = True
     return changed
@@ -206,85 +246,93 @@ def _get_masked_string(value):
     return value[:2] + MASK_STR + value[-2:]
 
 
-def partial_mask(value):
+def mask_log_line(line: str) -> str:
     """
-    Check length of the string. If it is too long, take 2 chars
-    from beginning, then add mask string and add 2 chars from the
-    end.
-    If value is short, take just 2 chars and add mask string
+    Masks several secrets occurrence in a single line.
+    Works good with big file with long lines and sparse secrets.
+
+    Returns masked line with secrets replaced by MASK_STR
     """
-    if not value.strip():
-        return
 
-    if "'" in value:
-        parsed_value = value.split("'")
-        if len(parsed_value) > 2 and parsed_value[1] != "":
-            prefix = parsed_value[0]
-            value = _get_masked_string(parsed_value[1])
-            suffix = parsed_value[2]
-            return f"{prefix}'{value}'{suffix}"
-    else:
-        match = re.match(r"^(\s*)(.*?)(\n?)$", value)
-        if match:
-            parts = list(match.groups())
-            prefix = parts[0]
-            value = _get_masked_string(parts[1])
-            suffix = parts[2]
-            return f"{prefix}'{value}'{suffix}"
+    line_lower = line.lower()
+    has_keyword = any(kw in line_lower for kw in QUICK_KEYWORDS)
+
+    if not has_keyword:
+        return line
+
+    # Pattern 1: 'password': 'value' -> 'password': 'v**********e'
+    # Groups: (1=prefix, 2=", 3=key, 4=", 5=", 6=value, 7=")
+    line = LOG_PATTERNS["python_dict_quoted"].sub(
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}: {m.group(5)}{_get_masked_string(m.group(6))}{m.group(7)}",
+        line,
+    )
+
+    # Pattern 2: 'password': 123456789 -> 'password': 1**********9
+    # Groups: (1=prefix, 2=", 3=key, 4=", 5=value)
+    line = LOG_PATTERNS["python_dict_numeric"].sub(
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}: {_get_masked_string(m.group(5))}",
+        line,
+    )
+
+    # Pattern 3: password: value -> password: v**********e
+    # Groups: (1=prefix, 2=key, 3=value)
+    line = LOG_PATTERNS["plain_key_value"].sub(
+        lambda m: (
+            f"{m.group(1)}{m.group(2)} = {_get_masked_string(m.group(3))}"
+            if "=" in m.group(0)
+            else f"{m.group(1)}{m.group(2)}: {_get_masked_string(m.group(3))}"
+        ),
+        line,
+    )
+    # SHA256 tokens
+    # sha256~abc123... -> sha256~**********
+    line = LOG_PATTERNS["sha256_token"].sub(f"sha256~{MASK_STR}", line)
+
+    # Bearer tokens
+    # Bearer abc123... -> Bearer **********
+    line = LOG_PATTERNS["bearer"].sub(f"Bearer {MASK_STR}", line)
+
+    # connection_string tokens
+    # Bearer abc123... -> Bearer **********
+    line = LOG_PATTERNS["connection_string"].sub(f"://{MASK_STR}:{MASK_STR}@", line)
+
+    return line
 
 
-def mask(module, path: str) -> bool:
+def should_skip_ansible_line(line: str) -> bool:
     """
-    Function responsible to begin masking on a provided
-    log file. It checks for file type, and calls
-    respective masking methods for that file.
+    Identifies if the line is in an Ansible header for Tasks or Plays.
+
+    Returns True for lines that should not be masked.
     """
-    changed = False
-    if (
-        path.endswith((tuple(["yaml", "yml"])))
-        or os.path.basename(path).split(".")[0] in ALLOWED_YAML_FILES
-    ):
-        extension = "yaml"
-        changed = mask_file(module, path, extension)
-    return changed
+    line_upper = line.upper()
+    return any(pattern.upper() in line_upper for pattern in ANSIBLE_SKIP_PATTERNS)
 
 
-def mask_yaml(infile, outfile, changed) -> bool:
+def mask_log_file_lines(infile, outfile, changed) -> bool:
     """
-    Read the file, search for colon (':'), take value and
-    mask sensitive data
+    Mask log file lines with skip logic.
+
     """
     for line in infile:
-        # Skip lines without colon
-        if ":" not in line:
+        # Skip Ansible task headers - don't mask these
+        if should_skip_ansible_line(line):
             outfile.write(line)
             continue
 
-        key, sep, value = line.partition(":")
-        masked_value = value
-        for word in PROTECT_KEYS:
-            if key.strip() == word:
-                masked = partial_mask(value)
-                if not masked:
-                    continue
-                masked_value = masked_value.replace(value, masked)
-                changed = True
+        masked_line = mask_log_line(line)
+        if masked_line != line:
+            changed = True
+        outfile.write(masked_line)
 
-        outfile.write(f"{key}{sep}{masked_value}")
     return changed
 
 
-def replace_file(temp_path, file_path, changed):
-    if changed:
-        temp_path.replace(file_path)
-    else:
-        temp_path.unlink(missing_ok=True)
-
-
-def mask_file(module, path, extension) -> bool:
+def mask_file(module, path) -> bool:
     """
     Create temporary file, replace sensitive string with masked,
     then replace the tmp file with original.
+    Unlink temp file when failure.
     """
 
     changed = False
@@ -293,12 +341,21 @@ def mask_file(module, path, extension) -> bool:
     try:
         with file_path.open("r", encoding="utf-8") as infile:
             with temp_path.open("w", encoding="utf-8") as outfile:
-                if extension == "yaml":
-                    changed = mask_yaml(infile, outfile, changed)
-                    replace_file(temp_path, file_path, changed)
-                    return changed
+                changed = mask_log_file_lines(infile, outfile, changed)
+        replace_file(temp_path, file_path, changed)
+        return changed
     except Exception as e:
         print(f"An unexpected error occurred on masking file {file_path}: {e}")
+        temp_path.unlink(missing_ok=True)
+        module.fail_json(msg=f"Failed to mask {file_path}: {e}")
+        return False
+
+
+def replace_file(temp_path, file_path, changed):
+    if changed:
+        temp_path.replace(file_path)
+    else:
+        temp_path.unlink(missing_ok=True)
 
 
 def run_module():
@@ -344,7 +401,7 @@ def run_module():
         changed = crawl(module, path)
 
     if not isdir and not re.search(excluded_file_ext_regex, path):
-        changed = mask(module, path)
+        changed = mask_file(module, path)
 
     result.update(changed=changed)
     # in the event of a successful module execution, you will want to
