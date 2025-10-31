@@ -1,0 +1,25 @@
+#!/bin/sh
+
+MSG_FILE="$1"
+MIN_BODY_LEN=10
+
+if [ -z "$MSG_FILE" ]; then
+    TMP_FILE=$(mktemp)
+    git log -1 --pretty=format:"%B" >"$TMP_FILE"
+    MSG_FILE="$TMP_FILE"
+fi
+
+BODY=$(tail -n +2 "$MSG_FILE" | sed '/^\s*#/d' | sed '/^\s*$/d')
+BODY_LEN=$(echo -n "$BODY" | wc -m)
+if [ "$BODY_LEN" -lt "$MIN_BODY_LEN" ]; then
+    echo -e "\n\nCommit message body is too short or empty (minimum 10 characters required).\n\nPlease correct commit message." >&2
+    exit 1
+fi
+
+if ! grep -qi '^Signed-off-by:' "$MSG_FILE"; then
+    echo -e "\n\nWARNING: missing 'Signed-off-by:' line in commit message.\n\n" >&2
+    exit 0
+fi
+
+[ -n "$TMP_FILE" ] && rm -f "$TMP_FILE"
+exit 0
