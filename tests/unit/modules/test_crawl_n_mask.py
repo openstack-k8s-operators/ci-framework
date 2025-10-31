@@ -41,25 +41,19 @@ class TestCrawlNMask:
             changed = cnm.crawl(module, test_dir)
             assert not changed
 
-    def test_partial_mask_scenario_1(self):
-        example_value = " 'test1234'\n"
-        expected_value = " 'te**********34'\n"
-        test_value = cnm.partial_mask(example_value)
-        assert expected_value == test_value
-
-    def test_partial_mask_scenario_2(self):
-        example_value = " osp_ci_framework_keytab\n"
-        expected_value = " 'os**********ab'\n"
-        test_value = cnm.partial_mask(example_value)
-        assert expected_value == test_value
-
-    def test_partial_mask_scenario_3(self):
-        example_value = " ''\n"
-        test_value = cnm.partial_mask(example_value)
-        assert test_value is None
-
-    def test_partial_mask_scenario_4(self):
-        example_value = "tet"
-        expected_value = "'te**********'"
-        test_value = cnm.partial_mask(example_value)
+    @pytest.mark.parametrize(
+        "file_format, example_value, expected_value",
+        [
+            ("yaml", " 'test1234'\n", " 'te**********34'\n"),
+            ("yaml", " osp_ci_framework_keytab\n", " 'os**********ab'\n"),
+            ("yaml", " ''\n", None),
+            ("yaml", "tet", "'te**********'"),
+            ("json", ' "test1234",\n', ' "te**********34",\n'),
+            ("json", ' "osp_ci_framework_keytab",\n', ' "os**********ab",\n'),
+            ("json", " ''\n", None),
+            ("json", '"tet"', '"te**********"'),
+        ],
+    )
+    def test_partial_mask(self, file_format, example_value, expected_value):
+        test_value = cnm.partial_mask(example_value, file_format)
         assert expected_value == test_value
