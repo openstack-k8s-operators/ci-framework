@@ -59,6 +59,9 @@
           openstack tripleo container image prepare
           default --output-env-file
           {{ ansible_user_dir }}/containers-prepare-parameters.yaml
+          {% if cifmw_adoption_osp_deploy_scenario.container_prepare_local_push_dest | default(false) | bool %}
+          --local-push-destination
+          {% endif %}
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_basedir }}/artifacts"
         script: "{{ _container_prepare_cmd }}"
@@ -125,20 +128,15 @@
 
     - name: Obtain IPs whose routes need to be added to the undercloud (bgp)
       when: bgp
-      ansible.builtin.shell: |
-        getent ahosts {{ item }} | grep STREAM | awk '{print $1}' | grep -v :
-      register: _ips_for_uc_routes_output
+      ansible.builtin.getent:
+        database: ahosts
+        key: "{{ item }}"
+      register: _ips_for_uc_routes_getent
       loop:
         - registry.redhat.io
         - cdn.redhat.com
         - access.redhat.com
         - cdn01.quay.io
-
-    - name: Create list with the previous IPs
-      when: bgp
-      ansible.builtin.set_fact:
-        ips_for_uc_routes_list: "{{ (ips_for_uc_routes_list | default([]) + item.stdout_lines) | ansible.builtin.unique }}"
-      loop: "{{ _ips_for_uc_routes_output.results }}"
 
     - name: Generate os-net-config file (bgp)
       when: bgp
@@ -153,7 +151,17 @@
         _gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
         _interface_mtu: "{{ _undercloud_net.networks.ctlplaner0.mtu }}"
         _ctlplane_cidr: "{{ _undercloud_net.networks.ctlplaner0[prefix_length_version|default('prefix_length_v4')] }}"
-        _ips_for_uc_routes_list: "{{ ips_for_uc_routes_list }}"
+        _ips_for_uc_routes_list: >-
+          {{
+            _ips_for_uc_routes_getent.results |
+            map(attribute='ansible_facts.getent_ahosts') |
+            map('dict2items') |
+            flatten |
+            map(attribute='key') |
+            reject('match', '.*:.*') |
+            list |
+            unique
+          }}
       ansible.builtin.template:
         src: "os_net_config_undercloud_bgp.yml.j2"
         dest: /etc/os-net-config/tripleo_config.yaml
