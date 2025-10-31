@@ -1,0 +1,120 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set NodeSet name
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_current_nodeset_name: "{{ nodeset.metadata.name }}"
+
+# ============================================
+# Patch Container Images
+# ============================================
+
+- name: Patch container images in nodeset
+  when:
+    - cifmw_fdp_update_edpm_containers_enabled | bool
+    - _cifmw_fdp_update_edpm_updated_images is defined
+    - _cifmw_fdp_update_edpm_updated_images | length > 0
+  block:
+    - name: Build EDPM image variables patch
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_image_vars_patch: {}
+
+    - name: Add each EDPM variable to patch
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_image_vars_patch: >-
+          {{
+            _cifmw_fdp_update_edpm_image_vars_patch | combine({
+              cifmw_fdp_update_edpm_image_variable_mapping[item.key]: item.value
+            })
+          }}
+      loop: "{{ _cifmw_fdp_update_edpm_updated_images | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Apply container images using oc patch
+      ansible.builtin.command:
+        cmd: >-
+          oc patch openstackdataplanenodeset {{ _cifmw_fdp_update_edpm_current_nodeset_name }}
+          -n {{ cifmw_fdp_update_edpm_namespace }}
+          --type=merge
+          --patch '{"spec":{"nodeTemplate":{"ansible":{"ansibleVars":{{ _cifmw_fdp_update_edpm_image_vars_patch | to_json }}}}}}'
+      when:
+        - not cifmw_fdp_update_edpm_dry_run
+        - _cifmw_fdp_update_edpm_image_vars_patch | length > 0
+      changed_when: true
+
+# ============================================
+# Patch Host Packages and Repositories
+# ============================================
+
+- name: Patch host packages and repositories in nodeset
+  when: cifmw_fdp_update_edpm_packages_enabled | bool
+  ansible.builtin.include_tasks: update_host_packages.yml
+
+# ============================================
+# Configure Registry Authentication
+# ============================================
+
+- name: Configure registry authentication
+  when:
+    - not cifmw_fdp_update_edpm_dry_run
+    - cifmw_fdp_update_edpm_configure_registry_auth | bool
+    - _cifmw_fdp_update_edpm_external_registry is defined
+    - _cifmw_fdp_update_edpm_external_registry | length > 0
+  block:
+    - name: Get authentication token for OpenShift registry
+      ansible.builtin.command: oc whoami -t
+      register: _cifmw_fdp_update_edpm_oc_token_result
+      changed_when: false
+      failed_when: false
+
+    - name: Get current registry logins
+      ansible.builtin.command: >-
+        oc get openstackdataplanenodeset {{ _cifmw_fdp_update_edpm_current_nodeset_name }}
+        -n {{ cifmw_fdp_update_edpm_namespace }}
+        -o jsonpath='{.spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins}'
+      register: _cifmw_fdp_update_edpm_current_logins_result
+      changed_when: false
+      failed_when: false
+
+    - name: Apply registry authentication configuration
+      ansible.builtin.command:
+        cmd: >-
+          oc patch openstackdataplanenodeset {{ _cifmw_fdp_update_edpm_current_nodeset_name }}
+          -n {{ cifmw_fdp_update_edpm_namespace }}
+          --type=merge
+          --patch '{"spec":{"nodeTemplate":{"ansible":{"ansibleVars":{"edpm_container_registry_logins":{{ (((_cifmw_fdp_update_edpm_current_logins_result.stdout | from_json) if (_cifmw_fdp_update_edpm_current_logins_result.rc == 0 and _cifmw_fdp_update_edpm_current_logins_result.stdout | length > 0) else {}) | combine({_cifmw_fdp_update_edpm_external_registry: {'serviceaccount': _cifmw_fdp_update_edpm_oc_token_result.stdout}})) | to_json }}}}}}}'
+      when:
+        - _cifmw_fdp_update_edpm_oc_token_result.rc == 0
+        - _cifmw_fdp_update_edpm_oc_token_result.stdout | length > 0
+      changed_when: true
+
+# ============================================
+# Configure Registry CA Certificate
+# ============================================
+
+- name: Configure registry CA certificate
+  when: cifmw_fdp_update_edpm_configure_registry_ca | bool
+  ansible.builtin.include_tasks: configure_ca_cert.yml
+
+# ============================================
+# Record NodeSet as Processed
+# ============================================
+
+- name: Record NodeSet as processed
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_updated_nodesets: "{{ _cifmw_fdp_update_edpm_updated_nodesets + [_cifmw_fdp_update_edpm_current_nodeset_name] }}"
+  when: not cifmw_fdp_update_edpm_dry_run

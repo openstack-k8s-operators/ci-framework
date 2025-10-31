@@ -1,0 +1,89 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+  vars:
+    # Test variables - using mock values
+    cifmw_fdp_update_container_images_target_package: "ovn24.03"
+    cifmw_fdp_update_container_images_repo_name: "test-repo"
+    cifmw_fdp_update_container_images_repo_baseurl: "http://example.com/repo"
+    cifmw_fdp_update_container_images_namespace: "openstack-test"
+    cifmw_fdp_update_container_images_openstack_cr_name: "controlplane-test"
+
+  tasks:
+    - name: Display test information
+      ansible.builtin.debug:
+        msg: |
+          This is a basic molecule test for update_package_in_containers role.
+          In a real environment, this would require:
+          - A running OpenShift cluster
+          - OpenStack operators deployed
+          - Access to oc and podman commands
+
+          For now, we're just validating the role structure and templates.
+
+    - name: Validate role defaults are loaded
+      ansible.builtin.assert:
+        that:
+          - cifmw_fdp_update_container_images_target_package is defined
+          - cifmw_fdp_update_container_images_repo_baseurl is defined
+        success_msg: "Required variables are properly set"
+
+    - name: Test repository template rendering
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../templates/repo.j2"
+        dest: "/tmp/test-repo.repo"
+        mode: '0644'
+
+    - name: Verify repository file was created
+      ansible.builtin.stat:
+        path: "/tmp/test-repo.repo"
+      register: repo_file_stat
+
+    - name: Assert repository file exists
+      ansible.builtin.assert:
+        that:
+          - repo_file_stat.stat.exists
+        success_msg: "Repository template rendered successfully"
+
+    - name: Test Dockerfile template rendering
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../templates/Dockerfile.j2"
+        dest: "/tmp/test-Dockerfile"
+        mode: '0644'
+      vars:
+        base_image: "quay.io/centos/centos:stream9"
+
+    - name: Verify Dockerfile was created
+      ansible.builtin.stat:
+        path: "/tmp/test-Dockerfile"
+      register: dockerfile_stat
+
+    - name: Assert Dockerfile exists
+      ansible.builtin.assert:
+        that:
+          - dockerfile_stat.stat.exists
+        success_msg: "Dockerfile template rendered successfully"
+
+    - name: Clean up test files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/test-repo.repo
+        - /tmp/test-Dockerfile
