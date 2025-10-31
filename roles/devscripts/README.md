@@ -16,7 +16,6 @@ networks.
   building the various needed files.
 * `devscripts_deploy`: Overlaps with the previous tag, and adds the actual
   deployment of devscripts managed services.
-* `devscripts_post`: Only runs the post-installation tasks.
 
 ## Parameters
 
@@ -135,6 +134,18 @@ Allowed values can be found [here](https://mirror.openshift.com/pub/openshift-v4
 | extra_worker_memory_mb | |  The amount of memory to be set for the extra nodes. |
 | extra_worker_disk | | The disk size to be set for each extra nodes. |
 | extra_worker_vcpu | | The number of vCPUs to be configured for each extra nodes. |
+
+#### Registry and Image Mirroring
+
+| Key | Default Value | Description |
+| --- | ------------- | ----------- |
+| mirror_images | `false` | When set to `true`, enables image mirroring to a local registry. This is useful for disconnected/air-gapped environments. **Note:** When enabled, the pull-secret and OperatorHub sources are automatically restored after installation to allow pulling images from external registries for operators and other workloads. |
+
+**Important:** When `mirror_images` is enabled:
+- During installation, only the local mirror registry credentials are used
+- Post-installation, the original pull-secret is automatically merged with the local mirror credentials
+- OperatorHub default sources are re-enabled to allow operator installation
+- ImageContentSourcePolicy manifests remain in place to prefer the local mirror when available, with fallback to external registries
 
 ### Support keys in cifmw_devscripts_external_net
 
