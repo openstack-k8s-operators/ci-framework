@@ -32,34 +32,6 @@
       tags:
         - bootstrap_layout
 
-- name: Discover and expose CI Framework path on remote node
-  tags:
-    - always
-  vars:
-    default_path: >-
-      {{
-        cifmw_reproducer_default_repositories |
-        selectattr('src', 'match', '^.*/ci[_\-]framework$') |
-        map(attribute='dest') | first
-      }}
-    custom_path: >-
-      {{
-        cifmw_reproducer_repositories |
-        selectattr('src', 'match', '^.*/ci-framework$') |
-        map(attribute='dest')
-      }}
-    _path: >-
-      {{
-        (custom_path | length > 0) |
-        ternary(custom_path | first, default_path)
-      }}
-  ansible.builtin.set_fact:
-    _cifmw_reproducer_framework_location: >-
-      {{
-        (_path is match('.*/ci-framework/?$')) |
-        ternary(_path, [_path, 'ci-framework'] | path_join)
-      }}
-
 - name: Build final libvirt layout
   tags:
     - bootstrap_env
@@ -252,6 +224,34 @@
       }}
   failed_when: false
 
+- name: Discover and expose CI Framework path on remote node
+  tags:
+    - always
+  vars:
+    default_path: >-
+      {{
+        cifmw_reproducer_default_repositories |
+        selectattr('src', 'match', '^.*/ci[_\-]framework$') |
+        map(attribute='dest') | first
+      }}
+    custom_path: >-
+      {{
+        cifmw_reproducer_repositories |
+        selectattr('src', 'match', '^.*/ci-framework$') |
+        map(attribute='dest')
+      }}
+    _path: >-
+      {{
+        (custom_path | length > 0) |
+        ternary(custom_path | first, default_path)
+      }}
+  ansible.builtin.set_fact:
+    _cifmw_reproducer_framework_location: >-
+      {{
+        (_path is match('.*/ci-framework/?$')) |
+        ternary(_path, [_path, 'ci-framework'] | path_join)
+      }}
+
 - name: Run only on hypervisor with controller-0
   when:
     - (
@@ -281,13 +281,15 @@
             - always
           ansible.builtin.include_tasks: rotate_log.yml
           loop:
-            - "/home/zuul/ansible-bootstrap.log"
+            - "{{ cifmw_reproducer_controller_user_dir }}/ansible-bootstrap.log"
 
         - name: Bootstrap environment on controller-0
           vars:
             # NOTE: need to overwrite parent vars:
             # ./roles/reproducer/molecule/crc_layout/converge.yml
-            cifmw_basedir: "{{ ansible_user_dir ~ '/ci-framework-data' }}"
+            cifmw_basedir: "{{ cifmw_reproducer_controller_basedir }}"
+            ansible_user_dir: "{{ cifmw_reproducer_controller_user_dir }}"
+            ansible_user_id: "{{ cifmw_reproducer_controller_user }}"
           no_log: "{{ cifmw_nolog | default(true) | bool }}"
           ansible.builtin.import_role:
             name: cifmw_setup
@@ -300,7 +302,8 @@
             _devsetup_path: >-
               {{
                 (
-                  cifmw_installyamls_repos,
+                  cifmw_reproducer_controller_user_dir,
+                  'src/github.com/openstack-k8s-operators/install_yamls',
                   'devsetup'
                 ) | ansible.builtin.path_join
               }}
@@ -310,13 +313,13 @@
             cmd: >-
               ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
               download_tools.yaml --tags kustomize,kubectl
-            creates: "/home/zuul/bin/kubectl"
+            creates: "{{ cifmw_reproducer_controller_user_dir }}/bin/kubectl"
 
         - name: Configure CRC network if needed
           when:
             - _use_crc | bool
           vars:
-            cifmw_openshift_kubeconfig: "/home/zuul/.kube/config"
+            cifmw_openshift_kubeconfig: "{{ cifmw_reproducer_controller_user_dir }}/.kube/config"
           ansible.builtin.include_role:
             name: openshift_setup
             tasks_from: patch_network_operator.yml
@@ -396,8 +399,8 @@
         extravars: "{{ cifmw_reproducer_play_extravars }}"
         playbook: "deploy-edpm.yml"
       ansible.builtin.template:
-        dest: "/home/zuul/deploy-edpm.sh"
+        dest: "{{ cifmw_reproducer_controller_user_dir }}/deploy-edpm.sh"
         src: "script.sh.j2"
         mode: "0755"
-        owner: "zuul"
-        group: "zuul"
+        owner: "{{ cifmw_reproducer_controller_user }}"
+        group: "{{ cifmw_reproducer_controller_user }}"
