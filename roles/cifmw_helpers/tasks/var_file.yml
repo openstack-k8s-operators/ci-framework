@@ -10,19 +10,21 @@
     path: "{{ provided_file | trim }}"
   register: _param_file
 
-- name: Read vars
+- name: Read vars and set as fact
   when: _param_file.stat.exists
-  ansible.builtin.slurp:
-    src: "{{ provided_file | trim }}"
-  register: _parsed_vars
-  no_log: "{{ cifmw_helpers_no_log }}"
+  block:
+    - name: Read the vars
+      ansible.builtin.slurp:
+        src: "{{ provided_file | trim }}"
+      register: _parsed_vars
+      no_log: "{{ cifmw_helpers_no_log }}"
 
-- name: Set vars as fact
-  when: "'content' in _parsed_vars"
-  ansible.builtin.set_fact:
-    "{{ file_item.key }}": "{{ file_item.value }}"
-    cacheable: true
-  loop: "{{ _parsed_vars['content'] | b64decode | from_yaml | dict2items }}"
-  no_log: "{{ cifmw_helpers_no_log }}"
-  loop_control:
-    loop_var: file_item
+    - name: Set vars as fact
+      when: "'content' in _parsed_vars"
+      ansible.builtin.set_fact:
+        "{{ file_item.key }}": "{{ file_item.value }}"
+        cacheable: true
+      loop: "{{ _parsed_vars['content'] | b64decode | from_yaml | dict2items }}"
+      no_log: "{{ cifmw_helpers_no_log }}"
+      loop_control:
+        loop_var: file_item
