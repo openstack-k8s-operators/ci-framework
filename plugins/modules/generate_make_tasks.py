@@ -74,7 +74,7 @@ MAKE_TMPL = """---
   until: "{{ make_%(target)s_until | default(true) }}"
   register: "make_%(target)s_status"
   cifmw.general.ci_script:
-    output_dir: "{{ cifmw_basedir|default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts"
+    output_dir: "{{ cifmw_basedir }}/artifacts"
     chdir: "%(chdir)s"
     script: "make %(target)s"
     dry_run: "{{ make_%(target)s_dryrun|default(false)|bool }}"
