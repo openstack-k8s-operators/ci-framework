@@ -14,6 +14,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Cleaning the World
-  ansible.builtin.debug:
-    msg: "So here update should clean things up!"
+- name: Cleanup ping test resources
+  block:
+    - name: Cleaning the ping vm if needed
+      ansible.builtin.shell: |
+        set -e
+        set -o pipefail
+        cat {{ cifmw_update_workload_launch_script }} | \
+        podman exec -i lopenstackclient env WKL_MODE=cleanup bash -i 2>&1 \
+        {{ cifmw_update_timestamper_cmd }} | tee {{ cifmw_update_artifacts_basedir }}/workload_cleanup.log
+
+    - name: Get logs from update instance creation
+      ansible.builtin.shell: >
+        podman cp lopenstackclient:{{ cifmw_update_artifacts_basedir_suffix }}/.
+        {{ cifmw_update_artifacts_basedir }}
+  when:
+    - cifmw_update_ping_test | bool
