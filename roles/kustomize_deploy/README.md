@@ -101,6 +101,7 @@ with a message.
 Some tasks uses timeouts when applying or waiting for resources. Those timeouts can be controlled by:
 
 * `cifmw_kustomize_deploy_delay`: (Int) Ansible `delay` passed to tasks that waits for a resource to reach a target state (default `10`)
+* `cifmw_kustomize_deploy_retries_subscription`: (Int) Ansible `retries` passed to tasks that wait for the Subscription (default `90`)
 * `cifmw_kustomize_deploy_retries_install_plan`: (Int) Ansible `retries` passed to tasks that wait for the InstallPlan (default `60`)
 
 ### Task tagging
