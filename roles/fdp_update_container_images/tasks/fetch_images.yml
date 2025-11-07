@@ -1,0 +1,38 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get OpenStackVersion CR
+  kubernetes.core.k8s_info:
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    name: "{{ cifmw_fdp_update_container_images_openstack_cr_name }}"
+    namespace: "{{ cifmw_fdp_update_container_images_namespace }}"
+  register: _cifmw_fdp_update_container_images_cr_info
+
+- name: Extract container images
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_container_images_container_images: "{{ _cifmw_fdp_update_container_images_cr_info.resources[0].status.containerImageVersionDefaults.values() | first | default({}) }}"
+
+- name: Filter images to process
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_container_images_image_entries: "{{ _cifmw_fdp_update_container_images_container_images | dict2items | selectattr('key', 'in', cifmw_fdp_update_container_images_images_to_scan) | list }}"
+    _cifmw_fdp_update_container_images_modified_images: []
+    _cifmw_fdp_update_container_images_updated_cr_keys: []
+    _cifmw_fdp_update_container_images_processed_images: 0
+
+- name: Display images to process
+  ansible.builtin.debug:
+    msg: "Processing {{ _cifmw_fdp_update_container_images_image_entries | length }} images: {{ _cifmw_fdp_update_container_images_image_entries | map(attribute='key') | list | join(', ') }}"
