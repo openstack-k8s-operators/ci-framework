@@ -1,0 +1,89 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Fetch Updated Container Images
+- name: Get OpenStackVersion CR list
+  kubernetes.core.k8s_info:
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+  register: _cifmw_fdp_update_edpm_osv_result
+
+- name: Fail if no OpenStackVersion CR found
+  ansible.builtin.fail:
+    msg: "No OpenStackVersion CR found in namespace {{ cifmw_fdp_update_edpm_namespace }}"
+  when: _cifmw_fdp_update_edpm_osv_result.resources | length == 0
+
+- name: Parse and filter EDPM-relevant custom images
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_updated_images: >-
+      {{
+        (_cifmw_fdp_update_edpm_osv_result.resources[0].spec.customContainerImages | default({})) | dict2items |
+        selectattr('key', 'in', cifmw_fdp_update_edpm_image_variable_mapping.keys()) |
+        items2dict
+      }}
+
+- name: Fail if no EDPM container images found
+  ansible.builtin.fail:
+    msg: |
+      No EDPM container images found in OpenStackVersion CR.
+      The OpenStackVersion CR must contain customContainerImages with EDPM-relevant images.
+      Expected image keys: {{ cifmw_fdp_update_edpm_image_variable_mapping.keys() | list }}
+  when: _cifmw_fdp_update_edpm_updated_images | length == 0
+
+# Convert Internal Registry URLs to External
+- name: Convert internal registry URLs to external for EDPM compute nodes
+  block:
+    - name: Determine external registry URL
+      block:
+        - name: Try to auto-detect registry route if not configured
+          kubernetes.core.k8s_info:
+            api_version: route.openshift.io/v1
+            kind: Route
+            name: default-route
+            namespace: openshift-image-registry
+          register: _cifmw_fdp_update_edpm_registry_route_result
+          failed_when: false
+          when: cifmw_fdp_update_edpm_image_registry is not defined or cifmw_fdp_update_edpm_image_registry | length == 0
+
+        - name: Set external registry URL
+          ansible.builtin.set_fact:
+            _cifmw_fdp_update_edpm_external_registry: >-
+              {%- if cifmw_fdp_update_edpm_image_registry is defined and cifmw_fdp_update_edpm_image_registry | length > 0 -%}
+                {{ cifmw_fdp_update_edpm_image_registry }}
+              {%- elif _cifmw_fdp_update_edpm_registry_route_result.resources | default([]) | length > 0 -%}
+                {{ _cifmw_fdp_update_edpm_registry_route_result.resources[0].spec.host }}
+              {%- else -%}
+                UNDEFINED
+              {%- endif -%}
+
+        - name: Fail if no external registry URL could be determined
+          ansible.builtin.fail:
+            msg: |
+              Cannot determine external registry URL!
+              EDPM compute nodes require an external registry URL to pull images.
+              Please set: cifmw_fdp_update_edpm_image_registry
+          when: _cifmw_fdp_update_edpm_external_registry == 'UNDEFINED'
+
+    - name: Convert URLs (handle all internal registry variations)
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_updated_images: "{{ dict(_cifmw_fdp_update_edpm_updated_images.keys() | zip(_cifmw_fdp_update_edpm_updated_images.values() | map('regex_replace', 'image-registry\\.openshift-image-registry\\.svc\\.cluster\\.local:5000', _cifmw_fdp_update_edpm_external_registry) | map('regex_replace', 'image-registry\\.openshift-image-registry\\.svc:5000', _cifmw_fdp_update_edpm_external_registry) | list)) }}"
+
+- name: Display container images to update
+  ansible.builtin.debug:
+    msg:
+      - "Container images found in OpenStackVersion CR:"
+      - "{{ _cifmw_fdp_update_edpm_updated_images }}"

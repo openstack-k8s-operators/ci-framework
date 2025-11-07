@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set deployment name
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_deployment_name: "edpm-fdp-update-{{ ansible_date_time.epoch }}"
+
+- name: Create OpenStackDataPlaneDeployment
+  kubernetes.core.k8s:
+    state: present
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneDeployment
+    definition:
+      metadata:
+        name: "{{ _cifmw_fdp_update_edpm_deployment_name }}"
+        namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+      spec:
+        nodeSets: "{{ _cifmw_fdp_update_edpm_updated_nodesets }}"
+        servicesOverride: "{{ cifmw_fdp_update_edpm_deployment_services }}"
+
+- name: Display deployment information
+  ansible.builtin.debug:
+    msg:
+      - "Created deployment: {{ _cifmw_fdp_update_edpm_deployment_name }}"
+      - "NodeSets: {{ _cifmw_fdp_update_edpm_updated_nodesets }}"
+      - "Services: {{ cifmw_fdp_update_edpm_deployment_services }}"
+
+- name: Wait for deployment to complete
+  when: cifmw_fdp_update_edpm_wait_for_deployment | bool
+  block:
+    - name: Wait for deployment Ready condition
+      kubernetes.core.k8s_info:
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneDeployment
+        name: "{{ _cifmw_fdp_update_edpm_deployment_name }}"
+        namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+      register: _cifmw_fdp_update_edpm_deployment_result
+      until: >-
+        _cifmw_fdp_update_edpm_deployment_result.resources | length > 0 and
+        _cifmw_fdp_update_edpm_deployment_result.resources[0].status.conditions |
+        selectattr('type', 'equalto', 'Ready') |
+        map(attribute='status') | first | default('False') == 'True'
+      retries: "{{ (cifmw_fdp_update_edpm_deployment_timeout / cifmw_fdp_update_edpm_deployment_poll_interval) | int }}"
+      delay: "{{ cifmw_fdp_update_edpm_deployment_poll_interval }}"
+
+    - name: Display deployment completion
+      ansible.builtin.debug:
+        msg: "Deployment {{ _cifmw_fdp_update_edpm_deployment_name }} completed successfully"

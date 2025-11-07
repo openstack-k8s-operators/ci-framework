@@ -1,0 +1,79 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This file configures OpenShift registry CA certificate on EDPM nodes
+# Embeds CA certificate installation in edpm_bootstrap_command
+
+- name: Get OpenShift ingress CA certificate
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: router-ca
+    namespace: openshift-ingress-operator
+  register: _cifmw_fdp_update_edpm_ca_cert_result
+
+- name: Decode CA certificate
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_ca_cert: "{{ _cifmw_fdp_update_edpm_ca_cert_result.resources[0].data['tls.crt'] | b64decode }}"
+
+- name: Get current edpm_bootstrap_command from nodeset
+  kubernetes.core.k8s_info:
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+    namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+  register: _cifmw_fdp_update_edpm_current_bootstrap_result
+  failed_when: false
+
+- name: Check if CA certificate is already in bootstrap command
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_ca_already_present: "{{ (_cifmw_fdp_update_edpm_current_bootstrap_result.resources | length > 0) and ('openshift-registry-ca.crt' in (_cifmw_fdp_update_edpm_current_bootstrap_result.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_bootstrap_command | default(''))) }}"
+
+- name: Get existing bootstrap command
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_existing_bootstrap: "{{ _cifmw_fdp_update_edpm_current_bootstrap_result.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_bootstrap_command | default('') if (_cifmw_fdp_update_edpm_current_bootstrap_result.resources | length > 0) else '' }}"
+
+- name: Build bootstrap command with CA certificate installation (if not present)
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_bootstrap_with_ca: |
+      # Install OpenShift registry CA certificate
+      cat > /etc/pki/ca-trust/source/anchors/openshift-registry-ca.crt <<'EOF'
+      {{ _cifmw_fdp_update_edpm_ca_cert }}
+      EOF
+      update-ca-trust extract
+
+      {{ _cifmw_fdp_update_edpm_existing_bootstrap }}
+  when: not _cifmw_fdp_update_edpm_ca_already_present
+
+- name: Keep existing bootstrap command (CA already present)
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_bootstrap_with_ca: "{{ _cifmw_fdp_update_edpm_existing_bootstrap }}"
+  when: _cifmw_fdp_update_edpm_ca_already_present
+
+- name: Patch NodeSet with updated bootstrap command
+  kubernetes.core.k8s:
+    state: patched
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+    namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+    definition:
+      spec:
+        nodeTemplate:
+          ansible:
+            ansibleVars:
+              edpm_bootstrap_command: "{{ _cifmw_fdp_update_edpm_bootstrap_with_ca }}"
+  when: not cifmw_fdp_update_edpm_dry_run

@@ -1,0 +1,59 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Validate and Initialize
+- name: Validate parameters and initialize
+  ansible.builtin.include_tasks: validate.yml
+
+# Setup Hypervisor Firewall
+- name: Setup hypervisor firewall for registry access
+  ansible.builtin.include_tasks: setup_hypervisor_firewall.yml
+  when: cifmw_fdp_update_edpm_setup_hypervisor_firewall | default(true) | bool
+
+# Fetch NodeSets
+- name: Fetch EDPM NodeSets
+  ansible.builtin.include_tasks: fetch_nodesets.yml
+
+# Update Container Images (Optional)
+- name: Update container images
+  when: cifmw_fdp_update_edpm_containers_enabled | bool
+  ansible.builtin.include_tasks: update_container_images.yml
+
+# Process Each NodeSet
+- name: Process each NodeSet
+  ansible.builtin.include_tasks: process_nodeset.yml
+  loop: "{{ _cifmw_fdp_update_edpm_nodesets }}"
+  loop_control:
+    loop_var: nodeset
+    label: "{{ nodeset.metadata.name }}"
+
+# Deploy Updates to EDPM Nodes (Optional)
+- name: Deploy updates to EDPM nodes
+  when:
+    - cifmw_fdp_update_edpm_auto_deploy | bool
+    - not cifmw_fdp_update_edpm_dry_run | bool
+    - _cifmw_fdp_update_edpm_updated_nodesets | length > 0
+  ansible.builtin.include_tasks: create_deployment.yml
+
+# Summary
+- name: Display update summary
+  ansible.builtin.debug:
+    msg:
+      - "EDPM Update Summary"
+      - "Updated {{ _cifmw_fdp_update_edpm_updated_nodesets | length }} NodeSet(s): {{ _cifmw_fdp_update_edpm_updated_nodesets }}"
+      - "Container images updated: {{ cifmw_fdp_update_edpm_containers_enabled }}"
+      - "Host packages updated: {{ cifmw_fdp_update_edpm_packages_enabled }}"
+  when: not cifmw_fdp_update_edpm_dry_run
