@@ -1,0 +1,62 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# ============================================
+# Cleanup Hypervisor Firewall for Registry Access
+# ============================================
+# This task removes iptables rules previously configured on the hypervisor
+# to allow compute nodes (EDPM) to access the OpenShift registry.
+# These rules should be cleaned up when tearing down the EDPM deployment.
+
+- name: Remove traffic rule from compute to registry interface
+  delegate_to: "{{ cifmw_fdp_update_edpm_hypervisor_host | default('hypervisor') }}"
+  become: true
+  ansible.builtin.iptables:
+    chain: FORWARD
+    in_interface: "{{ cifmw_fdp_update_compute_interface }}"
+    out_interface: "{{ cifmw_fdp_update_registry_interface }}"
+    jump: ACCEPT
+    state: absent
+
+- name: Remove return traffic rule from registry to compute interface
+  delegate_to: "{{ cifmw_fdp_update_edpm_hypervisor_host | default('hypervisor') }}"
+  become: true
+  ansible.builtin.iptables:
+    chain: FORWARD
+    in_interface: "{{ cifmw_fdp_update_registry_interface }}"
+    out_interface: "{{ cifmw_fdp_update_compute_interface }}"
+    ctstate: RELATED,ESTABLISHED
+    jump: ACCEPT
+    state: absent
+
+- name: Remove NAT rule for compute nodes to access registry
+  delegate_to: "{{ cifmw_fdp_update_edpm_hypervisor_host | default('hypervisor') }}"
+  become: true
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: "{{ cifmw_fdp_update_compute_network }}"
+    destination: "{{ cifmw_fdp_update_registry_network }}"
+    out_interface: "{{ cifmw_fdp_update_registry_interface }}"
+    jump: MASQUERADE
+    state: absent
+
+- name: Persist firewall rules cleanup
+  delegate_to: "{{ cifmw_fdp_update_edpm_hypervisor_host | default('hypervisor') }}"
+  become: true
+  community.general.iptables_state:
+    state: saved
+    path: /etc/sysconfig/iptables
