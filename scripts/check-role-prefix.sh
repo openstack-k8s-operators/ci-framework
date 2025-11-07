@@ -1,8 +1,16 @@
 #!/bin/bash
 
 # Get the latest commit message file
-TMP_MSG_FILE=$(mktemp)
-git log -1 --pretty=format:"%s%n%n%b" >"$TMP_MSG_FILE"
+TMP_MSG_FILE="$1"
+
+echo "Checking file $TMP_MSG_FILE"
+cat $TMP_MSG_FILE
+
+if [ -z "$TMP_MSG_FILE" ]; then
+    echo "now here"
+    TMP_MSG_FILE=$(mktemp)
+    git log -1 --pretty=format:"%B" | head -n1
+fi
 
 echo "Checking latest commit message:"
 cat "$TMP_MSG_FILE"
