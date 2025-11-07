@@ -1,0 +1,139 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set NodeSet name
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_current_nodeset_name: "{{ nodeset.metadata.name }}"
+
+# Patch Container Images
+- name: Patch container images in nodeset
+  when:
+    - cifmw_fdp_update_edpm_containers_enabled | bool
+    - _cifmw_fdp_update_edpm_updated_images | length > 0
+  block:
+    - name: Initialize EDPM image variables patch
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_image_vars_patch: {}
+
+    - name: Add each EDPM variable to patch
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_image_vars_patch: >-
+          {{
+            _cifmw_fdp_update_edpm_image_vars_patch | combine({
+              cifmw_fdp_update_edpm_image_variable_mapping[item.key]: item.value
+            })
+          }}
+      loop: "{{ _cifmw_fdp_update_edpm_updated_images | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Apply container images using k8s patch
+      kubernetes.core.k8s:
+        state: patched
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+        namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+        definition:
+          spec:
+            nodeTemplate:
+              ansible:
+                ansibleVars: "{{ _cifmw_fdp_update_edpm_image_vars_patch }}"
+      when:
+        - not cifmw_fdp_update_edpm_dry_run
+        - _cifmw_fdp_update_edpm_image_vars_patch | length > 0
+
+# Patch Host Packages and Repositories
+- name: Patch host packages and repositories in nodeset
+  when: cifmw_fdp_update_edpm_packages_enabled | bool
+  ansible.builtin.include_tasks: update_host_packages.yml
+
+# Configure Registry Authentication
+- name: Configure registry authentication
+  when:
+    - not cifmw_fdp_update_edpm_dry_run
+    - cifmw_fdp_update_edpm_configure_registry_auth | bool
+    - _cifmw_fdp_update_edpm_external_registry is defined
+    - _cifmw_fdp_update_edpm_external_registry | length > 0
+  block:
+    - name: Get authentication token for OpenShift registry
+      ansible.builtin.command: oc whoami -t
+      register: _cifmw_fdp_update_edpm_oc_token_result
+      changed_when: false
+
+    - name: Get existing registry logins
+      kubernetes.core.k8s_info:
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+        namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+      register: _cifmw_fdp_update_edpm_current_logins_result
+      failed_when: false
+
+    - name: Initialize existing registry logins as empty
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_existing_logins: {}
+
+    - name: Extract existing registry logins from NodeSet
+      ansible.builtin.set_fact:
+        _cifmw_fdp_update_edpm_existing_logins: >-
+          {{
+            _cifmw_fdp_update_edpm_current_logins_result.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_container_registry_logins | default({})
+          }}
+      when: _cifmw_fdp_update_edpm_current_logins_result.resources | length > 0
+
+    - name: Configure registry authentication with token
+      when: _cifmw_fdp_update_edpm_oc_token_result.stdout | length > 0
+      block:
+        - name: Merge with new registry login
+          ansible.builtin.set_fact:
+            _cifmw_fdp_update_edpm_merged_logins: >-
+              {{
+                _cifmw_fdp_update_edpm_existing_logins | combine({
+                  _cifmw_fdp_update_edpm_external_registry: {
+                    'serviceaccount': _cifmw_fdp_update_edpm_oc_token_result.stdout
+                  }
+                })
+              }}
+
+        - name: Build registry authentication patch
+          ansible.builtin.set_fact:
+            _cifmw_fdp_update_edpm_registry_auth_patch:
+              spec:
+                nodeTemplate:
+                  ansible:
+                    ansibleVars:
+                      edpm_container_registry_logins: "{{ _cifmw_fdp_update_edpm_merged_logins }}"
+
+        - name: Apply registry authentication configuration
+          kubernetes.core.k8s:
+            state: patched
+            api_version: dataplane.openstack.org/v1beta1
+            kind: OpenStackDataPlaneNodeSet
+            name: "{{ _cifmw_fdp_update_edpm_current_nodeset_name }}"
+            namespace: "{{ cifmw_fdp_update_edpm_namespace }}"
+            definition: "{{ _cifmw_fdp_update_edpm_registry_auth_patch }}"
+
+# Configure Registry CA Certificate
+- name: Configure registry CA certificate
+  when: cifmw_fdp_update_edpm_configure_registry_ca | bool
+  ansible.builtin.include_tasks: configure_ca_cert.yml
+
+# Record NodeSet as Processed
+- name: Record NodeSet as processed
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_edpm_updated_nodesets: "{{ _cifmw_fdp_update_edpm_updated_nodesets + [_cifmw_fdp_update_edpm_current_nodeset_name] }}"
+  when: not cifmw_fdp_update_edpm_dry_run
