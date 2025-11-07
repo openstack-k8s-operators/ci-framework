@@ -128,15 +128,7 @@
 
     - name: Obtain IPs whose routes need to be added to the undercloud (bgp)
       when: bgp
-      ansible.builtin.getent:
-        database: ahosts
-        key: "{{ item }}"
-      register: _ips_for_uc_routes_getent
-      loop:
-        - registry.redhat.io
-        - cdn.redhat.com
-        - access.redhat.com
-        - cdn01.quay.io
+      ansible.builtin.include_tasks: getent_registry_ips_bgp.yml
 
     - name: Generate os-net-config file (bgp)
       when: bgp
@@ -151,17 +143,7 @@
         _gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
         _interface_mtu: "{{ _undercloud_net.networks.ctlplaner0.mtu }}"
         _ctlplane_cidr: "{{ _undercloud_net.networks.ctlplaner0[prefix_length_version|default('prefix_length_v4')] }}"
-        _ips_for_uc_routes_list: >-
-          {{
-            _ips_for_uc_routes_getent.results |
-            map(attribute='ansible_facts.getent_ahosts') |
-            map('dict2items') |
-            flatten |
-            map(attribute='key') |
-            reject('match', '.*:.*') |
-            list |
-            unique
-          }}
+        _ips_for_uc_routes_list: "{{ _accumulated_ips | unique }}"
       ansible.builtin.template:
         src: "os_net_config_undercloud_bgp.yml.j2"
         dest: /etc/os-net-config/tripleo_config.yaml
