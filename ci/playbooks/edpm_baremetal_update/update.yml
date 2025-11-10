@@ -1,0 +1,52 @@
+---
+# CI playbook orchestrator for OpenStack minor version updates.
+# This playbook runs on the controller (cifmw_zuul_target_host) and orchestrates
+# the update by calling update-edpm.yml on the target host (cifmw_target_host).
+# This playbook depends on content provider variables from CI jobs.
+# This is Phase 2 of the baremetal update workflow and should be called
+# sequentially after run.yml (Phase 1).
+
+- name: OpenStack minor version update orchestrator
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Set cifmw_basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+
+    - name: Get minor update index image from content provider or use default
+      ansible.builtin.set_fact:
+        cifmw_minor_update_index_image: >-
+          {{
+            cifmw_operator_build_output.operators['openstack-operator'].image_catalog
+            if (cifmw_operator_build_output is defined and
+                cifmw_operator_build_output.operators is defined and
+                'openstack-operator' in cifmw_operator_build_output.operators)
+            else cifmw_minor_update_pre_update_index_image | default('quay.io/openstack-k8s-operators/openstack-operator-index:18.0-fr3-latest')
+          }}
+
+    - name: Write minor update index image to parameters file
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/minor_update_index_image.yml"
+        content: "{{ {'cifmw_minor_update_index_image': cifmw_minor_update_index_image} | to_nice_yaml }}"
+        mode: "0644"
+      when: cifmw_minor_update_index_image is defined
+
+    - name: Run update-edpm.yml on target host
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook ci/playbooks/edpm_baremetal_update/update-edpm.yml
+          -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          -e @group_vars/all.yml
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+          {%- if cifmw_minor_update_index_image is defined %}
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/minor_update_index_image.yml"
+          {%- endif %}
