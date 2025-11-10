@@ -1,0 +1,123 @@
+---
+# CI playbook for OpenStack minor version updates.
+# This playbook performs a minor version update of an OpenStack deployment
+# using index images and install_yamls make targets.
+# This playbook depends on content provider variables from CI jobs.
+# It runs on cifmw_zuul_target_host where tasks are executed.
+# This playbook should be called after update_prepare.yml which sets up
+# the collection. This playbook generates the install_yamls_makes role
+# and then performs the update.
+# This is Phase 2 of the baremetal update workflow and should be called
+# sequentially after run.yml (Phase 1) and update_prepare.yml.
+
+- name: Ensure install_yamls_makes role exists on zuul host
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Set cifmw_basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+
+    - name: Check if install_yamls_makes role exists
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/roles/install_yamls_makes/tasks"
+      register: install_yamls_makes_role_check
+
+    - name: Generate install_yamls_makes role on zuul host
+      when: not install_yamls_makes_role_check.stat.exists
+      ansible.builtin.include_role:
+        name: install_yamls
+
+- name: OpenStack minor version update
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Set cifmw_basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+
+    - name: Set update artifacts basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_update_artifacts_basedir: "{{ cifmw_update_artifacts_basedir | default(cifmw_basedir ~ '/tests/update') }}"
+
+    - name: Set cifmw_openshift_kubeconfig if not defined
+      ansible.builtin.set_fact:
+        cifmw_openshift_kubeconfig: "{{ cifmw_openshift_kubeconfig | default(ansible_user_dir ~ '/.crc/machines/crc/kubeconfig') }}"
+
+    - name: Get minor update index image from content provider or use default
+      ansible.builtin.set_fact:
+        cifmw_minor_update_index_image: >-
+          {{
+            cifmw_operator_build_output.operators['openstack-operator'].image_catalog
+            if (cifmw_operator_build_output is defined and
+                cifmw_operator_build_output.operators is defined and
+                'openstack-operator' in cifmw_operator_build_output.operators)
+            else cifmw_minor_update_pre_update_index_image | default('quay.io/openstack-k8s-operators/openstack-operator-index:18.0-fr3-latest')
+          }}
+
+    - name: Write minor update index image to parameters file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/parameters/minor_update_index_image.yml"
+        content: "{{ {'cifmw_minor_update_index_image': cifmw_minor_update_index_image} | to_nice_yaml }}"
+        mode: "0644"
+      when: cifmw_minor_update_index_image is defined
+
+    - name: Initialize monitoring
+      ansible.builtin.include_role:
+        name: update
+        tasks_from: init_monitoring.yml
+
+    - name: Load parameters from files on current host
+      # Parameters files exist on cifmw_zuul_target_host.
+      # Use var_dir.yml to read files directly from the current host and set them as facts.
+      vars:
+        provided_dir: "{{ cifmw_basedir }}/artifacts/parameters"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_dir.yml
+
+    - name: Debug cifmw_install_yamls_environment after loading parameters
+      ansible.builtin.debug:
+        msg: "cifmw_install_yamls_environment: {{ cifmw_install_yamls_environment | default('UNDEFINED') | to_nice_yaml }}"
+
+    - name: Debug cifmw_install_yamls_defaults after loading parameters
+      ansible.builtin.debug:
+        msg: "cifmw_install_yamls_defaults: {{ cifmw_install_yamls_defaults | default('UNDEFINED') | to_nice_yaml }}"
+
+    - name: Set install_yamls environment for minor update phase
+      ansible.builtin.set_fact:
+        cifmw_minor_update_env: >-
+          {{
+            (cifmw_install_yamls_environment | default({})) |
+            combine({'PATH': cifmw_path | default(ansible_user_dir ~ '/.crc/bin:' ~ ansible_user_dir ~ '/.crc/bin/oc:' ~ ansible_user_dir ~ '/bin:' ~ ansible_env.PATH)}) |
+            combine({'OPENSTACK_IMG': cifmw_minor_update_index_image}) |
+            combine({'BMO_CLEANUP': false})
+          }}
+
+    - name: Set vars related to update_containers content provider
+      when:
+        - content_provider_os_registry_url is defined
+        - content_provider_os_registry_url != 'null'
+      ansible.builtin.set_fact:
+        cifmw_update_containers_registry: "{{ content_provider_os_registry_url  | split('/') | first }}"
+        cifmw_update_containers_org: "{{ content_provider_os_registry_url  | split('/') | last }}"
+        cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
+        cifmw_update_containers_openstack: true
+
+    - name: Run update variant ci
+      vars:
+        cifmw_update_variant: ci
+        cifmw_update_cleanup_ignore_errors: true
+        cifmw_update_openstack_update_run_timeout: "1200s"
+        cifmw_update_display_verification_result: true
+        cifmw_update_stop_monitoring: true
+      ansible.builtin.include_role:
+        name: update
+        tasks_from: update_variant_ci.yml

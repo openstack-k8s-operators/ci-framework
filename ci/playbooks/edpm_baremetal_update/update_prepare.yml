@@ -1,0 +1,27 @@
+---
+# CI playbook to prepare the environment for OpenStack minor version updates.
+# This playbook sets up the cifmw collection and generates the install_yamls_makes
+# role on the zuul host (localhost) where ansible-playbook executes.
+# This should be run before update.yml to ensure the collection is available.
+# This is part of Phase 2 of the baremetal update workflow.
+
+- name: Ensure cifmw collection is available on zuul host
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Make symlink of cifmw general collection to Zuul Ansible workdir
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: symlink_cifmw_collection.yml
+      vars:
+        # Use cifmw_project_dir_absolute as fallback if zuul variable is not available
+        cifmw_helpers_project_dir: >-
+          {{
+            (zuul is defined and
+             zuul.projects is defined and
+             'github.com/openstack-k8s-operators/ci-framework' in zuul.projects) |
+            ternary(
+              ansible_user_dir ~ '/' ~ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir,
+              cifmw_project_dir_absolute | default(ansible_user_dir ~ '/src/github.com/openstack-k8s-operators/ci-framework')
+            )
+          }}
