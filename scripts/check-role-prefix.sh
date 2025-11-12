@@ -25,9 +25,9 @@ ROLE_COUNT=$(echo "$CHANGED_ROLES" | tr '|' '\n' | wc -l)
 
 if [ "$ROLE_COUNT" -eq 1 ]; then
     # shellcheck disable=SC1087
-    PATTERN="^[\[(]$CHANGED_ROLES[\])]"
+    PATTERN="^[[(]$CHANGED_ROLES[])]"
 else
-    PATTERN="^[\[(](multiple)[\])]"
+    PATTERN="^[[(]multiple[])]"
 fi
 
 if ! grep -qE "$PATTERN" <<<"$MSG"; then
