@@ -20,7 +20,7 @@ FAIL_LENGTH=0
 FAIL_SIGNED_OFF_BY=0
 
 BODY=$(tail -n +3 "$MSG_FILE" | sed '/^\s*#/d' | sed '/^\s*$/d')
-BODY_LEN=$(echo -n "$BODY" | wc -m)
+BODY_LEN=$(echo -n "$BODY" | sed '/Signed-off-by:/d' | wc -m)
 
 if [ "$BODY_LEN" -lt "$MIN_BODY_LEN" ]; then
     echo -e "\n\n**WARNING: Commit message body is too short (has $BODY_LEN chars, minimum $MIN_BODY_LEN required).**\n" >&2
