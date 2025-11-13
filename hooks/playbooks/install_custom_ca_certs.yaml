@@ -1,12 +1,23 @@
 ---
-- name: Set up custom CA secret for OpenStack control plane
+- name: Prepare custom CA secret
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
+  connection: local
   vars:
-    _custom_ca_cert_filepath: "{{ custom_ca_cert_filepath | mandatory }}"
+    _custom_ca_cert_filepath: "{{ custom_ca_cert_filepath | default('/tmp/ca_cert.txt') }}"
     _namespace: "{{ namespace | default('openstack') }}"
-    _controlplane_name: "{{ controlplane_name | default('controlplane') }}"
   tasks:
+    - name: Download cert
+      ansible.builtin.get_url:
+        url: "{{ custom_ca_cert_url }}"
+        dest: "{{ _custom_ca_cert_filepath }}"
+        mode: '0644'
+      when: custom_ca_cert_url is defined
+      register: download_status
+      until: download_status is not failed and (download_status.status_code is undefined or download_status.status_code == 200)
+      retries: 10
+      delay: 5
+
     - name: Read custom CA certificate file
       ansible.builtin.slurp:
         src: "{{ _custom_ca_cert_filepath }}"
@@ -14,6 +25,7 @@
 
     - name: Create custom CA secret
       kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         state: present
         definition:
           apiVersion: v1
@@ -24,17 +36,3 @@
             namespace: "{{ _namespace }}"
           data:
             CustomCACerts: "{{ custom_ca_certs.content }}"
-
-    - name: Patch OpenStack control plane to use custom CA secret
-      kubernetes.core.k8s:
-        state: patched
-        kind: OpenStackControlPlane
-        api_version: core.openstack.org/v1beta1
-        name: "{{ _controlplane_name }}"
-        namespace: "{{ _namespace }}"
-        definition:
-          spec:
-            tls:
-              podLevel:
-                enabled: true
-              caBundleSecretName: custom-ca-certs
