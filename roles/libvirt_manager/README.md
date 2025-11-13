@@ -45,6 +45,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_default_gw_nets`: (List[String]) List of networks used as default gateway. If not set, defaults to the `cifmw_libvirt_manager_pub_net`. Read bellow for more information about that parameter.
 * `cifmw_libvirt_manager_vm_users`: (List[Dict]) Used to override the default list of users enabled in the vm. For its format, refers to cloud-init [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) about `users`. Defaults to `[]`.
 * `cifmw_libvirt_manager_extra_network_configuration`: (Dict) Extra network configuration in nmstate format for the hypervisor. This configuration is applied after creating the libvirt networks, so it can be used to create VLAN interfaces on the libvirt bridges. In addition to nmstate, it also supports a `cifmw_firewall_zone` hint in nmstate interfaces.  Defaults to: `{}`.
+* `cifmw_libvirt_manager_radvd_networks`: (List[Dict]) List of networks to configure with radvd for IPv6 router advertisements. When defined, the `radvd` role will be included after network creation. Each network definition follows the format documented in the `radvd` role. Defaults to `[]`.
 
 ### `cifmw_libvirt_manager_default_gw_nets` parameter usage
 
@@ -245,3 +246,20 @@ layout used by the role.
     name: libvirt_manager
     tasks_from: attack_interface.yml
 ```
+
+## IPv6 Router Advertisements with radvd
+
+The libvirt_manager role can automatically configure IPv6 router advertisements using the `radvd` role. This is useful for providing SLAAC and/or DHCPv6 configuration to VMs on IPv6-enabled networks.
+
+To enable radvd, define `cifmw_libvirt_manager_radvd_networks` with a list of network configurations:
+
+```yaml
+cifmw_libvirt_manager_radvd_networks:
+  - name: cifmw-testnet1
+    adv_managed_flag: true
+    adv_other_config_flag: true
+    prefixes:
+      - network: "2001:db8:1::/64"
+```
+
+For complete documentation on available parameters and configuration options, refer to the [radvd role documentation](../radvd/README.md).
