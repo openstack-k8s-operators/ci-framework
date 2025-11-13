@@ -1,0 +1,68 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This playbook cleans up OpenStack resources while preserving the OpenShift
+# cluster infrastructure for reuse. It removes:
+# - All OpenStack CRs (ControlPlane, DataPlane, etc.)
+# - Storage resources (PVCs, secrets, ConfigMaps)
+# - Optionally: OpenStack API resources (servers, networks, volumes, etc.)
+#
+# Usage examples:
+#
+# Basic cleanup (removes OpenStack CRs and storage, keeps cluster):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml
+#
+# Skip API resource cleanup (if needed):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml \
+#     -e cleanup_api_resources=false
+#
+# Aggressive cleanup (removes everything including namespaces):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml \
+#     -e cleanup_api_resources=true \
+#     -e cleanup_namespaces=true \
+#     -e force_remove_finalizers=true
+
+- name: Clean OpenStack deployment for infrastructure reuse
+  hosts: "{{ target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    # By default, clean OpenStack CRs, storage, and API resources but keep OpenShift cluster
+    # Set to false to skip OpenStack API resource cleanup
+    cifmw_cleanup_openstack_delete_api_resources: "{{ cleanup_api_resources | default(true) }}"
+    # Set to true to delete namespaces (use with caution)
+    cifmw_cleanup_openstack_delete_namespaces: "{{ cleanup_namespaces | default(false) }}"
+    # Set to true to force remove finalizers from stuck CRs
+    cifmw_cleanup_openstack_force_remove_finalizers: "{{ force_remove_finalizers | default(false) }}"
+  tasks:
+    - name: Cleanup OpenStack deployment
+      ansible.builtin.include_role:
+        name: cleanup_openstack
+
+    - name: Display cleanup summary
+      ansible.builtin.debug:
+        msg: >-
+          OpenStack cleanup completed. The OpenShift cluster is now ready for reuse.
+
+          Cleaned resources:
+          - OpenStack CRs (ControlPlane, DataPlane, etc.)
+          - Storage resources (PVCs, secrets, ConfigMaps)
+          - OpenStack API resources (servers, networks, volumes, etc.)
+          - Artifacts and logs
+          {% if cifmw_cleanup_openstack_delete_namespaces %}
+          - OpenStack namespaces (if empty)
+          {% endif %}
+
+          The cluster infrastructure is preserved and ready for a new deployment.

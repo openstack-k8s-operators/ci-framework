@@ -1,10 +1,10 @@
 ---
-- name: Include required vars
-  ansible.builtin.include_vars:
-    file: "{{ item }}"
-  loop:
-    - roles/kustomize_deploy/defaults/main.yml
-    - roles/deploy_bmh/defaults/main.yml
+# Note: Required variables from kustomize_deploy and deploy_bmh roles
+# are now defined in this role's defaults/main.yaml to make the role
+# self-contained and work from any playbook location.
+
+- name: Set common facts and variables
+  ansible.builtin.import_tasks: common.yaml
 
 - name: Load architecture automation file
   register: _automation
@@ -51,7 +51,15 @@
   ansible.builtin.import_tasks: detach_bmh.yaml
   when: cifmw_cleanup_openstack_detach_bmh
 
-- name: Delete deployment CRs
+- name: Clean up OpenStack API resources
+  ansible.builtin.import_tasks: cleanup_openstack_api.yaml
+  when: cifmw_cleanup_openstack_delete_api_resources | default(true)
+
+- name: Delete OpenStack CRs directly from cluster
+  ansible.builtin.import_tasks: cleanup_crs_direct.yaml
+  when: cifmw_cleanup_openstack_delete_crs_direct | default(true)
+
+- name: Delete deployment CRs from files
   vars:
     _stages_crs: >-
       {{
@@ -73,10 +81,9 @@
       - "{{ cifmw_basedir }}/artifacts/manifests/cifmw_external_dns/ceph-local-dns.yml"
       - "{{ cifmw_basedir }}/artifacts/manifests/cifmw_external_dns/ceph-local-cert.yml"
     _operators_crs:
-      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      # Only delete OpenStack CRs, not infrastructure operators (NMState, MetalLB, OLM)
+      # These infrastructure operators should be preserved for cluster reuse
       - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
-      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     _bmh_crs: >-
       {{
         bmh_crs.files |
@@ -98,6 +105,14 @@
         _operators_crs
       }}
   ansible.builtin.import_tasks: cleanup_crs.yaml
+
+- name: Clean up PVCs and storage resources
+  ansible.builtin.import_tasks: cleanup_storage.yaml
+  when: cifmw_cleanup_openstack_delete_storage | default(true)
+
+- name: Clean up namespaces
+  ansible.builtin.import_tasks: cleanup_namespaces.yaml
+  when: cifmw_cleanup_openstack_delete_namespaces | default(false)
 
 - name: Get artifacts scripts
   ansible.builtin.find:
