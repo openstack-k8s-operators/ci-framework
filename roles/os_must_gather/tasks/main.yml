@@ -77,19 +77,6 @@
           gather
           2>&1
 
-    - name: Find existing os-must-gather directories
-      ansible.builtin.find:
-        paths: "{{ cifmw_os_must_gather_output_log_dir }}"
-        file_type: directory
-        depth: 1
-      register: _os_gather_latest_dir
-
-    - name: Create a symlink to newest os-must-gather directory
-      ansible.builtin.file:
-        src: "{{ (_os_gather_latest_dir.files | sort(attribute='mtime', reverse=True) | first).path | basename }}"
-        dest: "{{ cifmw_os_must_gather_output_log_dir }}/latest"
-        state: link
-
   rescue:
     - name: Openstack-must-gather failure
       block:
@@ -132,3 +119,28 @@
                 )
               ) | unique
             }}
+  always:
+    - name: Find existing os-must-gather directories
+      ansible.builtin.find:
+        paths: "{{ cifmw_os_must_gather_output_log_dir }}"
+        file_type: directory
+        depth: 1
+      register: _os_gather_latest_dir
+
+    - name: Get interesting info
+      ansible.builtin.shell: |
+        whoami
+        hostname
+      register: _debug_msg
+
+    - name: Found existing os-must-gather directories
+      ansible.builtin.debug:
+        msg: |
+          we are {{ _debug_msg.stdout }}
+          _os_gather_latest_dir {{ _os_gather_latest_dir | default('') }}
+
+    - name: Create a symlink to newest os-must-gather directory
+      ansible.builtin.file:
+        src: "{{ (_os_gather_latest_dir.files | sort(attribute='mtime', reverse=True) | first).path | basename }}"
+        dest: "{{ cifmw_os_must_gather_output_log_dir }}/latest"
+        state: link
