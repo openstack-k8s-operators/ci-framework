@@ -1,17 +1,53 @@
 ---
-- name: Include required vars
-  ansible.builtin.include_vars:
-    file: "{{ item }}"
-  loop:
-    - roles/kustomize_deploy/defaults/main.yml
-    - roles/deploy_bmh/defaults/main.yml
+# Note: Required variables from kustomize_deploy and deploy_bmh roles
+# are now defined in this role's defaults/main.yaml to make the role
+# self-contained and work from any playbook location.
+
+- name: Set common facts and variables
+  ansible.builtin.import_tasks: common.yaml
+
+- name: Initialize cleanup tracking
+  ansible.builtin.set_fact:
+    _cleanup_summary:
+      started_at: "{{ ansible_date_time.iso8601 }}"
+      started_epoch: "{{ ansible_date_time.epoch | int }}"
+      dry_run: "{{ cifmw_cleanup_openstack_dry_run | bool }}"
+      crs_deleted: []
+      crs_failed: []
+      api_resources_cleaned: false
+      storage_cleaned: false
+      namespaces_deleted: []
+      bmh_detached: []
+      errors: []
+
+- name: Set cifmw_architecture_automation_file if not set before
+  when:
+    - cifmw_architecture_automation_file is not defined
+    - cifmw_architecture_repo is defined
+    - cifmw_architecture_scenario is defined
+  ansible.builtin.set_fact:
+    cifmw_architecture_automation_file: >-
+      {{
+        (
+          cifmw_architecture_repo,
+          'automation/vars',
+          cifmw_architecture_scenario~'.yaml'
+        ) | ansible.builtin.path_join
+      }}
 
 - name: Load architecture automation file
+  when: cifmw_architecture_automation_file is defined
   register: _automation
   ansible.builtin.slurp:
     path: "{{ cifmw_architecture_automation_file }}"
+  failed_when: false
 
 - name: Prepare automation data
+  when:
+    - cifmw_architecture_automation_file is defined
+    - _automation is defined
+    - _automation is succeeded
+    - _automation.content is defined
   vars:
     _parsed: "{{ _automation.content | b64decode | from_yaml }}"
   ansible.builtin.set_fact:
@@ -19,6 +55,7 @@
       {{ _parsed['vas'][cifmw_architecture_scenario] }}
 
 - name: Clean up testing resources
+  when: cifmw_architecture_automation_file is defined and _automation is succeeded
   ansible.builtin.include_role:
     name: test_operator
     tasks_from: cleanup
@@ -40,55 +77,70 @@
     patterns: "*.yml"
     excludes: "bmh-secret*"
   register: bmh_crs
+  failed_when: false
 
 - name: Get bmh secrets crs
   ansible.builtin.find:
     path: "{{ cifmw_deploy_bmh_dest_dir }}"
     patterns: "bmh-secret*"
   register: bmh_secrets_crs
+  failed_when: false
 
 - name: Detach bmh to skip deprovisioning
   ansible.builtin.import_tasks: detach_bmh.yaml
-  when: cifmw_cleanup_openstack_detach_bmh
+  when:
+    - cifmw_cleanup_openstack_detach_bmh
+    - not cifmw_cleanup_openstack_dry_run | bool
+  tags:
+    - cleanup_bmh
 
-- name: Delete deployment CRs
-  vars:
+- name: Build list of CRs to delete
+  ansible.builtin.set_fact:
     _stages_crs: >-
       {{
-        cifmw_deploy_architecture_steps['stages'] |
+        (cifmw_deploy_architecture_steps['stages'] |
         reverse |
         selectattr('build_output', 'defined') |
         map(attribute='build_output') |
         map('basename') |
-        list
+        list) if cifmw_deploy_architecture_steps is defined else []
       }}
+
+- name: Build stages CR paths
+  ansible.builtin.set_fact:
     _stages_crs_path: >-
       {{
-        [cifmw_kustomize_deploy_kustomizations_dest_dir]
+        ([cifmw_kustomize_deploy_kustomizations_dest_dir]
         | product(_stages_crs)
         | map('join', '/')
         | unique
+        | list) if _stages_crs | length > 0 else []
       }}
+
+- name: Build additional CR lists
+  ansible.builtin.set_fact:
     _external_dns_crs:
       - "{{ cifmw_basedir }}/artifacts/manifests/cifmw_external_dns/ceph-local-dns.yml"
       - "{{ cifmw_basedir }}/artifacts/manifests/cifmw_external_dns/ceph-local-cert.yml"
     _operators_crs:
-      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      # Only delete OpenStack CRs, not infrastructure operators (NMState, MetalLB, OLM)
+      # These infrastructure operators should be preserved for cluster reuse
       - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
-      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     _bmh_crs: >-
       {{
-        bmh_crs.files |
+        bmh_crs.files | default([]) |
         map(attribute='path') |
         list
       }}
     _bmh_secrets_crs: >-
       {{
-        bmh_secrets_crs.files |
+        bmh_secrets_crs.files | default([]) |
         map(attribute='path') |
         list
       }}
+
+- name: Set final CRs to delete list
+  ansible.builtin.set_fact:
     _crs_to_delete: >-
       {{
         _external_dns_crs +
@@ -97,22 +149,74 @@
         _bmh_secrets_crs +
         _operators_crs
       }}
+
+- name: Report CRs that would be deleted (dry-run)
+  when: cifmw_cleanup_openstack_dry_run | bool
+  ansible.builtin.debug:
+    msg: >-
+      [DRY-RUN] Would delete the following CR files:
+      {{ _crs_to_delete | to_nice_yaml }}
+
+- name: Delete deployment CRs
   ansible.builtin.import_tasks: cleanup_crs.yaml
+  tags:
+    - cleanup_crs
+  when: not cifmw_cleanup_openstack_dry_run | bool
+
+- name: Clean up OpenStack API resources
+  ansible.builtin.import_tasks: cleanup_openstack_api.yaml
+  when:
+    - cifmw_cleanup_openstack_delete_api_resources | default(true)
+    - not cifmw_cleanup_openstack_dry_run | bool
+  tags:
+    - cleanup_api
+
+- name: Delete OpenStack CRs directly from cluster
+  ansible.builtin.import_tasks: cleanup_crs_direct.yaml
+  when:
+    - cifmw_cleanup_openstack_delete_crs_direct | default(true)
+    - not cifmw_cleanup_openstack_dry_run | bool
+  tags:
+    - cleanup_crs_direct
+
+- name: Clean up PVCs and storage resources
+  ansible.builtin.import_tasks: cleanup_storage.yaml
+  when:
+    - cifmw_cleanup_openstack_delete_storage | default(true)
+    - not cifmw_cleanup_openstack_dry_run | bool
+  tags:
+    - cleanup_storage
+
+- name: Clean up namespaces
+  ansible.builtin.import_tasks: cleanup_namespaces.yaml
+  when:
+    - cifmw_cleanup_openstack_delete_namespaces | default(false)
+    - not cifmw_cleanup_openstack_dry_run | bool
+  tags:
+    - cleanup_namespaces
 
 - name: Get artifacts scripts
   ansible.builtin.find:
     path: "{{ cifmw_kustomize_deploy_basedir }}/artifacts"
     patterns: "*.sh, ansible_facts.*"
   register: artifacts_to_remove
+  failed_when: false
 
 - name: Remove artifacts
+  when:
+    - not cifmw_cleanup_openstack_dry_run | bool
+    - artifacts_to_remove.files is defined
+    - artifacts_to_remove.files | length > 0
   become: true
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
-  loop: "{{ artifacts_to_remove.files | map(attribute='path') | list }}"
+  loop: "{{ artifacts_to_remove.files | default([]) | map(attribute='path') | list }}"
+  tags:
+    - cleanup_artifacts
 
 - name: Remove logs and tests directories
+  when: not cifmw_cleanup_openstack_dry_run | bool
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -120,3 +224,54 @@
     - "{{ cifmw_basedir }}/logs"
     - "{{ cifmw_basedir }}/tests"
   become: true
+  tags:
+    - cleanup_artifacts
+
+- name: Record cleanup completion time
+  ansible.builtin.set_fact:
+    _cleanup_completed_at: "{{ ansible_date_time.epoch | int }}"
+
+- name: Finalize cleanup summary
+  ansible.builtin.set_fact:
+    _cleanup_summary: >-
+      {{
+        _cleanup_summary | combine({
+          'completed_at': ansible_date_time.iso8601,
+          'duration_seconds': (_cleanup_completed_at | int) - (_cleanup_summary.started_epoch | default(ansible_date_time.epoch) | int),
+          'crs_deleted_count': _cleanup_summary.crs_deleted | length,
+          'errors_count': _cleanup_summary.errors | length
+        })
+      }}
+
+- name: Display comprehensive cleanup summary
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════════╗
+      ║  OpenStack Cleanup Summary                                       ║
+      ╚══════════════════════════════════════════════════════════════════╝
+      
+      Mode: {{ 'DRY-RUN' if cifmw_cleanup_openstack_dry_run else 'EXECUTION' }}
+      Duration: {{ _cleanup_summary.duration_seconds }}s
+      
+      ✓ Custom Resources: {{ _cleanup_summary.crs_deleted_count }} deleted
+      {% if _cleanup_summary.crs_failed | length > 0 %}
+      ✗ Failed CRs: {{ _cleanup_summary.crs_failed | length }}
+      {% endif %}
+      ✓ API Resources: {{ 'Cleaned' if _cleanup_summary.api_resources_cleaned else 'Skipped' }}
+      ✓ Storage: {{ 'Cleaned' if _cleanup_summary.storage_cleaned else 'Skipped' }}
+      ✓ BMH Detached: {{ _cleanup_summary.bmh_detached | length }}
+      ✓ Namespaces: {{ _cleanup_summary.namespaces_deleted | join(', ') if _cleanup_summary.namespaces_deleted else 'Preserved' }}
+      
+      {% if _cleanup_summary.errors | length > 0 %}
+      ⚠ Errors encountered: {{ _cleanup_summary.errors_count }}
+      {% for error in _cleanup_summary.errors %}
+        - {{ error }}
+      {% endfor %}
+      {% endif %}
+      
+      {% if not cifmw_cleanup_openstack_dry_run %}
+      ═══════════════════════════════════════════════════════════════════
+      Cluster is ready for reuse. Infrastructure operators preserved:
+      - NMState, MetalLB, OLM, cert-manager
+      ═══════════════════════════════════════════════════════════════════
+      {% endif %}

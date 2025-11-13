@@ -1,0 +1,195 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check if openstackclient pod exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ _openstack_namespace }}"
+    kind: Pod
+    name: openstackclient
+  register: _openstackclient_pod
+  failed_when: false
+
+- name: Check if openstackclient is available locally
+  ansible.builtin.command:
+    cmd: which openstack
+  register: _openstackclient_local
+  changed_when: false
+  failed_when: false
+
+- name: Set cleanup method
+  ansible.builtin.set_fact:
+    _cleanup_method: >-
+      {{
+        'pod' if (_openstackclient_pod is succeeded and _openstackclient_pod.resources | default([]) | length > 0)
+        else ('local' if _openstackclient_local.rc == 0 else 'skip')
+      }}
+
+- name: Fetch OpenStack cloud config from pod
+  kubernetes.core.k8s_cp:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ _openstack_namespace }}"
+    pod: openstackclient
+    remote_path: /home/cloud-admin/.config/openstack/
+    local_path: "{{ ansible_user_dir }}/.config/openstack/"
+    state: from_pod
+  failed_when: false
+  when:
+    - _cleanup_method == 'pod'
+    - _openstackclient_pod is succeeded
+    - _openstackclient_pod.resources | default([]) | length > 0
+
+- name: Install openstackclient locally
+  ansible.builtin.dnf:
+    name: python3-openstackclient
+    state: present
+  become: true
+  when: _cleanup_method == 'local'
+
+- name: Delete OpenStack API resources
+  ansible.builtin.shell: |
+    set -o pipefail
+    # Helper function to safely delete resources
+    delete_resources() {
+      local resource_type=$1
+      local list_cmd=$2
+      local delete_cmd=$3
+      local ids
+      ids=$($list_cmd 2>/dev/null || true)
+      if [ -n "$ids" ]; then
+        echo "$ids" | while read -r id; do
+          [ -n "$id" ] && $delete_cmd "$id" 2>/dev/null || true
+        done
+      fi
+    }
+
+    # Delete flavors
+    delete_resources "flavors" \
+      "openstack flavor list -c ID -f value" \
+      "openstack flavor delete"
+
+    # Delete servers
+    delete_resources "servers" \
+      "openstack server list --all-projects -c ID -f value" \
+      "openstack server delete"
+
+    # Wait for servers to be deleted
+    timeout=300
+    elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+      if [ -z "$(openstack server list --all-projects -c ID -f value 2>/dev/null)" ]; then
+        break
+      fi
+      sleep 5
+      elapsed=$((elapsed + 5))
+    done
+
+    # Delete volumes
+    delete_resources "volumes" \
+      "openstack volume list --all-projects -c ID -f value" \
+      "openstack volume delete --force"
+
+    # Delete images
+    delete_resources "images" \
+      "openstack image list -c ID -f value" \
+      "openstack image delete"
+
+    # Delete floating IPs
+    delete_resources "floating IPs" \
+      "openstack floating ip list -c ID -f value" \
+      "openstack floating ip delete"
+
+    # Delete network trunks
+    delete_resources "network trunks" \
+      "openstack network trunk list -c ID -f value" \
+      "openstack network trunk delete"
+
+    # Delete routers and their subnets
+    for router in $(openstack router list -f value -c ID 2>/dev/null || true); do
+      [ -z "$router" ] && continue
+      for subnet in $(openstack subnet list -c ID -f value 2>/dev/null || true); do
+        [ -z "$subnet" ] && continue
+        openstack router remove subnet "$router" "$subnet" 2>/dev/null || true
+      done
+      openstack router unset --external-gateway "$router" 2>/dev/null || true
+      openstack router delete "$router" 2>/dev/null || true
+    done
+
+    # Delete ports
+    delete_resources "ports" \
+      "openstack port list -c ID -f value" \
+      "openstack port delete"
+
+    # Delete networks
+    delete_resources "networks" \
+      "openstack network list -c ID -f value" \
+      "openstack network delete"
+
+    # Delete security groups (except default)
+    openstack security group list -c ID -f value 2>/dev/null | while read -r sg_id; do
+      [ -z "$sg_id" ] && continue
+      sg_name=$(openstack security group show "$sg_id" -c name -f value 2>/dev/null || echo "")
+      if [ "$sg_name" != "default" ] && [ -n "$sg_name" ]; then
+        openstack security group delete "$sg_id" 2>/dev/null || true
+      fi
+    done
+
+    # Delete keypairs
+    delete_resources "keypairs" \
+      "openstack keypair list -c Name -f value" \
+      "openstack keypair delete"
+
+    # Delete roles (except admin and member)
+    openstack role list -c Name -f value 2>/dev/null | grep -v -E '^(admin|member)$' | while read -r role; do
+      [ -z "$role" ] && continue
+      openstack role delete "$role" 2>/dev/null || true
+    done
+
+    # Delete aggregates
+    for agg in $(openstack aggregate list -f value -c ID 2>/dev/null || true); do
+      [ -z "$agg" ] && continue
+      for host in $(openstack aggregate show "$agg" -c hosts -f value 2>/dev/null | awk -F "'" '{print $2}' || true); do
+        [ -z "$host" ] && continue
+        openstack aggregate remove host "$agg" "$host" 2>/dev/null || true
+      done
+      openstack aggregate delete "$agg" 2>/dev/null || true
+    done
+
+    # Delete load balancers (Octavia)
+    delete_resources "load balancers" \
+      "openstack loadbalancer list -c id -f value" \
+      "openstack loadbalancer delete --cascade"
+
+    # Delete containers (Swift)
+    openstack container list 2>/dev/null | awk 'NR>3 {print $1}' | while read -r container; do
+      [ -z "$container" ] && continue
+      openstack container delete "$container" --recursive 2>/dev/null || true
+    done
+  environment:
+    OS_CLOUD: "{{ cifmw_cleanup_openstack_cloud_name | default('default') }}"
+  when: _cleanup_method != 'skip'
+  register: _api_cleanup_result
+  failed_when: false
+  changed_when: _api_cleanup_result.rc == 0
+
+- name: Display cleanup result
+  ansible.builtin.debug:
+    msg: "OpenStack API resource cleanup {{ 'completed' if _cleanup_method != 'skip' else 'skipped (no openstackclient available)' }}"
+  when: _cleanup_method != 'skip'

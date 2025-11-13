@@ -1,0 +1,49 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This playbook cleans only config drive ISO files to allow infrastructure reuse.
+# It does NOT clean libvirt VMs or other resources - only config drives.
+# This is needed when reusing infrastructure to avoid conflicts with existing
+# ISO files that might be attached to VMs.
+
+- name: Clean config drives for infrastructure reuse
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Cleanup config_drive workdir
+      ansible.builtin.include_role:
+        name: config_drive
+        tasks_from: cleanup.yml
+
+    - name: Remove ISO files from workload directory
+      when: cifmw_libvirt_manager_basedir is defined
+      ansible.builtin.find:
+        paths: "{{ cifmw_libvirt_manager_basedir }}/workload"
+        patterns: "*.iso"
+      register: _iso_files
+      failed_when: false
+
+    - name: Delete ISO files from workload directory
+      when:
+        - cifmw_libvirt_manager_basedir is defined
+        - _iso_files.files | default([]) | length > 0
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ _iso_files.files | default([]) }}"
+      failed_when: false
+      # Note: This may fail if ISO is attached to a running VM, but that's okay
+      # The config_drive role will handle the case where ISO doesn't exist

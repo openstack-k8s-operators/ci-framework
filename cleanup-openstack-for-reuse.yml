@@ -1,0 +1,108 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This playbook cleans up OpenStack resources while preserving the OpenShift
+# cluster infrastructure for reuse. It removes:
+# - All OpenStack CRs (ControlPlane, DataPlane, etc.)
+# - Storage resources (PVCs, secrets, ConfigMaps)
+# - Optionally: OpenStack API resources (servers, networks, volumes, etc.)
+#
+# Usage examples:
+#
+# Basic cleanup (removes OpenStack CRs and storage, keeps cluster):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml
+#
+# Dry-run mode (preview what would be deleted):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml \
+#     -e dry_run=true
+#
+# Skip API resource cleanup (if needed):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml \
+#     -e cleanup_api_resources=false
+#
+# Selective cleanup using tags:
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml \
+#     --tags cleanup_storage,cleanup_crs_direct
+#
+# Aggressive cleanup (removes everything including namespaces):
+#   ansible-playbook -i inventory.yml cleanup-openstack-for-reuse.yml \
+#     -e cleanup_api_resources=true \
+#     -e cleanup_namespaces=true \
+#     -e force_remove_finalizers=true
+
+- name: Clean OpenStack deployment for infrastructure reuse
+  hosts: "{{ target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    # Dry-run mode - preview without making changes
+    cifmw_cleanup_openstack_dry_run: "{{ dry_run | default(false) }}"
+    # By default, clean OpenStack CRs, storage, and API resources but keep OpenShift cluster
+    # Set to false to skip OpenStack API resource cleanup
+    cifmw_cleanup_openstack_delete_api_resources: "{{ cleanup_api_resources | default(true) }}"
+    # Set to true to delete namespaces (use with caution)
+    cifmw_cleanup_openstack_delete_namespaces: "{{ cleanup_namespaces | default(false) }}"
+    # Set to true to force remove finalizers from stuck CRs
+    cifmw_cleanup_openstack_force_remove_finalizers: "{{ force_remove_finalizers | default(false) }}"
+  tasks:
+    - name: Cleanup OpenStack deployment
+      ansible.builtin.include_role:
+        name: cleanup_openstack
+
+    - name: Verify cleanup succeeded (if not dry-run)
+      when: not cifmw_cleanup_openstack_dry_run | bool
+      block:
+        - name: Verify OpenStackControlPlane CRs are removed
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ _k8s_kubeconfig | default(omit) }}"
+            api_key: "{{ cifmw_openshift_token | default(omit) }}"
+            context: "{{ cifmw_openshift_context | default(omit) }}"
+            api_version: core.openstack.org/v1beta1
+            kind: OpenStackControlPlane
+            namespace: "{{ cifmw_kustomize_deploy_namespace | default('openstack') }}"
+          register: _verify_controlplane
+          failed_when: false
+
+        - name: Verify OpenStackDataPlaneNodeSet CRs are removed
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ _k8s_kubeconfig | default(omit) }}"
+            api_key: "{{ cifmw_openshift_token | default(omit) }}"
+            context: "{{ cifmw_openshift_context | default(omit) }}"
+            api_version: dataplane.openstack.org/v1beta1
+            kind: OpenStackDataPlaneNodeSet
+            namespace: "{{ cifmw_kustomize_deploy_namespace | default('openstack') }}"
+          register: _verify_nodeset
+          failed_when: false
+
+        - name: Display verification results
+          ansible.builtin.debug:
+            msg: |
+              ╔══════════════════════════════════════════════════════════════════╗
+              ║  Cleanup Verification                                            ║
+              ╚══════════════════════════════════════════════════════════════════╝
+              
+              ✓ OpenStackControlPlane CRs: {{ (_verify_controlplane.resources | default([]) | length == 0) | ternary('✓ Removed', '✗ Still present (' + (_verify_controlplane.resources | default([]) | length | string) + ')') }}
+              ✓ OpenStackDataPlaneNodeSet CRs: {{ (_verify_nodeset.resources | default([]) | length == 0) | ternary('✓ Removed', '✗ Still present (' + (_verify_nodeset.resources | default([]) | length | string) + ')') }}
+              
+              {% if (_verify_controlplane.resources | default([]) | length > 0) or (_verify_nodeset.resources | default([]) | length > 0) %}
+              ⚠ Warning: Some CRs were not fully removed. Consider:
+                - Running cleanup again
+                - Using -e force_remove_finalizers=true
+                - Manually investigating stuck resources
+              {% else %}
+              ═══════════════════════════════════════════════════════════════════
+              ✓ Cleanup verified successfully! Cluster ready for reuse.
+              ═══════════════════════════════════════════════════════════════════
+              {% endif %}
