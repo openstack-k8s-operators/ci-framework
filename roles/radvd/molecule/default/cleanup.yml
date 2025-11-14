@@ -1,0 +1,52 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Cleanup
+  hosts: all
+  tasks:
+    - name: Copy generated content in ci-framework-data/artifacts
+      vars:
+        dest_dir: >-
+          {{
+            (ansible_user_dir,
+             'ci-framework-data',
+             'artifacts') | path_join
+          }}
+      ansible.posix.synchronize:
+        src: "{{ item }}"
+        dest: "{{ dest_dir }}"
+      loop:
+        - /etc/radvd.conf
+        - /etc/cifmw-radvd.d/
+
+    - name: Cleanup radvd
+      ansible.builtin.import_role:
+        name: "radvd"
+        tasks_from: "cleanup.yml"
+
+    - name: Check if cleanup files still exist
+      become: true
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: _cleanup_check
+      loop:
+        - /etc/radvd.conf
+        - /etc/cifmw-radvd.d
+
+    - name: Assert cleanup was successful
+      ansible.builtin.assert:
+        that:
+          - not (_cleanup_check.results | map(attribute='stat.exists') | list | max)
