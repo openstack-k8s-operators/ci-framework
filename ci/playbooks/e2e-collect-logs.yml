@@ -3,6 +3,18 @@
   hosts: "{{ cifmw_zuul_target_host | default('all') }}"
   gather_facts: true
   tasks:
+    # FIXME(amsinha/danpawlik): Current version of zuul does not support include-vars [1] from file,
+    # thus using this hack to read files. Will replace all these hacky var file read with include-vars
+    # once Zuul is upgraded.
+    # [1] https://zuul-ci.org/docs/zuul/latest/config/job.html#attr-job.include-vars
+    - name: Read group_vars
+      vars:
+        provided_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_dir.yml
+
     - name: Filter out host if needed
       when:
         - cifmw_zuul_target_host is defined
@@ -13,7 +25,7 @@
     - name: Ensure we have the ci-framework on host
       register: cifmw_status
       ansible.builtin.stat:
-        path: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        path: "{{ cifmw_project_dir_absolute }}"
 
     - name: End host if no basedir
       when:
@@ -35,7 +47,7 @@
         tasks_from: run_logs.yml
       tags:
         - logs
-      environment:
+     environment:
         ANSIBLE_LOG_PATH: "{{ ansible_user_dir }}/ci-framework-data/logs/e2e-collect-logs-must-gather.log"
 
 - name: "Run ci/playbooks/e2e-collect-logs.yml on CRC host"

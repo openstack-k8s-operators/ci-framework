@@ -3,6 +3,18 @@
   hosts: controller
   gather_facts: true
   tasks:
+    # FIXME(amsinha/danpawlik): Current version of zuul does not support include-vars [1] from file,
+    # thus using this hack to read files. Will replace all these hacky var file read with include-vars
+    # once Zuul is upgraded.
+    # [1] https://zuul-ci.org/docs/zuul/latest/config/job.html#attr-job.include-vars
+    - name: Read group_vars
+      vars:
+        provided_dir: >
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_dir.yml
+
     - name: Create a networking_mapper playbook
       ansible.builtin.copy:
         dest: "{{ ansible_user_dir }}/networking_mapper.yml"
@@ -17,7 +29,7 @@
       environment:
         ANSIBLE_HOST_KEY_CHECKING: false
       ansible.builtin.command:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        chdir: "{{ cifmw_project_dir_absolute }}"
         cmd: >-
           ~/test-python/bin/ansible-playbook {{ ansible_user_dir }}/networking_mapper.yml
           -i {{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml
