@@ -18,9 +18,20 @@
   ansible.builtin.command: oc config use-context admin --kubeconfig={{ cifmw_openshift_kubeconfig }}
   changed_when: true
 
-- name: Encode kubeconfig file to Base64
+#- name: Encode kubeconfig file to Base64
+#  ansible.builtin.set_fact:
+#    incluster_kubeconfig_base64: "{{ lookup('ansible.builtin.file', cifmw_openshift_kubeconfig ) | b64encode }}"
+#
+# ^ Fails if file is only on remote target (Ansible Lookup is Local to the Control Node)
+
+- name: Slurp and Encode kubeconfig file to Base64
+  ansible.builtin.slurp:
+    src: "{{ cifmw_openshift_kubeconfig }}"
+  register: kubeconfig_slurp
+
+- name: Set Base64 fact for the kubeconfig
   ansible.builtin.set_fact:
-    incluster_kubeconfig_base64: "{{ lookup('ansible.builtin.file', cifmw_openshift_kubeconfig ) | b64encode }}"
+    incluster_kubeconfig_base64: "{{ kubeconfig_slurp.content }}"
 
 - name: Render the incluster kubeconfig secret manifest
   ansible.builtin.template:
@@ -35,18 +46,18 @@
     src: "{{ (cifmw_shiftstack_manifests_dir, cifmw_shiftstack_client_incluster_secret_manifest) | path_join }}"
     proxy: "{{ cifmw_shiftstack_proxy | default(omit) }}"
 
-- name: Render the pvc manifest
-  ansible.builtin.template:
-    src: templates/shiftstackclient_pvc.yml.j2
-    dest: "{{ (cifmw_shiftstack_manifests_dir, cifmw_shiftstack_client_pvc_manifest) | path_join }}"
-    mode: "0644"
-
-- name: Apply the manifest for the PVC creation
-  kubernetes.core.k8s:
-    state: present
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    src: "{{ (cifmw_shiftstack_manifests_dir, cifmw_shiftstack_client_pvc_manifest) | path_join }}"
-    proxy: "{{ cifmw_shiftstack_proxy | default(omit) }}"
+#- name: Render the pvc manifest
+#  ansible.builtin.template:
+#    src: templates/shiftstackclient_pvc.yml.j2
+#    dest: "{{ (cifmw_shiftstack_manifests_dir, cifmw_shiftstack_client_pvc_manifest) | path_join }}"
+#    mode: "0644"
+#
+#- name: Apply the manifest for the PVC creation
+#  kubernetes.core.k8s:
+#    state: present
+#    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+#    src: "{{ (cifmw_shiftstack_manifests_dir, cifmw_shiftstack_client_pvc_manifest) | path_join }}"
+#    proxy: "{{ cifmw_shiftstack_proxy | default(omit) }}"
 
 - name: Render the pod manifest from a template
   ansible.builtin.template:
