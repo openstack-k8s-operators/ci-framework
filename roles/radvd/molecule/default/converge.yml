@@ -108,6 +108,21 @@
           - "'AdvAutonomous on' in _config"
           - "'AdvRouterAddr on' in _config"
 
+    - name: Verify testnet1 configuration formatting is correct
+      vars:
+        _config_lines: "{{ (_testnet1_conf.content | b64decode).split('\n') }}"
+      ansible.builtin.assert:
+        that:
+          # Check directives are on separate lines (not squished together)
+          - _config_lines | select('match', '.*;.*AdvManagedFlag') | list | length == 0
+          - _config_lines | select('match', '.*;.*AdvOtherConfigFlag') | list | length == 0
+          - _config_lines | select('match', '.*;.*AdvLinkMTU') | list | length == 0
+          # Check specific lines have proper formatting (one directive per line)
+          - _config_lines | select('match', '^        AdvManagedFlag on;$') | list | length == 1
+          - _config_lines | select('match', '^        AdvOtherConfigFlag on;$') | list | length == 1
+          - _config_lines | select('match', '^        AdvLinkMTU 1500;$') | list | length == 1
+        msg: "Configuration formatting is incorrect - directives may be squished together on the same line"
+
     - name: Verify testnet2 configuration has RDNSS
       become: true
       ansible.builtin.slurp:
