@@ -341,7 +341,19 @@ function workload_launch {
     ## create networking
     openstack network list | grep ${TENANT_NET_NAME}
     if [ $? -ne 0 ]; then
-        NAMESERVER=$(grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' /etc/resolv.conf  | head -1)
+        # Collect all nameservers from resolv.conf
+        NAMESERVERS=$(awk '/^nameserver[[:space:]]/ {print $2}' /etc/resolv.conf)
+
+        # Build DNS arguments
+        DNS_ARGS=""
+        if [ -n "$NAMESERVERS" ]; then
+            for ns in $NAMESERVERS; do
+                DNS_ARGS="$DNS_ARGS --dns-nameserver $ns"
+            done
+        else
+            echo "Warning: No nameservers found, using public DNS fallback"
+            DNS_ARGS="--dns-nameserver 8.8.8.8 --dns-nameserver 2001:4860:4860::8888"
+        fi
         echo "Creating router ${TENANT_NET_NAME}_router"
         os_cmd router create ${TENANT_NET_NAME}_router
 
@@ -357,7 +369,7 @@ function workload_launch {
             --subnet-range 192.168.0.0/24 \
             --allocation-pool start=192.168.0.10,end=192.168.0.100 \
             --gateway 192.168.0.254 \
-            --dns-nameserver ${NAMESERVER} \
+            $DNS_ARGS \
             --network ${TENANT_NET_NAME} \
             ${TENANT_NET_NAME}_subnet
 
