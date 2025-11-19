@@ -195,17 +195,6 @@
         loop_var: overcloud_vm
       when: not bgp
 
-    - name: Obtain IPs whose routes need to be added to the undercloud (bgp)
-      when: bgp
-      ansible.builtin.include_tasks: getent_registry_ips_bgp.yml
-      args:
-        apply:
-          delegate_to: "{{ _vm }}"
-      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
-      loop_control:
-        loop_var: _vm
-        pause: 1
-
     - name: Generate os-net-config file for overcloud nodes (bgp)
       become: true
       delegate_to: "{{ overcloud_vm }}"
@@ -213,7 +202,6 @@
         _node_net: "{{ cifmw_networking_env_definition.instances[overcloud_vm] }}"
         _dns_server: "{{ _ctlplane_net.[dns_version|default('dns_v4')] }}"
         _interface_mtu: 1500
-        _ips_for_oc_routes_list: "{{ _accumulated_ips | unique }}"
         vms:
           osp-r0-compute-0:
             ctlplane: '192.168.122.100'
@@ -314,6 +302,11 @@
 
         - name: BGP workaround apply patch
           ansible.posix.patch:
-            src: files/patch
-            dest: /usr/share/openstack-tripleo-heat-templates/deployment/cinder/cinder-api-container-puppet.yaml
+            src: "{{ item.patch_file }}"
+            dest: "{{ item.dest_file }}"
             strip: 1
+          loop:
+            - patch_file: files/bgp-tht-cinder-patch
+              dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/cinder/cinder-api-container-puppet.yaml
+            - patch_file: files/bgp-tht-frr-patch
+              dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/frr/frr-container-ansible.yaml
