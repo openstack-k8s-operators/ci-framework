@@ -14,41 +14,28 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
 - name: Collect lvm information
   become: true
   ansible.builtin.setup:
     gather_subset:
-      - '!all'
-      - '!min'
       - hardware
-    filter:
-      - ansible_lvm
-
-# ToDo: Identify why ansible-lint rule is violated.
-- name: Gathering root mount details  # noqa: jinja[invalid]
-  vars:
-    query_str: "[?mount=='/']"
-  ansible.builtin.set_fact:
-    root_mount_data: >-
-      {{
-        ansible_mounts |
-        community.general.json_query(query_str) |
-        first
-      }}
+      - mounts
 
 - name: Extending root logical volume
   become: true
   vars:
-    device_name: "{{ root_mount_data['device'] | split('/') | last }}"
-    lv_name: "{{ device_name | split('-') | last }}"
-  when:
-    - ansible_lvm
-    - root_mount_data
-    - ansible_lvm != 'N/A'
-    - "lv_name in ansible_lvm.lvs"
+    root_dev: "{{ (ansible_mounts | selectattr('mount', '==', '/') | first).device | default('') }}"
+    root_lv: "{{ root_dev | split('/') | last | split('-') | last | default('') }}"
   community.general.lvol:
-    lv: "{{ lv_name }}"
-    vg: "{{ ansible_lvm['lvs'][lv_name]['vg'] }}"
+    lv: "{{ root_lv }}"
+    vg: "{{ ansible_lvm.lvs[root_lv].vg }}"
     size: +100%FREE
     resizefs: true
+  when:
+    - ansible_lvm | default({}) != {}
+    - root_lv in ansible_lvm.lvs
+    - ansible_lvm.lvs[root_lv].vg is defined
+  register: _extend
+  until: _extend is succeeded
+  retries: 5
+  delay: 5
