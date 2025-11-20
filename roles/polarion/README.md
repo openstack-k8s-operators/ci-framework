@@ -12,6 +12,7 @@ Role to setup jump tool and upload XML test results to Polarion.
 * `cifmw_polarion_jump_extra_vars`: (String) A list of extra_vars that are being passed to the jump script. Defaults to empty.
 * `cifmw_polarion_jump_custom_fields`: (Dict) Structure listing the fields for --custom-fields argument of jump tool.
 * `cifmw_polarion_use_stage`: (Bool) Flag for using the staging instance of Polarion. Default is False meaning the production instance gets updated. Don't forget to change for testing on stage instance.
+* `cifmw_polarion_aggregate_test_results`: (Bool) Flag for merging all results into a single file instead of uploading multiple results. Default: False
 
 
 ## Examples
