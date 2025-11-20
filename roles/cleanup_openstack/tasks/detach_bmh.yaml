@@ -5,7 +5,7 @@
   block:
     - name: Patch bmh with detached
       kubernetes.core.k8s:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kubeconfig: "{{ _k8s_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
         context: "{{ cifmw_openshift_context | default(omit)}}"
         state: patched
@@ -25,18 +25,22 @@
 
     - name: Wait for operationalStatus to become detached
       kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kubeconfig: "{{ _k8s_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
         context: "{{ cifmw_openshift_context | default(omit)}}"
         namespace: "{{ cifmw_deploy_bmh_namespace }}"
         kind: BareMetalHost
         api_version: metal3.io/v1alpha1
         name: "{{ item }}"
+      register: bmh_status
       retries: 60
       delay: 10
-      until:
-        - bmh_status.resources | length == 0 or bmh_status.resources[0].status.operationalStatus == 'detached'
-      register: bmh_status
+      until: >-
+        bmh_status is succeeded and
+        (bmh_status.resources | default([]) | length == 0 or
+         (bmh_status.resources | default([]) | length > 0 and
+          bmh_status.resources[0].status.operationalStatus | default('') == 'detached'))
+      failed_when: false
       loop: "{{ cifmw_deploy_bmh_bm_hosts_list }}"
       loop_control:
         label: "{{ item }}"

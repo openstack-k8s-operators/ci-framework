@@ -7,7 +7,7 @@
 
 - name: Cleaning operators resources
   kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    kubeconfig: "{{ _k8s_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
     context: "{{ cifmw_openshift_context | default(omit) }}"
     state: absent
@@ -16,9 +16,10 @@
     wait_timeout: 600
   loop: "{{ _crs_to_delete_files.results }}"
   register: _cleanup_results
-  until: "_cleanup_results is success"
+  until: _cleanup_results is not failed
   retries: 3
   delay: 120
+  failed_when: false
   when:
     - item.stat.exists
 
@@ -29,3 +30,11 @@
   loop: "{{ _crs_to_delete_files.results }}"
   when:
     - item.stat.exists
+    - not cifmw_cleanup_openstack_keep_generated_crs | default(false) | bool
+
+- name: Display CR cleanup status
+  ansible.builtin.debug:
+    msg: >-
+      CR cleanup completed:
+      - Deleted: {{ _crs_to_delete_files.results | selectattr('stat.exists') | list | length }} CRs from cluster
+      - Files {% if cifmw_cleanup_openstack_keep_generated_crs %}kept{% else %}removed{% endif %}

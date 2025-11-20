@@ -1,0 +1,90 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get all resources in OpenStack namespace
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ _openstack_namespace }}"
+  register: _openstack_namespace_resources
+  failed_when: false
+
+- name: Check if OpenStack namespace is empty
+  ansible.builtin.set_fact:
+    _openstack_namespace_empty: >-
+      {{
+        (_openstack_namespace_resources is succeeded) and
+        (_openstack_namespace_resources.resources | default([]) |
+         rejectattr('kind', 'in', ['Namespace', 'ServiceAccount']) |
+         list | length) == 0
+      }}
+
+- name: Delete OpenStack namespace if empty
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Namespace
+    name: "{{ _openstack_namespace }}"
+    state: absent
+    wait: true
+    wait_timeout: 300
+  failed_when: false
+  when:
+    - _openstack_namespace_empty
+    - cifmw_cleanup_openstack_delete_namespaces
+
+- name: Get all resources in OpenStack operators namespace
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ _openstack_operators_namespace }}"
+  register: _operators_namespace_resources
+  failed_when: false
+
+- name: Check if OpenStack operators namespace is empty
+  ansible.builtin.set_fact:
+    _operators_namespace_empty: >-
+      {{
+        (_operators_namespace_resources is succeeded) and
+        (_operators_namespace_resources.resources | default([]) |
+         rejectattr('kind', 'in', ['Namespace', 'ServiceAccount']) |
+         list | length) == 0
+      }}
+
+- name: Delete OpenStack operators namespace if empty
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Namespace
+    name: "{{ _openstack_operators_namespace }}"
+    state: absent
+    wait: true
+    wait_timeout: 300
+  failed_when: false
+  when:
+    - _operators_namespace_empty
+    - cifmw_cleanup_openstack_delete_namespaces
+
+- name: Display namespace cleanup status
+  ansible.builtin.debug:
+    msg: >-
+      Namespace cleanup:
+      - {{ _openstack_namespace }}: {{ 'deleted' if (_openstack_namespace_empty and cifmw_cleanup_openstack_delete_namespaces) else 'kept (not empty or deletion disabled)' }}
+      - {{ _openstack_operators_namespace }}: {{ 'deleted' if (_operators_namespace_empty and cifmw_cleanup_openstack_delete_namespaces) else 'kept (not empty or deletion disabled)' }}

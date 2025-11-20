@@ -1,0 +1,101 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Delete OpenStackControlPlane CRs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackControlPlane
+    namespace: "{{ _openstack_namespace }}"
+    state: absent
+    wait: true
+    wait_timeout: 600
+  register: _delete_controlplane_result
+  failed_when: false
+  until: _delete_controlplane_result is succeeded or (_delete_controlplane_result.failed and 'not found' in (_delete_controlplane_result.msg | default('')))
+  retries: 3
+  delay: 30
+
+- name: Wait for control plane pods to terminate
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ _openstack_namespace }}"
+    kind: Pod
+  register: _remaining_pods
+  until: >-
+    _remaining_pods is succeeded and
+    (_remaining_pods.resources | default([]) | length == 0 or
+     (_remaining_pods.resources | default([]) | selectattr('metadata.name', 'match', '.*(rabbitmq|galera|openstack).*') | list | length == 0))
+  retries: 60
+  delay: 10
+  failed_when: false
+  when: _delete_controlplane_result is succeeded
+
+- name: Delete OpenStack CRs by kind
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: "{{ item.api_version }}"
+    kind: "{{ item.kind }}"
+    namespace: "{{ _openstack_namespace }}"
+    state: absent
+    wait: true
+    wait_timeout: "{{ item.wait_timeout | default(300) }}"
+  failed_when: false
+  loop:
+    - api_version: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      wait_timeout: 600
+    - api_version: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneNodeSet
+      wait_timeout: 600
+    - api_version: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      wait_timeout: 300
+    - api_version: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneNode
+      wait_timeout: 300
+    - api_version: client.openstack.org/v1beta1
+      kind: OpenStackClient
+      wait_timeout: 300
+    - api_version: core.openstack.org/v1beta1
+      kind: OpenStackVersion
+      wait_timeout: 300
+    - api_version: openstack.org/v1beta1
+      kind: OpenStack
+      wait_timeout: 300
+  loop_control:
+    label: "{{ item.kind }}"
+
+- name: Remove finalizers from stuck OpenStackControlPlane CRs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _k8s_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackControlPlane
+    namespace: "{{ _openstack_namespace }}"
+    state: patched
+    definition:
+      metadata:
+        finalizers: []
+  failed_when: false
+  when: cifmw_cleanup_openstack_force_remove_finalizers | default(false)
