@@ -1,0 +1,180 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_radvd_networks:
+      - name: testnet1
+        adv_managed_flag: true
+        adv_other_config_flag: true
+        adv_ra_solicited_unicast: true
+        adv_link_mtu: 1500
+        min_rtr_adv_interval: 30
+        max_rtr_adv_interval: 100
+        prefixes:
+          - network: "2001:db8:1::/64"
+            adv_on_link: true
+            adv_autonomous: true
+            adv_router_addr: true
+      - name: testnet2
+        adv_managed_flag: true
+        adv_other_config_flag: true
+        adv_link_mtu: 1500
+        min_rtr_adv_interval: 30
+        max_rtr_adv_interval: 100
+        prefixes:
+          - network: "2001:db8:2::/64"
+            adv_on_link: true
+            adv_autonomous: false
+        rdnss:
+          - servers:
+              - "2001:db8:2::53"
+            adv_rdnss_lifetime: 300
+      - name: testnet3
+        adv_managed_flag: false
+        adv_other_config_flag: false
+        adv_link_mtu: 9000
+        min_rtr_adv_interval: 30
+        max_rtr_adv_interval: 600
+        prefixes:
+          - network: "2001:db8:3::/64"
+            adv_on_link: true
+            adv_autonomous: true
+        rdnss:
+          - servers:
+              - "2001:db8:3::53"
+            adv_rdnss_lifetime: 600
+  roles:
+    - role: "radvd"
+  tasks:
+    - name: Verify radvd configuration is valid
+      become: true
+      ansible.builtin.command:
+        cmd: /usr/sbin/radvd -c -C /etc/radvd.conf
+      changed_when: false
+
+    - name: Check if configuration files exist
+      become: true
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: _config_files
+      loop:
+        - /etc/radvd.conf
+        - /etc/cifmw-radvd.d/testnet1.conf
+        - /etc/cifmw-radvd.d/testnet2.conf
+        - /etc/cifmw-radvd.d/testnet3.conf
+
+    - name: Assert all configuration files exist
+      ansible.builtin.assert:
+        that:
+          - _config_files.results | map(attribute='stat.exists') | list | min
+
+    - name: Verify testnet1 configuration content
+      become: true
+      ansible.builtin.slurp:
+        path: /etc/cifmw-radvd.d/testnet1.conf
+      register: _testnet1_conf
+
+    - name: Check testnet1 configuration has expected content
+      vars:
+        _config: "{{ _testnet1_conf.content | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - "'interface testnet1' in _config"
+          - "'AdvSendAdvert on' in _config"
+          - "'AdvManagedFlag on' in _config"
+          - "'AdvOtherConfigFlag on' in _config"
+          - "'AdvRASolicitedUnicast on' in _config"
+          - "'AdvLinkMTU 1500' in _config"
+          - "'MinRtrAdvInterval 30' in _config"
+          - "'MaxRtrAdvInterval 100' in _config"
+          - "'prefix 2001:db8:1::/64' in _config"
+          - "'AdvOnLink on' in _config"
+          - "'AdvAutonomous on' in _config"
+          - "'AdvRouterAddr on' in _config"
+
+    - name: Verify testnet1 configuration formatting is correct
+      vars:
+        _config_lines: "{{ (_testnet1_conf.content | b64decode).split('\n') }}"
+      ansible.builtin.assert:
+        that:
+          # Check directives are on separate lines (not squished together)
+          - _config_lines | select('match', '.*;.*AdvManagedFlag') | list | length == 0
+          - _config_lines | select('match', '.*;.*AdvOtherConfigFlag') | list | length == 0
+          - _config_lines | select('match', '.*;.*AdvLinkMTU') | list | length == 0
+          # Check specific lines have proper formatting (one directive per line)
+          - _config_lines | select('match', '^        AdvManagedFlag on;$') | list | length == 1
+          - _config_lines | select('match', '^        AdvOtherConfigFlag on;$') | list | length == 1
+          - _config_lines | select('match', '^        AdvLinkMTU 1500;$') | list | length == 1
+        msg: "Configuration formatting is incorrect - directives may be squished together on the same line"
+
+    - name: Verify testnet2 configuration has RDNSS
+      become: true
+      ansible.builtin.slurp:
+        path: /etc/cifmw-radvd.d/testnet2.conf
+      register: _testnet2_conf
+
+    - name: Check testnet2 configuration has RDNSS
+      vars:
+        _config: "{{ _testnet2_conf.content | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - "'RDNSS 2001:db8:2::53' in _config"
+          - "'AdvRDNSSLifetime 300' in _config"
+          - "'AdvAutonomous off' in _config"
+
+    - name: Verify service is running
+      become: true
+      ansible.builtin.systemd:
+        name: radvd.service
+      register: _service_status
+
+    - name: Assert service is active
+      ansible.builtin.assert:
+        that:
+          - _service_status.status.ActiveState == 'active'
+
+    - name: Remove testnet3 network configuration
+      vars:
+        cifmw_radvd_networks:
+          - name: testnet3
+            state: absent
+      ansible.builtin.include_role:
+        name: radvd
+
+    - name: Verify testnet3 network configuration was removed
+      become: true
+      ansible.builtin.stat:
+        path: /etc/cifmw-radvd.d/testnet3.conf
+      register: _testnet3_conf
+
+    - name: Assert testnet3 configuration is removed
+      ansible.builtin.assert:
+        that:
+          - not _testnet3_conf.stat.exists
+
+    - name: Verify service is still running after network removal
+      become: true
+      ansible.builtin.systemd:
+        name: radvd.service
+      register: _service_status_after
+
+    - name: Assert service is still active
+      ansible.builtin.assert:
+        that:
+          - _service_status_after.status.ActiveState == 'active'

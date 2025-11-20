@@ -56,6 +56,8 @@
     - _kubeconfig_stat.stat.exists
   block:
     - name: Run openstack-must-gather command
+      vars:
+        shell_cmd_timeout: "{{ (cifmw_os_must_gather_timeout | community.general.to_seconds) + 900 }}"
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
         PATH: "{{ cifmw_path }}"
@@ -65,6 +67,7 @@
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
         script: >-
+          timeout {{ shell_cmd_timeout }}
           oc adm must-gather --image {{ cifmw_os_must_gather_image }}
           --timeout {{ cifmw_os_must_gather_timeout }}
           --host-network={{ cifmw_os_must_gather_host_network }}
@@ -74,7 +77,13 @@
           SOS_EDPM=$SOS_EDPM
           SOS_DECOMPRESS=$SOS_DECOMPRESS
           gather
-          2>&1
+          2>&1 || {
+            rc=$?
+            if [ $rc -eq 124 ]; then
+              echo "The must gather command did not finish on time!"
+              echo "{{ shell_cmd_timeout }} seconds was not enough to finish the task."
+            fi
+          }
 
     - name: Find existing os-must-gather directories
       ansible.builtin.find:
@@ -101,7 +110,11 @@
             KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
             PATH: "{{ cifmw_path }}"
           ansible.builtin.command:
-            cmd: oc adm must-gather --dest-dir {{ ansible_user_dir }}/ci-framework-data/must-gather
+            cmd: >-
+              timeout {{ (cifmw_os_must_gather_timeout | community.general.to_seconds) + 120 }}
+              oc adm must-gather
+              --dest-dir {{ ansible_user_dir }}/ci-framework-data/must-gather
+              --timeout {{ cifmw_os_must_gather_timeout }}
       always:
         - name: Create oc_inspect log directory
           ansible.builtin.file:

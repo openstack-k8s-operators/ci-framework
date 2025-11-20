@@ -1,0 +1,29 @@
+---
+- name: Ensure required system package
+  become: true
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+
+- name: Install dependencies in virtualenv
+  ansible.builtin.pip:
+    virtualenv_command: python3 -m venv
+    virtualenv: "{{ pcp_metrics_venv_dir }}"
+    requirements: "{{ role_path }}/files/plot.requirements.txt"
+
+- name: Copy plot script
+  ansible.builtin.copy:
+    src: plot.py
+    dest: "{{ pcp_metrics_venv_dir }}/plot.py"
+    mode: '0755'
+
+- name: Draw the figures
+  ansible.builtin.shell: >-
+    . "{{ pcp_metrics_venv_dir }}/bin/activate"
+    && export OUTPUT_DIR="{{ pcp_metrics_output_dir }}"
+    && export ANNOTATIONS_FILE="{{ pcp_metrics_output_dir }}/annotations.txt"
+    && python3 "{{ pcp_metrics_venv_dir }}/plot.py" "{{ pcp_metrics_output_dir }}/*.csv"
+  register: _pcp_shell
+  failed_when:
+    - _pcp_shell.rc != 0
+    - '"ERROR No sources found in specified paths" not in _pcp_shell.stdout'

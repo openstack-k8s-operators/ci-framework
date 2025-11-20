@@ -14,6 +14,10 @@ It contains a set of playbooks to deploy podified control plane.
 * `cifmw_install_yamls_edpm_dir`: (String) Output directory for EDPM related artifacts (OUTPUT_BASEDIR). Defaults to `{{ cifmw_install_yamls_out_dir_basedir ~ '/artifacts/edpm' }}`
 * `cifmw_install_yamls_checkout_openstack_ref`: (String) Enable the checkout from openstack-operator references
 when cloning operator's repository using install_yamls make targets. Defaults to `"true"`
+* `cifmw_install_yamls_opm_version`: (String) Override the opm version in install_yamls devsetup/vars/default.yaml. Example: `v1.30.0`
+* `cifmw_install_yamls_sdk_version`: (String) Override the operator-sdk version in install_yamls devsetup/vars/default.yaml. Example: `v1.41.1`
+* `cifmw_install_yamls_go_version`: (String) Override the golang version in install_yamls devsetup/vars/default.yaml. Example: `1.24.6`
+* `cifmw_install_yamls_kustomize_version`: (String) Override the kustomize version in install_yamls devsetup/vars/default.yaml. Example: `v5.0.3`
 
 ## cifmw_install_yamls_vars patching
 

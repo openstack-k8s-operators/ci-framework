@@ -1,0 +1,52 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Assert mandatory parameters
+  ansible.builtin.assert:
+    that:
+      - cifmw_radvd_network.name is defined
+      - cifmw_radvd_network.state | default('present') in ['present', 'absent']
+      - cifmw_radvd_network.state | default('present') == 'absent' or cifmw_radvd_network.prefixes is defined
+      - cifmw_radvd_network.state | default('present') == 'absent' or cifmw_radvd_network.prefixes | type_debug == "list"
+
+- name: Create network configuration fragment
+  become: true
+  when:
+    - cifmw_radvd_network.state | default('present') == 'present'
+  ansible.builtin.template:
+    dest: >-
+      {{ cifmw_radvd_basedir }}/{{ cifmw_radvd_network.name }}.conf
+    mode: "0644"
+    src: "network.conf.j2"
+
+- name: Remove network configuration fragment
+  become: true
+  when:
+    - cifmw_radvd_network.state | default('present') == 'absent'
+  ansible.builtin.file:
+    path: >-
+      {{ cifmw_radvd_basedir }}/{{ cifmw_radvd_network.name }}.conf
+    state: absent
+
+- name: Assemble radvd configuration from fragments
+  become: true
+  notify: Restart radvd service
+  ansible.builtin.assemble:
+    src: "{{ cifmw_radvd_basedir }}"
+    dest: "/etc/radvd.conf"
+    regexp: '\.conf$'
+    mode: "0644"
+    validate: "/usr/sbin/radvd -c -C %s"

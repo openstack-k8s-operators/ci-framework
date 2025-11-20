@@ -45,6 +45,19 @@ Here is an example, based on a common use-case, on how to use those variables
     oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
 ~~~
 
+## A few words about using Git
+
+Before you make a pull request, make sure that:
+
+* the title of your git commit message begins with the role
+  name in brackets: `[my_wonderful_role]` or `(my_wonderful_role)`
+* the git commit body message is longer than 10 characters and describes
+  the reason why you added this change
+* sign your git commit using the `Signed-Off-By` option by
+  adding: `--signoff` or `-s` when using the command: `git commit`.
+* if you already make a commit, and you want to add `Signed-Off-By`,
+  use command: `git commit --amend --signoff`
+
 ### Documentation
 
 A new role must get proper documentation. Please edit the README.md located in

@@ -91,9 +91,9 @@
         src: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
       register: _cifmw_kustomize_deploy_olm_apply_out
 
-    - name: Wait for the openstack operators InstallPlan to be created
+    - name: Wait for the openstack operators Subscription to be created
       vars:
-        _cifmw_kustomize_deploy_olm_osp_operator_sub: >-
+        _cifmw_kustomize_deploy_olm_osp_operator_subscription: >-
           {{
             (
               _cifmw_kustomize_deploy_olm_apply_out.result.results |
@@ -108,18 +108,18 @@
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit) }}"
         context: "{{ cifmw_openshift_context | default(omit) }}"
-        api_version: "{{ _cifmw_kustomize_deploy_olm_osp_operator_sub.apiVersion }}"
+        api_version: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.apiVersion }}"
         kind: Subscription
-        namespace: "{{ _cifmw_kustomize_deploy_olm_osp_operator_sub.metadata.namespace }}"
-        name: "{{ _cifmw_kustomize_deploy_olm_osp_operator_sub.metadata.name }}"
-      register: _cifmw_kustomize_deploy_olm_osp_operator_sub_out
-      retries: "{{ cifmw_kustomize_deploy_retries_install_plan }}"
+        namespace: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.metadata.namespace }}"
+        name: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.metadata.name }}"
+      register: _cifmw_kustomize_deploy_olm_osp_operator_subscription_out
+      retries: "{{ cifmw_kustomize_deploy_retries_subscription }}"
       delay: "{{ cifmw_kustomize_deploy_delay }}"
       until:
-        - _cifmw_kustomize_deploy_olm_osp_operator_sub_out.failed is false
-        - _cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources is defined
-        - _cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | length == 1
-        - (_cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | first)['status']['installPlanRef'] is defined
+        - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.failed is false
+        - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources is defined
+        - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | length == 1
+        - (_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first)['status']['installPlanRef'] is defined
 
     - name: Install plan
       ansible.builtin.include_tasks: install_plan.yml
@@ -131,7 +131,7 @@
       vars:
         _install_plan: >-
           {{
-            (_cifmw_kustomize_deploy_olm_osp_operator_sub_out.resources | first).status.installPlanRef
+            (_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first).status.installPlanRef
           }}
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -230,39 +230,39 @@
         name: openshift_setup
         tasks_from: patch_dependent_operators_source.yml
 
-    - name: Wait for controller-manager pods
+    - name: Wait for controller-manager deployment
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        kind: Pod
+        kind: Deployment
         namespace: metallb-system
         label_selectors:
           - control-plane = controller-manager
         wait: true
         wait_condition:
-          type: Ready
+          type: Available
           status: "True"
         wait_timeout: 300
       retries: 3
       delay: 60
-      register: _controller_manager_pods
-      until: _controller_manager_pods is success
+      register: _controller_manager_deployment
+      until: _controller_manager_deployment is success
 
-    - name: Wait for webhook-server pods
+    - name: Wait for webhook-server deployment
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        kind: Pod
+        kind: Deployment
         namespace: metallb-system
         label_selectors:
           - component = webhook-server
         wait: true
         wait_condition:
-          type: Ready
+          type: Available
           status: "True"
         wait_timeout: 300
       retries: 3
       delay: 60
-      register: _webhook_server_pods
-      until: _webhook_server_pods is success
+      register: _webhook_server_deployment
+      until: _webhook_server_deployment is success
 
     - name: Wait until NMstate operator resources are deployed
       kubernetes.core.k8s_info:

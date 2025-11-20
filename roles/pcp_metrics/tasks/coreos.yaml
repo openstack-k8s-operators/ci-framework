@@ -1,0 +1,42 @@
+---
+#
+# NOTE(sdatko): The OCP nodes we use have no yum repositories, so I add some.
+#               In CoreOS, things typically should be deployed as containers
+#               or in the layered filesystem via the rpm-ostree package tool.
+#               However, this requires either a lot of space or system reboot
+#               while all I need is to install a small service and enable it.
+#               So, this play allows to setup the PCP easily in our CI jobs,
+#               even though it may not be the way advised for real-world env.
+#
+- name: Set repositories
+  become: true
+  block:
+    - name: Set repositories (BaseOS)
+      ansible.builtin.yum_repository:
+        file: pcp-coreos-hack
+        name: baseos
+        description: BaseOS repository
+        baseurl: "{{ pcp_repo_url }}/BaseOS/$basearch/os/"
+        gpgcheck: false
+
+    - name: Set repositories (AppStream)
+      ansible.builtin.yum_repository:
+        file: pcp-coreos-hack
+        name: appstream
+        description: AppStream repository
+        baseurl: "{{ pcp_repo_url }}/AppStream/$basearch/os/"
+        gpgcheck: false
+
+- name: Make /usr writable
+  become: true
+  ansible.posix.mount:
+    path: /usr
+    state: remounted
+    opts: rw
+
+- name: Create required directory
+  become: true
+  ansible.builtin.file:
+    path: /var/lib/rpm-state
+    state: directory
+    mode: "0750"

@@ -1,0 +1,32 @@
+name: Check if commit message body is not too short
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+
+jobs:
+  verify-body-length:
+    runs-on: ubuntu-latest
+    # set as non-voting for now.
+    continue-on-error: true
+
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Dump commit message to file
+        run: |
+          git fetch origin ${{ github.event.pull_request.head.sha }}
+          git log -1 --pretty=format:"%B" ${{ github.event.pull_request.head.sha }} > commit-message-file
+
+      - name: Run commit message check
+        id: bodylength
+        run: |
+          ./scripts/git-check-commit-body-length.sh commit-message-file

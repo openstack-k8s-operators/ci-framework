@@ -6,8 +6,10 @@ None
 
 ## Parameters
 
-* `cifmw_reproducer_user`: (String) User used for reproducer role. Defaults to `zuul`
 * `cifmw_reproducer_basedir`: (String) Base directory. Defaults to `cifmw_basedir`, which defaults to `~/ci-framework-data`.
+* `cifmw_reproducer_controller_user`: (String) User on controller-0. Defaults to `ansible_ssh_user` from controller-0's `hostvars` if available, otherwise defaults to `zuul`.
+* `cifmw_reproducer_controller_user_dir`: (String) Controller-0 user's home dir. Defaults to `/home/{{ cifmw_reproducer_controller_user }}`
+* `cifmw_reproducer_controller_basedir`: (String) Path to the `ci-framework-data` dir on controller-0. Defaults to `"{{ cifmw_reproducer_controller_user_dir }}/ci-framework-data"`
 * `cifmw_reproducer_compute_repos`: (List[mapping]) List of yum repository that must be deployed on the compute nodes during their creation. Defaults to `[]`.
 * `cifmw_reproducer_compute_set_repositories`: (Bool) Deploy repositories (rhos-release) on Compute nodes. Defaults to `true`.
 * `cifmw_reproducer_play_extravars`: (List[string]) List of extra-vars you want to pass down to the EDPM deployment playbooks. Defaults to `[]`.

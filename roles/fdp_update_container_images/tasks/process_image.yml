@@ -1,0 +1,67 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create repository file
+  ansible.builtin.template:
+    src: repo.j2
+    dest: "{{ _cifmw_fdp_update_container_images_temp_dir }}/{{ cifmw_fdp_update_container_images_repo_name }}.repo"
+    mode: '0644'
+
+- name: Create Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ _cifmw_fdp_update_container_images_temp_dir }}/Dockerfile"
+    mode: '0644'
+  vars:
+    base_image: "{{ image_entry.value }}"
+
+- name: Generate image paths
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_container_images_new_image_path_external: "{{ cifmw_fdp_update_container_images_image_registry }}/{{ cifmw_fdp_update_container_images_namespace }}/{{ cifmw_fdp_update_container_images_image_name_prefix }}-{{ image_entry.key | lower }}-{{ ansible_date_time.epoch }}"
+    _cifmw_fdp_update_container_images_new_image_path_internal: "{{ cifmw_fdp_update_container_images_image_registry_internal }}/{{ cifmw_fdp_update_container_images_namespace }}/{{ cifmw_fdp_update_container_images_image_name_prefix }}-{{ image_entry.key | lower }}-{{ ansible_date_time.epoch }}"
+
+- name: Build and push image
+  containers.podman.podman_image:
+    name: "{{ _cifmw_fdp_update_container_images_new_image_path_external }}"
+    path: "{{ _cifmw_fdp_update_container_images_temp_dir }}"
+    build:
+      file: "{{ _cifmw_fdp_update_container_images_temp_dir }}/Dockerfile"
+    push: true
+    push_args:
+      dest: "{{ _cifmw_fdp_update_container_images_new_image_path_external }}"
+    state: build
+
+- name: Patch OpenStackVersion CR
+  kubernetes.core.k8s:
+    state: patched
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    name: "{{ cifmw_fdp_update_container_images_openstack_cr_name }}"
+    namespace: "{{ cifmw_fdp_update_container_images_namespace }}"
+    definition:
+      spec:
+        customContainerImages:
+          "{{ image_entry.key }}": "{{ _cifmw_fdp_update_container_images_new_image_path_internal }}"
+
+- name: Update tracking
+  ansible.builtin.set_fact:
+    _cifmw_fdp_update_container_images_modified_images: "{{ _cifmw_fdp_update_container_images_modified_images + [image_entry.key ~ ': ' ~ _cifmw_fdp_update_container_images_new_image_path_internal] }}"
+    _cifmw_fdp_update_container_images_updated_cr_keys: "{{ _cifmw_fdp_update_container_images_updated_cr_keys + [image_entry.key] }}"
+    _cifmw_fdp_update_container_images_processed_images: "{{ _cifmw_fdp_update_container_images_processed_images | int + 1 }}"
+
+- name: Display progress
+  ansible.builtin.debug:
+    msg: "✓ Updated {{ image_entry.key }} ({{ _cifmw_fdp_update_container_images_processed_images }}/{{ _cifmw_fdp_update_container_images_image_entries | length }})"

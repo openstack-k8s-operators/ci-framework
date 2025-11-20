@@ -7,34 +7,29 @@ OIDCPassClaimsAs "{{ cifmw_federation_keystone_OIDC_PassClaimsAs }}"
 OIDCCryptoPassphrase "{{ cifmw_federation_keystone_OIDC_CryptoPassphrase }}"
 OIDCMetadataDir "/var/lib/httpd/metadata"
 OIDCRedirectURI "{{ cifmw_federation_keystone_url }}/v3/redirect_uri"
-LogLevel debug
+OIDCAuthRequestParams "prompt=login"
+LogLevel rewrite:trace3 auth_openidc:debug
 
-<LocationMatch "/v3/auth/OS-FEDERATION/identity_providers/{{ cifmw_federation_IdpName }}/protocols/openid/websso">
-  AuthType "openid-connect"
-  Require valid-user
-</LocationMatch>
+<IfModule headers_module>
+  <Location "/v3/local-logout/clear">
+    Header always add Set-Cookie "mod_auth_openidc_session=deleted; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None"
+  </Location>
+</IfModule>
 
-<Location ~ "/v3/OS-FEDERATION/identity_providers/{{ cifmw_federation_IdpName }}/protocols/openid/auth">
-  AuthType oauth20
-  Require valid-user
-</Location>
+RewriteEngine On
 
-<LocationMatch "/v3/auth/OS-FEDERATION/identity_providers/{{ cifmw_federation_IdpName2 }}/protocols/openid/websso">
-  AuthType "openid-connect"
-  Require valid-user
-</LocationMatch>
+RewriteRule ^/v3/auth/OS-FEDERATION/identity_providers/({{ cifmw_federation_IdpName }}|{{ cifmw_federation_IdpName2 }})/protocols/openid/websso$ \
+  /v3/local-logout/clear [R=302,L]
 
-<Location ~ "/v3/OS-FEDERATION/identity_providers/{{ cifmw_federation_IdpName2 }}/protocols/openid/auth">
-  AuthType oauth20
-  Require valid-user
-</Location>
+RewriteRule ^/v3/local-logout/clear$ \
+  /v3/auth/OS-FEDERATION/websso/openid [R=302,L,QSA,NE]
 
-<Location ~ "/redirect_uri">
-  Require valid-user
+<Location "/v3/auth/OS-FEDERATION/websso/openid">
   AuthType openid-connect
+  Require  valid-user
 </Location>
 
-<LocationMatch "/v3/auth/OS-FEDERATION/websso/openid">
-  AuthType "openid-connect"
-  Require valid-user
-</LocationMatch>
+<Location "/v3/redirect_uri">
+  AuthType openid-connect
+  Require  valid-user
+</Location>

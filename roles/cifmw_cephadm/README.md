@@ -103,6 +103,11 @@ that they do not need to be changed for a typical EDPM deployment.
 * `cifmw_cephadm_config_key_set_ssl_option`: Optional colon separated
   list of SSL context options (default: `no_sslv2:sslv3:no_tlsv1:no_tlsv1_1`)
 
+* `cifmw_rgw_ssl_backward_compatibility`: This option is true by default
+  because this role is able to manage older Ceph releases (starting from
+  Squid). Set it to false if the target Ceph release is equal to or greater
+  than Tentacle.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
