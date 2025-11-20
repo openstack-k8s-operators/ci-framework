@@ -1,0 +1,195 @@
+---
+
+- name: Deploy OpenStack Lightspeed operators
+  hosts: localhost
+  connection: local
+  vars:
+    # OpenShift Lightspeed (foundation)
+    openshift_lightspeed_namespace: "{{ cifmw_openshift_lightspeed_namespace | default('openshift-lightspeed') }}"
+    openshift_lightspeed_operator_group: "{{ cifmw_openshift_lightspeed_operator_group | default('lightspeed-operator-group') }}"
+
+    # OpenStack Lightspeed (main goal)
+    openstack_lightspeed_namespace: "{{ cifmw_openstack_lightspeed_namespace | default('openstack-lightspeed') }}"
+    openstack_lightspeed_operator_group: "{{ cifmw_openstack_lightspeed_operator_group | default('openstack-lightspeed-operator-group') }}"
+    openstack_lightspeed_catalog_image: "{{ cifmw_openstack_lightspeed_catalog_image | default('quay.io/openstack-lightspeed/operator-catalog:latest') }}"
+    openstack_lightspeed_catalog_name: "{{ cifmw_openstack_lightspeed_catalog_name | default('openstack-lightspeed-catalog') }}"
+
+    # Kubeconfig path
+    cifmw_openshift_kubeconfig: "{{ ansible_env.HOME }}/.crc/machines/crc/kubeconfig"
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+
+  tasks:
+    # STEP 1: Deploy OpenShift Lightspeed (foundation )
+
+    - name: Create namespace for OpenShift Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ openshift_lightspeed_namespace }}"
+
+    - name: Get service-ca bundle
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        name: service-ca
+        namespace: openshift-config-managed
+      register: service_ca_cm
+
+    - name: Create metrics-client-ca ConfigMap for OpenShift Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: metrics-client-ca
+            namespace: openshift-monitoring
+          data:
+            client-ca.crt: "{{ service_ca_cm.resources[0].data['ca-bundle.crt'] }}"
+      when: service_ca_cm.resources | length > 0
+
+    - name: Create OperatorGroup for OpenShift Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ openshift_lightspeed_operator_group }}"
+            namespace: "{{ openshift_lightspeed_namespace }}"
+          spec:
+            targetNamespaces:
+              - "{{ openshift_lightspeed_namespace }}"
+
+    - name: Subscribe to OpenShift Lightspeed operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: "lightspeed-operator"
+            namespace: "{{ openshift_lightspeed_namespace }}"
+          spec:
+            channel: "stable"
+            name: "lightspeed-operator"
+            source: "redhat-operators"
+            sourceNamespace: "openshift-marketplace"
+            installPlanApproval: "Automatic"
+
+    - name: Wait for OpenShift Lightspeed operator to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ openshift_lightspeed_namespace }}"
+        label_selectors:
+          - "control-plane=controller-manager"
+      register: ols_deployment
+      failed_when: false
+      until:
+        - ols_deployment.resources is defined
+        - ols_deployment.resources | length > 0
+        - ols_deployment.resources[0].status.readyReplicas is defined
+        - ols_deployment.resources[0].status.readyReplicas > 0
+      retries: 30
+      delay: 10
+
+    # STEP 2: Deploy OpenStack Lightspeed catalog
+
+    - name: Create CatalogSource for OpenStack Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: CatalogSource
+          metadata:
+            name: "{{ openstack_lightspeed_catalog_name }}"
+            namespace: "openshift-marketplace"
+          spec:
+            sourceType: grpc
+            image: "{{ openstack_lightspeed_catalog_image }}"
+            displayName: "OpenStack Lightspeed Operator"
+            publisher: "Red Hat"
+
+    - name: Wait for CatalogSource to be ready
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        name: "{{ openstack_lightspeed_catalog_name }}"
+        namespace: "openshift-marketplace"
+      register: catalog_source
+      failed_when: false
+      until:
+        - catalog_source.resources is defined
+        - catalog_source.resources | length > 0
+        - catalog_source.resources[0].status.connectionState.lastObservedState is defined
+        - catalog_source.resources[0].status.connectionState.lastObservedState == "READY"
+      retries: 30
+      delay: 10
+
+    # STEP 3: Deploy OpenStack Lightspeed operator
+
+    - name: Create namespace for OpenStack Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ openstack_lightspeed_namespace }}"
+
+    - name: Create OperatorGroup for OpenStack Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ openstack_lightspeed_operator_group }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          spec:
+            targetNamespaces:
+              - "{{ openstack_lightspeed_namespace }}"
+
+    - name: Subscribe to OpenStack Lightspeed operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: "openstack-lightspeed-operator"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          spec:
+            channel: "alpha"
+            name: "openstack-lightspeed-operator"
+            source: "{{ openstack_lightspeed_catalog_name }}"
+            sourceNamespace: "openshift-marketplace"
+            installPlanApproval: "Automatic"
+
+    - name: Wait for OpenStack Lightspeed operator to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ openstack_lightspeed_namespace }}"
+        label_selectors:
+          - "control-plane=controller-manager"
+      register: osls_deployment
+      failed_when: false
+      until:
+        - osls_deployment.resources is defined
+        - osls_deployment.resources | length > 0
+        - osls_deployment.resources[0].status.readyReplicas is defined
+        - osls_deployment.resources[0].status.readyReplicas > 0
+      retries: 30
+      delay: 10
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "✓ OpenShift Lightspeed operator deployed in namespace: {{ openshift_lightspeed_namespace }}"
+          - "✓ OpenStack Lightspeed operator deployed in namespace: {{ openstack_lightspeed_namespace }}"
