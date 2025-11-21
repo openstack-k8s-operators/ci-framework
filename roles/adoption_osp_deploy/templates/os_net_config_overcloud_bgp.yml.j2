@@ -1,0 +1,64 @@
+#jinja2: trim_blocks:True, lstrip_blocks:True
+network_config:
+- type: interface
+  name: nic1
+  mtu: {{ _interface_mtu }}
+  use_dhcp: true
+  routes: []
+- type: interface
+  name: nic2
+  mtu: {{ _interface_mtu }}
+{% if 'r0' in overcloud_vm %}
+  dns_servers: ['192.168.122.1', '192.168.125.1']
+{% elif 'r1' in overcloud_vm %}
+  dns_servers: ['192.168.123.1', '192.168.125.1']
+{% else %}
+  dns_servers: ['192.168.124.1', '192.168.125.1']
+{% endif %}
+  domain: []
+  routes:
+{% if 'r0' in overcloud_vm %}
+  - ip_netmask: 192.168.123.0/24
+    next_hop: 192.168.122.1
+  - ip_netmask: 192.168.124.0/24
+    next_hop: 192.168.122.1
+{% elif 'r1' in overcloud_vm %}
+  - ip_netmask: 192.168.122.0/24
+    next_hop: 192.168.123.1
+  - ip_netmask: 192.168.124.0/24
+    next_hop: 192.168.123.1
+{% else %}
+  - ip_netmask: 192.168.122.0/24
+    next_hop: 192.168.124.1
+  - ip_netmask: 192.168.123.0/24
+    next_hop: 192.168.124.1
+{% endif %}
+  use_dhcp: false
+  addresses:
+  - ip_netmask: {{ vms[overcloud_vm].ctlplane }}/24
+- type: interface
+  name: nic3
+  use_dhcp: false
+  addresses:
+  - ip_netmask:
+      {{ vms[overcloud_vm].left }}/30
+- type: interface
+  name: nic4
+  use_dhcp: false
+  addresses:
+  - ip_netmask:
+      {{ vms[overcloud_vm].right }}/30
+- type: interface
+  name: lo
+  use_dhcp: false
+  addresses:
+  - ip_netmask:
+      {{ vms[overcloud_vm].main }}/32
+  - ip_netmask:
+      {{ vms[overcloud_vm].main6 }}/128
+- type: ovs_bridge
+  name: br-ex
+  use_dhcp: false
+- type: ovs_bridge
+  name: br-vlan
+  use_dhcp: false
