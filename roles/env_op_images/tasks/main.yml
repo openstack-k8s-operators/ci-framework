@@ -51,8 +51,8 @@
           oc get ClusterServiceVersion
           -l operators.coreos.com/openstack-operator.openstack-operators
           --all-namespaces
-          -o yaml
-      register: _csvs_out
+          -o yaml > {{ cifmw_basedir }}/logs/openstack_csvs_output.yaml
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     - name: Get the images name
       ansible.builtin.shell: >
@@ -95,9 +95,16 @@
         cifmw_install_yamls_vars_content:
           OPENSTACK_IMG: "{{ selected_pod.status.containerStatuses[0].imageID }}"
 
+    - name: Read openstack_csvs_output.yaml file
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/logs/openstack_csvs_output.yaml"
+      register: _csvs_out
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
     - name: Get all the pods in openstack-operator namespace
       vars:
-        csv_items: "{{ (_csvs_out.stdout | from_yaml)['items'] }}"
+        parsed_csv: "{{ _csvs_out['content'] | b64decode | from_yaml }}"
+        csv_items: "{{ parsed_csv['items'] }}"
       kubernetes.core.k8s_info:
         kind: Pod
         namespace: >-
@@ -140,6 +147,7 @@
       loop: "{{ selected_pods }}"
       loop_control:
         label: "{{ item.metadata.name }}"
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     - name: Write images to file
       vars:
