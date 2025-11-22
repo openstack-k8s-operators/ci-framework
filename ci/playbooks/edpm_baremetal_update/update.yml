@@ -1,0 +1,280 @@
+---
+# CI playbook for OpenStack minor version updates.
+# This playbook performs a minor version update of an OpenStack deployment
+# using index images and install_yamls make targets.
+# This playbook depends on content provider variables from CI jobs.
+# It runs on cifmw_zuul_target_host where tasks are executed.
+# This playbook should be called after update_prepare.yml which sets up
+# the collection. This playbook generates the install_yamls_makes role
+# and then performs the update.
+# This is Phase 2 of the baremetal update workflow and should be called
+# sequentially after run.yml (Phase 1) and update_prepare.yml.
+
+- name: Ensure install_yamls_makes role exists on zuul host
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Set cifmw_basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+
+    - name: Debug - Show ANSIBLE_CONFIG environment variable
+      ansible.builtin.debug:
+        msg: "ANSIBLE_CONFIG={{ ansible_env.ANSIBLE_CONFIG | default('not set') }}"
+
+    - name: Debug - Get ansible config file being used
+      ansible.builtin.command:
+        cmd: ansible --version
+      register: ansible_version_output
+      changed_when: false
+
+    - name: Debug - Show ansible config file location
+      ansible.builtin.debug:
+        msg: "{{ ansible_version_output.stdout_lines }}"
+
+    - name: Debug - Read ansible.cfg content if ANSIBLE_CONFIG is set
+      when: ansible_env.ANSIBLE_CONFIG is defined
+      ansible.builtin.slurp:
+        src: "{{ ansible_env.ANSIBLE_CONFIG }}"
+      register: ansible_cfg_content
+
+    - name: Debug - Show ansible.cfg content
+      when: ansible_env.ANSIBLE_CONFIG is defined
+      ansible.builtin.debug:
+        msg: "{{ ansible_cfg_content.content | b64decode }}"
+
+    - name: Debug - Determine project directory
+      ansible.builtin.set_fact:
+        debug_project_dir: >-
+          {{
+            (zuul is defined and
+             zuul.projects is defined and
+             'github.com/openstack-k8s-operators/ci-framework' in zuul.projects) |
+            ternary(
+              ansible_user_dir ~ '/' ~ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir,
+              cifmw_project_dir_absolute | default(ansible_user_dir ~ '/src/github.com/openstack-k8s-operators/ci-framework')
+            )
+          }}
+
+    - name: Debug - Show project directory
+      ansible.builtin.debug:
+        msg: "Project directory: {{ debug_project_dir }}"
+
+    - name: Debug - Check if source plugins directory exists
+      ansible.builtin.stat:
+        path: "{{ debug_project_dir }}/plugins"
+      register: source_plugins_dir_check
+
+    - name: Debug - Show source plugins directory status
+      ansible.builtin.debug:
+        msg: "Source plugins directory exists: {{ source_plugins_dir_check.stat.exists }}, path: {{ debug_project_dir }}/plugins"
+
+    - name: Debug - List files in source plugins directory
+      when: source_plugins_dir_check.stat.exists
+      ansible.builtin.find:
+        paths: "{{ debug_project_dir }}/plugins"
+        patterns: "*.py"
+        recurse: true
+      register: source_plugins_files
+
+    - name: Debug - Show source plugins files
+      when: source_plugins_dir_check.stat.exists
+      ansible.builtin.debug:
+        msg: "Source plugins files: {{ source_plugins_files.files | map(attribute='path') | list }}"
+
+    - name: Debug - Check if get_makefiles_env module exists in source
+      when: source_plugins_dir_check.stat.exists
+      ansible.builtin.stat:
+        path: "{{ debug_project_dir }}/plugins/modules/get_makefiles_env.py"
+      register: get_makefiles_env_source_file
+
+    - name: Debug - Show get_makefiles_env source file status
+      ansible.builtin.debug:
+        msg: "get_makefiles_env.py exists in source: {{ get_makefiles_env_source_file.stat.exists | default(false) }}, path: {{ debug_project_dir }}/plugins/modules/get_makefiles_env.py"
+
+    - name: Debug - Check if plugins/modules directory exists in source
+      ansible.builtin.stat:
+        path: "{{ debug_project_dir }}/plugins/modules"
+      register: source_modules_dir_check
+
+    - name: Debug - Show source modules directory status
+      ansible.builtin.debug:
+        msg: "Source plugins/modules directory exists: {{ source_modules_dir_check.stat.exists | default(false) }}, path: {{ debug_project_dir }}/plugins/modules"
+
+    - name: Debug - List all modules in source plugins/modules
+      when: source_modules_dir_check.stat.exists
+      ansible.builtin.find:
+        paths: "{{ debug_project_dir }}/plugins/modules"
+        patterns: "*.py"
+      register: source_modules_list
+
+    - name: Debug - Show source modules list
+      when: source_modules_dir_check.stat.exists
+      ansible.builtin.debug:
+        msg: "Source modules: {{ source_modules_list.files | map(attribute='name') | list }}"
+
+    - name: Debug - Check collection symlink exists
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw/general/plugins"
+      register: collection_symlink_check
+
+    - name: Debug - Show collection symlink status
+      ansible.builtin.debug:
+        msg: "Collection symlink exists: {{ collection_symlink_check.stat.exists }}, islink: {{ collection_symlink_check.stat.islnk | default(false) }}, target: {{ collection_symlink_check.stat.lnk_target | default('N/A') }}"
+
+    - name: Debug - Check if get_makefiles_env module exists through symlink
+      when: collection_symlink_check.stat.exists
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw/general/plugins/modules/get_makefiles_env.py"
+      register: get_makefiles_env_symlink_file
+
+    - name: Debug - Show get_makefiles_env through symlink
+      when: collection_symlink_check.stat.exists
+      ansible.builtin.debug:
+        msg: "get_makefiles_env.py exists through symlink: {{ get_makefiles_env_symlink_file.stat.exists | default(false) }}, path: {{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw/general/plugins/modules/get_makefiles_env.py"
+
+    - name: Debug - Check if plugins/modules directory exists through symlink
+      when: collection_symlink_check.stat.exists
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw/general/plugins/modules"
+      register: symlink_modules_dir_check
+
+    - name: Debug - Show symlink modules directory status
+      when: collection_symlink_check.stat.exists
+      ansible.builtin.debug:
+        msg: "Symlink plugins/modules directory exists: {{ symlink_modules_dir_check.stat.exists | default(false) }}, path: {{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw/general/plugins/modules"
+
+    - name: Debug - List all modules through symlink
+      when: symlink_modules_dir_check.stat.exists
+      ansible.builtin.find:
+        paths: "{{ ansible_user_dir }}/.ansible/collections/ansible_collections/cifmw/general/plugins/modules"
+        patterns: "*.py"
+      register: symlink_modules_list
+
+    - name: Debug - Show modules through symlink
+      when: symlink_modules_dir_check.stat.exists
+      ansible.builtin.debug:
+        msg: "Modules through symlink: {{ symlink_modules_list.files | map(attribute='name') | list }}"
+
+    - name: Debug - Get collection paths from ansible config
+      ansible.builtin.command:
+        cmd: ansible-config dump | grep -i COLLECTIONS_PATH
+      register: collections_path_output
+      changed_when: false
+
+    - name: Debug - Show collection paths
+      ansible.builtin.debug:
+        msg: "{{ collections_path_output.stdout_lines }}"
+
+    - name: Debug - List available collections
+      ansible.builtin.command:
+        cmd: ansible-galaxy collection list
+      register: collections_list
+      changed_when: false
+
+    - name: Debug - Show available collections
+      ansible.builtin.debug:
+        msg: "{{ collections_list.stdout_lines }}"
+
+    - name: Debug - Test if cifmw.general.get_makefiles_env module is accessible
+      ansible.builtin.command:
+        cmd: ansible-doc -t module cifmw.general.get_makefiles_env 2>&1 || echo "Module not found"
+      register: module_test
+      changed_when: false
+      ignore_errors: true
+
+    - name: Debug - Show module test result
+      ansible.builtin.debug:
+        msg: "{{ module_test.stdout_lines }}"
+
+    - name: Check if install_yamls_makes role exists
+      ansible.builtin.stat:
+        path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/roles/install_yamls_makes/tasks"
+      register: install_yamls_makes_role_check
+
+    - name: Generate install_yamls_makes role on zuul host
+      when: not install_yamls_makes_role_check.stat.exists
+      ansible.builtin.include_role:
+        name: install_yamls
+
+- name: OpenStack minor version update
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Set cifmw_basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+
+    - name: Set update artifacts basedir if not defined
+      ansible.builtin.set_fact:
+        cifmw_update_artifacts_basedir: "{{ cifmw_update_artifacts_basedir | default(cifmw_basedir ~ '/tests/update') }}"
+
+    - name: Get minor update index image from content provider or use default
+      ansible.builtin.set_fact:
+        cifmw_minor_update_index_image: >-
+          {{
+            cifmw_operator_build_output.operators['openstack-operator'].image_catalog
+            if (cifmw_operator_build_output is defined and
+                cifmw_operator_build_output.operators is defined and
+                'openstack-operator' in cifmw_operator_build_output.operators)
+            else cifmw_minor_update_pre_update_index_image | default('quay.io/openstack-k8s-operators/openstack-operator-index:18.0-fr3-latest')
+          }}
+
+    - name: Write minor update index image to parameters file
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/parameters/minor_update_index_image.yml"
+        content: "{{ {'cifmw_minor_update_index_image': cifmw_minor_update_index_image} | to_nice_yaml }}"
+        mode: "0644"
+      when: cifmw_minor_update_index_image is defined
+
+    - name: Initialize monitoring
+      ansible.builtin.include_role:
+        name: update
+        tasks_from: init_monitoring.yml
+
+    - name: Copy parameters files from cifmw_zuul_target_host to localhost and include vars
+      # Parameters files exist on cifmw_zuul_target_host, but include_vars reads from localhost.
+      # Use include_dir.yml to copy files from remote to localhost first.
+      vars:
+        included_dir: "{{ cifmw_basedir }}/artifacts/parameters"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_dir.yml
+
+    - name: Set install_yamls environment for minor update phase
+      ansible.builtin.set_fact:
+        cifmw_minor_update_env: >-
+          {{
+            (cifmw_install_yamls_environment | default({})) |
+            combine({'PATH': cifmw_path | default(ansible_user_dir ~ '/.crc/bin:' ~ ansible_user_dir ~ '/.crc/bin/oc:' ~ ansible_user_dir ~ '/bin:' ~ ansible_env.PATH)}) |
+            combine({'OPENSTACK_IMG': cifmw_minor_update_index_image}) |
+            combine({'BMO_CLEANUP': false})
+          }}
+
+    - name: Set vars related to update_containers content provider
+      when:
+        - content_provider_os_registry_url is defined
+        - content_provider_os_registry_url != 'null'
+      ansible.builtin.set_fact:
+        cifmw_update_containers_registry: "{{ content_provider_os_registry_url  | split('/') | first }}"
+        cifmw_update_containers_org: "{{ content_provider_os_registry_url  | split('/') | last }}"
+        cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
+        cifmw_update_containers_openstack: true
+
+    - name: Run update variant ci
+      vars:
+        cifmw_update_variant: ci
+        cifmw_update_cleanup_ignore_errors: true
+        cifmw_update_openstack_update_run_timeout: "1200s"
+        cifmw_update_display_verification_result: true
+        cifmw_update_stop_monitoring: true
+      ansible.builtin.include_role:
+        name: update
+        tasks_from: update_variant_ci.yml

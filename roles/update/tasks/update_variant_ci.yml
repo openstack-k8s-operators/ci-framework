@@ -1,0 +1,249 @@
+---
+# CI update variant for OpenStack version updates
+# This variant is used in CI jobs for testing minor version updates from one
+# release to another (e.g., FR3 -> FR4) using index images and install_yamls make targets.
+# Also used for baremetal update workflows.
+
+- name: Set cifmw_basedir if not defined
+  ansible.builtin.set_fact:
+    cifmw_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+
+- name: Ensure update log directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_update_artifacts_basedir }}"
+    state: directory
+    mode: "0755"
+
+- name: Create update step monitoring file
+  ansible.builtin.template:
+    src: "update_event.sh.j2"
+    dest: "{{ cifmw_update_artifacts_basedir }}/update_event.sh"
+    mode: "0755"
+
+- name: Set update environment variable if not defined
+  ansible.builtin.set_fact:
+    _update_env: >-
+      {{
+        cifmw_minor_update_env | default(
+          cifmw_install_yamls_environment | default({}) | combine({'PATH': cifmw_path | default('') })
+        )
+      }}
+
+- name: Set update step to Running openstack cleanup
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Running openstack cleanup
+
+- name: Run make openstack_cleanup
+  vars:
+    make_openstack_cleanup_env: "{{ _update_env }}"
+    make_openstack_cleanup_dryrun: false
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_cleanup'
+  ignore_errors: "{{ cifmw_update_cleanup_ignore_errors | default(false) | bool }}"
+
+- name: Set update step to Running openstack wait
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Running openstack wait
+
+- name: Run make openstack_wait
+  vars:
+    make_openstack_wait_env: "{{ _update_env }}"
+    make_openstack_wait_dryrun: false
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_wait'
+
+- name: Set update step to Running openstack init
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Running openstack init
+
+- name: Run make openstack_init
+  vars:
+    make_openstack_init_env: "{{ _update_env }}"
+    make_openstack_init_dryrun: false
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_init'
+
+- name: Set update step to Waiting for new version to be available
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Waiting for new version to be available
+
+- name: Set update namespace
+  ansible.builtin.set_fact:
+    _update_namespace: >-
+      {{
+        cifmw_update_namespace | default(
+          cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack')
+        )
+      }}
+
+- name: Wait for availableVersion to be different from deployedVersion
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ _update_namespace }}"
+  register: openstackversion_wait_info
+  retries: 10
+  delay: 60
+  until: >
+    openstackversion_wait_info.resources is defined and
+    openstackversion_wait_info.resources | length > 0 and
+    openstackversion_wait_info.resources[0].status.availableVersion is defined and
+    openstackversion_wait_info.resources[0].status.deployedVersion is defined and
+    openstackversion_wait_info.resources[0].status.availableVersion != openstackversion_wait_info.resources[0].status.deployedVersion
+
+- name: Get available version from OpenStackVersion CR
+  ansible.builtin.set_fact:
+    cifmw_update_next_available_version: "{{ openstackversion_wait_info.resources[0].status.availableVersion }}"
+    cifmw_minor_update_target_version: "{{ openstackversion_wait_info.resources[0].status.availableVersion }}"
+
+- name: Set update target version
+  ansible.builtin.set_fact:
+    _update_target_version: >-
+      {{
+        cifmw_minor_update_target_version | default(cifmw_update_next_available_version)
+      }}
+
+- name: Set update step to Patching OpenStackVersion CR
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Patching OpenStackVersion CR with version {{ _update_target_version }}
+
+- name: Patch OpenStackVersion CR availableVersion
+  vars:
+    make_openstack_patch_version_env: "{{ _update_env }}"
+    make_openstack_patch_version_dryrun: false
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_patch_version'
+
+- name: Set vars related to update_containers content provider
+  when:
+    - content_provider_os_registry_url is defined
+    - content_provider_os_registry_url != 'null'
+  ansible.builtin.set_fact:
+    cifmw_update_containers_registry: "{{ content_provider_os_registry_url  | split('/') | first }}"
+    cifmw_update_containers_org: "{{ content_provider_os_registry_url  | split('/') | last }}"
+    cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
+    cifmw_update_containers_openstack: true
+
+- name: Set update step to Updating container images
+  when: >-
+    (cifmw_update_containers_edpm_image_url is defined and
+    cifmw_update_containers_openstack is defined and
+    cifmw_update_containers_openstack | bool) or
+    (cifmw_update_containers_ansibleee_image_url is defined) or
+    (cifmw_update_containers_openstack is defined and
+    cifmw_update_containers_openstack | bool) or
+    (cifmw_update_containers_watcher is defined and
+    cifmw_update_containers_watcher | bool)
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Updating container images
+
+- name: Prepare and patch OpenStackVersion CR for update
+  vars:
+    cifmw_update_containers_metadata: "controlplane"
+    cifmw_update_containers: true
+  ansible.builtin.include_role:
+    name: update_containers
+  when: >-
+    (cifmw_update_containers_edpm_image_url is defined and
+    cifmw_update_containers_openstack is defined and
+    cifmw_update_containers_openstack | bool) or
+    (cifmw_update_containers_ansibleee_image_url is defined) or
+    (cifmw_update_containers_openstack is defined and
+    cifmw_update_containers_openstack | bool) or
+    (cifmw_update_containers_watcher is defined and
+    cifmw_update_containers_watcher | bool)
+
+- name: Set update step to Starting the CI update sequence
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Starting the CI update sequence
+
+- name: Run make openstack_update_run
+  vars:
+    make_openstack_update_run_env: "{{ _update_env }}"
+    make_openstack_update_run_params: >-
+      {{
+        {
+          'OPENSTACK_VERSION': _update_target_version
+        } | combine(
+          {'TIMEOUT': cifmw_update_openstack_update_run_timeout} if cifmw_update_openstack_update_run_timeout is defined else {}
+        )
+      }}
+    make_openstack_update_run_dryrun: false
+  ansible.builtin.include_role:
+    name: 'install_yamls_makes'
+    tasks_from: 'make_openstack_update_run'
+
+- name: Set update step to Verifying update completion
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      Verifying update completion
+
+- name: Verify deployed version matches target version
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackVersion
+    namespace: "{{ _update_namespace }}"
+  register: openstackversion_verify_info
+  until: >
+    openstackversion_verify_info.resources is defined and
+    openstackversion_verify_info.resources | length > 0 and
+    openstackversion_verify_info.resources[0].status.deployedVersion is defined and
+    openstackversion_verify_info.resources[0].status.deployedVersion == _update_target_version
+  retries: 5
+  delay: 2
+
+- name: Set update step to CI update sequence complete
+  ansible.builtin.command:
+    cmd: >
+      {{ cifmw_update_artifacts_basedir }}/update_event.sh
+      CI update verification successful - Target version {{ _update_target_version }}
+      matches deployed version {{ openstackversion_verify_info.resources[0].status.deployedVersion }}
+
+- name: Display update verification result
+  when: cifmw_update_display_verification_result | default(false) | bool
+  ansible.builtin.debug:
+    msg: >-
+      Update verification successful: Target version {{ _update_target_version }}
+      matches deployed version {{ openstackversion_verify_info.resources[0].status.deployedVersion }}
+
+- name: Stop monitoring
+  when: cifmw_update_stop_monitoring | default(false) | bool
+  block:
+    - name: Verify monitoring pid file
+      ansible.builtin.stat:
+        path: "{{ cifmw_update_artifacts_basedir }}/monitor_resources_changes.pid"
+      register: cifmw_update_monitoring_pid
+
+    - name: Stop the monitoring process
+      ansible.builtin.shell:
+        cmd: >-
+          kill
+          $(cat {{ cifmw_update_artifacts_basedir }}/monitor_resources_changes.pid)
+      register: _kill_result
+      failed_when: _kill_result.rc not in [0, 1]
+      when: cifmw_update_monitoring_pid.stat.exists | bool
