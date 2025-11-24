@@ -32,6 +32,16 @@
       ansible.builtin.include_role:
         name: build_openstack_packages
 
+    - name: Check for gating repo
+      ansible.builtin.stat:
+        path: "{{ cifmw_build_containers_repo_dir }}/gating.repo"
+      register: _gating_repo
+
+    - name: Set gating repo URL if available
+      when: _gating_repo.stat.exists
+      ansible.builtin.set_fact:
+        content_provider_gating_repo_url: "http://{{ cifmw_rp_registry_ip }}:{{ cifmw_bop_gating_port | default(8766) }}"
+
     - name: Construct project change list
       ansible.builtin.set_fact:
         zuul_change_list: "{{ zuul_change_list | default([]) + [item.project.short_name] }}"
@@ -63,6 +73,14 @@
             - container_img_build
           ansible.builtin.include_role:
             name: build_containers
+
+        - name: Save registry namespace and URL
+          when:
+            - cifmw_build_containers_registry_namespace is defined
+            - cifmw_build_containers_push_registry is defined
+          ansible.builtin.set_fact:
+            content_provider_os_registry_namespace: "{{ cifmw_build_containers_registry_namespace }}"
+            content_provider_os_registry_url: "{{ cifmw_build_containers_push_registry }}/{{ cifmw_build_containers_registry_namespace }}"
 
         - name: Get the containers list from container registry
           ansible.builtin.uri:
