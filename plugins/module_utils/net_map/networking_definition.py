@@ -2568,7 +2568,7 @@ class NetworkingDefinition:
 
     @staticmethod
     def __check_overlapping_ranges_dict(
-        ranges_dict: typing.Dict[str, typing.List[HostNetworkRange]]
+        ranges_dict: typing.Dict[str, typing.List[HostNetworkRange]],
     ):
         for net_name, net_ranges in ranges_dict.items():
             if len(net_ranges) < 2:
