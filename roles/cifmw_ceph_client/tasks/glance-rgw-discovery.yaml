@@ -1,0 +1,127 @@
+---
+- name: Ensure cifmw_cephadm_fsid variable is set if none was provided
+  delegate_to: "{{ groups['cephs'][0] }}"
+  when: cifmw_cephadm_fsid is not defined or cifmw_cephadm_fsid | length == 0
+  block:
+    - name: List Ceph daemon instances on this host
+      ansible.builtin.command:
+        cmd: "{{ cifmw_cephadm_bin }} ls --no-detail"
+      register: cephadm_ls
+      no_log: true
+      become: true
+
+    - name: Set list of found FSIDs
+      ansible.builtin.set_fact:
+        cifmw_cephadm_fsid_list: |-
+          {{
+            cephadm_ls.stdout |
+            from_json |
+            map(attribute='fsid') |
+            sort | unique
+          }}
+      when:
+        - cephadm_ls.stdout | length != 0
+
+    - name: Fail if >1 FSID was discovered
+      when: cifmw_cephadm_fsid_list | length > 1
+      ansible.builtin.fail:
+        msg: |
+          Multiple FSIDs were found. This Ansible role does not
+          support management of multiple Ceph clusters on one host.
+
+    - name: Set FSID to the discovered value
+      when: cifmw_cephadm_fsid_list | length == 1
+      ansible.builtin.set_fact:
+        cifmw_cephadm_fsid: "{{ cifmw_cephadm_fsid_list[0] }}"
+
+- name: Create glance RGW user
+  delegate_to: "{{ groups['cephs'][0] }}"
+  block:
+    - name: Import Ceph cli role
+      ansible.builtin.import_role:
+        name: cifmw_cephadm
+        tasks_from: ceph_cli.yml
+      vars:
+        ceph_command: radosgw-admin
+
+    - name: Check if Ceph S3 glance user exists
+      ignore_errors: true
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }} user info --uid glance
+      register: cifmw_ceph_s3_glance_user_check
+
+    - name: Create Ceph S3 glance user
+      ignore_errors: true  # noqa: ignore-errors
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }} user create
+          --uid="glance"
+          --display-name="Glance S3 User"
+      when: cifmw_ceph_s3_glance_user_check != 0
+
+    - name: Get RGW glance user info
+      ansible.builtin.command:
+        cmd: >-
+          {{ cifmw_cephadm_ceph_cli }} user info --uid="glance"
+      become: true
+      no_log: true
+      changed_when: false
+      register: rgw_user_info
+
+- name: Set facts RGW glance user
+  ansible.builtin.set_fact:
+    rgw_user_json_string: "{{ rgw_user_info.stdout | from_json }}"
+  no_log: true
+
+- name: Get OpenStack internal object-store endpoints
+  ansible.builtin.command: oc -n openstack rsh openstackclient openstack endpoint list --service object-store --interface internal -f value -c URL
+  register: object_store_endpoint_raw
+  delegate_to: localhost
+
+- name: Extract base URL without path
+  ansible.builtin.set_fact:
+    rgw_internal_url: >-
+      {{
+        object_store_endpoint_raw.stdout
+        | regex_replace('(/swift.*)$', '')
+      }}
+
+- name: Set fact for glance S3 backend secrets
+  ansible.builtin.set_fact:
+    ceph_s3_access_key: "{{ rgw_user_json_string['keys'][0]['access_key'] }}"
+    ceph_s3_secret_key: "{{ rgw_user_json_string['keys'][0]['secret_key'] }}"
+    ceph_s3_bucket: "glance-s3-bucket"
+    ceph_s3_endpoint: "{{ rgw_internal_url }}"
+  no_log: true
+
+- name: Generate Glance S3 backend secrets using Ceph RGW credentials
+  ansible.builtin.template:
+    src: templates/k8s_ceph_rgw_glance_secret.j2
+    dest: k8s_ceph_rgw_glance_secret.yaml
+    mode: "0600"
+    force: true
+  no_log: true
+
+- name: Create glance S3 backend secrets
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: openstack
+    state: present
+    apply: true
+    force: true
+    src: k8s_ceph_rgw_glance_secret.yaml
+  register: k8s_glance_s3_secret
+  delegate_to: localhost
+  no_log: true
+
+- name: Delete the rendered secret file
+  ansible.builtin.file:
+    path: k8s_ceph_rgw_glance_secret.yaml
+    state: absent
+  delegate_to: localhost
+  when: k8s_glance_s3_secret | default(true)
