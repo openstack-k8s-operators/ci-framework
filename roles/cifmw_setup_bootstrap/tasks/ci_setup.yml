@@ -1,0 +1,48 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Include common prerequisites
+  ansible.builtin.include_tasks: common_prerequisites.yml
+
+- name: Check if CI setup is already done
+  ansible.builtin.include_tasks: checks/check_ci_setup_done.yml
+
+- name: Check if repo-setup is configured (prerequisite)
+  ansible.builtin.include_tasks: checks/check_repo_setup_installed.yml
+
+- name: "BS-03: Verify prerequisites"
+  when: not _cifmw_setup_bootstrap_repo_setup_already_installed
+  ansible.builtin.fail:
+    msg: |
+      BS-03 requires repository configuration first.
+      Either run BS-02 (repo_setup.yml) or configure repositories manually.
+      Expected: {{ cifmw_repo_setup_venv }}/bin/repo-setup should exist.
+
+- name: "BS-03: CI Setup"
+  when: not _cifmw_setup_bootstrap_ci_packages_installed or not _cifmw_setup_bootstrap_oc_client_installed
+  block:
+    - name: Call ci_setup role
+      ansible.builtin.import_role:
+        name: ci_setup
+
+  rescue:
+    - name: Fail with clear message
+      ansible.builtin.fail:
+        msg: "BS-03 (CI Setup) failed"
+
+- name: "BS-03: Status"
+  ansible.builtin.debug:
+    msg: "BS-03: {{ 'Already configured' if (_cifmw_setup_bootstrap_ci_packages_installed and _cifmw_setup_bootstrap_oc_client_installed) else 'Completed' }}"
