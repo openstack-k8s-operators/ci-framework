@@ -1,4 +1,19 @@
 ---
+# FIXME: Normally that part should not be needed, but...
+# if all "required" projects would not be done, later we will have an error:
+#
+#    TASK [repo_setup : Make sure git-core package is installed] ********************
+#    fatal: [hypervisor -> controller-0(controller-0.hypervisor)]: FAILED! =>
+#     fact that ''no_log: true'' was specified
+#
+# OR
+#
+#    TASK [repo_setup : Make sure git-core package is installed] ********************
+#    ok: [hypervisor -> controller-0(controller-0.hypervisor)]
+#    TASK [repo_setup : Get repo-setup repository] **********************************
+#    fatal: [hypervisor -> controller-0(controller-0.hypervisor)]: FAILED! =>
+#     fact that ''no_log: true'' was specified
+#
 - name: Sync zuul content if available
   when:
     - (zuul is defined) or (zuul_vars.zuul is defined)
@@ -61,7 +76,6 @@
             chdir: "{{ dest_dir }}"
             cmd: "git -c 'user.name=zuul' -c 'user.email=zuul@controller-0.com' pull --rebase origin {{ refspec | regex_replace(':.*', '') }}"
           loop: "{{ ansible_failed_result['results'] }}"
-
 
     - name: Fetch zuul.projects repositories for dependencies
       when:
@@ -156,9 +170,23 @@
         loop_var: repository
         label: "{{ repository.src | basename }}"
 
+# Sync repositories if zuul is not defined
+- name: Push src directory if Zuul does not exists
+  when:
+    - (zuul_vars is not defined) or (zuul_vars.zuul.projects | length == 0 | default(false))
+  block:
+    - name: Sync local repositories to ansible controller
+      delegate_to: localhost
+      ansible.posix.synchronize:
+        src: "{{ ansible_user_dir }}/src/"
+        dest: "{{ cifmw_reproducer_controller_user }}@controller-0:{{ ansible_user_dir }}/src"
+        archive: true
+        recursive: true
+        delete: true
+
 # installing the cifmw collection will pull it's dependencies alongside it
 - name: Install collections on controller-0
   delegate_to: controller-0
   ansible.builtin.command:
-    chdir: "{{ _cifmw_reproducer_framework_location }}"
+    chdir: "{{ _cifmw_reproducer_framework_location | default(cifmw_project_dir) }}"
     cmd: ansible-galaxy collection install --upgrade --force .
