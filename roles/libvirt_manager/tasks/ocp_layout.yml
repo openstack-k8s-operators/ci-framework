@@ -26,14 +26,28 @@
       {{ cifmw_libvirt_manager_ocp_pool_dir }}
     _layout_overrides:
       image_local_dir: "{{ cifmw_libvirt_manager_basedir }}/images"
-      disksize: "50"
       disk_file_name: "blank"
+    _disksize_override_master:
+      disksize: >-
+        {{
+          _cifmw_libvirt_manager_layout.vms.ocp.disksize | default('50')
+          if not (cifmw_use_ocp_overlay | default(true) | bool)
+          else '50'
+        }}
+    _disksize_override_worker:
+      disksize: >-
+        {{
+          _cifmw_libvirt_manager_layout.vms.ocp_worker.disksize | default('50')
+          if not (cifmw_use_ocp_overlay | default(true) | bool)
+          else '50'
+        }}
     _ocp_layout:
       vms:
         ocp_master: >-
           {{
             _cifmw_libvirt_manager_layout.vms.ocp |
             combine(_layout_overrides, recursive=true) |
+            combine(_disksize_override_master, recursive=true) |
             ansible.utils.remove_keys(target="xml_paths")
           }}
         ocp_worker: >-
@@ -41,6 +55,7 @@
             _cifmw_libvirt_manager_layout.vms.ocp_worker |
             default({'amount': 0}) |
             combine(_layout_overrides, recursive=true) |
+            combine(_disksize_override_worker, recursive=true) |
             ansible.utils.remove_keys(target="xml_paths")
           }}
     _vm_list: >-
