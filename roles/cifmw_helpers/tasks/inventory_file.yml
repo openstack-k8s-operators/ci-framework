@@ -17,8 +17,23 @@
         inventory_data: "{{ _inventory_file.content | b64decode | from_yaml }}"
 
     - name: Process each group with hosts
+      when:
+        - inventory_data is mapping
+        - inventory_data | dict2items | selectattr('value.hosts', 'defined') | list | length > 0
       ansible.builtin.include_tasks:
         file: parse_inventory.yml
       loop: "{{ inventory_data | dict2items | selectattr('value.hosts', 'defined') | list }}"
+      loop_control:
+        loop_var: group_item
+
+    - name: Process each group with hosts when in groups
+      when:
+        - inventory_data.all is defined
+        - inventory_data.all.children is defined
+        - inventory_data.all.children is mapping
+        - inventory_data.all.children | dict2items | selectattr('value.hosts', 'defined') | list | length > 0
+      ansible.builtin.include_tasks:
+        file: parse_inventory.yml
+      loop: "{{ inventory_data.all.children | dict2items | selectattr('value.hosts', 'defined') | list }}"
       loop_control:
         loop_var: group_item
