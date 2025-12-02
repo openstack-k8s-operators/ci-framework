@@ -128,11 +128,13 @@ data:
         "isDefaultGateway": true,
         "isGateway": true,
         "forceAddress": false,
+{%  if network.network_name == "ctlplane" %}
         "ipMasq": true,
+{%  else %}
+        "ipMasq": false,
+{%  endif %}
         "hairpinMode": true,
-{%  if network.network_name == "octavia" %}
-        "bridge": "octbr",
-{%  elif network.network_name == "ctlplane" %}
+{%  if network.network_name == "ctlplane" %}
         "bridge": "ospbr",
 {%  else %}
         "bridge": "{{ network.network_name }}",
@@ -165,16 +167,12 @@ data:
   dns-resolver:
     config:
       server:
-# We set ctlplane = 192.168.125.0/24 and we rely on this definition to create the nad above.
-# BGP exposes nad ips by advertising a 192.168.125.X address on the worker, and this would break dns
-# because the traffic will not be sent to the right nic if a local ip on the same network is present.
-# To avoid messing with routes etc we hardcode the 122.1 ip here
-        - 192.168.122.1
+        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
       search: []
     options:
       - key: server
         values:
-          - 192.168.122.1
+          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}
 {% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
       - key: server
         values:
