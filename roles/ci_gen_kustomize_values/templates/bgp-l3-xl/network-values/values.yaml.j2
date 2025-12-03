@@ -125,7 +125,11 @@ data:
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
         "type": "bridge",
+{%  if network.network_name == "storage" %}
+        "isDefaultGateway": false,
+{%  else %}
         "isDefaultGateway": true,
+{%  endif %}
         "isGateway": true,
         "forceAddress": false,
 {%  if network.network_name == "ctlplane" %}
@@ -152,13 +156,20 @@ data:
 {%  endfor %}
            ],
 {%  endif %}
-          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
+{%  if network.network_name == "storage" %}
+          "routes": [
+               {"dst": "172.31.0.0/24", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"},
+               {"dst": "192.168.188.0/24", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"},
+               {"dst": "99.99.0.0/16", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"}
+           ],
+{%  endif %}
 {%  if network.network_name == "ctlplane" %}
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(2) }}"
-{% else %}
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(2) }}",
+{% elif network.network_name != "storage" %}
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}",
 {% endif %}
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
         }
       }
 {%  endif %}
