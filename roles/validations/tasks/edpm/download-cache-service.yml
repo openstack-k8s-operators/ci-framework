@@ -1,0 +1,100 @@
+- name: Determine name of deployed NodeSet
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc get -n {{ cifmw_validations_namespace }} osdpns --no-headers -o custom-columns=":metadata.name"
+  register: deployed_nodeset_name
+
+- name: Clean cache on a compute node
+  become: true
+  ansible.builtin.command:
+    cmd: dnf clean all
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+
+- name: Uninstall requested packages on a compute node
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ item_cached_package }}"
+    state: absent
+  loop: "{{ cifmw_validations_cached_packages }}"
+  loop_control:
+    loop_var: item_cached_package
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+
+# Packages are removed from cache when they are installed. Create a custom service
+# that checks for cached packages. This service can be used to verify that packages
+# have been properly cached by executing before a service that loads packages.
+- name: Create custom service to verify cache on a compute node
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      metadata:
+        name: check-cache
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        playbookContents: |
+          - hosts: all
+            vars:
+              cached_package_list: {{ cifmw_validations_cached_packages }}
+            become: true
+            tasks:
+      {% raw %}
+              - name: Find all rpm packages cached on compute node
+                ansible.builtin.command:
+                  cmd: find /var/cache/dnf/ -name "*.rpm"
+                register: dnf_cached_packages
+
+              - name: Verify all requested packages were cached
+                ansible.builtin.fail:
+                  msg: "'{{ item_cached_package }}' package was not cached"
+                loop: "{{ cached_package_list }}"
+                loop_control:
+                  loop_var: item_cached_package
+                when: item_cached_package+'-' not in dnf_cached_packages.stdout
+      {% endraw %}
+      EOF
+
+- name: Create openstackdataplanedeployment for download cache service
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: download-cache-service
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout | trim }}"
+        ansibleLimit:
+          "{{ cifmw_validations_edpm_check_node }}"
+        servicesOverride:
+          - download-cache
+          - check-cache
+          - bootstrap
+      EOF
+
+- name: Wait for download cache service deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment download-cache-service
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ 4 * cifmw_validations_timeout }}s
