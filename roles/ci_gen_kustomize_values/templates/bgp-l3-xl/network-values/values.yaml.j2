@@ -20,23 +20,23 @@ data:
                                      },
                                      recursive=true) %}
     {{ network.network_name }}_ip: {{ network.ip_v4 }}
-{%       if 'worker-9' == hostname and 'ctlplane' == network.network_name %}
+{%       if 'worker-6' == hostname and 'ctlplane' == network.network_name %}
     base_if: {{ network.interface_name }}
 {%       endif %}
 {%     endfor %}
 {%     set node_bgp_orig_content = original_content.data.bgp.bgpdefs['node' ~ ns.ocp_index] %}
 {%     set node_bgp_net0 = node_bgp_orig_content.bgpnet0 %}
-{%     if 'worker-9' != hostname %}
+{%     if 'worker-6' != hostname %}
 {%       set node_bgp_net1 = node_bgp_orig_content.bgpnet1 %}
 {%     endif %}
     bgp_peers:
       - {{ node_bgp_net0.bgp_peer }}
-{%     if 'worker-9' != hostname %}
+{%     if 'worker-6' != hostname %}
       - {{ node_bgp_net1.bgp_peer }}
 {%     endif %}
     bgp_ip:
       - {{ node_bgp_net0.bgp_ip }}
-{%     if 'worker-9' != hostname %}
+{%     if 'worker-6' != hostname %}
       - {{ node_bgp_net1.bgp_ip }}
 {%     endif %}
     loopback_ip: {{ node_bgp_orig_content.loopback_ip }}
@@ -125,14 +125,20 @@ data:
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
         "type": "bridge",
+{%  if network.network_name == "storage" %}
+        "isDefaultGateway": false,
+{%  else %}
         "isDefaultGateway": true,
+{%  endif %}
         "isGateway": true,
         "forceAddress": false,
+{%  if network.network_name == "ctlplane" %}
         "ipMasq": true,
+{%  else %}
+        "ipMasq": false,
+{%  endif %}
         "hairpinMode": true,
-{%  if network.network_name == "octavia" %}
-        "bridge": "octbr",
-{%  elif network.network_name == "ctlplane" %}
+{%  if network.network_name == "ctlplane" %}
         "bridge": "ospbr",
 {%  else %}
         "bridge": "{{ network.network_name }}",
@@ -150,13 +156,20 @@ data:
 {%  endfor %}
            ],
 {%  endif %}
-          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
+{%  if network.network_name == "storage" %}
+          "routes": [
+               {"dst": "172.31.0.0/24", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"},
+               {"dst": "192.168.188.0/24", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"},
+               {"dst": "99.99.0.0/16", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"}
+           ],
+{%  endif %}
 {%  if network.network_name == "ctlplane" %}
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(2) }}"
-{% else %}
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(2) }}",
+{% elif network.network_name != "storage" %}
+          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}",
 {% endif %}
+          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}"
         }
       }
 {%  endif %}
@@ -165,16 +178,12 @@ data:
   dns-resolver:
     config:
       server:
-# We set ctlplane = 192.168.125.0/24 and we rely on this definition to create the nad above.
-# BGP exposes nad ips by advertising a 192.168.125.X address on the worker, and this would break dns
-# because the traffic will not be sent to the right nic if a local ip on the same network is present.
-# To avoid messing with routes etc we hardcode the 122.1 ip here
-        - 192.168.122.1
+        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
       search: []
     options:
       - key: server
         values:
-          - 192.168.122.1
+          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}
 {% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
       - key: server
         values:
