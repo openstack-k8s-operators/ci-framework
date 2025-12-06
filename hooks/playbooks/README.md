@@ -24,6 +24,21 @@ on removing "import_playbook" usage in ci-framework project.
 ### Output
 None
 
+## install-openstack-lightspeed.yml
+Installs OpenShift Lightspeed and OpenStack Lightspeed operators on CRC cluster.
+This hook deploys both operators sequentially, setting up required namespaces,
+operator groups, catalog sources, and subscriptions.
+
+### Input
+* `cifmw_openstack_lightspeed_namespace`: (String) Namespace for OpenStack Lightspeed operator. Defaults to `openshift-lightspeed`.
+* `cifmw_openstack_lightspeed_operator_group`: (String) OperatorGroup name for OpenStack Lightspeed. Defaults to `openstack-lightspeed-operator-group`.
+* `cifmw_openstack_lightspeed_catalog_image`: (String) Container image for OpenStack Lightspeed catalog source. Defaults to `quay.io/openstack-lightspeed/operator-catalog:latest`.
+* `cifmw_openstack_lightspeed_catalog_name`: (String) Name for OpenStack Lightspeed CatalogSource resource. Defaults to `openstack-lightspeed-catalog`.
+* `cifmw_openshift_kubeconfig`: (String) Path to kubeconfig file for OpenShift cluster. Defaults to `{{ ansible_env.HOME }}/.crc/machines/crc/kubeconfig`.
+
+### Output
+None
+
 ## kustomize_cr.yml
 This hook enables customization of CR files, using oc kustomize.
 ### Input

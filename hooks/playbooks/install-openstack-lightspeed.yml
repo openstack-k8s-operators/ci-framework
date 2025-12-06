@@ -1,0 +1,128 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Deploy OpenStack Lightspeed operator
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  connection: local
+  vars:
+    # OpenStack Lightspeed configuration
+    # Note: Installing in openshift-lightspeed namespace to ensure compatibility
+    openstack_lightspeed_namespace: "{{ cifmw_openstack_lightspeed_namespace | default('openshift-lightspeed') }}"
+    openstack_lightspeed_operator_group: "{{ cifmw_openstack_lightspeed_operator_group | default('openstack-lightspeed-operator-group') }}"
+    openstack_lightspeed_catalog_image: "{{ cifmw_openstack_lightspeed_catalog_image | default('quay.io/openstack-lightspeed/operator-catalog:latest') }}"
+    openstack_lightspeed_catalog_name: "{{ cifmw_openstack_lightspeed_catalog_name | default('openstack-lightspeed-catalog') }}"
+
+    # Kubeconfig path - use user-provided or default to CRC location
+    cifmw_openshift_kubeconfig: "{{ cifmw_openshift_kubeconfig | default(ansible_env.HOME ~ '/.crc/machines/crc/kubeconfig') }}"
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+
+  tasks:
+    # STEP 1: Deploy OpenStack Lightspeed catalog
+
+    - name: Create CatalogSource for OpenStack Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: CatalogSource
+          metadata:
+            name: "{{ openstack_lightspeed_catalog_name }}"
+            namespace: "openshift-marketplace"
+          spec:
+            sourceType: grpc
+            image: "{{ openstack_lightspeed_catalog_image }}"
+            displayName: "OpenStack Lightspeed Operator"
+            publisher: "Red Hat"
+
+    - name: Wait for CatalogSource to be ready
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        name: "{{ openstack_lightspeed_catalog_name }}"
+        namespace: "openshift-marketplace"
+      register: catalog_source
+      until:
+        - catalog_source.resources is defined
+        - catalog_source.resources | length > 0
+        - catalog_source.resources[0].status.connectionState.lastObservedState is defined
+        - catalog_source.resources[0].status.connectionState.lastObservedState == "READY"
+      retries: 30
+      delay: 10
+
+    # STEP 2: Deploy OpenStack Lightspeed operator
+    # Note: OpenStack Lightspeed operator will automatically install
+    # and manage the OpenShift Lightspeed operator as a dependency
+
+    - name: Create namespace for OpenStack Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ openstack_lightspeed_namespace }}"
+
+    - name: Create OperatorGroup for OpenStack Lightspeed
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: "{{ openstack_lightspeed_operator_group }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          spec:
+            targetNamespaces:
+              - "{{ openstack_lightspeed_namespace }}"
+
+    - name: Subscribe to OpenStack Lightspeed operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: "openstack-lightspeed-operator"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          spec:
+            channel: "alpha"
+            name: "openstack-lightspeed-operator"
+            source: "{{ openstack_lightspeed_catalog_name }}"
+            sourceNamespace: "openshift-marketplace"
+            installPlanApproval: "Automatic"
+
+    - name: Wait for OpenStack Lightspeed CSV to be ready
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: ClusterServiceVersion
+        namespace: "{{ openstack_lightspeed_namespace }}"
+        label_selectors:
+          - "operators.coreos.com/openstack-lightspeed-operator.{{ openstack_lightspeed_namespace }}"
+      register: osls_csv
+      until:
+        - osls_csv.resources is defined
+        - osls_csv.resources | length > 0
+        - osls_csv.resources[0].status.phase is defined
+        - osls_csv.resources[0].status.phase == "Succeeded"
+      retries: 30
+      delay: 10
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "✓ OpenStack Lightspeed operator deployed in namespace: {{ openstack_lightspeed_namespace }}"
+          - "✓ OpenShift Lightspeed operator will be automatically managed by OpenStack Lightspeed"
