@@ -19,7 +19,7 @@
   ignore_errors: true
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack aggregate show {{ _az_to_scaledown }} -c hosts -f value
@@ -28,7 +28,7 @@
   register: az_compute_hosts
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       sh -c "openstack compute service list -c Host -c Zone -f value | grep {{ _az_to_scaledown }} | awk '{print $1}'"
@@ -46,7 +46,7 @@
   register: osp_instances
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack server list --availability-zone {{ _az_to_scaledown }} --all-projects -f value -c ID
@@ -54,7 +54,7 @@
 - name: Clean the running instances from the AZ up before deleting the hosts
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack server delete --force {{ item }}
@@ -64,7 +64,7 @@
   loop: "{{ az_hosts_list }}"
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack aggregate remove host {{ _az_to_scaledown }} {{ item }}
@@ -73,7 +73,7 @@
 - name: Delete the host aggregate
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack aggregate delete {{ _az_to_scaledown }}
@@ -83,7 +83,7 @@
   loop: "{{ az_compute_hosts.stdout_lines }}"
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack compute service set {{ item }} nova-compute --disable
@@ -125,7 +125,7 @@
   register: cell_uuid
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: nova-cell0-conductor-0
     command: >-
       sh -c "nova-manage cell_v2 list_hosts | grep {{ az_compute_hosts.stdout_lines[0] }} | awk '{print $4}'"
@@ -133,7 +133,7 @@
 - name: Remove the compute hosts from the cell
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: nova-cell0-conductor-0
     command: >-
       nova-manage cell_v2 delete_host --cell_uuid {{ cell_uuid.stdout }} --host {{ item }}
@@ -177,13 +177,13 @@
       az1: cell2
       az2: cell3
   ansible.builtin.shell: |
-    oc delete -n openstack rabbitmqclusters rabbitmq-{{ az_to_cell_map[_az_to_scaledown] }}
-    oc delete -n openstack galera openstack-{{ az_to_cell_map[_az_to_scaledown] }}
+    oc delete -n {{ cifmw_openstack_namespace }} rabbitmqclusters rabbitmq-{{ az_to_cell_map[_az_to_scaledown] }}
+    oc delete -n {{ cifmw_openstack_namespace }} galera openstack-{{ az_to_cell_map[_az_to_scaledown] }}
 
 - name: Get list of pods in the openstack namespace
   kubernetes.core.k8s_info:
     kind: Pod
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
   register: pod_list
 
@@ -197,7 +197,7 @@
 - name: Delete the cinder-volume service
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: "{{ cinder_prefix }}-scheduler-0"
     command: >-
       cinder-manage service remove cinder-volume {{ cinder_prefix }}-volume-{{ _az_to_scaledown }}-0@ceph
@@ -208,7 +208,7 @@
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
     kind: Secret
     name: ceph-conf-files
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
 
 - name: Create temporary directory for ceph conf files
   ansible.builtin.file:
@@ -230,7 +230,7 @@
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
     kind: Secret
     name: "{{ item }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     state: absent
   loop:
     - "ceph-conf-files-{{ _az_to_scaledown }}"
@@ -292,7 +292,7 @@
 - name: Delete the network agents on scale-downed compute nodes
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       sh -c "openstack network agent list --host {{ item }} -c ID -f value | xargs openstack network agent delete"
@@ -305,7 +305,7 @@
     api_version: dataplane.openstack.org/v1beta1
     kind: OpenStackDataPlaneNodeSet
     name: "{{ _group_name }}-edpm"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
 
 - name: Delete OpenStackDataPlaneNodeSet
   kubernetes.core.k8s:
@@ -314,11 +314,11 @@
     state: absent
     kind: OpenStackDataPlaneNodeSet
     name: "{{ _group_name }}-edpm"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
 
 - name: Delete each Secret which contains TLS certificate for the NodeSet nodes
   ansible.builtin.command:
-    cmd: oc -n openstack delete Secret {{ item }}
+    cmd: oc -n {{ cifmw_openstack_namespace }} delete Secret {{ item }}
   loop: "{{ osdpns_info.resources[0].status.secretHashes.keys() | select('search', 'cert') | list }}"
 
 - name: Delete temporary files with ceph client variables and keys

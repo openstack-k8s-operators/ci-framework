@@ -41,7 +41,7 @@
   register: removed_compute
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       sh -c "openstack compute service list -c Host -c Zone -f value | grep {{ _node_to_remove}} | awk '{print $1}'"
@@ -54,7 +54,7 @@
   register: compute_az
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       sh -c "openstack compute service list -c Host -c Zone -f value | grep {{ _removed_compute }} | awk '{print $2}'"
@@ -67,7 +67,7 @@
   register: osp_instances
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack server list --availability-zone {{ _compute_az }} --host {{ _removed_compute }} --all-projects -f value -c ID
@@ -75,7 +75,7 @@
 - name: Clean the running instances from the node up
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack server delete --force {{ item }}
@@ -84,7 +84,7 @@
 - name: Delete the compute nodes from the aggregate
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack aggregate remove host {{ _compute_az }} {{ _removed_compute }}
@@ -92,7 +92,7 @@
 - name: Disable the compute service on scale-downed compute nodes
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       openstack compute service set {{ _removed_compute }} nova-compute --disable
@@ -117,7 +117,7 @@
   register: cell_uuid
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: nova-cell0-conductor-0
     command: >-
       sh -c "nova-manage cell_v2 list_hosts | grep {{ _removed_compute }} | awk '{print $4}'"
@@ -125,7 +125,7 @@
 - name: Remove the compute hosts from the cell
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: nova-cell0-conductor-0
     command: >-
       nova-manage cell_v2 delete_host --cell_uuid {{ cell_uuid.stdout }} --host {{ _removed_compute }}
@@ -162,7 +162,7 @@
 - name: Delete the network agents on scale-downed compute nodes
   kubernetes.core.k8s_exec:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     pod: openstackclient
     command: >-
       sh -c "openstack network agent list --host {{ _removed_compute }} -c ID -f value | xargs openstack network agent delete"
@@ -173,7 +173,7 @@
     api_version: dataplane.openstack.org/v1beta1
     kind: OpenStackDataPlaneNodeSet
     name: "{{ az_to_group_map[_compute_az] }}-edpm"
-    namespace: "openstack"
+    namespace: "{{ cifmw_openstack_namespace }}"
     patch:
       - op: "remove"
         path: "/spec/nodes/edpm-{{ _node_to_remove }}"
@@ -189,7 +189,7 @@
   kubernetes.core.k8s:
     api_key: "{{ _auth_results.openshift_auth.api_key }}"
     state: present
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
     src: "{{ ci_dcn_site_arch_path }}/dataplane_remove_node_deploy.yaml"
 
 - name: Wait for the node to be removed from the OpenStackDataPlaneNodeSet CR
@@ -197,7 +197,7 @@
     api_version: openstack.org/v1beta1
     kind: OpenStackDataPlaneNodeSet
     name: "{{ az_to_group_map[_compute_az] }}-edpm"
-    namespace: openstack
+    namespace: "{{ cifmw_openstack_namespace }}"
   register: nodeset_status
   until: (_node_to_remove not in (nodeset_status.resources[0].spec.nodes | default({})).keys())
   retries: 30
