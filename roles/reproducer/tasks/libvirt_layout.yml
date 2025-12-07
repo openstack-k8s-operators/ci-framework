@@ -28,8 +28,9 @@
             map(attribute="key")
           }}
 
-- name: Run tasks on controller-0 hypervisor
+- name: Run tasks on controller-0 hypervisor (legacy mode)
   when:
+    - not (cifmw_run_on_zuul_host | default(false) | bool)
     - (
         _cifmw_libvirt_manager_layout.vms.controller.target is defined and
         _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
@@ -42,11 +43,30 @@
       loop_control:
         loop_var: "host"
 
-    - name: Push generated inventory from hypervisor
+    - name: Push generated inventory from hypervisor to controller-0
       ansible.builtin.command:  # noqa: command-instead-of-module
         cmd: >-
           rsync -r {{ cifmw_reproducer_basedir }}/reproducer-inventory/
           {{ cifmw_reproducer_controller_user }}@controller-0:reproducer-inventory
+
+- name: Run tasks on zuul host (direct execution)
+  when:
+    - cifmw_run_on_zuul_host | default(false) | bool
+    - (
+        _cifmw_libvirt_manager_layout.vms.controller.target is defined and
+        _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
+      ) or
+      _cifmw_libvirt_manager_layout.vms.controller.target is undefined
+  block:
+    - name: Inject remote inventories onto zuul host
+      ansible.builtin.include_tasks: gather_inventories.yml
+      loop: "{{ hostvars.keys() }}"
+      loop_control:
+        loop_var: "host"
+
+    - name: Keep inventory on zuul host (no push to controller-0)
+      ansible.builtin.debug:
+        msg: "Inventory kept on zuul host at {{ cifmw_reproducer_basedir }}/reproducer-inventory/"
 
 - name: Run post tasks in OCP cluster case
   when:
@@ -62,15 +82,24 @@
   ansible.builtin.import_tasks: ocp_post.yml
 
 # Configure the controller before CRC. This one will run the networking_mapper
-# role, ensuring we have all the needed data on the controller-0. This
-# will allow us to configure the CRC node in order to ensure we have
+# role, ensuring we have all the needed data on the controller-0 or zuul host.
+# This will allow us to configure the CRC node in order to ensure we have
 # appropriate settings there.
-- name: Configure Controller node
+- name: Configure Controller node (controller-0 legacy mode)
+  when: not (cifmw_run_on_zuul_host | default(false) | bool)
   tags:
     - bootstrap
     - bootstrap_layout
     - bootstrap_env
   ansible.builtin.include_tasks: configure_controller.yml
+
+- name: Configure zuul host (direct execution)
+  when: cifmw_run_on_zuul_host | default(false) | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+    - bootstrap_env
+  ansible.builtin.include_tasks: configure_zuul_host.yml
 
 - name: Configure CRC node if available
   when:
