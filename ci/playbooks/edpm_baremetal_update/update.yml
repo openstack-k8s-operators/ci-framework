@@ -1,7 +1,7 @@
 ---
 # CI playbook orchestrator for OpenStack minor version updates.
-# This playbook runs on the controller (cifmw_zuul_target_host) and orchestrates
-# the update by calling update-edpm.yml on the target host (cifmw_target_host).
+# This playbook runs on the zuul host (cifmw_zuul_target_host) and orchestrates
+# the update by calling the update role's update_variant_ci.yml task (no nested ansible-playbook).
 # This playbook depends on content provider variables from CI jobs.
 # This is Phase 2 of the baremetal update workflow and should be called
 # sequentially after run.yml (Phase 1).
@@ -39,14 +39,14 @@
         mode: "0644"
       when: cifmw_minor_update_index_image is defined
 
-    - name: Run update-edpm.yml on target host
-      ansible.builtin.command:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
-        cmd: >-
-          ansible-playbook ci/playbooks/edpm_baremetal_update/update-edpm.yml
-          -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
-          -e @group_vars/all.yml
-          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
-          {%- if cifmw_minor_update_index_image is defined %}
-          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/minor_update_index_image.yml"
-          {%- endif %}
+    - name: Load all parameters from parameters directory
+      vars:
+        provided_dir: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: var_dir.yml
+
+    - name: Run minor update using update role
+      ansible.builtin.include_role:
+        name: update
+        tasks_from: update_variant_ci.yml

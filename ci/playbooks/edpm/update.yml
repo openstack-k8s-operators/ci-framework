@@ -1,4 +1,6 @@
 ---
+# When cifmw_run_on_zuul_host is true, this playbook directly imports update-edpm.yml
+# instead of running nested ansible-playbook commands.
 - name: "Run ci/playbooks/edpm/update.yml"
   hosts: "{{ cifmw_zuul_target_host | default('all') }}"
   gather_facts: true
@@ -15,7 +17,45 @@
         path: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
       register: edpm_file
 
-    - name: Run Podified EDPM update
+    - name: Load parameters for direct execution
+      when: cifmw_run_on_zuul_host | default(false) | bool
+      block:
+        - name: Load group vars
+          ansible.builtin.include_vars:
+            file: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars/all.yml"
+          ignore_errors: true
+
+        - name: Load scenario files
+          ansible.builtin.include_vars:
+            file: "{{ item }}"
+          loop:
+            - "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/base.yml"
+            - "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/edpm_ci.yml"
+          ignore_errors: true
+
+        - name: Load edpm-ansible.yml if exists
+          when: edpm_file.stat.exists
+          ansible.builtin.include_vars:
+            file: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
+          ignore_errors: true
+
+        - name: Load all parameters from parameters directory
+          vars:
+            provided_dir: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters"
+          ansible.builtin.include_role:
+            name: cifmw_helpers
+            tasks_from: var_dir.yml
+
+        - name: Set update_playbook_run fact
+          ansible.builtin.set_fact:
+            update_playbook_run: true
+
+    - name: Directly import update-edpm.yml playbook (zuul host execution)
+      when: cifmw_run_on_zuul_host | default(false) | bool
+      ansible.builtin.import_playbook: update-edpm.yml
+
+    - name: Run Podified EDPM update via nested ansible-playbook (controller-0 execution)
+      when: not (cifmw_run_on_zuul_host | default(false) | bool)
       ansible.builtin.command:
         chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
         cmd: >-
