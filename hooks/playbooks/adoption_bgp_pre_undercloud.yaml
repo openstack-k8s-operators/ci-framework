@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: BGP pre_undercloud hook
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Add default route to UC and OC nodes
+      delegate_to: "{{ _vm }}"
+      become: true
+      ansible.builtin.command:
+        cmd: ip route add default via 192.168.111.1
+      loop: >-
+        {{
+          _vm_groups['osp-underclouds'] | list +
+          _vm_groups['osp-r0-computes'] | list +
+          _vm_groups['osp-r0-controllers'] | list +
+          _vm_groups['osp-r1-computes'] | list +
+          _vm_groups['osp-r1-controllers'] | list +
+          _vm_groups['osp-r2-computes'] | list +
+          _vm_groups['osp-r2-controllers'] | list
+        }}
+      loop_control:
+        loop_var: _vm
+    - name: Prefer IPv4 over IPv6 for name resolution
+      delegate_to: "{{ _vm }}"
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/gai.conf
+        line: 'precedence ::ffff:0:0/96  100'
+        regexp: '^#?\s*precedence ::ffff:0:0/96' # Matches the line, even if commented
+        state: present
+        create: true
+        owner: root
+        group: root
+        mode: '0644'
+      loop: >-
+        {{
+          _vm_groups['osp-underclouds'] | list +
+          _vm_groups['osp-r0-computes'] | list +
+          _vm_groups['osp-r0-controllers'] | list +
+          _vm_groups['osp-r1-computes'] | list +
+          _vm_groups['osp-r1-controllers'] | list +
+          _vm_groups['osp-r2-computes'] | list +
+          _vm_groups['osp-r2-controllers'] | list
+        }}
+      loop_control:
+        loop_var: _vm
