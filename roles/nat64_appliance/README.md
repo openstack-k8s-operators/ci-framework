@@ -25,6 +25,9 @@
 * `cifmw_nat64_appliance_memory`: (Integer) Memory in GiB for the nat64 appliance VM. Defaults to: `2`.
 * `cifmw_nat64_appliance_cpus`: (Integer) Virtual CPUs for the nat64 appliance VM. Defaults to: `2`.
 * `cifmw_nat64_appliance_ssh_pub_keys`: (List) List of SSH public key for the nat64 appliance VM. Defaults to: `[]`.
+* `cifmw_nat64_appliance_image_url`: (String) URL to download a pre-built NAT64 appliance image. If empty, the image will be built from source using diskimage-builder. Defaults to: `""`.
+* `cifmw_nat64_appliance_image_checksum`: (String) Optional checksum for the downloaded image in the format `algorithm:hash` (e.g., `sha256:xxxxx`). Only used when `cifmw_nat64_appliance_image_url` is set. Defaults to: undefined.
+* `cifmw_nat64_appliance_download_timeout`: (Integer) Timeout in seconds for image download. Only used when `cifmw_nat64_appliance_image_url` is set. Defaults to: `600`.
 * `cifmw_nat64_ipv6_prefix`: (String) IPv6 prefix for nat64. Defaults to: `fc00:abcd:abcd:fc00::/64`.
 * `cifmw_nat64_ipv6_tayga_address`: (String) Tayga IPv6 address. Defaults to: `fc00:abcd:abcd:fc00::3`.
 
@@ -32,14 +35,28 @@
 
 Include the `nat64_appliance` role in a playbook. For example:
 
-```
-- name: Build nat64-appliance
+### Build from source
+
+```yaml
+- name: Build nat64-appliance from source
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   roles:
     - nat64_appliance
 ```
 
-The built image will be in: `{{ cifmw_nat64_appliance_workdir }}/nat64-appliance.qcow2`
+### Download pre-built image
+
+```yaml
+- name: Download pre-built nat64-appliance image
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  vars:
+    cifmw_nat64_appliance_image_url: "http://example.com/nat64-appliance.qcow2"
+    # cifmw_nat64_appliance_image_checksum: "sha256:xxxxx"  # Optional
+  roles:
+    - nat64_appliance
+```
+
+The image will be in: `{{ cifmw_nat64_appliance_workdir }}/nat64-appliance.qcow2`
 
 ## Using the nat64-appliance
 

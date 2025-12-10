@@ -55,6 +55,7 @@
       retries: 60
       delay: 10
 
+    # Build the image
     - name: Build nat64 appliance image
       vars:
         # TODO(hjensas): Running as root should not be required here.
@@ -84,6 +85,81 @@
         recurse: true
         owner: "{{ ansible_user_id }}"
         group: "{{ ansible_user_gid }}"
+
+    # Test download functionality
+    - name: Set download test directory
+      ansible.builtin.set_fact:
+        cifmw_nat64_download_dir: "{{ cifmw_basedir }}/nat64_download"
+        cifmw_nat64_http_port: 8765
+
+    - name: Start HTTP server to serve the built image
+      ansible.builtin.shell: |
+        cd {{ cifmw_basedir }}/nat64_appliance
+        nohup python3 -m http.server {{ cifmw_nat64_http_port }} > /tmp/nat64_http_server.log 2>&1 &
+        echo $! > /tmp/nat64_http_server.pid
+        sleep 2
+
+    - name: Verify HTTP server is running
+      ansible.builtin.uri:
+        url: "http://localhost:{{ cifmw_nat64_http_port }}/nat64-appliance.qcow2"
+        method: HEAD
+      register: _http_check
+      until: _http_check.status == 200
+      retries: 5
+      delay: 2
+
+    - name: Download nat64 appliance image from HTTP server
+      vars:
+        cifmw_nat64_appliance_basedir: "{{ cifmw_nat64_download_dir }}"
+        cifmw_nat64_appliance_image_url: "http://localhost:{{ cifmw_nat64_http_port }}/nat64-appliance.qcow2"
+      ansible.builtin.include_role:
+        name: nat64_appliance
+
+    - name: Verify downloaded image exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_nat64_download_dir }}/nat64_appliance/nat64-appliance.qcow2"
+        checksum_algorithm: sha256
+      register: _downloaded_image
+      failed_when: not _downloaded_image.stat.exists
+
+    - name: Get built image info with checksum
+      ansible.builtin.stat:
+        path: "{{ cifmw_basedir }}/nat64_appliance/nat64-appliance.qcow2"
+        checksum_algorithm: sha256
+      register: _built_image
+
+    - name: Show download test results
+      ansible.builtin.debug:
+        msg:
+          - "Built image: {{ _built_image.stat.path }} ({{ _built_image.stat.size }} bytes, SHA256: {{ _built_image.stat.checksum }})"
+          - "Downloaded image: {{ _downloaded_image.stat.path }} ({{ _downloaded_image.stat.size }} bytes, SHA256: {{ _downloaded_image.stat.checksum }})"
+
+    - name: Verify images are identical using checksum
+      ansible.builtin.assert:
+        that:
+          - _downloaded_image.stat.size > 0
+          - _built_image.stat.size > 0
+          - _downloaded_image.stat.checksum == _built_image.stat.checksum
+        fail_msg: |
+          Downloaded image differs from built image!
+          Built:      {{ _built_image.stat.size }} bytes, SHA256: {{ _built_image.stat.checksum }}
+          Downloaded: {{ _downloaded_image.stat.size }} bytes, SHA256: {{ _downloaded_image.stat.checksum }}
+        success_msg: "Images are identical - SHA256: {{ _built_image.stat.checksum }} ({{ _built_image.stat.size }} bytes)"
+
+    - name: Stop HTTP server
+      ansible.builtin.shell: |
+        if [ -f /tmp/nat64_http_server.pid ]; then
+          kill $(cat /tmp/nat64_http_server.pid) || true
+          rm -f /tmp/nat64_http_server.pid
+        fi
+
+    # Deploy nat64 appliance for testing
+    - name: Copy downloaded image to working location for deployment
+      ansible.builtin.copy:
+        src: "{{ cifmw_nat64_download_dir }}/nat64_appliance/nat64-appliance.qcow2"
+        dest: "{{ cifmw_basedir }}/nat64_appliance/nat64-appliance.qcow2"
+        remote_src: true
+        mode: "0644"
 
     - name: "Deploy the nat64 appliance and networks"
       vars:
