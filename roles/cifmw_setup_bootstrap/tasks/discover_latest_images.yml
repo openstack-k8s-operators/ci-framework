@@ -1,0 +1,46 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Include common prerequisites
+  ansible.builtin.include_tasks: common_prerequisites.yml
+
+# Check real prerequisites: do we have network access to image repo?
+- name: Check if image repository is accessible
+  ansible.builtin.include_tasks: checks/check_image_discovery_ready.yml
+
+- name: "BS-05: Discover latest images"
+  when: cifmw_discovered_image_url is not defined
+  block:
+    - name: Verify network connectivity
+      when: not _cifmw_setup_bootstrap_image_repo_accessible
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Image repository may not be accessible.
+          Image discovery will attempt to run but may fail.
+          URL: {{ cifmw_discover_latest_image_base_url | default('https://cloud.centos.org/centos/9-stream/x86_64/images/') }}
+
+    - name: Get latest image for future reference
+      ansible.builtin.import_role:
+        role: discover_latest_image
+
+  rescue:
+    - name: Fail with clear message
+      ansible.builtin.fail:
+        msg: "BS-05 (Discover latest images) failed"
+
+- name: "BS-05: Status"
+  ansible.builtin.debug:
+    msg: "BS-05: {{ 'Already discovered' if cifmw_discovered_image_url is defined else 'Completed' }}"
