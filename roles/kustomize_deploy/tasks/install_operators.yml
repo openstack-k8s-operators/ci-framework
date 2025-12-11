@@ -47,16 +47,19 @@
   ansible.builtin.include_role:
     name: ci_gen_kustomize_values
 
-- name: Copy generated values.yaml for OLM resources
-  ansible.builtin.copy:
-    backup: true
-    remote_src: true
+- name: Slurp generated values.yaml for OLM resources
+  ansible.builtin.slurp:
     src: >-
       {{
         (cifmw_kustomize_deploy_basedir,
           'artifacts', 'ci_gen_kustomize_values',
           'olm-values', 'values.yaml') | path_join
       }}
+  register: _cifmw_kustomize_deploy_olm_values_content
+
+- name: Copy generated values.yaml for OLM resources to localhost
+  ansible.builtin.copy:
+    content: "{{ _cifmw_kustomize_deploy_olm_values_content.content | b64decode }}"
     dest: >-
       {{
         (
@@ -65,6 +68,7 @@
         ) | path_join
       }}
     mode: "0644"
+  delegate_to: localhost
 
 - name: Generate the OLM kustomization file
   ansible.builtin.copy:
