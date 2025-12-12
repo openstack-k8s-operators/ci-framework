@@ -137,9 +137,18 @@
         script: "{{ _source_cmd }}; {{ _vip_provision_cmd }}"
 
     - name: Create tripleo ansible inventory
+      when: not (cifmw_adoption_osp_deploy_bgp | bool)
       delegate_to: "osp-undercloud-0"
       ansible.builtin.template:
         src: "tripleo-ansible-inventory.yaml.j2"
+        dest: "{{ ansible_user_dir }}/overcloud-deploy/{{ _overcloud_name }}/tripleo-ansible-inventory.yaml"
+        mode: "0644"
+
+    - name: Create tripleo ansible inventory (BGP)
+      when: cifmw_adoption_osp_deploy_bgp | bool
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.template:
+        src: "tripleo-ansible-inventory_bgp.yaml.j2"
         dest: "{{ ansible_user_dir }}/overcloud-deploy/{{ _overcloud_name }}/tripleo-ansible-inventory.yaml"
         mode: "0644"
 
@@ -184,6 +193,78 @@
       loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
+      when: not (cifmw_adoption_osp_deploy_bgp | bool)
+
+    - name: Generate os-net-config file for overcloud nodes (bgp)
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      vars:
+        _node_net: "{{ cifmw_networking_env_definition.instances[overcloud_vm] }}"
+        _dns_server: "{{ _ctlplane_net.[dns_version|default('dns_v4')] }}"
+        _interface_mtu: 1500
+        vms:
+          osp-r0-compute-0:
+            ctlplane: '192.168.122.100'
+            left: '100.64.0.2'
+            right: '100.65.0.2'
+            main: '99.99.0.7'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0004'
+          osp-r0-compute-1:
+            ctlplane: '192.168.122.101'
+            left: '100.64.0.6'
+            right: '100.65.0.6'
+            main: '99.99.0.8'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0005'
+          osp-r1-compute-0:
+            ctlplane: '192.168.123.105'
+            left: '100.64.1.2'
+            right: '100.65.1.2'
+            main: '99.99.1.7'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0006'
+          osp-r1-compute-1:
+            ctlplane: '192.168.123.106'
+            left: '100.64.1.6'
+            right: '100.65.1.6'
+            main: '99.99.1.8'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0007'
+          osp-r2-compute-0:
+            ctlplane: '192.168.124.110'
+            left: '100.64.2.2'
+            right: '100.65.2.2'
+            main: '99.99.2.7'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0008'
+          osp-r2-compute-1:
+            ctlplane: '192.168.124.111'
+            left: '100.64.2.6'
+            right: '100.65.2.6'
+            main: '99.99.2.8'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0009'
+          osp-r0-controller-0:
+            ctlplane: '192.168.122.140'
+            left: '100.64.0.26'
+            right: '100.65.0.26'
+            main: '99.99.0.9'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0001'
+          osp-r1-controller-0:
+            ctlplane: '192.168.123.142'
+            left: '100.64.1.26'
+            right: '100.65.1.26'
+            main: '99.99.1.9'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0002'
+          osp-r2-controller-0:
+            ctlplane: '192.168.124.144'
+            left: '100.64.2.26'
+            right: '100.65.2.26'
+            main: '99.99.2.9'
+            main6: 'f00d:f00d:f00d:f00d:f00d:f00d:f00d:0003'
+      ansible.builtin.template:
+        src: "os_net_config_overcloud_bgp.yml.j2"
+        dest: /etc/os-net-config/tripleo_config.yaml
+        mode: "0644"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+      when: cifmw_adoption_osp_deploy_bgp | bool
 
     - name: Configure network interfaces for overcloud nodes
       become: true
@@ -208,3 +289,24 @@
       loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
       loop_control:
         loop_var: overcloud_vm
+
+    - name: Apply patch to increase cinder-api timeout (bgp)
+      when: cifmw_adoption_osp_deploy_bgp | bool
+      delegate_to: "osp-undercloud-0"
+      become: true
+      block:
+        - name: Ensure patch package is installed in undercloud
+          ansible.builtin.dnf:
+            name: patch
+            state: present
+
+        - name: BGP workaround apply patch
+          ansible.posix.patch:
+            src: "{{ item.patch_file }}"
+            dest: "{{ item.dest_file }}"
+            strip: 1
+          loop:
+            - patch_file: files/bgp-tht-cinder-patch
+              dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/cinder/cinder-api-container-puppet.yaml
+            - patch_file: files/bgp-tht-frr-patch
+              dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/frr/frr-container-ansible.yaml
