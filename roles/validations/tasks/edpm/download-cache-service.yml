@@ -1,0 +1,120 @@
+- name: Determine name of deployed NodeSet
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc get -n {{ cifmw_validations_namespace }} osdpns --no-headers -o custom-columns=":metadata.name"
+  register: deployed_nodeset_name
+
+- name: Clean cache on a compute node
+  become: true
+  ansible.builtin.command:
+    cmd: dnf clean all
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+
+- name: Uninstall requested packages on a compute node
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ item_cached_package }}"
+    state: absent
+  loop: "{{ cifmw_validations_cached_packages }}"
+  loop_control:
+    loop_var: item_cached_package
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+
+- name: Patch nodeset with download cache configuration
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc patch -n {{ cifmw_validations_namespace }} osdpns/"{{ deployed_nodeset_name.stdout | trim }}" --type json --patch '[{ "op": "add", "path": "/spec/nodeTemplate/ansible/ansibleVars/edpm_download_cache_running_services","value": {{ cifmw_validations_cache_run_services }} }]'
+
+- name: Wait for nodeset to be SetupReady again
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait osdpns "{{ deployed_nodeset_name.stdout | trim }}"
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=SetupReady
+      --timeout={{ cifmw_validations_timeout }}m
+
+- name: Create openstackdataplanedeployment for download cache service
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: |
+      oc apply -f - <<EOF
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: download-cache-service
+        namespace: {{ cifmw_validations_namespace }}
+      spec:
+        nodeSets:
+          - "{{ deployed_nodeset_name.stdout | trim }}"
+        servicesOverride:
+          - download-cache
+      EOF
+
+- name: Wait for download cache service deployment to be complete
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc wait openstackdataplanedeployment download-cache-service
+      --namespace={{ cifmw_validations_namespace }}
+      --for=condition=ready
+      --timeout={{ cifmw_validations_timeout }}s
+
+- name: Find all rpm packages cached on compute node
+  become: true
+  ansible.builtin.command:
+    cmd: find /var/cache/dnf/ -name "*.rpm"
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+  register: dnf_cached_packages
+
+# Create failure msg for xml results file
+- name: Verify all requested packages were cached
+  ansible.builtin.fail:
+    msg: "'{{ item_cached_package }}' package was not cached"
+  loop: "{{ cifmw_validations_cached_packages }}"
+  loop_control:
+    loop_var: item_cached_package
+  when: item_cached_package+'-' not in dnf_cached_packages.stdout
+
+- name: Find all container images cached on compute node
+  become: true
+  ansible.builtin.command:
+    cmd: podman images
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
+  register: podman_images
+
+# Create failure msg for xml results file
+- name: Verify all requested container images were cached
+  ansible.builtin.fail:
+    msg: "'{{ item_cached_image }}' container image was not cached"
+  loop: "{{ cifmw_validations_cached_images }}"
+  loop_control:
+    loop_var: item_cached_image
+  when: item_cached_image+' ' not in podman_images.stdout
+
+- name: Reinstall requested packages on a compute node
+  become: true
+  ansible.builtin.dnf:
+    name: "{{ item_cached_package }}"
+    state: present
+  loop: "{{ cifmw_validations_cached_packages }}"
+  loop_control:
+    loop_var: item_cached_package
+  delegate_to: "{{ cifmw_validations_edpm_check_node }}"
