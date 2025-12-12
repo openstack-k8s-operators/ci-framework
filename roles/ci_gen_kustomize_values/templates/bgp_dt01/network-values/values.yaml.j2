@@ -20,7 +20,7 @@ data:
                                      },
                                      recursive=true) %}
     {{ network.network_name }}_ip: {{ network.ip_v4 }}
-{%       if 'worker-3' == hostname and 'ctlplane' == network.network_name %}
+{%       if 'ctlplane' == network.network_name %}
     base_if: {{ network.interface_name }}
 {%       endif %}
 {%     endfor %}
@@ -56,6 +56,7 @@ data:
 {% endfor %}
 
 {% for network in cifmw_networking_env_definition.networks.values() %}
+{% if network.network_name != 'ctlplane_ocp_nad' %}
 {%  set ns.lb_tools = {} %}
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
@@ -101,7 +102,8 @@ data:
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
 {%      for tool in ns.lb_tools.keys() %}
-{%        for lb_range in network.tools[tool].ipv4_ranges %}
+{%      set lb_range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+{%        for lb_range in lb_range_network.tools[tool].ipv4_ranges %}
       - {{ lb_range.start }}-{{ lb_range.end }}
 {%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
 {%        endfor %}
@@ -120,10 +122,10 @@ data:
     iface: {{ network.network_name }}
     base_iface: {{ ns.interfaces[network.network_name] }}
 {%    endif %}
-{%  else %}
-{%    if ns.interfaces[network.network_name] is defined %}
+{%  elif network.network_name == "ctlplane" %}
+    iface: {{ ns.interfaces[network.network_name] }}
+{%  elif ns.interfaces[network.network_name] is defined %}
     iface: {{ network.network_name }}
-{%    endif %}
 {%  endif %}
 {%  if network.tools.multus is defined %}
     net-attach-def: |
@@ -147,23 +149,25 @@ data:
 {%  endif %}
         "ipam": {
           "type": "whereabouts",
-          "range": "{{ network.network_v4 }}",
 {%  if network.network_name == "octavia" and network.tools.multus.ipv4_routes | default([]) | length > 0 %}
           "routes": [
-{%  for route in network.tools.multus.ipv4_routes %}
+{%    for route in network.tools.multus.ipv4_routes %}
              {
                "dst": "{{ route.destination }}",
                "gw": "{{ route.gateway }}"
              }{% if not loop.last %},{% endif %}
-{%  endfor %}
+{%    endfor %}
            ],
 {%  endif %}
-          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
+{%  set range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+          "range": "{{ range_network.network_v4 }}",
+          "range_start": "{{ range_network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ range_network.tools.multus.ipv4_ranges.0.end }}",
+          "gateway": "{{ range_network.network_v4 |ansible.utils.nthhost(1) }}"
         }
       }
 {%  endif %}
+{% endif %}
 {% endfor %}
 
   dns-resolver:
