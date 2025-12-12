@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install required RPM packages
+  tags:
+    - packages
+  become: true
+  ansible.builtin.package:
+    name:
+      - python3-pip
+      - qemu-img
+      - dosfstools
+      - xfsprogs
+    state: present
+
+- name: Install diskimage-builder in virtualenv
+  tags:
+    - packages
+  ansible.builtin.pip:
+    virtualenv_command: "python3 -m venv"
+    virtualenv: "{{ cifmw_nat64_appliance_venv_dir }}"
+    name:
+      - diskimage-builder
+      - setuptools
+
+- name: Copy files to cifmw_nat64_appliance_dir
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ cifmw_nat64_appliance_workdir }}/{{ item }}"
+    mode: preserve
+  loop:
+    - "elements/"
+    - nat64-appliance.yaml
+
+- name: Clone edpm-image-builder (reset-bls-entries dib element)
+  ansible.builtin.git:
+    repo: https://github.com/openstack-k8s-operators/edpm-image-builder.git
+    dest: "{{ cifmw_nat64_appliance_workdir }}/edpm-image-builder"
+    version: main
+
+- name: Build the nat64-appliance image using DIB (with ci_script)
+  when: cifmw_nat64_appliance_use_ci_script | bool
+  ansible.builtin.include_tasks: build_with_ci_script.yml
+
+- name: Build the nat64-appliance image using DIB (with shell)
+  when: not (cifmw_nat64_appliance_use_ci_script | bool)
+  ansible.builtin.include_tasks: build_with_shell.yml
