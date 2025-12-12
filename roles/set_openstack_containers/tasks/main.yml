@@ -37,11 +37,6 @@
 - name: Set common facts for the role
   ansible.builtin.set_fact:
     operator_name: "{{ cifmw_set_openstack_containers_operator_name }}"
-    operator_namespace: >-
-      {{
-        cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] |
-        default(cifmw_set_openstack_containers_operators_namespace)
-      }}
     cifmw_set_openstack_containers_common_env: >-
       {{
         ( cifmw_install_yamls_environment |
@@ -59,6 +54,9 @@
     output_dir: "{{ cifmw_set_openstack_containers_basedir }}/artifacts"
     script: "oc set env $(oc get pods -n {{ operator_namespace }} -o name -l app.kubernetes.io/name={{ operator_name }}-operator) -n {{ operator_namespace }} --list"
   register: containers_env_list
+  until: containers_env_list.rc == 0
+  retries: 10
+  delay: 5
 
 - name: Generate update_env_vars.sh script
   ansible.builtin.template:
