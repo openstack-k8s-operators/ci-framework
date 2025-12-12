@@ -98,6 +98,28 @@
       cifmw_admin_distribute_private_key: true
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
+- name: Ceph prerequisites
+  tags: ceph_prereq
+  hosts: "{{ cifmw_ceph_target | default('computes') }}"
+  gather_facts: false
+  become: true
+  tasks:
+    # jq is normally installed by cifmw_block_device role, but when cifmw_ceph_spec_data_devices
+    # is defined (indicating block devices are already present), the block device creation play
+    # is skipped. Install jq explicitly here to ensure it's available for ceph operations.
+    - name: Install prerequisite packages
+      ansible.builtin.dnf:
+        name:
+          - jq
+        state: present
+
+    # Install cephadm on all nodes. This supports both standard deployments (where only the
+    # bootstrap node needs it) and adoption scenarios (where all nodes may need it).
+    - name: Install cephadm package on all nodes
+      ansible.builtin.include_role:
+        name: cifmw_cephadm
+        tasks_from: install_cephadm
+
 - name: Create Block Device on target nodes
   tags: block
   hosts: "{{ cifmw_ceph_target | default('computes')  }}"
