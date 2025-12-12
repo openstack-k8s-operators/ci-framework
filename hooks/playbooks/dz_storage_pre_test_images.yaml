@@ -8,7 +8,6 @@
     cirros_version: "0.6.2"
     cirros_image_name: "cirros-{{ cirros_version }}-x86_64-disk.img"
     cirros_download_url: "https://github.com/cirros-dev/cirros/releases/download/{{ cirros_version }}/{{ cirros_image_name }}"
-    openstack_namespace: "{{ cifmw_openstack_namespace | default('openstack') }}"
   tasks:
     - name: Check if cirros image already exists
       environment:
@@ -16,7 +15,7 @@
         PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
       ansible.builtin.command: >-
         oc rsh
-        -n {{ openstack_namespace }}
+        -n {{ cifmw_openstack_namespace }}
         openstackclient
         openstack image show {{ cirros_image_name }}
       register: _image_exists
@@ -31,7 +30,7 @@
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
             oc rsh
-            -n {{ openstack_namespace }}
+            -n {{ cifmw_openstack_namespace }}
             openstackclient
             openstack endpoint list --service keystone --interface public -f value -c URL
           register: keystone_url
@@ -41,7 +40,7 @@
             KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
-            oc get secret osp-secret -n {{ openstack_namespace }} -o jsonpath='{.data.AdminPassword}'
+            oc get secret osp-secret -n {{ cifmw_openstack_namespace }} -o jsonpath='{.data.AdminPassword}'
           register: admin_password_b64
 
         - name: Decode admin password
@@ -61,7 +60,7 @@
           ansible.builtin.command: >-
             oc cp
             "/tmp/{{ cirros_image_name }}"
-            "{{ openstack_namespace }}/openstackclient:/home/cloud-admin/{{ cirros_image_name }}"
+            "{{ cifmw_openstack_namespace }}/openstackclient:/home/cloud-admin/{{ cirros_image_name }}"
 
         - name: Create cirros image in default glance store (az0)
           environment:
@@ -69,7 +68,7 @@
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
             oc rsh
-            -n {{ openstack_namespace }}
+            -n {{ cifmw_openstack_namespace }}
             openstackclient
             openstack image create
             --disk-format qcow2
@@ -85,7 +84,7 @@
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
             oc rsh
-            -n {{ openstack_namespace }}
+            -n {{ cifmw_openstack_namespace }}
             openstackclient
             openstack image show {{ cirros_image_name }} -f value -c status
           register: image_status
@@ -99,7 +98,7 @@
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
             oc rsh
-            -n {{ openstack_namespace }}
+            -n {{ cifmw_openstack_namespace }}
             openstackclient
             openstack image show {{ cirros_image_name }} -f value -c id
           register: image_id
@@ -110,7 +109,7 @@
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
             oc rsh
-            -n {{ openstack_namespace }}
+            -n {{ cifmw_openstack_namespace }}
             openstackclient
             glance --os-auth-url {{ keystone_url.stdout | trim }}
             --os-project-name admin
@@ -128,7 +127,7 @@
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
           ansible.builtin.command: >-
             oc rsh
-            -n {{ openstack_namespace }}
+            -n {{ cifmw_openstack_namespace }}
             openstackclient
             openstack image show {{ image_id.stdout | trim }} -c properties -f value
           register: image_stores
