@@ -589,3 +589,23 @@
 
     - name: Apply the BGP default routes
       ansible.builtin.include_tasks: tasks/apply_bgp_default_routes.yaml
+
+# Workaround for OSPRH-23100: Restart cifmw-dnsmasq on hypervisor.
+# The dnsmasq service sometimes stops responding to DNS queries after
+# BGP network configuration, causing EDPM deployment to fail when
+# compute nodes cannot resolve package repository hostnames.
+- name: Restart cifmw-dnsmasq on hypervisor (OSPRH-23100 workaround)
+  hosts: hypervisor
+  become: true
+  tasks:
+    - name: Restart cifmw-dnsmasq service
+      ansible.builtin.systemd:
+        name: cifmw-dnsmasq
+        state: restarted
+
+    - name: Wait for dnsmasq to be ready
+      ansible.builtin.wait_for:
+        port: 53
+        host: 127.0.0.1
+        delay: 2
+        timeout: 30
