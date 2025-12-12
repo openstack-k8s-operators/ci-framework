@@ -20,7 +20,7 @@ data:
                                      },
                                      recursive=true) %}
     {{ network.network_name }}_ip: {{ network.ip_v4 }}
-{%       if 'worker-9' == hostname and 'ctlplane' == network.network_name %}
+{%       if 'ctlplane' == network.network_name %}
     base_if: {{ network.interface_name }}
 {%       endif %}
 {%     endfor %}
@@ -50,6 +50,7 @@ data:
 {% endfor %}
 
 {% for network in cifmw_networking_env_definition.networks.values() %}
+{% if network.network_name != 'ctlplane_ocp_nad' %}
 {%  set ns.lb_tools = {} %}
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
@@ -95,7 +96,8 @@ data:
 {%    if ns.lb_tools | length > 0 %}
     lb_addresses:
 {%      for tool in ns.lb_tools.keys() %}
-{%        for lb_range in network.tools[tool].ipv4_ranges %}
+{%      set lb_range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+{%        for lb_range in lb_range_network.tools[tool].ipv4_ranges %}
       - {{ lb_range.start }}-{{ lb_range.end }}
 {%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
 {%        endfor %}
@@ -114,10 +116,10 @@ data:
     iface: {{ network.network_name }}
     base_iface: {{ ns.interfaces[network.network_name] }}
 {%    endif %}
-{%  else %}
-{%    if ns.interfaces[network.network_name] is defined %}
+{%  elif network.network_name == "ctlplane" %}
     iface: {{ ns.interfaces[network.network_name] }}
-{%    endif %}
+{%  elif ns.interfaces[network.network_name] is defined %}
+    iface: {{ network.network_name }}
 {%  endif %}
 {%  if network.tools.multus is defined %}
     net-attach-def: |
@@ -139,42 +141,36 @@ data:
 {%  endif %}
         "ipam": {
           "type": "whereabouts",
-          "range": "{{ network.network_v4 }}",
 {%  if network.network_name == "octavia" and network.tools.multus.ipv4_routes | default([]) | length > 0 %}
           "routes": [
-{%  for route in network.tools.multus.ipv4_routes %}
+{%    for route in network.tools.multus.ipv4_routes %}
              {
                "dst": "{{ route.destination }}",
                "gw": "{{ route.gateway }}"
              }{% if not loop.last %},{% endif %}
-{%  endfor %}
+{%    endfor %}
            ],
 {%  endif %}
-          "range_start": "{{ network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ network.tools.multus.ipv4_ranges.0.end }}",
-{%  if network.network_name == "ctlplane" %}
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(2) }}"
-{% else %}
-          "gateway": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"
-{% endif %}
+{%  set range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+          "range": "{{ range_network.network_v4 }}",
+          "range_start": "{{ range_network.tools.multus.ipv4_ranges.0.start }}",
+          "range_end": "{{ range_network.tools.multus.ipv4_ranges.0.end }}",
+          "gateway": "{{ range_network.network_v4 |ansible.utils.nthhost(1) }}"
         }
       }
 {%  endif %}
+{% endif %}
 {% endfor %}
 
   dns-resolver:
     config:
       server:
-# We set ctlplane = 192.168.125.0/24 and we rely on this definition to create the nad above.
-# BGP exposes nad ips by advertising a 192.168.125.X address on the worker, and this would break dns
-# because the traffic will not be sent to the right nic if a local ip on the same network is present.
-# To avoid messing with routes etc we hardcode the 122.1 ip here
-        - 192.168.122.1
+        - "{{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}"
       search: []
     options:
       - key: server
         values:
-          - 192.168.122.1
+          - {{ cifmw_networking_env_definition.networks.ctlplane.gw_v4 }}
 {% for nameserver in cifmw_ci_gen_kustomize_values_nameservers %}
       - key: server
         values:
