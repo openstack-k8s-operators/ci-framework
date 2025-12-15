@@ -410,7 +410,11 @@ def annotate(axs: Iterable[plt.Axes]) -> None:
         data = file.read().strip().split("\n")
 
     for annotation in data:
-        time, details = annotation.split(" | ", maxsplit=1)
+        try:
+            time, details = annotation.split(" | ", maxsplit=1)
+        except ValueError:
+            print("WARNING Skipping malformed annotation line:", annotation.strip())
+            continue
         time = datetime.strptime(time, "%Y-%m-%d %H:%M:%S,%f")
 
         if details.startswith("PLAY"):
