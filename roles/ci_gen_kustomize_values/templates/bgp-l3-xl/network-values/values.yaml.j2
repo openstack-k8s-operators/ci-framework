@@ -49,117 +49,130 @@ data:
 {%   endif %}
 {% endfor %}
 
-{% for network in cifmw_networking_env_definition.networks.values() %}
-{% if network.network_name != 'ctlplane_ocp_nad' %}
-{%  set ns.lb_tools = {} %}
+{% set filtered_networks = cifmw_networking_env_definition.networks.values() | selectattr('network_name', '!=', 'ctlplane_ocp_nad') | list %}
+{% for network in filtered_networks %}
+{%   set ns.lb_tools = {} %}
   {{ network.network_name }}:
     dnsDomain: {{ network.search_domain }}
-{%  if network.tools is defined and network.tools.keys() | length > 0 %}
+{%   if network.tools is defined and network.tools.keys() | length > 0 %}
     subnets:
-{%    for tool in network.tools.keys() %}
-{%      if tool is match('.*lb$') %}
-{%        set _ = ns.lb_tools.update({tool: []}) %}
-{%      endif %}
-{%    endfor %}
-{%    if network.network_name != 'ctlplane' %}
+{%     for tool in network.tools.keys() %}
+{%       if tool is match('.*lb$') %}
+{%         set _ = ns.lb_tools.update({tool: []}) %}
+{%       endif %}
+{%     endfor %}
+{%     if network.network_name != 'ctlplane' %}
       - allocationRanges:
-{%      for range in network.tools.netconfig.ipv4_ranges %}
+{%       for range in network.tools.netconfig.ipv4_ranges %}
         - end: {{ range.end }}
           start: {{ range.start }}
-{%      endfor %}
+{%       endfor %}
         cidr: {{ network.network_v4 }}
-{%      if network.gw_v4 is defined %}
+{%       if network.gw_v4 is defined %}
         gateway: {{ network.gw_v4 }}
-{%      endif %}
+{%       endif %}
         name: subnet1
-{%      if network.vlan_id is defined  %}
+{%       if network.vlan_id is defined  %}
         vlan: {{ network.vlan_id }}
-{%      endif %}
-{%    else %}
-{%      for rack in ['r0', 'r1', 'r2'] %}
-{%        set rack_subnet = cifmw_networking_env_definition.networks[network.network_name + rack] %}
+{%       endif %}
+{%     else %}
+{%       for rack in ['r0', 'r1', 'r2'] %}
+{%         set rack_subnet = cifmw_networking_env_definition.networks[network.network_name + rack] %}
       - allocationRanges:
-{%        for range in rack_subnet.tools.netconfig.ipv4_ranges %}
+{%         for range in rack_subnet.tools.netconfig.ipv4_ranges %}
         - end: {{ range.end }}
           start: {{ range.start }}
-{%        endfor %}
+{%         endfor %}
         cidr: {{ rack_subnet.network_v4 }}
-{%        if rack_subnet.gw_v4 is defined %}
+{%         if rack_subnet.gw_v4 is defined %}
         gateway: {{ rack_subnet.gw_v4 }}
-{%        endif %}
+{%         endif %}
         name: {{ 'subnet' ~ loop.index0 }}
-{%        if rack_subnet.vlan_id is defined  %}
+{%         if rack_subnet.vlan_id is defined  %}
         vlan: {{ rack_subnet.vlan_id }}
-{%        endif %}
-{%      endfor %}
-{%    endif %}
-{%    if ns.lb_tools | length > 0 %}
+{%         endif %}
+{%       endfor %}
+{%     endif %}
+{%     if ns.lb_tools | length > 0 %}
     lb_addresses:
-{%      for tool in ns.lb_tools.keys() %}
-{%      set lb_range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
-{%        for lb_range in lb_range_network.tools[tool].ipv4_ranges %}
+{%       for tool in ns.lb_tools.keys() %}
+{%         set lb_range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+{%         for lb_range in lb_range_network.tools[tool].ipv4_ranges %}
       - {{ lb_range.start }}-{{ lb_range.end }}
-{%          set _ = ns.lb_tools[tool].append(lb_range.start) %}
-{%        endfor %}
+{%           set _ = ns.lb_tools[tool].append(lb_range.start) %}
+{%         endfor %}
     endpoint_annotations:
       {{ tool }}.universe.tf/address-pool: {{ network.network_name }}
       {{ tool }}.universe.tf/allow-shared-ip: {{ network.network_name }}
       {{ tool }}.universe.tf/loadBalancerIPs: {{ ','.join(ns.lb_tools[tool]) }}
-{%      endfor %}
-{%    endif %}
-{%  endif %}
+{%       endfor %}
+{%     endif %}
+{%   endif %}
     prefix-length: {{ network.network_v4 | ansible.utils.ipaddr('prefix') }}
     mtu: {{ network.mtu | default(1500) }}
-{%  if network.vlan_id is defined  %}
+{%   if network.vlan_id is defined  %}
     vlan: {{ network.vlan_id }}
-{%    if ns.interfaces[network.network_name] is defined %}
+{%     if ns.interfaces[network.network_name] is defined %}
     iface: {{ network.network_name }}
     base_iface: {{ ns.interfaces[network.network_name] }}
-{%    endif %}
-{%  elif network.network_name == "ctlplane" %}
+{%     endif %}
+{%   elif network.network_name == "ctlplane" %}
     iface: {{ ns.interfaces[network.network_name] }}
-{%  elif ns.interfaces[network.network_name] is defined %}
+{%   elif ns.interfaces[network.network_name] is defined %}
     iface: {{ network.network_name }}
-{%  endif %}
-{%  if network.tools.multus is defined %}
+{%   endif %}
+{%   if network.tools.multus is defined %}
     net-attach-def: |
       {
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
         "type": "bridge",
+{%     if network.network_name == "storage" %}
+        "isDefaultGateway": false,
+{%     else %}
         "isDefaultGateway": true,
+{%     endif %}
         "isGateway": true,
         "forceAddress": false,
+{%     if network.network_name == "ctlplane" %}
         "ipMasq": true,
+{%     else %}
+        "ipMasq": false,
+{%     endif %}
         "hairpinMode": true,
-{%  if network.network_name == "octavia" %}
-        "bridge": "octbr",
-{%  elif network.network_name == "ctlplane" %}
+{%     if network.network_name == "ctlplane" %}
         "bridge": "ospbr",
-{%  else %}
+{%     else %}
         "bridge": "{{ network.network_name }}",
-{%  endif %}
+{%     endif %}
         "ipam": {
           "type": "whereabouts",
-{%  if network.network_name == "octavia" and network.tools.multus.ipv4_routes | default([]) | length > 0 %}
+{%     if network.network_name == "octavia" and network.tools.multus.ipv4_routes | default([]) | length > 0 %}
           "routes": [
-{%    for route in network.tools.multus.ipv4_routes %}
+{%       for route in network.tools.multus.ipv4_routes %}
              {
                "dst": "{{ route.destination }}",
                "gw": "{{ route.gateway }}"
              }{% if not loop.last %},{% endif %}
-{%    endfor %}
+{%       endfor %}
            ],
-{%  endif %}
-{%  set range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+{%     elif network.network_name == "storage" %}
+          "routes": [
+               {"dst": "172.31.0.0/24", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"},
+               {"dst": "192.168.188.0/24", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"},
+               {"dst": "99.99.0.0/16", "gw": "{{ network.network_v4 |ansible.utils.nthhost(1) }}"}
+           ],
+{%     endif %}
+{%     set range_network = network if network.network_name != "ctlplane" else cifmw_networking_env_definition.networks.ctlplane_ocp_nad %}
+{%     if network.network_name != "storage" %}
+          "gateway": "{{ range_network.network_v4 |ansible.utils.nthhost(1) }}",
+{%     endif %}
           "range": "{{ range_network.network_v4 }}",
           "range_start": "{{ range_network.tools.multus.ipv4_ranges.0.start }}",
-          "range_end": "{{ range_network.tools.multus.ipv4_ranges.0.end }}",
-          "gateway": "{{ range_network.network_v4 |ansible.utils.nthhost(1) }}"
+          "range_end": "{{ range_network.tools.multus.ipv4_ranges.0.end }}"
         }
       }
-{%  endif %}
-{% endif %}
+{%   endif %}
 {% endfor %}
 
   dns-resolver:
