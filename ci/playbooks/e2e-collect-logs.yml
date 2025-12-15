@@ -50,3 +50,21 @@
       no_log: true
       args:
         chdir: "{{ ansible_user_dir }}/zuul-output/logs/"
+
+    - name: Compress logs bigger than 2MB
+      when: cifmw_compress_all_logs | default(true)
+      ansible.builtin.shell: >
+        find "{{ ansible_user_dir }}/zuul-output/"
+        -type f
+        ! -name "*.gz"
+        ! -name "*.xz"
+        -size +2M
+        -exec gzip --best "{}" +
+      ignore_errors: true  # noqa: ignore-errors
+
+    - name: Copy files from workspace on node
+      vars:
+        work_dir: "{{ ansible_user_dir }}/zuul-output/logs"
+      ansible.builtin.include_role:
+        name: fetch-output
+      ignore_errors: true # noqa: ignore-errors
