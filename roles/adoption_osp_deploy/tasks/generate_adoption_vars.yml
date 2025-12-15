@@ -24,23 +24,29 @@
 - name: Generate adoption vars file
   delegate_to: "controller-0"
   vars:
+    _is_bgp: "{{ cifmw_adoption_osp_deploy_bgp | bool }}"
     _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
     _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
-    _undercloud_ip: "{{ _undercloud_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
-    _controller_1_name: "{{ _vm_groups['osp-controllers'] | first }}"
+    _undercloud_ctlplane_net: "{{ _undercloud_net.networks.ctlplaner0 if _is_bgp else _undercloud_net.networks.ctlplane }}"
+    _undercloud_ip: "{{ _undercloud_ctlplane_net[ip_version|default('ip_v4')] }}"
+    _controller_1_name: "{{ _vm_groups['osp-r0-controllers' if _is_bgp else 'osp-controllers'] | first }}"
     _controller_1_net: "{{ cifmw_networking_env_definition.instances[_controller_1_name] }}"
-    _controller_1_internalapi_ip: "{{ _controller_1_net.networks.internalapi[ip_version|default('ip_v4')] }}"
+    _controller_1_internalapi_ip: "{{ '99.99.0.9' if _is_bgp else _controller_1_net.networks.internalapi[ip_version|default('ip_v4')] }}"
     _compute_1_name: >-
-      {%- if _vm_groups['osp-computes'] | default([]) | length > 0 -%}
+      {%- if _is_bgp -%}
+      {{ _vm_groups['osp-r0-computes'] | first }}
+      {%- elif _vm_groups['osp-computes'] | default([]) | length > 0 -%}
       {{ _vm_groups['osp-computes'] | first }}
       {%- else -%}
       standalone
       {%- endif -%}
     _compute_1_net: "{{ cifmw_networking_env_definition.instances[_compute_1_name] | default({'networks': {'ctlplane': {'ip_v4': '192.168.122.100'}}}) }}"
+    _compute_1_ctlplane_net: "{{ _compute_1_net.networks.ctlplaner0 if _is_bgp else _compute_1_net.networks.ctlplane }}"
+    _compute_1_ip: "{{ _compute_1_ctlplane_net[ip_version|default('ip_v4')] }}"
     _stack_names: "{{ cifmw_adoption_osp_deploy_scenario.stacks | map(attribute='stackname') | list }}"
     _default_cell_name: "{{ cifmw_adoption_osp_deploy_scenario.default_cell_name | default('cell1') }}"
-    _compute_1_ip: "{{ _compute_1_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
+    _adoption_vars_template: "{{ 'adoption_vars_bgp.yaml.j2' if _is_bgp else 'adoption_vars.yaml.j2' }}"
   ansible.builtin.template:
-    src: "adoption_vars.yaml.j2"
+    src: "{{ _adoption_vars_template }}"
     dest: "{{ ansible_user_dir }}/adoption_vars.yaml"
     mode: "0644"
