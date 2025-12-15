@@ -50,6 +50,34 @@
     - cifmw_ci_gen_kustomize_values_installplan_approval is defined
     - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
 
+- name: Validate subscription CSV version after installplan
+  when:
+    - cifmw_ci_gen_kustomize_values_installplan_approval is defined
+    - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
+  block:
+    - name: Wait for subscription installedCSV to match currentCSV
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: Subscription
+        namespace: openstack-operators
+        label_selectors:
+          - operators.coreos.com/openstack-operator.openstack-operators
+      register: _cifmw_update_subscription_info
+      until: >
+        _cifmw_update_subscription_info.resources | length > 0
+        and
+        _cifmw_update_subscription_info.resources[0].status.installedCSV is defined
+        and
+        _cifmw_update_subscription_info.resources[0].status.currentCSV is defined
+        and
+        _cifmw_update_subscription_info.resources[0].status.installedCSV ==
+        _cifmw_update_subscription_info.resources[0].status.currentCSV
+      retries: 30
+      delay: 10
+
 - name: Handle OpenStack operator initialization
   when:
     - cifmw_ci_gen_kustomize_values_deployment_version is defined
@@ -144,6 +172,29 @@
           {{ cifmw_update_artifacts_basedir }}/update_event.sh
           Got new version {{ cifmw_update_next_available_version }}
           ({{ openstackversion_info.resources[0].status.deployedVersion }})
+
+- name: Wait for OpenStackControlPlane to be ready after operator update
+  when:
+    - not (cifmw_update_run_dryrun | bool)
+    - cifmw_ci_gen_kustomize_values_deployment_version is defined
+  block:
+    - name: Delay to allow OpenStackControlPlane ready condition to transition
+      # If we install the new operators, the control plane is in 'ready' status, so
+      # we need to wait a few seconds so it changes to a 'non-ready' status first.
+      ansible.builtin.pause:
+        seconds: "{{ cifmw_update_wait_controplane_status_change_sec }}"
+
+    - name: Wait for OpenStackControlPlane ready condition
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc wait OpenStackControlPlane
+          --all
+          --namespace={{ cifmw_update_namespace }}
+          --for=condition=ready
+          --timeout={{ cifmw_update_openstack_update_run_timeout }}
 
 - name: Set openstack_update_run Makefile environment variables
   tags:
