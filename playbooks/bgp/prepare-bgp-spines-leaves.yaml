@@ -1,4 +1,60 @@
 ---
+- name: Start spines and leafs and add them to inventory
+  hosts: localhost
+  vars:
+    leafs_list:
+      - leaf-0
+      - leaf-1
+      - leaf-2
+      - leaf-3
+      - leaf-4
+      - leaf-5
+    spines_list:
+      - spine-0
+      - spine-1
+    routers_list:
+      - router-0
+    fabric_list: "{{ leafs_list + spines_list + routers_list }}"
+  tasks:
+    - name: Start spine and leaf VMs
+      delegate_to: hypervisor
+      become: true
+      community.libvirt.virt:
+        name: "cifmw-{{ item }}"
+        state: running
+      loop: "{{ fabric_list }}"
+
+    - name: Add leafs group to inventory
+      when: '"leafs" not in groups'
+      ansible.builtin.add_host:
+        name: "{{ item }}.utility"
+        group: leafs
+      loop: "{{ leafs_list }}"
+
+    - name: Add spines group to inventory
+      when: '"spines" not in groups'
+      ansible.builtin.add_host:
+        name: "{{ item }}.utility"
+        group: spines
+      loop: "{{ spines_list }}"
+
+    - name: Add routers group to inventory
+      when: '"routers" not in groups'
+      ansible.builtin.add_host:
+        name: "{{ item }}.utility"
+        group: routers
+      loop: "{{ routers_list }}"
+
+    - name: Check SSH connectivity
+      delegate_to: hypervisor
+      ansible.builtin.wait_for:
+        port: 22
+        host: "{{ item }}.utility"
+        search_regex: OpenSSH
+        delay: 10
+        timeout: 120
+      loop: "{{ fabric_list }}"
+
 - name: Common spines and leaves configuration
   hosts: "spines,leafs{{ router_bool | default(false) | ternary(',routers', '') }}"
   tasks:
@@ -183,10 +239,13 @@
         autoconnect: true
         conn_name: "{{ item }}"
         type: ethernet
+        ifname: "{{ router_downlink_ifs[loop_index | int] }}"
         method4: disabled
         method6: link-local
         state: present
       loop: "{{ router_downlink_conns }}"
+      loop_control:
+        index_var: loop_index
 
     # uplink router IPv4 is configured for both IPv4 and IPv6 jobs
     - name: Configure uplink router connections with nmcli when IPv4
@@ -453,6 +512,8 @@
             autoconnect: true
             conn_name: "{{ item }}"
             ip4: "{{ leaf_ds_ip4 }}/30"
+            type: ethernet
+            ifname: "{{ downlink_ifs_rack3[loop_index | int] }}"
             method4: manual
             method6: link-local
             state: present
@@ -470,6 +531,8 @@
             autoconnect: true
             conn_name: "{{ item }}"
             ip4: "{{ leaf_ds_ip4 }}/30"
+            type: ethernet
+            ifname: "{{ leaf_downlink_ifs[loop_index | int] }}"
             method4: manual
             method6: link-local
             state: present
@@ -513,6 +576,8 @@
             conn_name: "{{ item }}"
             ip4: "{{ _leaf_ds_ip4 }}/30"
             ip6: "{{ _leaf_ds_ip6 }}/126"
+            type: ethernet
+            ifname: "{{ leaf_downlink_ifs[loop_index | int] }}"
             method4: manual
             method6: manual
             state: present
@@ -549,8 +614,12 @@
         conn_name: "{{ item }}"
         method4: disabled
         method6: link-local
+        type: ethernet
+        ifname: "{{ uplink_ifs[loop_index | int] }}"
         state: present
       loop: "{{ uplink_conns }}"
+      loop_control:
+        index_var: loop_index
 
     - name: Enable FRR Zebra daemon
       become: true
