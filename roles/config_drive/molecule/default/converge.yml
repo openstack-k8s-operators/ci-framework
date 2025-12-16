@@ -18,7 +18,7 @@
 - name: Converge
   hosts: all
   tasks:
-    - name: Include config_drive role
+    - name: Include config_drive role with full configuration
       vars:
         cifmw_config_drive_uuid: de2f369a-1886-4a90-8e50-e419289e6850
         cifmw_config_drive_name: test01
@@ -54,3 +54,158 @@
                     - 192.168.0.1
       ansible.builtin.include_role:
         name: config_drive
+
+    - name: Run config_drive role again without user-data or network-config (soft-clean scenario)
+      vars:
+        cifmw_config_drive_uuid: de2f369a-1886-4a90-8e50-e419289e6850
+        cifmw_config_drive_name: test01
+        cifmw_config_drive_hostname: test01.example.com
+        # cifmw_config_drive_userdata is not defined (simulating soft clean)
+        # cifmw_config_drive_networkconfig is not defined (simulating soft clean)
+      ansible.builtin.include_role:
+        name: config_drive
+
+    - name: Verify ISO still exists after soft-clean
+      ansible.builtin.stat:
+        path: "{{ cifmw_config_drive_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}/artifacts/cifmw_config_drive/de2f369a-1886-4a90-8e50-e419289e6850.iso"
+      register: _iso_check
+
+    - name: Assert ISO exists
+      ansible.builtin.assert:
+        that:
+          - _iso_check.stat.exists
+        fail_msg: "ISO file should exist after soft-clean scenario"
+        success_msg: "Soft-clean scenario passed - ISO exists and role didn't fail on skipped tasks"
+
+    - name: Run config_drive role again with same configuration (should pass - no changes)
+      vars:
+        cifmw_config_drive_uuid: de2f369a-1886-4a90-8e50-e419289e6850
+        cifmw_config_drive_name: test01
+        cifmw_config_drive_hostname: test01.example.com
+        cifmw_config_drive_userdata:
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCg1LHRahLiT1NFv4l/XH
+          packages:
+            - git
+            - bind-utils
+          write_files:
+            - path: /root/test.file
+              owner: root:root
+              content: |-
+                # Test file content
+          runcmd:
+            - ['sh', '-c', 'echo foo | tee -a /tmp/foo']
+        cifmw_config_drive_networkconfig:
+          network:
+            version: 2
+            ethernets:
+              id0:
+                match:
+                  macaddress: "aa:bb:cc:dd:ee:ff"
+                addresses:
+                  - 192.168.0.101/24
+                routes:
+                  - to: 0.0.0.0/0
+                    via: 192.168.0.1
+                    on-link: true
+                nameservers:
+                  addresses:
+                    - 192.168.0.1
+      ansible.builtin.include_role:
+        name: config_drive
+
+    - name: Attempt to change user-data on existing ISO (should fail)
+      block:
+        - name: Include config_drive with modified user-data
+          vars:
+            cifmw_config_drive_uuid: de2f369a-1886-4a90-8e50-e419289e6850
+            cifmw_config_drive_name: test01
+            cifmw_config_drive_hostname: test01.example.com
+            cifmw_config_drive_userdata:
+              ssh_authorized_keys:
+                - ssh-rsa DIFFERENT_KEY_HERE
+              packages:
+                - vim  # Changed from git
+            cifmw_config_drive_networkconfig:
+              network:
+                version: 2
+                ethernets:
+                  id0:
+                    match:
+                      macaddress: "aa:bb:cc:dd:ee:ff"
+                    addresses:
+                      - 192.168.0.101/24
+                    routes:
+                      - to: 0.0.0.0/0
+                        via: 192.168.0.1
+                        on-link: true
+                    nameservers:
+                      addresses:
+                        - 192.168.0.1
+          ansible.builtin.include_role:
+            name: config_drive
+
+        - name: Fail if role didn't reject the change
+          ansible.builtin.fail:
+            msg: "Role should have failed when trying to change user-data on existing ISO"
+
+      rescue:
+        - name: Verify the failure was due to ISO modification attempt
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.msg is defined
+              - ansible_failed_result.msg is regex('trying to edit an existing ISO', ignorecase=True)
+            fail_msg: "Role failed but not with expected error message. Got: {{ ansible_failed_result.msg | default('no message') }}"
+            success_msg: "Role correctly rejected attempt to change user-data"
+
+    - name: Attempt to change network-config on existing ISO (should fail)
+      block:
+        - name: Include config_drive with modified network-config
+          vars:
+            cifmw_config_drive_uuid: de2f369a-1886-4a90-8e50-e419289e6850
+            cifmw_config_drive_name: test01
+            cifmw_config_drive_hostname: test01.example.com
+            cifmw_config_drive_userdata:
+              ssh_authorized_keys:
+                - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCg1LHRahLiT1NFv4l/XH
+              packages:
+                - git
+                - bind-utils
+              write_files:
+                - path: /root/test.file
+                  owner: root:root
+                  content: |-
+                    # Test file content
+              runcmd:
+                - ['sh', '-c', 'echo foo | tee -a /tmp/foo']
+            cifmw_config_drive_networkconfig:
+              network:
+                version: 2
+                ethernets:
+                  id0:
+                    match:
+                      macaddress: "11:22:33:44:55:66"  # Changed MAC address
+                    addresses:
+                      - 192.168.0.200/24  # Changed IP
+                    routes:
+                      - to: 0.0.0.0/0
+                        via: 192.168.0.1
+                        on-link: true
+                    nameservers:
+                      addresses:
+                        - 192.168.0.1
+          ansible.builtin.include_role:
+            name: config_drive
+
+        - name: Fail if role didn't reject the change
+          ansible.builtin.fail:
+            msg: "Role should have failed when trying to change network-config on existing ISO"
+
+      rescue:
+        - name: Verify the failure was due to ISO modification attempt
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.msg is defined
+              - ansible_failed_result.msg is regex('trying to edit an existing ISO', ignorecase=True)
+            fail_msg: "Role failed but not with expected error message. Got: {{ ansible_failed_result.msg | default('no message') }}"
+            success_msg: "Role correctly rejected attempt to change network-config"
