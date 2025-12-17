@@ -3,13 +3,15 @@
 #   - There are no failed CI jobs
 #   - There are no Pending CI jobs excluding Tide
 #   - The PR isn't in draft state
+#   - The PR doesn't have "do-not-merge/work-in-progress" label
 # Removes the label if any of those checks fail.
+# Runs on CI status changes, draft status changes, and label changes.
 
 name: Toggle review ready label
 on:
   status:
   pull_request_target:
-    types: [ready_for_review, converted_to_draft]
+    types: [ready_for_review, converted_to_draft, labeled, unlabeled]
 jobs:
   toggle-label:
     runs-on: ubuntu-latest
@@ -66,9 +68,15 @@ jobs:
           if [ "$draft_status" = "true" ]; then
               ready=false
           fi
-
-          # Define pr_number and set or remove review_ready_label on PR
+          # Check for dnm labels and set $ready false if there is any dnm label
+          # Define pr_number and pr_labels
           pr_number=$(echo "${pr_search_result}" | jq '.[].number')
+          pr_labels=$(gh pr view "${pr_number}" --json labels -R "${GITHUB_REPOSITORY}" | jq -r '.labels[].name')
+          if echo "${pr_labels}" | grep -q "do-not-merge/work-in-progress"; then
+              ready=false
+          fi
+
+          # Set or remove review_ready_label on PR
           if [ "$ready" = "true" ]; then
               echo "Setting label: ${review_ready_label} on PR: ${pr_number}"
               gh pr edit "${pr_number}" --add-label "${review_ready_label}" -R "${GITHUB_REPOSITORY}"
