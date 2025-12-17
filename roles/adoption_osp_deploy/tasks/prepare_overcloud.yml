@@ -21,7 +21,51 @@
       - user_id
       - user_dir
 
+- name: Reset facts
+  ansible.builtin.set_fact:
+    _tripleo_nodes_stack: {}
+
 - name: Prepare enviornment for 17.1 overcloud deployment
+  vars:
+    _overcloud_name: >-
+      {{
+        _stack.stackname |
+        default('overcloud')
+      }}
+    _hostname_map_translation: >-
+      {{
+        cifmw_adoption_osp_deploy_scenario.hostname_groups_map |
+        ansible.utils.keep_keys(target=_stack.stack_nodes)
+      }}
+    _network_data_file: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _stack.network_data_file
+        ] | path_join
+      }}
+    _network_data_file_dest: >-
+      {{
+        [ansible_user_dir,
+         'network_data_' ~  _overcloud_name ~'.yaml'
+        ] | path_join
+      }}
+    _network_data_extension: "{{ _network_data_file | splitext | last }}"
+    _vips_data_file: >-
+      {{
+        [cifmw_adoption_source_scenario_path,
+         _stack.vips_data_file
+        ] | path_join
+      }}
+    _vips_data_file_dest: >-
+      {{
+        [ansible_user_dir,
+         'vips_data_' ~ _overcloud_name ~ '.yaml'
+        ] | path_join
+      }}
+    _source_cmd: "source {{ ansible_user_dir }}/stackrc"
+    _network_provision_output: "network_provision_{{ _overcloud_name }}_out.yaml"
+    _vips_provision_output: "vips_provision_{{ _overcloud_name }}_out.yaml"
+    _ctlplane: "{{ _stack.ctlplanenet|default('ctlplane') }}"
   block:
     - name: Gather stack nodes and facts
       ansible.builtin.include_tasks: gather_stack_nodes.yml
@@ -50,6 +94,43 @@
         tasks_from: "start_vms.yml"
         apply:
           delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+
+    - name: Configure NetworkManager to not override /etc/resolv.conf
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      community.general.ini_file:
+        path: "/etc/NetworkManager/NetworkManager.conf"
+        option: dns
+        section: main
+        value: none
+        mode: "0644"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+
+    - name: Restart NetworkManager to ensure we apply new configuration
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      ansible.builtin.service:
+        name: NetworkManager
+        state: restarted
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+
+    - name: Inject custom nameservers in /etc/resolv.conf
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      vars:
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_ctlplane] }}"
+        _dns_server: "{{ _ctlplane_net[dns_version|default('dns_v4')] }}"
+      ansible.builtin.template:
+        src: "resolv.conf.j2"
+        dest: "/etc/resolv.conf"
+        mode: "0644"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
 
     - name: Ensure needed logins
       ansible.builtin.include_tasks: login_registries.yml
@@ -171,12 +252,12 @@
       delegate_to: "{{ overcloud_vm }}"
       vars:
         _node_net: "{{ cifmw_networking_env_definition.instances[overcloud_vm] }}"
-        _ctlplane_ip: "{{ _node_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
-        _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
-        _dns_server: "{{ _ctlplane_net.[dns_version|default('dns_v4')] }}"
+        _ctlplane_ip: "{{ _node_net.networks[_ctlplane][ip_version|default('ip_v4')] }}"
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_ctlplane] }}"
+        _dns_server: "{{ _ctlplane_net[dns_version|default('dns_v4')] }}"
         _gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
-        _interface_mtu: "{{ _node_net.networks.ctlplane.mtu }}"
-        _ctlplane_cidr: "{{ _node_net.networks.ctlplane[prefix_length_version|default('prefix_length_v4')] }}"
+        _interface_mtu: "{{ _node_net.networks[_ctlplane].mtu }}"
+        _ctlplane_cidr: "{{ _node_net.networks[_ctlplane][prefix_length_version|default('prefix_length_v4')] }}"
       ansible.builtin.template:
         src: "os_net_config_overcloud.yml.j2"
         dest: /etc/os-net-config/tripleo_config.yaml

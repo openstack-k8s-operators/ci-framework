@@ -1,18 +1,20 @@
 #jinja2: trim_blocks:True, lstrip_blocks:True
-{% for group, role in cifmw_adoption_osp_deploy_scenario.roles_groups_map.items() %}
+{% for group in _stack.stack_nodes %}
+  {% set role = cifmw_adoption_osp_deploy_scenario.roles_groups_map[group] %}
 {{ role }}:
   hosts:
     {% for node in _vm_groups[group] %}
     {% set node_nets = cifmw_networking_env_definition.instances[node] %}
     {{ node }}:
-      ansible_host: {{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}
+      ansible_host: {{ node_nets.networks[_ctlplane][ip_version|default('ip_v4')] }}
       canonical_hostname: {{ node }}.{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}
-      ctlplane_ip: {{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}
+      ctlplane_ip: {{ node_nets.networks[_ctlplane][ip_version|default('ip_v4')] }}
       {% for network_name, net in node_nets.networks.items() %}
+      {% set network_name = cifmw_adoption_osp_deploy_scenario.network_tripleo_network_map[network_name]|default(network_name) %}
       {% if 'vlan_id' in net %}
-        {% set net_name = ['storage_mgmt'] if network_name == 'storagemgmt' else [network_name] %}
-        {% set net_name = ['internal_api'] if network_name == 'internalapi' else [network_name] %}
-      {{ net_name[0] }}_ip: {{ net[ip_version|default('ip_v4')] }}
+        {% set network_name = 'storage_mgmt' if network_name == 'storagemgmt' else network_name %}
+        {% set network_name = 'internal_api' if network_name == 'internalapi' else network_name %}
+      {{ network_name }}_ip: {{ net[ip_version|default('ip_v4')] }}
       {% endif %}
       {% endfor %}
     {% endfor %}
@@ -33,19 +35,18 @@ allovercloud:
     {% endfor %}
 computes:
   children:
-{% if _role_map_translation['osp-computes'] | default([]) | length > 0 %}
-    {{ _role_map_translation['osp-computes'] }}: {}
-{% endif %}
-{% if _role_map_translation[_overcloud_name ~ '-osp-computes'] | default([]) | length > 0 %}
-    {{ _role_map_translation[_overcloud_name ~ '-osp-computes'] }}: {}
-{% endif %}
+    {% for group in _stack.stack_nodes %}
+      {% if 'computes' in group %}
+    {{ cifmw_adoption_osp_deploy_scenario.roles_groups_map[group] }}: {}
+      {% endif %}
+    {% endfor %}
 {{ _overcloud_name }}:
   hosts:
-    {% for group in _role_map_translation.keys() %}
+    {% for group in _stack.stack_nodes %}
     {% for node in _vm_groups[group] %}
     {% set node_nets = cifmw_networking_env_definition.instances[node] %}
     {{ node }}:
       ansible_user: tripleo-admin
-      ansible_host: {{ node_nets.networks.ctlplane[ip_version|default('ip_v4')] }}
+      ansible_host: {{ node_nets.networks[_ctlplane][ip_version|default('ip_v4')] }}
     {% endfor %}
     {% endfor %}
