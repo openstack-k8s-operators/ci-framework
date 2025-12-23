@@ -1,0 +1,106 @@
+#!/bin/bash
+# Helper script to obtain tokens from Keycloak for OIDC authentication testing
+# Usage:
+#   get-keycloak-token.sh access_token <username> <password>  - Get access token
+#   get-keycloak-token.sh auth_code <username> <password>     - Get authorization code
+#   get-keycloak-token.sh admin_token                         - Get Keycloak admin token
+
+set -e
+
+KEYCLOAK_URL="{{ cifmw_federation_keycloak_url }}"
+REALM="{{ cifmw_federation_keycloak_realm }}"
+CLIENT_ID="{{ cifmw_federation_keystone_OIDC_ClientID }}"
+CLIENT_SECRET="{{ cifmw_federation_keystone_OIDC_ClientSecret }}"
+REDIRECT_URI="{{ cifmw_federation_keystone_url }}/v3/redirect_uri"
+
+TOKEN_ENDPOINT="${KEYCLOAK_URL}/auth/realms/${REALM}/protocol/openid-connect/token"
+AUTH_ENDPOINT="${KEYCLOAK_URL}/auth/realms/${REALM}/protocol/openid-connect/auth"
+ADMIN_TOKEN_ENDPOINT="${KEYCLOAK_URL}/auth/realms/master/protocol/openid-connect/token"
+
+get_access_token() {
+    local username="$1"
+    local password="$2"
+
+    curl -s -k -X POST "${TOKEN_ENDPOINT}" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "grant_type=password" \
+        -d "client_id=${CLIENT_ID}" \
+        -d "client_secret=${CLIENT_SECRET}" \
+        -d "username=${username}" \
+        -d "password=${password}" \
+        -d "scope=openid profile email" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))"
+}
+
+get_auth_code() {
+    local username="$1"
+    local password="$2"
+
+    # Step 1: Get login page and extract form action
+    local cookies_file=$(mktemp)
+    local login_page=$(curl -s -k -c "${cookies_file}" -b "${cookies_file}" \
+        "${AUTH_ENDPOINT}?client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&response_type=code&scope=openid%20profile%20email&state=test_state")
+
+    local action_url=$(echo "${login_page}" | grep -oE 'action="[^"]+"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
+
+    if [ -z "${action_url}" ]; then
+        echo "ERROR: Could not find login form action URL" >&2
+        rm -f "${cookies_file}"
+        return 1
+    fi
+
+    # Step 2: Submit login and get redirect URL with auth code
+    local final_url=$(curl -s -k -c "${cookies_file}" -b "${cookies_file}" -L -w "%{url_effective}" \
+        -X POST "${action_url}" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "username=${username}" \
+        -d "password=${password}" \
+        -o /dev/null 2>&1)
+
+    rm -f "${cookies_file}"
+
+    # Extract authorization code from URL
+    local auth_code=$(echo "${final_url}" | grep -oE 'code=[^&]+' | sed 's/code=//')
+
+    if [ -z "${auth_code}" ]; then
+        echo "ERROR: Could not extract authorization code" >&2
+        return 1
+    fi
+
+    echo "${auth_code}"
+}
+
+get_admin_token() {
+    curl -s -k -X POST "${ADMIN_TOKEN_ENDPOINT}" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" \
+        -d "username={{ cifmw_federation_keycloak_admin_username }}" \
+        -d "password={{ cifmw_federation_keycloak_admin_password }}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))"
+}
+
+case "$1" in
+    access_token)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 access_token <username> <password>" >&2
+            exit 1
+        fi
+        get_access_token "$2" "$3"
+        ;;
+    auth_code)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo "Usage: $0 auth_code <username> <password>" >&2
+            exit 1
+        fi
+        get_auth_code "$2" "$3"
+        ;;
+    admin_token)
+        get_admin_token
+        ;;
+    *)
+        echo "Usage: $0 {access_token|auth_code|admin_token} [args...]" >&2
+        echo "  access_token <username> <password> - Get user access token from Keycloak"
+        echo "  auth_code <username> <password>    - Get authorization code from Keycloak"
+        echo "  admin_token                        - Get Keycloak admin token"
+        exit 1
+        ;;
+esac
