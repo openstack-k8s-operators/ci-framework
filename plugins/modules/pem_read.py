@@ -41,12 +41,12 @@ options:
 
 EXAMPLES = r"""
 - name: Get pem certs from crt file
-  pem_read:
+  cifmw.general.pem_read:
     path: "/etc/ssl/certs/ca-certificates.crt"
   register: _certs
 
 - name: Get pem certs from crt file by OU
-  pem_read:
+  cifmw.general.pem_read:
     path: "/etc/ssl/certs/ca-certificates.crt"
     ou_filter: "Red Hat"
   register: _certs2

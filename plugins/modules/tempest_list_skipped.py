@@ -45,7 +45,7 @@ author:
 
 EXAMPLES = r"""
 - name: Get list of skipped tests
-  tempest_list_skipped:
+  cifmw.general.tempest_list_skipped:
     yaml_file: /tmp/skipped.yaml
     job: edpm
     release: master

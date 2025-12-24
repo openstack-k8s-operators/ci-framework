@@ -39,7 +39,7 @@ author:
 
 EXAMPLES = r"""
 - name: Approve all pending certificate requests
-  approve_csr:
+  cifmw.general.approve_csr:
     k8s_config: "{{ lookup('env', 'KUBECONFIG') }}"
 """
 

@@ -43,16 +43,16 @@ author:
 
 EXAMPLES = r"""
 - name: Mask secrets in all yaml/json/log files within /home/zuul/logs
-  crawl_n_mask:
+  cifmw.general.crawl_n_mask:
     path: /home/zuul/logs
     isdir: True
 
 - name: Mask my_secrets.yaml
-  crawl_n_mask:
+  cifmw.general.crawl_n_mask:
     path: /home/zuul/logs/my_secrets.yaml
 
 - name: Mask application.log
-  crawl_n_mask:
+  cifmw.general.crawl_n_mask:
     path: /var/log/application.log
 """
 
