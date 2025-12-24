@@ -41,7 +41,7 @@ EXAMPLES = r"""
     mode: "0644"
 
 - name: Generate make tasks
-  generate_make_tasks:
+  cifmw.general.generate_make_tasks:
     install_yamls_path: "{{ cifmw_installyamls_repos }}"
     output_directory: "{{ ansible_user_dir }}/make_installyamls/tasks"
 """  # noqa

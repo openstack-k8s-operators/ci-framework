@@ -22,7 +22,7 @@ author:
 
 EXAMPLES = r"""
 - name: Generate a cephx key
-  cephx_key:
+  cifmw.general.cephx_key:
   register: cephx
 
 - name: Show cephx key

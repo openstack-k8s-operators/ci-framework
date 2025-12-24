@@ -213,7 +213,7 @@ Module that approves pending certificate requests in OpenShift platform.
 
   tasks:
     - name: Wait and approve all
-      approve_csr:
+      cifmw.general.approve_csr:
         k8s_config: "{{ k8s_config }}"
 ```
 

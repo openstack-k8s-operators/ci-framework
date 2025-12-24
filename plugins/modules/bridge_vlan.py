@@ -54,7 +54,7 @@ author:
 EXAMPLES = r"""
 - name: Attach all configured VLANs to the interfaces of osp_trunk
   become: true
-  bridge_vlan:
+  cifmw.general.bridge_vlan:
     networks:
       - osp_trunk
 """  # noqa

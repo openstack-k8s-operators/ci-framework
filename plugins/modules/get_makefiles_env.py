@@ -33,7 +33,7 @@ EXAMPLES = r"""
 # Recursively get all the variables of the Makefiles under /home/user
 - name: Generate env var fact
   register: get_makefiles_env_out
-  get_makefiles_env:
+  cifmw.general.get_makefiles_env:
     base_path: /home/user
 """
 

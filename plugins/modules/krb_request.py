@@ -54,7 +54,7 @@ options:
 
 EXAMPLES = r"""
 - name: Get some content
-  krb_request:
+  cifmw.general.krb_request:
     url: "http://someurl.local/resource"
     dest: "{{ ansible_user_dir }}/content.raw"
     mode: "0644"

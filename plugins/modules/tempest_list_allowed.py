@@ -47,7 +47,7 @@ author:
 
 EXAMPLES = r"""
 - name: Get list of allowed tests
-  tempest_list_allowed:
+  cifmw.general.tempest_list_allowed:
     yaml_file: /tmp/allowed.yaml
     job: tripleo-ci-centos-8-standalone
     groups:

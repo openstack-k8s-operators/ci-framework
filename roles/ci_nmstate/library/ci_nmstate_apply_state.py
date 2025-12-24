@@ -30,7 +30,7 @@ EXAMPLES = r"""
   # Apply some network config to eth0 using nmstate
   - name: Generate env var fact
     register: get_makefiles_env_out
-    get_makefiles_env:
+    cifmw.general.get_makefiles_env:
       state:
         dns-resolver:
           running:
