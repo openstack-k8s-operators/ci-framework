@@ -211,7 +211,9 @@ The parameters listed here are therefore merely proxies to the ones set in the r
 and have the same name, less the role prefix. Default values are the same as the
 reproducer role.
 
-* `cifmw_libvirt_manager_dns_servers`: `{{ cifmw_reproducer_dns_servers | default(['1.1.1.1', '8.8.8.8']) }}`
+Now, cifmw_default_dns_servers group_vars is introduced, and it sets dns_servers for both reproducer and libvirt_manager roles.
+
+* `cifmw_libvirt_manager_dns_servers`: `{{ cifmw_default_dns_servers | default(['1.1.1.1', '8.8.8.8']) }}`
 
 ## Calling attach_network.yml from another role
 
