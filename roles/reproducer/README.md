@@ -18,7 +18,7 @@ None
 * `cifmw_reproducer_run_job`: (Bool) Run actual CI job. Defaults to `true`.
 * `cifmw_reproducer_run_content_provider`: (Bool) Run content-provider job. Defaults to `true`.
 * `cifmw_reproducer_params`: (Dict) Specific parameters you want to pass to the reproducer. Defaults to `{}`.
-* `cifmw_reproducer_dns_servers`: List of dns servers which should be used by the CRC VM as upstream dns servers. Defaults to 1.1.1.1, 8.8.8.8.
+* `cifmw_reproducer_dns_servers`: List of dns servers which should be used by the CRC VM as upstream dns servers. Reads from group_var `{{ cifmw_default_dns_servers }}`. Defaults to 1.1.1.1, 8.8.8.8.
 * `cifmw_reproducer_hp_rhos_release`: (Bool) Allows to consume rhos-release on the hypervisor. Defaults to `false`.
 * `cifmw_reproducer_dnf_tweaks`: (List) Options you want to inject in dnf.conf, both on controller-0 and hypervisor. Defaults to `[]`.
 * `cifmw_reproducer_skip_fetch_repositories`: (Bool) Skip fetching repositories from zuul var and simply copy the code from the ansible controller. Defaults to `false`.
