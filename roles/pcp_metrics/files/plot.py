@@ -412,10 +412,10 @@ def annotate(axs: Iterable[plt.Axes]) -> None:
     for annotation in data:
         try:
             time, details = annotation.split(" | ", maxsplit=1)
-        except ValueError:
+            time = datetime.strptime(time, "%Y-%m-%d %H:%M:%S,%f")
+        except (ValueError, TypeError):
             print("WARNING Skipping malformed annotation line:", annotation.strip())
             continue
-        time = datetime.strptime(time, "%Y-%m-%d %H:%M:%S,%f")
 
         if details.startswith("PLAY"):
             color = "darkred"
