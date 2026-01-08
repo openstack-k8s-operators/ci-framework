@@ -46,7 +46,26 @@
     - cephadm_ls.stdout == '[]'
   tags:
     - cephadm_bootstrap
+  vars:
+    cephadm_registry_file: "/tmp/cephadm_registry.json"
   block:
+    - name: Prepare the registry credential file
+      when: cephadm_container_registry_url|length > 0
+      vars:
+        cephadm_container_registry_url: "{{ cifmw_cephadm_registry_url|default(cifmw_registry_token_registry_url|default(''), True) }}"
+        cephadm_container_registry_username: "{{ cifmw_cephadm_registry_username|default(cifmw_registry_token.credentials.username|default(''), True) }}"
+        cephadm_container_registry_password: "{{ cifmw_cephadm_registry_password|default(cifmw_registry_token.credentials.password|default(''), True) }}"
+      ansible.builtin.template:
+        src: templates/cephadm_registry_file.json.j2
+        dest: "{{ cephadm_registry_file }}"
+        mode: '0644'
+        force: true
+
+    - name: Find out if the container registry configuration file exists
+      ansible.builtin.stat:
+        path: "{{ cephadm_registry_file }}"
+      register: cephadm_container_registry_config_check
+
     - name: Run cephadm bootstrap
       become: true
       register: cephadm_bootstrap
@@ -65,9 +84,7 @@
         --output-keyring {{ cifmw_cephadm_admin_keyring }} \
         --output-config {{ cifmw_cephadm_conf }} \
         --fsid {{ cifmw_cephadm_fsid }} \
-        {% if cifmw_cephadm_registry_url|length > 0 %}--registry-url {{ cifmw_cephadm_registry_url }} \{% endif %}
-        {% if cifmw_cephadm_registry_username|length > 0 %}--registry-username {{ cifmw_cephadm_registry_username }} \{% endif %}
-        {% if cifmw_cephadm_registry_password|length > 0 %}--registry-password {{ cifmw_cephadm_registry_password }} \{% endif %}
+        {% if cephadm_container_registry_config_check.stat.exists %}--registry-json {{ cephadm_registry_file }} \{% endif %}
         {% if cifmw_cephadm_spec_on_bootstrap %}--apply-spec {{ cifmw_cephadm_spec }} \{% endif %}
         {% if cifmw_cephadm_assimilate_conf_stat.stat.exists %}--config {{ cifmw_cephadm_assimilate_conf }} \{% endif %}
         {% if cifmw_cephadm_single_host_defaults %}--single-host-defaults \{% endif %}
@@ -79,6 +96,12 @@
       when: cifmw_cephadm_verbose | bool
       ansible.builtin.debug:
         msg: "{{ cephadm_bootstrap }}"
+
+    - name: Remove the container registry credentials file which is not needed anymore
+      when: cephadm_container_registry_config_check.stat.exists
+      ansible.builtin.file:
+        path: "{{ cephadm_registry_file }}"
+        state: absent
 
     - name: Ensure cifmw_cephadm_ceph_cli is set
       when:
