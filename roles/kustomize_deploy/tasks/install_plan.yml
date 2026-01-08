@@ -27,9 +27,23 @@
     namespace: openstack-operators
   register: _cifmw_kustomize_deploy_install_plans
   until: >
-    _cifmw_kustomize_deploy_install_plans.resources |
-    selectattr('spec.approval', 'equalto', 'Manual') |
-    selectattr('spec.approved', 'equalto', false) | length > 0
+    (
+      cifmw_ci_gen_kustomize_values_deployment_version is defined
+    ) | ternary(
+      (
+        _cifmw_kustomize_deploy_install_plans.resources |
+        selectattr('spec.approval', 'equalto', 'Manual') |
+        selectattr('spec.approved', 'equalto', false) |
+        selectattr('spec.clusterServiceVersionNames', 'contains',
+                   'openstack-operator.' ~ cifmw_ci_gen_kustomize_values_deployment_version) |
+        length > 0
+      ),
+      (
+        _cifmw_kustomize_deploy_install_plans.resources |
+        selectattr('spec.approval', 'equalto', 'Manual') |
+        selectattr('spec.approved', 'equalto', false) | length > 0
+      )
+    )
   retries: 30
   delay: 10
 
@@ -37,12 +51,53 @@
   ansible.builtin.set_fact:
     _cifmw_kustomize_deploy_installplan_name: >-
       {{
-      (_cifmw_kustomize_deploy_install_plans.resources
-      | selectattr('spec.approval', 'equalto', 'Manual')
-      | selectattr('spec.approved', 'equalto', false)
-      | first)
-      .metadata.name
+      (
+        cifmw_ci_gen_kustomize_values_deployment_version is defined
+      ) | ternary(
+        (
+          _cifmw_kustomize_deploy_install_plans.resources
+          | selectattr('spec.approval', 'equalto', 'Manual')
+          | selectattr('spec.approved', 'equalto', false)
+          | selectattr('spec.clusterServiceVersionNames', 'contains',
+                       'openstack-operator.' ~ cifmw_ci_gen_kustomize_values_deployment_version)
+          | first
+        ).metadata.name,
+        (
+          _cifmw_kustomize_deploy_install_plans.resources
+          | selectattr('spec.approval', 'equalto', 'Manual')
+          | selectattr('spec.approved', 'equalto', false)
+          | first
+        ).metadata.name
+      )
       }}
+
+- name: Display the InstallPlan to be approved
+  vars:
+    _selected_installplan: >-
+      {{
+      (
+        cifmw_ci_gen_kustomize_values_deployment_version is defined
+      ) | ternary(
+        (
+          _cifmw_kustomize_deploy_install_plans.resources
+          | selectattr('spec.approval', 'equalto', 'Manual')
+          | selectattr('spec.approved', 'equalto', false)
+          | selectattr('spec.clusterServiceVersionNames', 'contains',
+                       'openstack-operator.' ~ cifmw_ci_gen_kustomize_values_deployment_version)
+          | first
+        ),
+        (
+          _cifmw_kustomize_deploy_install_plans.resources
+          | selectattr('spec.approval', 'equalto', 'Manual')
+          | selectattr('spec.approved', 'equalto', false)
+          | first
+        )
+      )
+      }}
+  ansible.builtin.debug:
+    msg: >
+      Approving InstallPlan {{ _cifmw_kustomize_deploy_installplan_name }}
+      for CSV: {{ _selected_installplan.spec.clusterServiceVersionNames | join(', ') }}
 
 - name: Approve the InstallPlan
   kubernetes.core.k8s:
