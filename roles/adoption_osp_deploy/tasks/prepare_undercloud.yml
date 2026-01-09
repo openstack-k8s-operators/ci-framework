@@ -108,17 +108,21 @@
     - name: Generate os-net-config file
       become: true
       vars:
+        _is_bgp: "{{ cifmw_adoption_osp_deploy_bgp | bool }}"
         _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
         _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
-        _ctlplane_ip: "{{ _undercloud_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
+        _ctlplane_net_name: "{{ 'ctlplaner0' if _is_bgp else 'ctlplane' }}"
+        _ctlplane_undercloud_net: "{{ _undercloud_net.networks[_ctlplane_net_name] }}"
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_ctlplane_net_name] }}"
+        _ctlplane_ip: "{{ _ctlplane_undercloud_net[ip_version|default('ip_v4')] }}"
         _ctlplane_vip: "{{ cifmw_adoption_osp_deploy_scenario.undercloud.ctlplane_vip }}"
-        _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
         _dns_server: "{{ _ctlplane_net[dns_version|default('dns_v4')] }}"
         _gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
-        _interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
-        _ctlplane_cidr: "{{ _undercloud_net.networks.ctlplane[prefix_length_version|default('prefix_length_v4')] }}"
+        _interface_mtu: "{{ _ctlplane_undercloud_net.mtu }}"
+        _ctlplane_cidr: "{{ _ctlplane_undercloud_net[prefix_length_version|default('prefix_length_v4')] }}"
+        _os_net_config_template: "{{ 'os_net_config_undercloud_bgp.yml.j2' if _is_bgp else 'os_net_config_undercloud.yml.j2' }}"
       ansible.builtin.template:
-        src: "os_net_config_undercloud.yml.j2"
+        src: "{{ _os_net_config_template }}"
         dest: /etc/os-net-config/tripleo_config.yaml
         mode: "0644"
 
@@ -131,53 +135,60 @@
 
 - name: Add environment specific vars for undercloud
   vars:
+    _is_bgp: "{{ cifmw_adoption_osp_deploy_bgp | bool }}"
     _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
     _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
-    _undercloud_ip: "{{ _undercloud_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
-    _undercloud_net_prefix: "{{ _undercloud_net.networks.ctlplane[prefix_length_version|default('prefix_length_v4')] }}"
-    _ctlplane_cidr: "{{ cifmw_networking_env_definition.networks.ctlplane[network_version|default('network_v4')] }}"
-    _interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
+    _ctlplane_net_name: "{{ 'ctlplaner0' if _is_bgp else 'ctlplane' }}"
+    _ctlplane_undercloud_net: "{{ _undercloud_net.networks[_ctlplane_net_name] }}"
+    _undercloud_ip: "{{ _ctlplane_undercloud_net[ip_version|default('ip_v4')] }}"
+    _undercloud_net_prefix: "{{ _ctlplane_undercloud_net[prefix_length_version|default('prefix_length_v4')] }}"
+    _ctlplane_cidr: "{{ cifmw_networking_env_definition.networks[_ctlplane_net_name][network_version|default('network_v4')] }}"
+    _interface_mtu: "{{ _ctlplane_undercloud_net.mtu }}"
+    # Common config for both BGP and non-BGP
+    _common_config:
+      - section: DEFAULT
+        option: undercloud_ntp_servers
+        value: "{{ cifmw_adoption_osp_deploy_ntp_server }}"
+      - section: DEFAULT
+        option: container_images_file
+        value: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
+      - section: DEFAULT
+        option: net_config_override
+        value: "/etc/os-net-config/tripleo_config.yaml"
+    # Non-BGP specific config
+    _non_bgp_config:
+      - section: DEFAULT
+        option: local_ip
+        value: "{{ _undercloud_ip }}/{{ _undercloud_net_prefix }}"
+      - section: DEFAULT
+        option: local_mtu
+        value: "{{ _interface_mtu }}"
+      - section: DEFAULT
+        option: undercloud_public_host
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(122) }}"
+      - section: DEFAULT
+        option: undercloud_admin_host
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(123) }}"
+      - section: "ctlplane-subnet"
+        option: "cidr"
+        value: "{{ _ctlplane_cidr }}"
+      - section: "ctlplane-subnet"
+        option: "dhcp_start"
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(110) }}"
+      - section: "ctlplane-subnet"
+        option: "dhcp_end"
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(130) }}"
+      - section: "ctlplane-subnet"
+        option: "gateway"
+        value: "{{ cifmw_networking_env_definition.networks[_ctlplane_net_name][gw_version|default('gw_v4')] }}"
+      - section: "ctlplane-subnet"
+        option: "inspection_iprange"
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(200) }},{{ _ctlplane_cidr | ansible.utils.nthhost(220) }}"
+      - section: "ctlplane-subnet"
+        option: "masquerade"
+        value: true
     _env_undercloud:
-      config:
-        - section: DEFAULT
-          option: local_ip
-          value: "{{ _undercloud_ip }}/{{ _undercloud_net_prefix }}"
-        - section: DEFAULT
-          option: local_mtu
-          value: "{{ _interface_mtu }}"
-        - section: DEFAULT
-          option: undercloud_ntp_servers
-          value: "{{ cifmw_adoption_osp_deploy_ntp_server }}"
-        - section: DEFAULT
-          option: container_images_file
-          value: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
-        - section: DEFAULT
-          option: net_config_override
-          value: "/etc/os-net-config/tripleo_config.yaml"
-        - section: DEFAULT
-          option: undercloud_public_host
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(122) }}"
-        - section: DEFAULT
-          option: undercloud_admin_host
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(123) }}"
-        - section: "ctlplane-subnet"
-          option: "cidr"
-          value: "{{ _ctlplane_cidr }}"
-        - section: "ctlplane-subnet"
-          option: "dhcp_start"
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(110) }}"
-        - section: "ctlplane-subnet"
-          option: "dhcp_end"
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(130) }}"
-        - section: "ctlplane-subnet"
-          option: "gateway"
-          value: "{{ cifmw_networking_env_definition.networks.ctlplane[gw_version|default('gw_v4')] }}"
-        - section: "ctlplane-subnet"
-          option: "inspection_iprange"
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(200) }},{{ _ctlplane_cidr | ansible.utils.nthhost(220) }}"
-        - section: "ctlplane-subnet"
-          option: "masquerade"
-          value: true
+      config: "{{ _common_config + (_non_bgp_config if not _is_bgp else []) }}"
   ansible.builtin.set_fact:
     _undercloud_conf: >-
       {{
