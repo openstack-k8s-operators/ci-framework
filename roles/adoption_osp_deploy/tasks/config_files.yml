@@ -34,9 +34,18 @@
   register: _original_config_download
   delegate_to: "localhost"
 
+- name: Reset facts
+  ansible.builtin.set_fact:
+    _tripleo_nodes: []
+    _hostname_map: {}
+    _deployedserverport_map: {}
+    _nodeport_map: {}
+    _ctlplanenet_attributes: {}
+
 - name: Generate config download file
   vars:
-    _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
+    _ctlplane_net1: "{{ cifmw_networking_env_definition.networks['ctlplane'] }}"
+    _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_stack.ctlplanenet|default('ctlplane')] }}"
     _hostname_map_translation: >-
       {{
         cifmw_adoption_osp_deploy_scenario.hostname_groups_map |
@@ -77,13 +86,13 @@
         dns_version: dns_v6
         gw_version: gw_v6
         prefix_length_version: prefix_length_v6
-      when: cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+      when: cifmw_networking_env_definition.networks[_stack.ctlplanenet|default('ctlplane')].network_v6 is defined
 
     - name: Generate DeployedServerPortMap field
       vars:
         _node_instance_net: "{{ cifmw_networking_env_definition.instances[node] }}"
         _key_name: "{{ node }}-ctlplane"
-        _ctlplane_ip: "{{ _node_instance_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
+        _ctlplane_ip: "{{ _node_instance_net.networks[_stack.ctlplanenet|default('ctlplane')][ip_version|default('ip_v4')] }}"
         _server_port: >-
           {%- set port = {_key_name: {}} -%}
           {%- set _ = port[_key_name].update({
@@ -115,7 +124,8 @@
           {%- set nodeport = {node: {}} -%}
           {% for network, net_info in _node_instance_net.networks.items() if network != 'ocpbm' %}
             {%- set subnet = cifmw_networking_env_definition.networks[network][network_version|default("network_v4")] -%}
-            {%- set network_name = network.replace('storagemgmt', 'storage_mgmt') -%}
+            {%- set network_name = cifmw_adoption_osp_deploy_scenario.network_tripleo_network_map[network] | default(network) -%}
+            {%- set network_name = network_name.replace('storagemgmt', 'storage_mgmt') -%}
             {%- set network_name = network_name.replace('internalapi', 'internal_api') -%}
             {%- set _ = nodeport[node].update(
               {
@@ -144,18 +154,18 @@
         _cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
         _dns_server: >-
           {{
-            (_ctlplane_net[dns_version|default("dns_v4")] | length > 0) |
-             ternary(_ctlplane_net[dns_version|default("dns_v4")], _ctlplane_net[gw_version|default("gw_v4")])
+            (_ctlplane_net1[dns_version|default("dns_v4")] | length > 0) |
+             ternary(_ctlplane_net1[dns_version|default("dns_v4")], _ctlplane_net1[gw_version|default("gw_v4")])
           }}
       ansible.builtin.set_fact:
         _ctlplanenet_attributes:
           network:
             dns_domain: "{{ _cloud_domain }}"
-            mtu: "{{ _ctlplane_net.mtu }}"
+            mtu: "{{ _ctlplane_net1.mtu }}"
           subnets:
             ctlplane-subnet:
               dns_nameservers: "{{ _dns_server }}"
-              gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
+              gateway_ip: "{{ _ctlplane_net1[gw_version|default('gw_v4')] }}"
 
     - name: Create new config download file
       vars:

@@ -1,0 +1,160 @@
+_osp_img_data: &osp_base_conf
+  image_local_dir: "{{ cifmw_basedir }}/images/"
+  disk_file_name: osp-base.qcow2
+  image_url: "{{ osp_base_img_url | default(cifmw_discovered_image_url) }}"
+  sha256_image_name: >-
+    {{ osp_base_img_sha256 | default(cifmw_discovered_hash) }}
+
+libvirt_manager_patch_layout:
+  vms:
+    osp-undercloud:
+      <<: *osp_base_conf
+      amount: 1
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - osp_trunk
+    osp-controller:
+      <<: *osp_base_conf
+      amount: 1
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+    # Let's remove the default computes, since we want to adopt the
+    # OSP ones
+    compute:
+      amount: 0
+    osp-compute:
+      <<: *osp_base_conf
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      extra_disks_num: 3
+      extra_disks_size: 15G
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      nets:
+        - ocpbm
+        - osp_trunk
+    dcn1-compute-az1:
+      amount: 0
+    osp-dcn1-compute-az1:
+      <<: *osp_base_conf
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      extra_disks_num: 3
+      extra_disks_size: 15G
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      nets:
+        - dcn1_pb
+        - dcn1_tr
+    dcn2-compute-az2:
+      amount: 0
+    osp-dcn2-compute-az2:
+      <<: *osp_base_conf
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 3] | max }}"
+      extra_disks_num: 3
+      extra_disks_size: 15G
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      nets:
+        - dcn2_pb
+        - dcn2_tr
+
+networking_mapper_definition_patch:
+  networks:
+    external:
+      network: "10.0.0.0/24"
+      vlan: 44
+      mtu: 1496
+
+  group-templates:
+    osp-controllers:
+      network-template:
+        range:
+          start: 103
+          length: 3
+      networks: &osp_nets
+        ctlplane: {}
+        external:
+          trunk-parent: ctlplane
+        internalapi:
+          trunk-parent: ctlplane
+        tenant:
+          trunk-parent: ctlplane
+        storage:
+          trunk-parent: ctlplane
+        storagemgmt:
+          trunk-parent: ctlplane
+    osp-underclouds:
+      network-template:
+        range:
+          start: 100
+          length: 1
+      networks: *osp_nets
+    computes:
+      network-template:
+        range:
+          start: 200
+          length: 1
+    osp-computes:
+      network-template:
+        range:
+          start: 106
+          length: 3
+      networks:
+        ctlplane: {}
+        internalapi:
+          trunk-parent: ctlplane
+        tenant:
+          trunk-parent: ctlplane
+        storage:
+          trunk-parent: ctlplane
+        storagemgmt:
+          trunk-parent: ctlplane
+    dcn1-compute-az1s:
+      network-template:
+        range:
+          start: 201
+          length: 1
+    osp-dcn1-compute-az1s:
+      network-template:
+        range:
+          start: 111
+          length: 10
+      networks:
+        ctlplanedcn1: {}
+        internalapidcn1:
+          trunk-parent: ctlplanedcn1
+        tenantdcn1:
+          trunk-parent: ctlplanedcn1
+        storagedcn1:
+          trunk-parent: ctlplanedcn1
+        storagemgmtdcn1:
+          trunk-parent: ctlplanedcn1
+    dcn2-compute-az2s:
+      network-template:
+        range:
+          start: 202
+          length: 1
+    osp-dcn2-compute-az2s:
+      network-template:
+        range:
+          start: 121
+          length: 10
+      networks:
+        ctlplanedcn2: {}
+        internalapidcn2:
+          trunk-parent: ctlplanedcn2
+        tenantdcn2:
+          trunk-parent: ctlplanedcn2
+        storagedcn2:
+          trunk-parent: ctlplanedcn2
+        storagemgmtdcn2:
+          trunk-parent: ctlplanedcn2
