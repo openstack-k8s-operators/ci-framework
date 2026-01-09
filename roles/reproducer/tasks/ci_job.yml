@@ -14,7 +14,8 @@
   ansible.builtin.set_fact:
     zuul_plays: "{{ extracted | map('last') | list }}"
 
-- name: Run on controller-0
+- name: Run on controller-0 (legacy mode)
+  when: not (cifmw_run_on_zuul_host | default(false) | bool)
   delegate_to: controller-0
   block:
     - name: CI reproducer dedicated tasks
@@ -176,3 +177,130 @@
           no_log: "{{ cifmw_nolog | default(true) | bool }}"
           ansible.builtin.command:
             cmd: "{{ _home }}/03-run-job.sh"
+
+- name: Run on zuul host (direct execution)
+  when: cifmw_run_on_zuul_host | default(false) | bool
+  block:
+    - name: CI reproducer dedicated tasks
+      when:
+        - cifmw_job_uri is defined
+      block:
+        - name: Ensure directory exists
+          ansible.builtin.file:
+            path: "{{ cifmw_reproducer_controller_user_dir }}/{{ job_id }}-params"
+            mode: "0755"
+            state: directory
+            owner: "{{ cifmw_reproducer_controller_user }}"
+            group: "{{ cifmw_reproducer_controller_user }}"
+
+        - name: Copy environment files to zuul host
+          tags:
+            - bootstrap
+          ansible.builtin.copy:
+            src: "{{ _reproducer_basedir }}/parameters/"
+            dest: "{{ cifmw_reproducer_controller_user_dir }}/{{ job_id }}-params"
+            mode: "0644"
+
+        - name: Inject reproducer dedicated parameter file
+          tags:
+            - bootstrap
+          ansible.builtin.template:
+            src: "reproducer_params.yml.j2"
+            dest: "{{ cifmw_reproducer_controller_user_dir }}/{{ job_id }}-params/reproducer_params.yml"
+            mode: "0644"
+
+        - name: Generate CI job playbook
+          tags:
+            - bootstrap
+          ansible.builtin.template:
+            dest: "{{ _cifmw_reproducer_framework_location }}/{{ job_id }}_play.yml"
+            src: "play.yml.j2"
+            mode: "0644"
+
+        - name: Push content-provider playbook if needed
+          tags:
+            - bootstrap
+          when: >
+             (operator_content_provider| default(false) | bool) or
+             (openstack_content_provider| default(false) | bool)
+          ansible.builtin.template:
+            dest: "{{ _cifmw_reproducer_framework_location }}/{{ job_id }}_content-provider.yml"
+            src: "content-provider.yml.j2"
+            mode: "0644"
+
+        - name: Push extracted network data on zuul host
+          when:
+            - not is_molecule | default(false)
+          tags:
+            - bootstrap
+          ansible.builtin.copy:
+            dest: "{{ cifmw_reproducer_controller_user_dir }}/zuul-network-data.yml"
+            content: "{{ {'job_network': ci_job_networking} | to_nice_yaml}}"
+            mode: "0644"
+
+    - name: Push pre-CI job playbook
+      tags:
+        - bootstrap
+      ansible.builtin.copy:
+        dest: "{{ _cifmw_reproducer_framework_location }}/pre-ci-play.yml"
+        src: "pre-ci-play.yml"
+        mode: "0644"
+
+    - name: Push zuul-params.yml to expected location
+      tags:
+        - bootstrap
+      block:
+        - name: Push extracted content
+          vars:
+            zuul_params_filtered: >-
+              {{
+                zuul_vars.zuul | dict2items |
+                rejectattr('key', 'equalto', 'cifmw_operator_build_output') |
+                rejectattr('key', 'equalto', 'content_provider_registry_ip') |
+                items2dict
+              }}
+          ansible.builtin.copy:
+            dest: "{{ cifmw_reproducer_controller_basedir }}/artifacts/parameters/zuul-params.yml"
+            content: "{{ {'zuul': zuul_params_filtered} | to_nice_yaml }}"
+            mode: "0644"
+
+    - name: Check for ansible logs file and rotate it
+      tags:
+        - always
+      ansible.builtin.include_tasks: rotate_log.yml
+      loop:
+        - "{{ cifmw_reproducer_controller_user_dir }}/ansible.log"
+        - "{{ cifmw_reproducer_controller_user_dir }}/ansible-pre-ci.log"
+        - "{{ cifmw_reproducer_controller_user_dir }}/ansible-{{ job_id }}.log"
+        - "{{ cifmw_reproducer_controller_user_dir }}/ansible-content-provider-bootstrap.log"
+
+    - name: Run playbooks directly (no nested ansible-playbook)
+      vars:
+        _home: "{{ cifmw_reproducer_controller_user_dir }}"
+        run_directory: "{{ _cifmw_reproducer_framework_location }}"
+      block:
+        - name: Load parameters for direct execution
+          ansible.builtin.include_vars:
+            file: "{{ cifmw_reproducer_controller_basedir }}/artifacts/parameters/zuul-params.yml"
+
+        - name: Run pre-ci-play directly
+          when:
+            - not is_molecule | default(false)
+          tags:
+            - bootstrap
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.import_playbook: "{{ run_directory }}/pre-ci-play.yml"
+
+        - name: Run content-provider directly
+          when:
+            - (operator_content_provider | default(false) | bool) or
+              (openstack_content_provider | default(false) | bool)
+            - cifmw_reproducer_run_content_provider | bool
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.import_playbook: "{{ run_directory }}/{{ job_id }}_content-provider.yml"
+
+        - name: Run CI job playbook directly
+          when:
+            - cifmw_reproducer_run_job | bool
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.import_playbook: "{{ run_directory }}/{{ job_id }}_play.yml"

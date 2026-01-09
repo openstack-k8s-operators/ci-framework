@@ -252,6 +252,15 @@
         ternary(_path, [_path, 'ci-framework'] | path_join)
       }}
 
+- name: Configure zuul host for direct playbook execution
+  when:
+    - cifmw_run_on_zuul_host | default(false) | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+    - bootstrap_env
+  ansible.builtin.include_tasks: configure_zuul_host.yml
+
 - name: Run only on hypervisor with controller-0
   when:
     - (
@@ -266,8 +275,9 @@
         - bootstrap
       ansible.builtin.include_tasks: push_code.yml
 
-    - name: Group tasks on controller-0
-      delegate_to: controller-0
+    - name: Group tasks on controller-0 or zuul host
+      delegate_to: "{{ 'localhost' if (cifmw_run_on_zuul_host | default(false) | bool) else 'controller-0' }}"
+      when: not (cifmw_run_on_zuul_host | default(false) | bool)
       block:
         - name: Inject CI Framework motd
           become: true
@@ -324,6 +334,62 @@
             name: openshift_setup
             tasks_from: patch_network_operator.yml
 
+    - name: Group tasks on zuul host (direct execution)
+      when: cifmw_run_on_zuul_host | default(false) | bool
+      block:
+        - name: Inject CI Framework motd
+          become: true
+          ansible.builtin.template:
+            dest: "/etc/motd.d/cifmw.motd"
+            src: "motd.j2"
+            mode: "0644"
+
+        - name: Rotate some logs
+          tags:
+            - always
+          ansible.builtin.include_tasks: rotate_log.yml
+          loop:
+            - "{{ cifmw_reproducer_controller_user_dir }}/ansible-bootstrap.log"
+
+        - name: Bootstrap environment on zuul host
+          vars:
+            cifmw_basedir: "{{ cifmw_reproducer_controller_basedir }}"
+            ansible_user_dir: "{{ cifmw_reproducer_controller_user_dir }}"
+            ansible_user_id: "{{ cifmw_reproducer_controller_user }}"
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.import_role:
+            name: cifmw_setup
+            tasks_from: bootstrap.yml
+
+        - name: Install dev tools from install_yamls on zuul host
+          environment:
+            ANSIBLE_LOG_PATH: "~/ansible-bootstrap.log"
+          vars:
+            _devsetup_path: >-
+              {{
+                (
+                  cifmw_reproducer_controller_user_dir,
+                  'src/github.com/openstack-k8s-operators/install_yamls',
+                  'devsetup'
+                ) | ansible.builtin.path_join
+              }}
+          no_log: "{{ cifmw_nolog | default(true) | bool }}"
+          ansible.builtin.command:
+            chdir: "{{ _devsetup_path }}"
+            cmd: >-
+              ansible-playbook -i ~/ci-framework-data/artifacts/zuul_inventory.yml
+              download_tools.yaml --tags kustomize,kubectl
+            creates: "{{ cifmw_reproducer_controller_user_dir }}/bin/kubectl"
+
+        - name: Configure CRC network if needed
+          when:
+            - _use_crc | bool
+          vars:
+            cifmw_openshift_kubeconfig: "{{ cifmw_reproducer_controller_user_dir }}/.kube/config"
+          ansible.builtin.include_role:
+            name: openshift_setup
+            tasks_from: patch_network_operator.yml
+
 # Run from the hypervisor
 - name: Ensure OCP cluster is stable
   when:
@@ -348,9 +414,10 @@
   ansible.builtin.include_role:
     name: openshift_adm
 
-- name: Run from controller-0
+- name: Run from controller-0 (legacy mode)
   when:
     - _has_openshift
+    - not (cifmw_run_on_zuul_host | default(false) | bool)
     - (
         _cifmw_libvirt_manager_layout.vms.controller.target is defined and
         _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
@@ -388,6 +455,62 @@
       when:
         - cifmw_job_uri is undefined
       delegate_to: controller-0
+      vars:
+        run_directory: "{{ _cifmw_reproducer_framework_location }}"
+        exports:
+          ANSIBLE_LOG_PATH: "~/ansible-deploy-edpm.log"
+        default_extravars:
+          - "@scenarios/centos-9/base.yml"
+          - "@scenarios/centos-9/edpm_ci.yml"
+          - "cifmw_openshift_password='{{ cifmw_openshift_password }}'"
+        extravars: "{{ cifmw_reproducer_play_extravars }}"
+        playbook: "deploy-edpm.yml"
+      ansible.builtin.template:
+        dest: "{{ cifmw_reproducer_controller_user_dir }}/deploy-edpm.sh"
+        src: "script.sh.j2"
+        mode: "0755"
+        owner: "{{ cifmw_reproducer_controller_user }}"
+        group: "{{ cifmw_reproducer_controller_user }}"
+
+- name: Run from zuul host (direct execution)
+  when:
+    - _has_openshift
+    - cifmw_run_on_zuul_host | default(false) | bool
+    - (
+        _cifmw_libvirt_manager_layout.vms.controller.target is defined and
+        _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
+      ) or
+      _cifmw_libvirt_manager_layout.vms.controller.target is undefined
+  block:
+    - name: Emulate CI job
+      when:
+        - cifmw_job_uri is defined
+      ansible.builtin.include_tasks: ci_job.yml
+
+    - name: Prepare architecture-based deployment
+      when:
+        - cifmw_architecture_scenario is defined
+        - cifmw_job_uri is undefined
+      tags:
+        - deploy_architecture
+      ansible.builtin.include_tasks:
+        file: configure_architecture.yml
+        apply:
+          tags:
+            - deploy_architecture
+
+    - name: Prepare architecture-based post deployment
+      when:
+        - cifmw_architecture_scenario is defined
+        - cifmw_job_uri is undefined
+      tags:
+        - deploy_architecture
+      ansible.builtin.include_tasks:
+        file: configure_post_deployment.yml
+
+    - name: Prepare ci-like EDPM deploy (direct execution)
+      when:
+        - cifmw_job_uri is undefined
       vars:
         run_directory: "{{ _cifmw_reproducer_framework_location }}"
         exports:

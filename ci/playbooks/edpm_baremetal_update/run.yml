@@ -84,44 +84,84 @@
 
     - name: Override operator build output with pre-update index image for Phase 1
       ansible.builtin.set_fact:
-        cifmw_operator_build_output_pre_update: >-
-          {{
-            {
-              'cifmw_operator_build_output': {
-                'operators': {
-                  'openstack-operator': {
-                    'image_catalog': cifmw_minor_update_pre_update_index_image
-                  }
-                }
-              }
-            }
-          }}
+        cifmw_operator_build_output:
+          operators:
+            openstack-operator:
+              image_catalog: "{{ cifmw_minor_update_pre_update_index_image }}"
 
-    - name: Phase 1 - Deploy with pre-update index image using deploy-edpm.yml
+    - name: Load parameters for direct execution
       block:
-        - name: Write pre-update operator build output to temporary file
-          ansible.builtin.copy:
-            dest: "{{ ansible_user_dir }}/ci-framework-data/artifacts/operator_build_output_pre_update.yml"
-            content: "{{ cifmw_operator_build_output_pre_update | to_nice_yaml }}"
-            mode: "0644"
+        - name: Load group vars
+          block:
+            - name: Read group vars file
+              ansible.builtin.slurp:
+                src: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/group_vars/all.yml"
+              delegate_to: localhost
+              register: _group_vars_content
 
-        - name: Perform Podified and EDPM deployment on compute nodes with virtual baremetal (pre-update)
-          ansible.builtin.command:
-            chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
-            cmd: >-
-              ansible-playbook deploy-edpm.yml
-              -i "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
-              -e @group_vars/all.yml
-              -e @scenarios/centos-9/base.yml
-              -e @scenarios/centos-9/edpm_baremetal_deployment_ci.yml
-              {%- if edpm_file.stat.exists %}
-              -e @{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml
-              {%- endif %}
-              {%- if cifmw_extras is defined %}
-              {%-   for extra_var in cifmw_extras %}
-              -e "{{   extra_var }}"
-              {%-   endfor %}
-              {%- endif %}
-              -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
-              -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/operator_build_output_pre_update.yml"
-              -e "cifmw_prepare_openstackversion=false"
+            - name: Set group vars as facts
+              when: "'content' in _group_vars_content"
+              ansible.builtin.set_fact:
+                "{{ item.key }}": "{{ item.value }}"
+                cacheable: true
+              loop: "{{ _group_vars_content['content'] | b64decode | from_yaml | dict2items }}"
+              loop_control:
+                loop_var: item
+
+        - name: Load scenario files
+          loop:
+            - "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/base.yml"
+            - "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/scenarios/centos-9/edpm_baremetal_deployment_ci.yml"
+          loop_control:
+            loop_var: scenario_file
+          block:
+            - name: Read scenario file
+              ansible.builtin.slurp:
+                src: "{{ scenario_file }}"
+              delegate_to: localhost
+              register: _scenario_file
+
+            - name: Set scenario vars as facts
+              when: "'content' in _scenario_file"
+              ansible.builtin.set_fact:
+                "{{ fact_item.key }}": "{{ fact_item.value }}"
+                cacheable: true
+              loop: "{{ _scenario_file['content'] | b64decode | from_yaml | dict2items }}"
+              loop_control:
+                loop_var: fact_item
+
+        - name: Load edpm-ansible.yml if exists
+          when: edpm_file.stat.exists
+          block:
+            - name: Read edpm-ansible.yml file
+              ansible.builtin.slurp:
+                src: "{{ ansible_user_dir }}/ci-framework-data/artifacts/edpm-ansible.yml"
+              delegate_to: localhost
+              register: _edpm_content
+
+            - name: Set edpm vars as facts
+              when: "'content' in _edpm_content"
+              ansible.builtin.set_fact:
+                "{{ item.key }}": "{{ item.value }}"
+                cacheable: true
+              loop: "{{ _edpm_content['content'] | b64decode | from_yaml | dict2items }}"
+              loop_control:
+                loop_var: item
+
+        - name: Load all parameters from parameters directory
+          vars:
+            provided_dir: "{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters"
+          ansible.builtin.include_role:
+            name: cifmw_helpers
+            tasks_from: var_dir.yml
+            apply:
+              delegate_to: localhost
+              become: false
+              gather_facts: false
+
+        - name: Set cifmw_prepare_openstackversion fact
+          ansible.builtin.set_fact:
+            cifmw_prepare_openstackversion: false
+
+- name: Phase 1 - Deploy with pre-update index image using deploy-edpm.yml
+  ansible.builtin.import_playbook: ../../../deploy-edpm.yml

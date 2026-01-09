@@ -94,9 +94,10 @@
             name: firewalld
             state: restarted
 
-    - name: Run deployment if instructed to
+    - name: Run deployment if instructed to (controller-0 legacy mode)
       when:
         - cifmw_deploy_architecture | default(false) | bool
+        - not (cifmw_run_on_zuul_host | default(false) | bool)
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
       async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
       poll: 20
@@ -104,13 +105,35 @@
       ansible.builtin.command:
         cmd: "$HOME/deploy-architecture.sh {{ cifmw_deploy_architecture_args | default('') }}"
 
-    - name: Run post deployment if instructed to
+    - name: Run deployment if instructed to (zuul host direct execution)
+      when:
+        - cifmw_deploy_architecture | default(false) | bool
+        - cifmw_run_on_zuul_host | default(false) | bool
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
+      poll: 20
+      ansible.builtin.command:
+        cmd: "$HOME/deploy-architecture.sh {{ cifmw_deploy_architecture_args | default('') }}"
+
+    - name: Run post deployment if instructed to (controller-0 legacy mode)
       when:
         - cifmw_deploy_architecture | default(false) | bool
         - cifmw_post_deployment | default(true) | bool
+        - not (cifmw_run_on_zuul_host | default(false) | bool)
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
       async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
       poll: 20
       delegate_to: controller-0
+      ansible.builtin.command:
+        cmd: "$HOME/post_deployment.sh {{ cifmw_post_deploy_args | default('') }}"
+
+    - name: Run post deployment if instructed to (zuul host direct execution)
+      when:
+        - cifmw_deploy_architecture | default(false) | bool
+        - cifmw_post_deployment | default(true) | bool
+        - cifmw_run_on_zuul_host | default(false) | bool
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
+      poll: 20
       ansible.builtin.command:
         cmd: "$HOME/post_deployment.sh {{ cifmw_post_deploy_args | default('') }}"
