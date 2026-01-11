@@ -108,6 +108,9 @@ that they do not need to be changed for a typical EDPM deployment.
   Squid). Set it to false if the target Ceph release is equal to or greater
   than Tentacle.
 
+* `cifmw_cephadm_rgw_s3_glance`: (Bool) If this is value is `true`, then
+  cephadm will create glance secrets using the discovered RGW settings
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
