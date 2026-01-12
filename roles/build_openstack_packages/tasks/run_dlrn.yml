@@ -179,6 +179,9 @@
         state: directory
         mode: "0755"
 
+- name: Run DLRN
+  when: project_name_mapped is success
+  block:
     - name: Run DLRN
       register: repo_built
       ansible.builtin.shell:
@@ -186,3 +189,12 @@
           set -o pipefail &&
           {{ cifmw_bop_build_repo_dir }}/run_dlrn.sh 2>&1 {{ cifmw_bop_timestamper_cmd }} >> {{ cifmw_bop_artifacts_basedir }}/logs/dlrn.log
         chdir: '{{ cifmw_bop_build_repo_dir }}'
+  rescue:
+    - name: Copy DLRN artifacts
+      register: repo_built_logs
+      ansible.builtin.shell:
+        cmd: |
+          cp -ra {{cifmw_bop_build_repo_dir}}/DLRN/data/repos/component/ {{ cifmw_bop_artifacts_basedir }}/logs/component_logs || true ;
+    - name: Fail the execution
+      ansible.builtin.fail:
+        msg: DLRN run failed
