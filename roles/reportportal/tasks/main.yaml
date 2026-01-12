@@ -14,6 +14,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Debug - Run reportportal role
+  ansible.builtin.debug:
+    msg: "Run reportportal role"
+
 - name: Check if mandatory variables are defined and not empty
   ansible.builtin.assert:
     that:
@@ -23,11 +27,20 @@
       - cifmw_reportportal_project is defined and cifmw_reportportal_project | length > 0
       - cifmw_reportportal_droute_client_url is defined and cifmw_reportportal_droute_client_url | length > 0
 
+- name: Debug - Mandatory variables check passed
+  ansible.builtin.debug:
+    msg: "All mandatory variables are defined and not empty"
+
 - name: Make sure the droute directory exists
   ansible.builtin.file:
     path: "{{ cifmw_reportportal_droute_dir }}"
     state: directory
     mode: "0755"
+  register: reportportal_droute_dir_result
+
+- name: Debug - droute directory
+  ansible.builtin.debug:
+    msg: "droute directory path: {{ cifmw_reportportal_droute_dir }}, state: {{ reportportal_droute_dir_result.state | default('unknown') }}"
 
 - name: Get the Data router client
   vars:
@@ -43,6 +56,12 @@
     dest: "{{ cifmw_reportportal_droute_dir }}"
     backup: true
     mode: "0755"
+  register: reportportal_get_url_result
+  when: not cifmw_reportportal_dry_run | bool
+
+- name: Debug - Data router client download
+  ansible.builtin.debug:
+    msg: "Downloaded from {{ _droute_url }} to {{ cifmw_reportportal_droute_dir }}, changed: {{ reportportal_get_url_result.changed | default(false) }}"
   when: not cifmw_reportportal_dry_run | bool
 
 - name: Create the metadata file
@@ -50,6 +69,11 @@
     src: metadata.json.j2
     dest: "{{ cifmw_reportportal_metadata_file }}"
     mode: "0755"
+  register: reportportal_metadata_file_result
+
+- name: Debug - Metadata file creation
+  ansible.builtin.debug:
+    msg: "Metadata file created at {{ cifmw_reportportal_metadata_file }}, changed: {{ reportportal_metadata_file_result.changed | default(false) }}"
 
 - name: Send the results via Data router client call
   ansible.builtin.command:
@@ -62,10 +86,15 @@
       --username={{ cifmw_reportportal_datarouter_username }}
       --password={{ cifmw_reportportal_datarouter_password }}
       --url={{ cifmw_reportportal_datarouter_url }}
-  register: droute_result
+  register: reportportal_droute_result
+  when: not cifmw_reportportal_dry_run | bool
+
+- name: Debug - Data router client command execution
+  ansible.builtin.debug:
+    msg: "Executed droute command, return code: {{ reportportal_droute_result.rc | default('N/A') }}"
   when: not cifmw_reportportal_dry_run | bool
 
 - name: Log droute result
   ansible.builtin.debug:
-    var: droute_result.stdout
+    var: reportportal_droute_result.stdout
   when: not cifmw_reportportal_dry_run | bool
