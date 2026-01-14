@@ -34,3 +34,24 @@
     state: "{{ item.state }}"
     validate: "/usr/sbin/dnsmasq -C %s --test"
   loop: "{{ cifmw_dnsmasq_host_record }}"
+
+# NOTE(dpawlik): Add short name like controller-0
+# into the /etc/hosts file, to avoid errors when all the configuration
+# is only stored in ssh config files.
+# It has been done into /etc/hosts, due dnsmasq require to contain a domain.
+- name: Add controller-0 short hostname record when 'utility' in the name into /etc/hosts
+  when:
+    - cifmw_dnsmasq_shortnames_etc_hosts
+    - record.names | select('search', 'utility') | list | length > 0
+    - record.names | select('search', 'controller-0') | list | length > 0
+  become: true
+  ansible.builtin.lineinfile:
+    path: "/etc/hosts"
+    line: "{{ ip }} {{ short_name }}"
+    state: "{{ record.state }}"
+  loop: "{{ cifmw_dnsmasq_host_record }}"
+  loop_control:
+    loop_var: record
+  vars:
+    short_name: "{{ record.names[0] | regex_replace('^([^.]+)\\..*$', '\\1') }}"
+    ip: "{{ record.ips[0] }}"
