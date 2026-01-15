@@ -131,6 +131,23 @@
       {% for node in libvirt_manager_bm_info_data.keys() if node.startswith(cifmw_reproducer_ironic_node_name_prefix) %}
       {% set _node = libvirt_manager_bm_info_data[node] %}
       {% set _conn = _node.connection | urlsplit %}
+      {% set _run_id_suffix = (cifmw_run_id | default('') | length > 0) | ternary('-' ~ (cifmw_run_id | lower), '') %}
+      {% set _simple_key = node | regex_replace(_run_id_suffix ~ '(?=-\d+$)', '') if _run_id_suffix else node %}
+      {% set _ports = [] %}
+      {% for nic in _node.nics %}
+      {% set _port_index = loop.index0 %}
+      {% set _port = {
+        'address': nic.mac,
+        'physical_network': nic.network
+      } %}
+      {% if _simple_key in cifmw_reproducer_ironic_local_link_connections and
+            cifmw_reproducer_ironic_local_link_connections[_simple_key] | length > _port_index %}
+      {% set _ = _port.update({
+          'local_link_connection': cifmw_reproducer_ironic_local_link_connections[_simple_key][_port_index]
+        }) %}
+      {% endif %}
+      {% set _ = _ports.append(_port) %}
+      {% endfor %}
       {% set _ironic_nodes = _ironic_nodes.append(
         {
            'name': node,
@@ -141,12 +158,7 @@
              'redfish_username': _node.username,
              'redfish_password': _node.password,
             },
-            'ports': [
-              {
-                'address': (_node.nics | first).mac,
-                'physical_network': (_node.nics | first).network,
-              }
-            ]
+            'ports': _ports
         }
       ) %}
       {% endfor %}
