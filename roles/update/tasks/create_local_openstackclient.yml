@@ -18,20 +18,115 @@
   ansible.builtin.set_fact:
     openstackclient_image: "{{ _cifmw_update_openstackclient_pod | community.general.json_query('resources[0].spec.containers[0].image') | default('') }}"
 
-- name: Login to registry.redhat.io if needed
+- name: Configure registry mirror and determine login target
   when: "'registry.redhat.io' in openstackclient_image"
   block:
+    - name: Find mirror configuration for registry.redhat.io
+      ansible.builtin.set_fact:
+        _cifmw_update_registry_mirror: >-
+          {{
+            (cifmw_openshift_setup_digest_mirrors | default([]) |
+             selectattr('source', 'equalto', 'registry.redhat.io') |
+             list | first | default({})).mirrors | default([]) | first | default('')
+          }}
+
+    - name: Set target registry for login
+      ansible.builtin.set_fact:
+        _cifmw_update_target_registry: >-
+          {{ _cifmw_update_registry_mirror if _cifmw_update_registry_mirror | length > 0 else 'registry.redhat.io' }}
+
+    - name: Display target registry information
+      ansible.builtin.debug:
+        msg: >-
+          Image uses registry.redhat.io. Target registry for login: {{ _cifmw_update_target_registry }}
+          {%- if _cifmw_update_registry_mirror | length > 0 %}
+          (using mirror from cifmw_openshift_setup_digest_mirrors)
+          {%- endif %}
+
+    - name: Configure podman to use mirror registry
+      when: _cifmw_update_registry_mirror | length > 0
+      block:
+        - name: Ensure user containers config directory exists
+          ansible.builtin.file:
+            path: "{{ ansible_user_dir }}/.config/containers/registries.conf.d"
+            state: directory
+            mode: "0755"
+
+        - name: Configure registry mirror in registries.conf
+          ansible.builtin.copy:
+            dest: "{{ ansible_user_dir }}/.config/containers/registries.conf.d/50-cifmw-update-mirrors.conf"
+            mode: "0644"
+            content: |
+              # Managed by ci-framework update role
+              [[registry]]
+              prefix = "registry.redhat.io"
+              location = "registry.redhat.io"
+
+              [[registry.mirror]]
+              location = "{{ _cifmw_update_registry_mirror }}"
+              insecure = false
+
+        - name: Read existing policy.json if present
+          ansible.builtin.slurp:
+            src: "{{ ansible_user_dir }}/.config/containers/policy.json"
+          register: _cifmw_update_existing_policy
+          failed_when: false
+
+        - name: Set default policy if none exists
+          ansible.builtin.set_fact:
+            _cifmw_update_policy: >-
+              {{
+                (_cifmw_update_existing_policy.content | default('') | b64decode | from_json)
+                if _cifmw_update_existing_policy.content is defined
+                else {'default': [{'type': 'insecureAcceptAnything'}], 'transports': {'docker': {}}}
+              }}
+
+        - name: Add mirror registry to signature policy
+          ansible.builtin.set_fact:
+            _cifmw_update_policy: >-
+              {{
+                _cifmw_update_policy | combine({
+                  'transports': _cifmw_update_policy.transports | combine({
+                    'docker': _cifmw_update_policy.transports.docker | combine({
+                      _cifmw_update_registry_mirror: [{'type': 'insecureAcceptAnything'}]
+                    })
+                  })
+                }, recursive=true)
+              }}
+
+        - name: Write updated policy.json
+          ansible.builtin.copy:
+            dest: "{{ ansible_user_dir }}/.config/containers/policy.json"
+            mode: "0644"
+            content: "{{ _cifmw_update_policy | to_nice_json }}"
+
     - name: Fail if cifmw_registry_token.credentials is not defined
       ansible.builtin.fail:
-        msg: "cifmw_registry_token.credentials is not defined, cannot login to registry.redhat.io"
+        msg: >-
+          cifmw_registry_token.credentials is not defined, cannot login to {{ _cifmw_update_target_registry }}.
+          Please ensure cifmw_registry_token.credentials is set with username and password.
       when: "'credentials' not in cifmw_registry_token | default({})"
 
-    - name: Login to registry.redhat.io
+    - name: Login to target registry
       containers.podman.podman_login:
         username: "{{ cifmw_registry_token.credentials.username }}"
         password: "{{ cifmw_registry_token.credentials.password }}"
-        registry: "registry.redhat.io"
+        registry: "{{ _cifmw_update_target_registry }}"
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+  rescue:
+    - name: Clean up registry mirror config files on failure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ ansible_user_dir }}/.config/containers/registries.conf.d/50-cifmw-update-mirrors.conf"
+        - "{{ ansible_user_dir }}/.config/containers/policy.json"
+      when: _cifmw_update_registry_mirror | default('') | length > 0
+
+    - name: Re-raise the failure
+      ansible.builtin.fail:
+        msg: "Failed to configure registry mirror or login. Config files have been cleaned up."
 
 - name: Collect and save OpenStack config files
   ansible.builtin.include_tasks: collect_openstackclient_config.yml
