@@ -85,6 +85,14 @@
 - name: OLM resources
   when: not cifmw_kustomize_deploy_generate_crs_only
   block:
+    - name: Create catalog source and switch dependent operators to consume it
+      when:
+        - cifmw_openshift_setup_enable_operator_catalog_override |
+          default(false) | bool
+      ansible.builtin.import_role:
+        name: openshift_setup
+        tasks_from: patch_dependent_operators_source.yml
+
     - name: Apply the kustomized CRs
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -157,7 +165,6 @@
             _cifmw_kustomize_deploy_olm_osp_operator_install_plan_out.resources | first
           ).status.phase | lower == "complete"
 
-
     - name: Wait for cert-manager-operator pods
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -225,14 +232,6 @@
       delay: 60
       register: _certmanager_pods
       until: _certmanager_pods is success
-
-    - name: Create catalog source and switch dependent operators to consume it
-      when:
-        - cifmw_openshift_setup_enable_operator_catalog_override |
-          default(false) | bool
-      ansible.builtin.import_role:
-        name: openshift_setup
-        tasks_from: patch_dependent_operators_source.yml
 
     - name: Wait for controller-manager deployment
       kubernetes.core.k8s_info:
