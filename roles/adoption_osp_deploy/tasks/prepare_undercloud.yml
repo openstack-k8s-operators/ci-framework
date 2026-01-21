@@ -272,3 +272,91 @@
     state: "present"
     mode: "0644"
   loop: "{{ _undercloud_conf.config }}"
+
+- name: Run undercloud FreeIPA enablement tasks
+  when: cifmw_adoption_osp_deploy_scenario.tlse | default(false)
+  vars:
+    cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
+    _freeipa_name: "{{ _vm_groups['osp-free-ipas'] | first }}"
+    _freeipa_net: "{{ cifmw_networking_env_definition.instances[_freeipa_name] }}"
+    freeipa_ip: "{{ _freeipa_net.networks.ocpbm[ip_version|default('ip_v4')] }}"
+  delegate_to: "osp-undercloud-0"
+  block:
+    - name: Create resolv.conf.manually-configured
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf.manually-configured"
+        content: |
+            search {{ cloud_domain }}
+            nameserver {{ freeipa_ip }}
+        mode: '0644'
+
+    - name: Create a symbolic link of systemd resolv.conf
+      become: true
+      ansible.builtin.file:
+        src: "/etc/resolv.conf.manually-configured"
+        dest: "/etc/resolv.conf"
+        owner: root
+        group: root
+        state: link
+        force: true
+
+    - name: Set hostname on undercloud
+      become: true
+      ansible.builtin.shell: |
+          sudo hostnamectl set-hostname osp-undercloud-0.{{ cloud_domain }}
+          sudo hostnamectl set-hostname --transient osp-undercloud-0.{{ cloud_domain }}
+
+    - name: Create ssh key pair
+      ansible.builtin.user:
+        name: zuul
+        generate_ssh_key: true
+        ssh_key_bits: 2048
+        ssh_key_file: "{{ ansible_user_dir }}/.ssh/id_rsa"
+
+    - name: Slurp pub key
+      ansible.builtin.slurp:
+        src: "{{ ansible_user_dir ~ '/.ssh/id_rsa.pub' }}"
+      register: pub_key
+
+    - name: Ensure zuul can ssh to localhost
+      ansible.posix.authorized_key:
+        user: zuul
+        key: "{{ pub_key['content'] | b64decode }}"
+
+    - name: Install ipa-client
+      become: true
+      ansible.builtin.dnf:
+        name: ipa-client
+        state: present
+
+    - name: Run undercloud ipa installer
+      vars:
+        _undercloud_ipa_install_cmd: |
+          export IPA_DOMAIN="{{ cloud_domain }}"
+          export IPA_REALM="{{ cloud_domain|upper }}"
+          export IPA_ADMIN_USER=admin
+          export IPA_ADMIN_PASSWORD="{{ cifmw_adoption_osp_deploy_freeipa_admin_password }}"
+          export IPA_SERVER_HOSTNAME="osp-free-ipa-0.{{ cloud_domain }}"
+          export UNDERCLOUD_FQDN="osp-undercloud-0.{{ cloud_domain }}"
+          export USER=zuul
+          export CLOUD_DOMAIN="{{ cloud_domain }}"
+          ansible-playbook \
+          --ssh-extra-args "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+          /usr/share/ansible/tripleo-playbooks/undercloud-ipa-install.yaml
+      cifmw.general.ci_script:
+        chdir: "{{ ansible_user_dir }}"
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        script: "{{ _undercloud_ipa_install_cmd }}"
+
+    - name: Edit undercloud.conf for ipa
+      community.general.ini_file:
+        path: ~/undercloud.conf
+        backup: true
+        mode: "0644"
+        section: "{{ item.section }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { section: "DEFAULT", option: "undercloud_nameservers", value: "{{ freeipa_ip }} " }
+        - { section: "DEFAULT", option: "overcloud_domain_name", value: "{{ cloud_domain }}" }

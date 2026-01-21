@@ -371,3 +371,37 @@
               dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/cinder/cinder-api-container-puppet.yaml
             - patch_file: files/bgp-tht-frr-patch
               dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/frr/frr-container-ansible.yaml
+
+- name: Run FreeIPA preparation tasks for overcloud nodes
+  when: cifmw_adoption_osp_deploy_scenario.tlse | default(false)
+  vars:
+    cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
+    _freeipa_name: "{{ _vm_groups['osp-free-ipas'] | first }}"
+    _freeipa_net: "{{ cifmw_networking_env_definition.instances[_freeipa_name] }}"
+  block:
+    - name: Create resolv.conf.manually-configured
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf.manually-configured"
+        content: |
+            search {{ cloud_domain }}
+            nameserver {{ _freeipa_net.networks.ocpbm[ip_version|default('ip_v4')] }}
+        mode: '0644'
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+
+    - name: Create a symbolic link of systemd resolv.conf
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      ansible.builtin.file:
+        src: "/etc/resolv.conf.manually-configured"
+        dest: "/etc/resolv.conf"
+        owner: root
+        group: root
+        state: link
+        force: true
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
