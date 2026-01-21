@@ -16,6 +16,7 @@ testing the new changes.
 * `cifmw_os_must_gather_namespaces`: (List) List of namespaces required by the gather task in case of failure
 * `cifmw_os_must_gather_additional_namespaces`: (String) List of comma separated additional namespaces. Defaults to `kuttl,openshift-storage,sushy-emulator`
 * `cifmw_os_must_gather_volume_percentage`: (int) Specify maximum percentage of must-gather pod's allocated volume that can be used. If this limit is exceeded, must-gather will stop gathering, but still copy gathered data. Defaults to `80`
+* `cifmw_os_must_gather_omc`: (bool) Enables the full gathering method. When set to false, a lightweight mode is used; when true, it performs a comprehensive data collection, which is more resource-intensive. Defaults to `false`
 
 ## Examples
 ```
