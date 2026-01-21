@@ -371,3 +371,61 @@
               dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/cinder/cinder-api-container-puppet.yaml
             - patch_file: files/bgp-tht-frr-patch
               dest_file: /usr/share/openstack-tripleo-heat-templates/deployment/frr/frr-container-ansible.yaml
+
+- name: Run FreeIPA preparation tasks for overcloud nodes
+  when: cifmw_adoption_osp_deploy_scenario.tlse | default(false)
+  vars:
+    cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
+    _freeipa_name: "{{ _vm_groups['osp-free-ipas'] | first }}"
+    _freeipa_net: "{{ cifmw_networking_env_definition.instances[_freeipa_name] }}"
+  block:
+    - name: Set 'dns=none' in /etc/NetworkManager/NetworkManager.conf
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      community.general.ini_file:
+        path: /etc/NetworkManager/NetworkManager.conf
+        state: present
+        no_extra_spaces: true
+        section: main
+        option: dns
+        value: none
+        backup: true
+        mode: '0644'
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+
+    - name: Set PEERDNS to 'no' for eth0
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      ansible.builtin.lineinfile:
+        path: "/etc/sysconfig/network-scripts/ifcfg-eth0"
+        regexp: '^PEERDNS=.*'
+        line: 'PEERDNS=no'
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+
+    - name: Set dns nameservers for etho0
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      ansible.builtin.lineinfile:
+        path: "/etc/sysconfig/network-scripts/ifcfg-eth0"
+        regexp: '^DNS1=.*'
+        line: "DNS1={{ _freeipa_net.networks.ocpbm[ip_version|default('ip_v4')] }}"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
+
+    - name: Set resolv.conf content
+      become: true
+      delegate_to: "{{ overcloud_vm }}"
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf"
+        content: |
+          search {{ cloud_domain }}
+          nameserver {{ _freeipa_net.networks.ocpbm[ip_version|default('ip_v4')] }}
+        mode: "0644"
+      loop: "{{ _tripleo_nodes_stack[_overcloud_name] }}"
+      loop_control:
+        loop_var: overcloud_vm
