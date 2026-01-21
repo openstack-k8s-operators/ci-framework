@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+import yaml
+import re
+from pathlib import Path
+
+README_PATH = Path("roles/test_operator/README.md")
+DEFAULTS_PATH = Path("roles/test_operator/defaults/main.yml")
+DEFAULTS_REL = DEFAULTS_PATH.relative_to("roles/test_operator")
+DEFAULTS_LINK = f"[{DEFAULTS_REL.name}]({DEFAULTS_REL})"
+# Build dynamic regex for removal
+DEFAULTS_REGEX = re.escape(f"[{DEFAULTS_REL.name}]({DEFAULTS_REL})")
+
+# Group rules
+GROUP_MAP = {
+    "TEMPEST_SPECIFIC_PARAMETERS": [
+        "cifmw_test_operator_tempest_",
+        "cifmw_tempest_",
+    ],
+    "TOBIKO_SPECIFIC_PARAMETERS": [
+        "cifmw_test_operator_tobiko_",
+    ],
+    "HORIZONTEST_SPECIFIC_PARAMETERS": [
+        "cifmw_test_operator_horizontest_",
+    ],
+    "ANSIBLETEST_SPECIFIC_PARAMETERS": [
+        "cifmw_test_operator_ansibletest_",
+    ],
+}
+GENERIC_GROUP = "GENERIC_PARAMETERS"
+
+MAX_INLINE_LENGTH = 200
+MAX_INLINE_LINES = 3
+
+
+def detect_group(var):
+    for group, prefixes in GROUP_MAP.items():
+        for p in prefixes:
+            if var.startswith(p):
+                return group
+    return GENERIC_GROUP
+
+
+def load_defaults():
+    with open(DEFAULTS_PATH, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def load_readme():
+    return README_PATH.read_text()
+
+
+def extract_section_blocks(readme):
+    sections = {}
+    for group in [GENERIC_GROUP] + list(GROUP_MAP.keys()):
+        pattern = rf"(<!-- START {group} -->)(.*?)(<!-- END {group} -->)"
+        m = re.search(pattern, readme, re.DOTALL)
+        if not m:
+            raise RuntimeError(f"Missing section markers for {group}")
+        sections[group] = {
+            "start": m.group(1),
+            "content": m.group(2),
+            "end": m.group(3),
+        }
+    return sections
+
+
+def parse_existing_variable_blocks(section_content):
+    """Extract full variable blocks (multi-line)."""
+    vars = {}
+    blocks = re.split(r"\n(?=\*\s*`)", section_content.strip())
+    for block in blocks:
+        m = re.match(r"\*\s*`([^`]+)`\s*:", block.strip())
+        if m:
+            vars[m.group(1)] = block.strip()
+    return vars
+
+
+def should_redirect(value):
+    # Explicitly redirect only complex values
+    if isinstance(value, (list, dict)):
+        return True
+
+    if isinstance(value, str) and "\n" in value:
+        return True
+
+    if isinstance(value, str) and len(value) > 120:
+        return True
+
+    return False
+
+
+def strip_multiline_default(block):
+    """
+    Remove any multiline default value YAML from README variable block.
+    Keeps description but removes indented YAML.
+    """
+    lines = block.splitlines()
+    cleaned = []
+    skip = False
+
+    for line in lines:
+        if re.search(r"Default value:\s*$", line):
+            cleaned.append(line)
+            skip = True
+            continue
+
+        # Stop skipping when indentation ends
+        if skip:
+            if re.match(r"\s{2,}", line):
+                continue
+            skip = False
+
+        cleaned.append(line)
+
+    return "\n".join(cleaned)
+
+
+def normalize_default_text(block, value):
+    # Normalize "Defaults to `x`" → "Default value: `x`"
+    block = re.sub(
+        r"(Defaults to|defaults to)\s*`([^`]+)`",
+        r"Default value: `\2`",
+        block,
+    )
+
+    # If Default value is missing, ALWAYS add it
+    if not re.search(r"Default value:", block):
+        if value is None:
+            # Empty but valid default
+            block = block.rstrip() + " Default value: ``"
+        elif should_redirect(value):
+            # Complex values should redirect to main.yml
+            block = block.rstrip() + f" Default value: See defaults in {DEFAULTS_LINK}"
+        else:
+            # Simple values can be shown inline
+            # Convert Python bool to lowercase for consistency with YAML
+            if isinstance(value, bool):
+                value_str = str(value).lower()
+            elif value is None:
+                value_str = "null"
+            else:
+                value_str = str(value)
+            block = block.rstrip() + f" Default value: `{value_str}`"
+
+    return block
+
+
+def build_bullet(var, value, existing_block=None):
+    """Build markdown bullet line for a variable while preserving descriptions."""
+
+    # CASE 1: Variable already exists in README
+    if existing_block:
+        # 🔹 Normalize Defaults wording FIRST
+        existing_block = normalize_default_text(existing_block, value)
+
+        # 1️⃣ Redirect if value is complex
+        if should_redirect(value):
+            print("should_redirect =", should_redirect(value))
+
+            existing_block = strip_multiline_default(existing_block)
+
+            if "See defaults in" not in existing_block:
+                existing_block = re.sub(
+                    r"Default value:.*",
+                    f"Default value: See defaults in {DEFAULTS_LINK}",
+                    existing_block,
+                    flags=re.DOTALL,
+                )
+            return existing_block
+
+        # 2️⃣ 🔥 RESTORE inline default if it was previously redirected
+        if re.search(r"See defaults in", existing_block):
+            existing_block = re.sub(
+                r"Default value:\s*See defaults in.*",
+                f"Default value: `{value}`",
+                existing_block,
+                flags=re.DOTALL,
+            )
+            return existing_block
+
+        # 3️⃣ Update inline default value if it changed
+        m = re.search(r"Default value:\s*`([^`]+)`", existing_block)
+        if m:
+            current_val = m.group(1).strip()
+            # Convert Python bool to lowercase for consistency
+            if isinstance(value, bool):
+                value_str = str(value).lower()
+            elif value is None:
+                value_str = "null"
+            else:
+                value_str = str(value)
+            if current_val != value_str:
+                existing_block = re.sub(
+                    r"Default value:\s*`[^`]+`",
+                    f"Default value: `{value_str}`",
+                    existing_block,
+                    count=1,
+                )
+
+        return existing_block
+
+    # CASE 2: New variable
+    if should_redirect(value):
+        return f"* `{var}`: Default value: See defaults in {DEFAULTS_LINK}"
+
+    # Convert Python bool to lowercase for consistency
+    if isinstance(value, bool):
+        value_str = str(value).lower()
+    elif value is None:
+        value_str = "null"
+    else:
+        value_str = str(value)
+    return f"* `{var}`: Default value: `{value_str}`"
+
+
+def sync():
+    defaults = load_defaults()
+    readme = load_readme()
+    sections = extract_section_blocks(readme)
+
+    grouped_new = {g: {} for g in sections}
+    existing_vars = {
+        g: parse_existing_variable_blocks(sections[g]["content"]) for g in sections
+    }
+
+    # Merge defaults with existing variables
+    for var in defaults:
+        value = defaults[var]
+        group = detect_group(var)
+        grouped_new[group][var] = build_bullet(
+            var, value, existing_vars[group].get(var)
+        )
+
+    # Keep variables that exist only in README (but not if they just redirect to defaults)
+    for group, existing in existing_vars.items():
+        for var, block in existing.items():
+            if var not in grouped_new[group]:
+                # Skip removing variables that had redirect to defaults but no longer exist in defaults/main.yml
+                if re.search(rf"See defaults in\s+{DEFAULTS_REGEX}", block):
+                    # Skip keeping — this var was only referencing defaults, and now it's gone from defaults.yml
+                    print(f"Removing obsolete variable from README: {var}")
+                    continue
+                # If variable exists in defaults (even in different group), update it with default value
+                if var in defaults:
+                    value = defaults[var]
+                    # Check if the block is missing "Default value:"
+                    if not re.search(r"Default value:", block):
+                        block = normalize_default_text(block, value)
+                    grouped_new[group][var] = block
+                else:
+                    # Otherwise keep it as-is (manual documentation, extra notes, etc.)
+                    grouped_new[group][var] = block
+
+    # Rebuild README
+    for group in grouped_new:
+        new_content = "\n".join(
+            grouped_new[group][v] for v in sorted(grouped_new[group])
+        )
+        pattern = rf"(<!-- START {group} -->)(.*?)(<!-- END {group} -->)"
+        readme = re.sub(pattern, rf"\1\n{new_content}\n\3", readme, flags=re.DOTALL)
+
+    README_PATH.write_text(readme)
+    print("README successfully synchronized with inline YAML support.")
+
+
+if __name__ == "__main__":
+    sync()
