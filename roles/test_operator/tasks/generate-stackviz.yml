@@ -1,0 +1,154 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Generate stackviz HTML from tempest results
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - cifmw_test_operator_generate_stackviz | default(true) | bool
+    - run_test_fw == 'tempest'
+  block:
+    - name: Find tempest_results.subunit.gz file in collected logs
+      ansible.builtin.find:
+        paths: "{{ cifmw_test_operator_artifacts_basedir }}"
+        patterns: "tempest_results.subunit.gz"
+        file_type: file
+        recurse: true
+      register: subunit_files
+
+    - name: Process stackviz generation
+      when: subunit_files.matched > 0
+      block:
+        - name: Set subunit file path
+          ansible.builtin.set_fact:
+            tempest_subunit_gz: "{{ subunit_files.files[0].path }}"
+
+        - name: Display subunit file location
+          ansible.builtin.debug:
+            msg: "Found tempest subunit file at: {{ tempest_subunit_gz }}"
+
+        - name: Create stackviz output directory
+          ansible.builtin.file:
+            path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
+            state: directory
+            mode: "0755"
+
+        - name: Check if stackviz is installed
+          ansible.builtin.command: which stackviz-export
+          register: stackviz_check
+          failed_when: false
+          changed_when: false
+
+        - name: Install stackviz
+          when: stackviz_check.rc != 0
+          block:
+            - name: Ensure pip is available
+              ansible.builtin.package:
+                name: python3-pip
+                state: present
+              become: true
+
+            - name: Install stackviz via pip
+              ansible.builtin.pip:
+                name: stackviz
+                state: present
+                executable: pip3
+              become: true
+
+        - name: Decompress subunit file
+          ansible.builtin.command:
+            cmd: >
+              gunzip -c {{ tempest_subunit_gz }}
+            chdir: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
+          register: decompressed_subunit
+          changed_when: false
+
+        - name: Write decompressed subunit to file
+          ansible.builtin.copy:
+            content: "{{ decompressed_subunit.stdout }}"
+            dest: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest_results.subunit"
+            mode: "0644"
+
+        - name: Check if decompressed subunit file exists
+          ansible.builtin.stat:
+            path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest_results.subunit"
+          register: subunit_file
+
+        - name: Generate stackviz HTML from subunit file
+          when: subunit_file.stat.exists
+          block:
+            - name: Run stackviz-export
+              ansible.builtin.command:
+                cmd: >
+                  stackviz-export
+                  {{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest_results.subunit
+                  {{ cifmw_test_operator_artifacts_basedir }}/stackviz/html
+                chdir: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
+              register: stackviz_export
+              failed_when: false
+
+            - name: Display stackviz export status
+              ansible.builtin.debug:
+                msg: |
+                  Stackviz export completed with return code: {{ stackviz_export.rc }}
+                  {% if stackviz_export.rc == 0 %}
+                  HTML report available at: {{ cifmw_test_operator_artifacts_basedir }}/stackviz/html/index.html
+                  {% else %}
+                  Stackviz export failed. Check logs for details.
+                  Output: {{ stackviz_export.stdout }}
+                  Error: {{ stackviz_export.stderr }}
+                  {% endif %}
+
+            - name: Set stackviz HTML path fact
+              when: stackviz_export.rc == 0
+              ansible.builtin.set_fact:
+                stackviz_html_path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/html/index.html"
+
+            - name: Verify stackviz HTML was generated
+              when: stackviz_export.rc == 0
+              ansible.builtin.stat:
+                path: "{{ stackviz_html_path }}"
+              register: stackviz_html
+
+            - name: Display success message
+              when:
+                - stackviz_export.rc == 0
+                - stackviz_html.stat.exists
+              ansible.builtin.debug:
+                msg: |
+                  ========================================
+                  Stackviz HTML Report Generated Successfully!
+                  ========================================
+                  Location: {{ stackviz_html_path }}
+
+                  To view the report, open the following file in your browser:
+                  file://{{ stackviz_html_path }}
+                  ========================================
+
+        - name: Warn if decompressed subunit file was not created
+          when: not subunit_file.stat.exists
+          ansible.builtin.debug:
+            msg: |
+              WARNING: Decompressed subunit file was not created.
+              This may indicate an issue with decompressing {{ tempest_subunit_gz }}.
+              Skipping stackviz generation.
+
+    - name: Warn if no subunit file found
+      when: subunit_files.matched == 0
+      ansible.builtin.debug:
+        msg: |
+          WARNING: No tempest_results.subunit.gz file found in tempest logs.
+          Stackviz HTML generation skipped.
+          Expected location: {{ cifmw_test_operator_artifacts_basedir }}/**/tempest_results.subunit.gz
