@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This playbook exports a TripleO stack for use by DCN stacks.
+# It creates the <stack_name>-export.yaml file that contains
+# the parameters DCN stacks need to connect to the central site.
+
+- name: Export TripleO stack for DCN
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _stack_name: "{{ stack_name | default('central') }}"
+    _ansible_user_dir: "{{ ansible_user_dir | default('/home/zuul') }}"
+  tasks:
+    - name: Gather ansible_user_dir from undercloud
+      delegate_to: "osp-undercloud-0"
+      ansible.builtin.setup:
+        gather_subset:
+          - user_dir
+
+    - name: Export stack for DCN usage
+      delegate_to: "osp-undercloud-0"
+      vars:
+        _export_cmd: >-
+          source {{ ansible_user_dir }}/stackrc;
+          openstack overcloud export
+          --stack {{ _stack_name }}
+          --force-overwrite
+          --output-file {{ ansible_user_dir }}/overcloud-deploy/{{ _stack_name }}/{{ _stack_name }}-export.yaml
+      cifmw.general.ci_script:
+        chdir: "{{ ansible_user_dir }}"
+        output_dir: "{{ ansible_user_dir }}/ci-framework-data/artifacts"
+        script: "{{ _export_cmd }}"
+
+    - name: Export Ceph configuration for DCN usage
+      delegate_to: "osp-undercloud-0"
+      vars:
+        _export_ceph_cmd: >-
+          source {{ ansible_user_dir }}/stackrc;
+          openstack overcloud export ceph
+          --stack {{ _stack_name }}
+          --force-overwrite
+          --output-file {{ ansible_user_dir }}/{{ _stack_name }}_ceph_external.yaml
+      cifmw.general.ci_script:
+        chdir: "{{ ansible_user_dir }}"
+        output_dir: "{{ ansible_user_dir }}/ci-framework-data/artifacts"
+        script: "{{ _export_ceph_cmd }}"
