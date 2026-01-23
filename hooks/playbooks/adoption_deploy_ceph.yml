@@ -72,6 +72,10 @@
           }}
         _cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
         _source_cmd: "source {{ ansible_user_dir }}/stackrc"
+        # Use stack-specific filename for non-default stack names to avoid overwrites
+        # Default 'overcloud' stack uses 'deployed_ceph.yaml' for backward compatibility
+        _deployed_ceph_suffix: "{{ '' if _overcloud_name == 'overcloud' else '_' ~ _overcloud_name }}"
+        _deployed_ceph_file: "{{ ansible_user_dir }}/deployed_ceph{{ _deployed_ceph_suffix }}.yaml"
       block:
         - name: Copy ceph osd file
           delegate_to: "osp-undercloud-0"
@@ -99,6 +103,7 @@
             _ceph_spec_cmd: >-
               openstack overcloud ceph spec
               {{ ansible_user_dir }}/config_download_{{ _overcloud_name }}.yaml
+              --stack {{ _overcloud_name }}
               --tld {{ _cloud_domain }}
               --osd-spec {{ _ceph_osd_spec_file_dest }}
               --roles-data {{ _roles_file_dest }}
@@ -111,7 +116,7 @@
         - name: Ensure deployed_ceph file does not exist
           delegate_to: "osp-undercloud-0"
           ansible.builtin.file:
-            path: "{{ ansible_user_dir }}/deployed_ceph.yaml"
+            path: "{{ _deployed_ceph_file }}"
             state: absent
 
         - name: Gather nodes for stack {{ _overcloud_name }}
@@ -159,14 +164,18 @@
         - name: Deploy ceph
           delegate_to: "osp-undercloud-0"
           vars:
+            # Only pass --cluster for non-default stacks to set unique cluster names
+            # Default 'overcloud' stack uses 'ceph' cluster name for backward compatibility
             _ceph_deploy_cmd: >-
               openstack overcloud ceph deploy
+              --stack {{ _overcloud_name }}
+              {%- if _overcloud_name != 'overcloud' %} --cluster {{ _overcloud_name }}{% endif %}
               --tld {{ _cloud_domain }}
               --ntp-server {{ cifmw_adoption_osp_deploy_ntp_server }}
               --ceph-spec ceph_spec.yaml
               --network-data {{ _network_data_file_dest }}
               --container-image-prepare {{ ansible_user_dir }}/containers-prepare-parameters.yaml
-              --output {{ ansible_user_dir }}/deployed_ceph.yaml
+              --output {{ _deployed_ceph_file }}
           cifmw.general.ci_script:
             chdir: "{{ ansible_user_dir }}"
             output_dir: "{{ _cifmw_basedir_undercloud }}/artifacts"
