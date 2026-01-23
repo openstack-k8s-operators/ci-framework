@@ -46,6 +46,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_vm_users`: (List[Dict]) Used to override the default list of users enabled in the vm. For its format, refers to cloud-init [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) about `users`. Defaults to `[]`.
 * `cifmw_libvirt_manager_extra_network_configuration`: (Dict) Extra network configuration in nmstate format for the hypervisor. This configuration is applied after creating the libvirt networks, so it can be used to create VLAN interfaces on the libvirt bridges. In addition to nmstate, it also supports a `cifmw_firewall_zone` hint in nmstate interfaces.  Defaults to: `{}`.
 * `cifmw_libvirt_manager_radvd_networks`: (List[Dict]) List of networks to configure with radvd for IPv6 router advertisements. When defined, the `radvd` role will be included after network creation. Each network definition follows the format documented in the `radvd` role. Defaults to `[]`.
+* `cifmw_libvirt_manager_cloud_init_extra`: (Dict) Additional cloud-init configuration to merge with the base user data. This allows extending the default cloud-init configuration with custom settings such as package updates, additional users, or other cloud-init modules. The configuration is merged with the base user data using Ansible's `combine` filter. Useful for scenarios like updating packages during VM initialization to resolve version compatibility issues. Defaults to `{}`.
 
 ### `cifmw_libvirt_manager_default_gw_nets` parameter usage
 
@@ -202,6 +203,16 @@ cifmw_libvirt_manager_configuration:
          prefix='24'>
         </ip>
       </network>
+```
+
+### Example usage of cifmw_libvirt_manager_cloud_init_extra for package updates
+
+The following will instruct cloud-init to update the `openssh-server`.
+
+```yaml
+cifmw_libvirt_manager_cloud_init_extra:
+  packages:
+    - openssh-server
 ```
 
 ### Parameters imported from the reproducer role
