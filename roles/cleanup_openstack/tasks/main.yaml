@@ -52,17 +52,31 @@
   when: cifmw_cleanup_openstack_detach_bmh
 
 - name: Work around for stale rabbit cluster deletion
-  kubernetes.core.k8s_json_patch:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_openstack_namespace }}"
-    kind: RabbitmqCluster
-    name: rabbitmq-cell1
-    patch:
-      - op: replace
-        path: /metadata/finalizers
-        value: []
+  block:
+    - name: Check if rabbitmq-cell1 exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: RabbitmqCluster
+        name: rabbitmq-cell1
+      register: rabbitmq_cell1_info
+      failed_when: false
+
+    - name: Patch rabbitmq-cell1 finalizers
+      kubernetes.core.k8s_json_patch:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: RabbitmqCluster
+        name: rabbitmq-cell1
+        patch:
+          - op: replace
+            path: /metadata/finalizers
+            value: []
+      when: rabbitmq_cell1_info.resources | default([]) | length > 0
 
 - name: Delete deployment CRs
   vars:
