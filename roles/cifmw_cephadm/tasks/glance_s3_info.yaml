@@ -41,7 +41,7 @@
       ansible.builtin.command:
         cmd: >-
           {{ cifmw_cephadm_ceph_cli }} user info --uid glance
-      no_log: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
       become: true
       ignore_errors: true
       changed_when: false
@@ -54,7 +54,7 @@
           {{ cifmw_cephadm_ceph_cli }} user create
           --uid="glance"
           --display-name="Glance S3 User"
-      no_log: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
       become: true
       when:
         - cifmw_ceph_s3_glance_user_check is not skipped
@@ -69,7 +69,7 @@
         cmd: >-
           {{ cifmw_cephadm_ceph_cli }} user info --uid="glance"
       become: true
-      no_log: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
       changed_when: false
       register: ceph_rgw_glance_user_info
 
@@ -100,26 +100,4 @@
       when:
         - ceph_rgw_glance_user_info is defined
         - ceph_rgw_glance_user_info.rc == 0
-      no_log: true
-
-    - name: Get OpenStack internal object-store endpoints
-      cifmw.general.ci_script:
-        extra_args:
-          KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        output_dir: "{{ cifmw_cephadm_basedir }}/artifacts"
-        script: |-
-          oc -n {{ cifmw_cephadm_ns }} rsh openstackclient openstack endpoint list --service object-store --interface internal -f value -c URL
-      delegate_to: localhost
-      register: object_store_endpoint_raw
-      when:
-        - cifmw_openshift_kubeconfig is defined
-        - cifmw_cephadm_basedir is defined
-        - cifmw_cephadm_rgw_s3_glance is defined
-
-    - name: Extract base URL without path
-      ansible.builtin.set_fact:
-        rgw_internal_url: >-
-          {{
-            object_store_endpoint_raw.stdout
-            | regex_replace('(/swift.*)$', '')
-          }}
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
