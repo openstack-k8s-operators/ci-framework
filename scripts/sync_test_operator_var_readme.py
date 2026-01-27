@@ -28,9 +28,6 @@ GROUP_MAP = {
 }
 GENERIC_GROUP = "GENERIC_PARAMETERS"
 
-MAX_INLINE_LENGTH = 200
-MAX_INLINE_LINES = 3
-
 
 def detect_group(var):
     for group, prefixes in GROUP_MAP.items():
@@ -81,9 +78,6 @@ def should_redirect(value):
         return True
 
     if isinstance(value, str) and "\n" in value:
-        return True
-
-    if isinstance(value, str) and len(value) > 120:
         return True
 
     return False
@@ -150,13 +144,11 @@ def build_bullet(var, value, existing_block=None):
 
     # CASE 1: Variable already exists in README
     if existing_block:
-        # 🔹 Normalize Defaults wording FIRST
+        # Normalize Defaults wording FIRST
         existing_block = normalize_default_text(existing_block, value)
 
-        # 1️⃣ Redirect if value is complex
+        # 1️. Redirect if value is complex
         if should_redirect(value):
-            print("should_redirect =", should_redirect(value))
-
             existing_block = strip_multiline_default(existing_block)
 
             if "See defaults in" not in existing_block:
@@ -168,7 +160,7 @@ def build_bullet(var, value, existing_block=None):
                 )
             return existing_block
 
-        # 2️⃣ 🔥 RESTORE inline default if it was previously redirected
+        # 2️. RESTORE inline default if it was previously redirected
         if re.search(r"See defaults in", existing_block):
             existing_block = re.sub(
                 r"Default value:\s*See defaults in.*",
@@ -178,7 +170,7 @@ def build_bullet(var, value, existing_block=None):
             )
             return existing_block
 
-        # 3️⃣ Update inline default value if it changed
+        # 3️. Update inline default value if it changed
         m = re.search(r"Default value:\s*`([^`]+)`", existing_block)
         if m:
             current_val = m.group(1).strip()
@@ -238,7 +230,6 @@ def sync():
                 # Skip removing variables that had redirect to defaults but no longer exist in defaults/main.yml
                 if re.search(rf"See defaults in\s+{DEFAULTS_REGEX}", block):
                     # Skip keeping — this var was only referencing defaults, and now it's gone from defaults.yml
-                    print(f"Removing obsolete variable from README: {var}")
                     continue
                 # If variable exists in defaults (even in different group), update it with default value
                 if var in defaults:
@@ -260,7 +251,6 @@ def sync():
         readme = re.sub(pattern, rf"\1\n{new_content}\n\3", readme, flags=re.DOTALL)
 
     README_PATH.write_text(readme)
-    print("README successfully synchronized with inline YAML support.")
 
 
 if __name__ == "__main__":

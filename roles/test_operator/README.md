@@ -1,12 +1,8 @@
-<!--
-NOTE: The parameter sections in this README are automatically synced from
-roles/test_operator/defaults/main.yml using scripts/sync_test_operator_var_readme.py
--->
 # Test operator
 
 Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/test-operator/).
 
-## Generic parameters
+## Generic parameters 
 <!-- START GENERIC_PARAMETERS -->
 * `cifmw_test_operator_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/test_operator` which Default value: `~/ci-framework-data/tests/test_operator`
 * `cifmw_test_operator_bundle`: (String) Full name of container image with bundle that contains the test-operator. Default value: ``
@@ -65,7 +61,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_tempest_extra_images`: (List) A list of images that should be uploaded to OpenStack before the tests are executed. The value is passed to extraImages parameter in the [Tempest CR](https://openstack-k8s-operators.github.io/test-operator/crds.html#tempest-custom-resource). Default value: `[]`
 * `cifmw_test_operator_tempest_extra_mounts`: (List) A list of additional volume mounts for the tempest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_tempest_extra_rpms`: (List) . A list of URLs that point to RPMs that should be installed before the execution of tempest. Note that this parameter has no effect when `cifmw_test_operator_tempest_external_plugin` is used. Default value: `[]`
-* `cifmw_test_operator_tempest_image`: (String) Tempest image to be used. Default value: See defaults in [main.yml](defaults/main.yml)
+* `cifmw_test_operator_tempest_image`: (String) Tempest image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_tempest_registry }}/{{ stage_vars_dict.cifmw_test_operator_tempest_namespace }}/{{ stage_vars_dict.cifmw_test_operator_tempest_container }}`
 * `cifmw_test_operator_tempest_image_tag`: (String) Tag for the `cifmw_test_operator_tempest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_tempest_include_list`: (String) List of tests to be executed. Setting this will not use the `list_allowed` plugin. Default value: `''`
 * `cifmw_test_operator_tempest_name`: (String) Value used in the `Tempest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tempest-tests`
@@ -92,13 +88,13 @@ Default value: {}
 
 ## Tobiko specific parameters
 <!-- START TOBIKO_SPECIFIC_PARAMETERS -->
-* `cifmw_test_operator_tobiko_advanced_image_url`: (String) Tobiko will download images from this URL that will be used to create advance VM instances. By default, the provided image will include all the customizations required by the tobiko tests. Default value: See defaults in [main.yml](defaults/main.yml)
+* `cifmw_test_operator_tobiko_advanced_image_url`: (String) Tobiko will download images from this URL that will be used to create advance VM instances. By default, the provided image will include all the customizations required by the tobiko tests. Default value: `https://github.com/openstack-k8s-operators/openstack-k8s-operators-ci/releases/download/v1.0.0/tobiko-custom-v1.0.0.qcow2`.
 * `cifmw_test_operator_tobiko_cleanup`: (Boolean) Cleanup all resources created by tobiko. Default value: `false`
 * `cifmw_test_operator_tobiko_config`: (Dict) Definition of Tobiko CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#tobiko-custom-resource)). Default value: See defaults in [main.yml](defaults/main.yml)
 * `cifmw_test_operator_tobiko_container`: (String) Name of the tobiko container. Default value: `openstack-tobiko`
 * `cifmw_test_operator_tobiko_debug`: (Bool) Run Tobiko in debug mode, it keeps the operator pod sleeping infinity (it must only set to `true`only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_tobiko_extra_mounts`: (List) A list of additional volume mounts for the tobiko test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
-* `cifmw_test_operator_tobiko_image`: (String) Tobiko image to be used. Default value: See defaults in [main.yml](defaults/main.yml)
+* `cifmw_test_operator_tobiko_image`: (String) Tobiko image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_tobiko_registry }}/{{ stage_vars_dict.cifmw_test_operator_tobiko_namespace }}/{{ stage_vars_dict.cifmw_test_operator_tobiko_container }}`
 * `cifmw_test_operator_tobiko_image_tag`: (String) Tag for the `cifmw_test_operator_tobiko_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_tobiko_kubeconfig_secret`: (String) Name of the Openshift Secret required to use Openshift Client from the Tobiko pod. Default value: `tobiko-secret`
 * `cifmw_test_operator_tobiko_name`: (String) Value used in the `Tobiko.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `tobiko-tests`
@@ -133,7 +129,7 @@ Default value: {}
 * `cifmw_test_operator_ansibletest_debug`: (Bool) Run ansible playbook with -vvvv. Default value: `false`
 * `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: WARNING: This parameter will be deprecated! Please use `cifmw_test_operator_ansibletest_extra_mounts` parameter instead. (List) Extra configmaps for mounting in the pod. Default value: See defaults in [main.yml](defaults/main.yml)
 * `cifmw_test_operator_ansibletest_extra_mounts`: (List) A list of additional volume mounts for the ansibletest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
-* `cifmw_test_operator_ansibletest_image`: (String) Ansibletests image to be used. Default value: See defaults in [main.yml](defaults/main.yml)
+* `cifmw_test_operator_ansibletest_image`: (String) Ansibletests image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_ansibletest_registry }}/{{ stage_vars_dict.cifmw_test_operator_ansibletest_namespace }}/{{ stage_vars_dict.cifmw_test_operator_ansibletest_container }}`
 * `cifmw_test_operator_ansibletest_image_tag`: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_ansibletest_name`: (String) Value used in the `Ansibletest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `ansibletest`
 * `cifmw_test_operator_ansibletest_namespace`: (String) Registry's namespace where to pull ansibletests container. Default value: `{{ cifmw_test_operator_default_namespace }}`
@@ -159,7 +155,7 @@ Default value: {}
 * `cifmw_test_operator_horizontest_flavor_name`: (String) The name of the OpenStack flavor to create for Horizon tests. Default value: `m1.tiny`
 * `cifmw_test_operator_horizontest_horizon_repo_branch`: (String) The branch of the Horizon repository to checkout. Default value: `master`
 * `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
-* `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: See defaults in [main.yml](defaults/main.yml)
+* `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_horizontest_registry }}/{{ stage_vars_dict.cifmw_test_operator_horizontest_namespace }}/{{ stage_vars_dict.cifmw_test_operator_horizontest_container }}`
 * `cifmw_test_operator_horizontest_image_tag`: (String) Tag for the `cifmw_test_operator_horizontest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
 * `cifmw_test_operator_horizontest_image_url`: (String) The URL to download the Cirros image. Default value: `http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img`
 * `cifmw_test_operator_horizontest_logs_directory_name`: (String) The name of the directory to store test logs. Default value: `horizon`
