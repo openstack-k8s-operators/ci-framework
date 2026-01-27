@@ -93,6 +93,62 @@
         name: openshift_setup
         tasks_from: patch_dependent_operators_source.yml
 
+    - name: Disable All Catalog Sources
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: patched
+        kind: OperatorHub
+        name: cluster
+        definition:
+          spec:
+            disableAllDefaultSources: true
+
+    - name: Wait for OLM-managed pods to be deleted
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Pod
+        namespace: openshift-marketplace
+        label_selectors:
+          - olm.managed
+      register: _olm_managed_pods
+      retries: 3
+      delay: 60
+      until: _olm_managed_pods.resources | length == 0
+
+    - name: Re-enable default catalog sources
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: patched
+        kind: OperatorHub
+        name: cluster
+        definition:
+          spec:
+            disableAllDefaultSources: false
+
+    - name: Wait for OLM-managed pods to be created
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Pod
+        namespace: openstack-operators
+        label_selectors:
+          - olm.managed
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+      retries: 3
+      delay: 60
+      register: _olm_managed_pods
+      until: _olm_managed_pods is success
+
     - name: Apply the kustomized CRs
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
