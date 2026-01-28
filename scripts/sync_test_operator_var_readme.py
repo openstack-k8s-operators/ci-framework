@@ -38,9 +38,52 @@ def detect_group(var):
     return GENERIC_GROUP
 
 
+def get_defaults_link(var_name, line_numbers):
+    """Generate GitHub URL with line anchor for a specific variable."""
+    if var_name in line_numbers:
+        start_line, end_line = line_numbers[var_name]
+        if start_line == end_line:
+            anchor = f"#L{start_line}"
+        else:
+            anchor = f"#L{start_line}-L{end_line}"
+        return f"[main.yml]({GITHUB_DEFAULTS_URL}{anchor})"
+    else:
+        # Fallback to generic link if line number not found
+        return DEFAULTS_LINK
+
+
 def load_defaults():
+    """Load defaults and track line numbers for each variable."""
     with open(DEFAULTS_PATH, "r") as f:
-        return yaml.safe_load(f) or {}
+        content = f.read()
+        defaults = yaml.safe_load(content) or {}
+
+    # Track line numbers for each variable
+    line_numbers = {}
+    lines = content.splitlines()
+
+    for i, line in enumerate(lines, start=1):
+        # Match top-level variable definitions (no leading whitespace before variable name)
+        match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*:', line)
+        if match:
+            var_name = match.group(1)
+            if var_name in defaults:
+                start_line = i
+
+                # Find end line by looking for the next top-level variable or end of file
+                end_line = i
+                for j in range(i, len(lines)):
+                    # Check if next line is a new top-level variable or comment section
+                    if j > i and re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*:|^#\s*Section', lines[j]):
+                        end_line = j - 1
+                        break
+                    # If line has content (not just whitespace), update end_line
+                    if lines[j].strip():
+                        end_line = j + 1
+
+                line_numbers[var_name] = (start_line, end_line)
+
+    return defaults, line_numbers
 
 
 def load_readme():
@@ -110,7 +153,7 @@ def strip_multiline_default(block):
     return "\n".join(cleaned)
 
 
-def normalize_default_text(block, value):
+def normalize_default_text(block, value, var_name, line_numbers):
     # Normalize "Defaults to `x`" → "Default value: `x`"
     block = re.sub(
         r"(Defaults to|defaults to)\s*`([^`]+)`",
@@ -125,7 +168,8 @@ def normalize_default_text(block, value):
             block = block.rstrip() + " Default value: ``"
         elif should_redirect(value):
             # Complex values should redirect to main.yml
-            block = block.rstrip() + f" Default value: See defaults in {DEFAULTS_LINK}"
+            defaults_link = get_defaults_link(var_name, line_numbers)
+            block = block.rstrip() + f" Default value: See defaults in {defaults_link}"
         else:
             # Simple values can be shown inline
             # Convert Python bool to lowercase for consistency with YAML
@@ -140,30 +184,33 @@ def normalize_default_text(block, value):
     return block
 
 
-def build_bullet(var, value, existing_block=None):
+def build_bullet(var, value, existing_block=None, line_numbers=None):
     """Build markdown bullet line for a variable while preserving descriptions."""
+    if line_numbers is None:
+        line_numbers = {}
 
     # CASE 1: Variable already exists in README
     if existing_block:
         # Normalize Defaults wording FIRST
-        existing_block = normalize_default_text(existing_block, value)
+        existing_block = normalize_default_text(existing_block, value, var, line_numbers)
 
         # 1️. Redirect if value is complex
         if should_redirect(value):
             existing_block = strip_multiline_default(existing_block)
+            defaults_link = get_defaults_link(var, line_numbers)
 
             if "See defaults in" not in existing_block:
                 existing_block = re.sub(
                     r"Default value:.*",
-                    f"Default value: See defaults in {DEFAULTS_LINK}",
+                    f"Default value: See defaults in {defaults_link}",
                     existing_block,
                     flags=re.DOTALL,
                 )
             else:
-                # Update existing "See defaults in" link to use GitHub URL
+                # Update existing "See defaults in" link to use GitHub URL with line anchor
                 existing_block = re.sub(
                     r"Default value:\s*See defaults in.*",
-                    f"Default value: See defaults in {DEFAULTS_LINK}",
+                    f"Default value: See defaults in {defaults_link}",
                     existing_block,
                     flags=re.DOTALL,
                 )
@@ -202,7 +249,8 @@ def build_bullet(var, value, existing_block=None):
 
     # CASE 2: New variable
     if should_redirect(value):
-        return f"* `{var}`: Default value: See defaults in {DEFAULTS_LINK}"
+        defaults_link = get_defaults_link(var, line_numbers)
+        return f"* `{var}`: Default value: See defaults in {defaults_link}"
 
     # Convert Python bool to lowercase for consistency
     if isinstance(value, bool):
@@ -215,7 +263,7 @@ def build_bullet(var, value, existing_block=None):
 
 
 def sync():
-    defaults = load_defaults()
+    defaults, line_numbers = load_defaults()
     readme = load_readme()
     sections = extract_section_blocks(readme)
 
@@ -229,7 +277,7 @@ def sync():
         value = defaults[var]
         group = detect_group(var)
         grouped_new[group][var] = build_bullet(
-            var, value, existing_vars[group].get(var)
+            var, value, existing_vars[group].get(var), line_numbers
         )
 
     # Keep variables that exist only in README (but not if they just redirect to defaults)
@@ -245,7 +293,7 @@ def sync():
                     value = defaults[var]
                     # Check if the block is missing "Default value:"
                     if not re.search(r"Default value:", block):
-                        block = normalize_default_text(block, value)
+                        block = normalize_default_text(block, value, var, line_numbers)
                     grouped_new[group][var] = block
                 else:
                     # Otherwise keep it as-is (manual documentation, extra notes, etc.)
