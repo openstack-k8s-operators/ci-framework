@@ -55,6 +55,13 @@ that they do not need to be changed for a typical EDPM deployment.
   as input to the `cifmw_ceph_client` role
   (e.g. `/tmp/ceph_client.yml`).
 
+* `cifmw_cephadm_install_on_all_nodes`: (Bool) If this value is `true`, then
+  cephadm will be installed on all nodes via the prerequisite play in
+  `hooks/playbooks/ceph.yml`. This is useful for adoption scenarios with
+  external Ceph where cephadm and its dependent packages (lvm2, jq) may be
+  missing on some nodes. Defaults to `false` for standard deployments where
+  cephadm is only installed on the bootstrap node.
+
 * `cifmw_cephadm_pools`: see below
 
 * `cifmw_cephadm_keys`: see below
