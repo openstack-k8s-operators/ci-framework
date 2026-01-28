@@ -5,10 +5,11 @@ from pathlib import Path
 
 README_PATH = Path("roles/test_operator/README.md")
 DEFAULTS_PATH = Path("roles/test_operator/defaults/main.yml")
-DEFAULTS_REL = DEFAULTS_PATH.relative_to("roles/test_operator")
-DEFAULTS_LINK = f"[{DEFAULTS_REL.name}]({DEFAULTS_REL})"
-# Build dynamic regex for removal
-DEFAULTS_REGEX = re.escape(f"[{DEFAULTS_REL.name}]({DEFAULTS_REL})")
+# GitHub URL for the defaults file
+GITHUB_DEFAULTS_URL = "https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml"
+DEFAULTS_LINK = f"[main.yml]({GITHUB_DEFAULTS_URL})"
+# Build regex that matches both old relative path and new GitHub URL
+DEFAULTS_REGEX = r"\[main\.yml\]\((defaults/main\.yml|" + re.escape(GITHUB_DEFAULTS_URL) + r")\)"
 
 # Group rules
 GROUP_MAP = {
@@ -154,6 +155,14 @@ def build_bullet(var, value, existing_block=None):
             if "See defaults in" not in existing_block:
                 existing_block = re.sub(
                     r"Default value:.*",
+                    f"Default value: See defaults in {DEFAULTS_LINK}",
+                    existing_block,
+                    flags=re.DOTALL,
+                )
+            else:
+                # Update existing "See defaults in" link to use GitHub URL
+                existing_block = re.sub(
+                    r"Default value:\s*See defaults in.*",
                     f"Default value: See defaults in {DEFAULTS_LINK}",
                     existing_block,
                     flags=re.DOTALL,
