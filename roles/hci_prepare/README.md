@@ -6,7 +6,7 @@ None.
 
 ## Parameters
 * `cifmw_hci_prepare_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
-* `cifmw_hci_prepare_dataplane_dir`: (String) Directory in where `edpm_deploy` role will search for DataPlane kustomizations. Defaults to `"{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane"`.
+* `cifmw_hci_prepare_dataplane_dir`: (String) Directory in where `edpm_deploy` role will search for DataPlane kustomizations. Defaults to `"{{ cifmw_manifests_dir }}kustomizations/dataplane"`.
 * `cifmw_hci_prepare_dryrun`: (Boolean) Perform a dry run on a set of commands. Defaults to `False`.
 * `cifmw_hci_prepare_skip_load_parameters`: Skip the initial `load_parameters` step, which load vars to gather network information. Defaults to `False`.
 * `cifmw_hci_prepare_ceph_secret_path`: "/tmp/k8s_ceph_secret.yml"
