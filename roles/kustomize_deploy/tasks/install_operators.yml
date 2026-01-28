@@ -93,6 +93,28 @@
         name: openshift_setup
         tasks_from: patch_dependent_operators_source.yml
 
+    - name: Verify default CatalogSources are healthy before applying subscriptions
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        namespace: openshift-marketplace
+        name: "{{ item }}"
+      register: _cifmw_kustomize_deploy_catalog_health
+      until:
+        - _cifmw_kustomize_deploy_catalog_health.resources is defined
+        - _cifmw_kustomize_deploy_catalog_health.resources | length == 1
+        - >-
+          (_cifmw_kustomize_deploy_catalog_health.resources | first).status.connectionState.lastObservedState
+          | default('') == 'READY'
+      retries: 30
+      delay: 10
+      loop:
+        - redhat-operators
+        - certified-operators
+
     - name: Apply the kustomized CRs
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -103,35 +125,74 @@
         src: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
       register: _cifmw_kustomize_deploy_olm_apply_out
 
-    - name: Wait for the openstack operators Subscription to be created
-      vars:
-        _cifmw_kustomize_deploy_olm_osp_operator_subscription: >-
-          {{
-            (
-              _cifmw_kustomize_deploy_olm_apply_out.result.results |
-              selectattr('result.kind', 'defined') |
-              selectattr('result.kind', 'equalto', 'Subscription') |
-              selectattr('result.spec.name', 'defined') |
-              selectattr('result.spec.name', 'equalto', 'openstack-operator') |
-              first
-            ).result
-          }}
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        api_version: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.apiVersion }}"
-        kind: Subscription
-        namespace: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.metadata.namespace }}"
-        name: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.metadata.name }}"
-      register: _cifmw_kustomize_deploy_olm_osp_operator_subscription_out
-      retries: "{{ cifmw_kustomize_deploy_retries_subscription }}"
-      delay: "{{ cifmw_kustomize_deploy_delay }}"
-      until:
-        - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.failed is false
-        - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources is defined
-        - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | length == 1
-        - (_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first)['status']['installPlanRef'] is defined
+    - name: Wait for subscription and handle resolution failures
+      block:
+        - name: Wait for the openstack operators Subscription to be created
+          vars:
+            _cifmw_kustomize_deploy_olm_osp_operator_subscription: >-
+              {{
+                (
+                  _cifmw_kustomize_deploy_olm_apply_out.result.results | default([]) |
+                  selectattr('result.kind', 'defined') |
+                  selectattr('result.kind', 'equalto', 'Subscription') |
+                  selectattr('result.spec.name', 'defined') |
+                  selectattr('result.spec.name', 'equalto', 'openstack-operator') |
+                  first
+                ).result
+              }}
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            api_key: "{{ cifmw_openshift_token | default(omit) }}"
+            context: "{{ cifmw_openshift_context | default(omit) }}"
+            api_version: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.apiVersion }}"
+            kind: Subscription
+            namespace: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.metadata.namespace }}"
+            name: "{{ _cifmw_kustomize_deploy_olm_osp_operator_subscription.metadata.name }}"
+          register: _cifmw_kustomize_deploy_olm_osp_operator_subscription_out
+          retries: "{{ cifmw_kustomize_deploy_retries_subscription }}"
+          delay: "{{ cifmw_kustomize_deploy_delay }}"
+          until:
+            - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.failed is false
+            - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources is defined
+            - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | length == 1
+            # Stop waiting if installPlanRef exists OR resolution has failed
+            - >-
+              ((_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first)['status']['installPlanRef'] is defined)
+              or
+              ((_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first).status.conditions | default([]) |
+               selectattr('type', 'equalto', 'ResolutionFailed') |
+               selectattr('status', 'equalto', 'True') |
+               list | length > 0)
+
+        - name: Verify installPlanRef exists
+          ansible.builtin.assert:
+            that:
+              - (_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first)['status']['installPlanRef'] is defined
+            fail_msg: "installPlanRef not found - subscription resolution may have failed"
+
+      rescue:
+        - name: Get resolution failure details and fail with clear message
+          vars:
+            _sub_resource: >-
+              {{ _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | default([]) | first | default({'status': {}, 'metadata': {}}) }}
+            _resolution_error: >-
+              {{
+                _sub_resource.status.conditions | default([]) |
+                selectattr('type', 'equalto', 'ResolutionFailed') |
+                selectattr('status', 'equalto', 'True') |
+                list | first | default({})
+              }}
+          ansible.builtin.fail:
+            msg: |
+              Subscription resolution failed for {{ _sub_resource.metadata.name | default('openstack-operator') }}!
+
+              Reason: {{ _resolution_error.reason | default('Unknown') }}
+              Message: {{ _resolution_error.message | default('No details available') }}
+
+              Troubleshooting steps:
+                oc get subscription {{ _sub_resource.metadata.name | default('openstack-operator') }} -n {{ _sub_resource.metadata.namespace | default('openstack-operators') }} -o yaml
+                oc get catalogsource -A
+                oc logs -n openshift-operator-lifecycle-manager -l app=catalog-operator
 
     - name: Install plan
       ansible.builtin.include_tasks: install_plan.yml
