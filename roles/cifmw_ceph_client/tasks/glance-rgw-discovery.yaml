@@ -14,16 +14,31 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Get OpenStack internal object-store endpoints
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    oc -n openstack rsh openstackclient openstack endpoint list --service object-store --interface internal -f value -c URL
+  register: object_store_endpoint_raw
+
+- name: Extract base URL without path
+  ansible.builtin.set_fact:
+    rgw_internal_url: >-
+      {{
+        object_store_endpoint_raw.stdout
+        | regex_replace('(/swift.*)$', '')
+      }}
+
 - name: Set fact for glance S3 backend secrets
   ansible.builtin.set_fact:
     ceph_s3_access_key: "{{ cifmw_ceph_client_s3_glance_user['keys'][0]['access_key'] }}"
     ceph_s3_secret_key: "{{ cifmw_ceph_client_s3_glance_user['keys'][0]['secret_key'] }}"
     ceph_s3_bucket: "glance-s3-bucket"
-    ceph_s3_endpoint: "{{ cifmw_ceph_client_s3_internal_swift_url }}"
+    ceph_s3_endpoint: "{{ rgw_internal_url }}"
   when:
     - cifmw_ceph_client_s3_glance_user is defined
-    - cifmw_ceph_client_s3_internal_swift_url is defined
-  no_log: true
+    - rgw_internal_url is defined
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
 - name: Generate Glance S3 backend secrets using Ceph RGW credentials
   ansible.builtin.template:
@@ -34,7 +49,7 @@
   when:
     - ceph_s3_access_key is defined
     - ceph_s3_secret_key is defined
-  no_log: true
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
   register: reg_k8s_ceph_rgw_glance_secret
 
 - name: Create glance S3 backend secrets
@@ -49,7 +64,7 @@
     src: k8s_ceph_rgw_glance_secret.yaml
   register: k8s_glance_s3_secret
   delegate_to: localhost
-  no_log: true
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
   when: reg_k8s_ceph_rgw_glance_secret is not skipped
 
 - name: Delete the rendered secret file
