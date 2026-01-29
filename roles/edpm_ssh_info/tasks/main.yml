@@ -1,0 +1,84 @@
+---
+- name: Read OpenShift password from file
+  ansible.builtin.slurp:
+    src: "{{ cifmw_edpm_ssh_info_oc_password_file }}"
+  register: _oc_password_content
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  when: cifmw_edpm_ssh_info_oc_auth_required
+
+- name: Authenticate to OpenShift cluster
+  community.okd.openshift_auth:
+    host: "{{ cifmw_edpm_ssh_info_oc_api_url }}"
+    username: "{{ cifmw_edpm_ssh_info_oc_username }}"
+    password: "{{ _oc_password_content.content | b64decode | trim }}"
+    validate_certs: "{{ cifmw_edpm_ssh_info_oc_validate_certs }}"
+  register: _openshift_auth_result
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  when: cifmw_edpm_ssh_info_oc_auth_required
+
+- name: Get OpenShift DataPlane NodeSets
+  kubernetes.core.k8s_info:
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    namespace: "{{ cifmw_edpm_ssh_info_openstack_namespace }}"
+    host: "{{ cifmw_edpm_ssh_info_oc_api_url if cifmw_edpm_ssh_info_oc_auth_required else omit }}"
+    api_key: "{{ _openshift_auth_result.openshift_auth.api_key if cifmw_edpm_ssh_info_oc_auth_required else omit }}"
+    kubeconfig: "{{ cifmw_edpm_ssh_info_kubeconfig_path if not cifmw_edpm_ssh_info_oc_auth_required else omit }}"
+    validate_certs: "{{ cifmw_edpm_ssh_info_oc_validate_certs }}"
+  register: osdpns_info
+  failed_when: osdpns_info.resources | length == 0
+
+- name: Check if SSH private key already exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_edpm_ssh_info_ssh_key_path }}"
+  register: ssh_key_stat
+
+- name: Retrieve SSH private key from OpenShift
+  when: not ssh_key_stat.stat.exists
+  block:
+    - name: Get dataplane SSH secret from OpenShift
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ cifmw_edpm_ssh_info_ssh_secret_name }}"
+        namespace: "{{ cifmw_edpm_ssh_info_openstack_namespace }}"
+        host: "{{ cifmw_edpm_ssh_info_oc_api_url if cifmw_edpm_ssh_info_oc_auth_required else omit }}"
+        api_key: "{{ _openshift_auth_result.openshift_auth.api_key if cifmw_edpm_ssh_info_oc_auth_required else omit }}"
+        kubeconfig: "{{ cifmw_edpm_ssh_info_kubeconfig_path if not cifmw_edpm_ssh_info_oc_auth_required else omit }}"
+        validate_certs: "{{ cifmw_edpm_ssh_info_oc_validate_certs }}"
+      register: secret_info
+      failed_when: secret_info.resources | length == 0
+
+    - name: Ensure SSH directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_ssh_info_ssh_key_path | dirname }}"
+        state: directory
+        mode: '0700'
+
+    - name: Save SSH private key
+      ansible.builtin.copy:
+        content: "{{ secret_info.resources[0].data['ssh-privatekey'] | b64decode }}"
+        dest: "{{ cifmw_edpm_ssh_info_ssh_key_path }}"
+        mode: '0600'
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+- name: Build dataplane information with nodes and SSH key
+  ansible.builtin.set_fact:
+    cifmw_edpm_ssh_info:
+      ssh_key_path: "{{ cifmw_edpm_ssh_info_ssh_key_path }}"
+      nodes: >-
+        {%- set nodes = [] -%}
+        {%- for nodeset in osdpns_info.resources -%}
+        {%-   if nodeset.status.allHostnames is defined and nodeset.status.allIPs is defined -%}
+        {%-     for fqdn in nodeset.status.allHostnames.keys() -%}
+        {%-       set node_name = fqdn.split('.')[0] -%}
+        {%-       if node_name.startswith(cifmw_edpm_ssh_info_node_prefix) and fqdn in nodeset.status.allIPs -%}
+        {%-         set ctlplane_ip = nodeset.status.allIPs[fqdn].ctlplane | default(None) -%}
+        {%-         if ctlplane_ip -%}
+        {%-           set _ = nodes.append({'name': node_name, 'host': ctlplane_ip}) -%}
+        {%-         endif -%}
+        {%-       endif -%}
+        {%-     endfor -%}
+        {%-   endif -%}
+        {%- endfor -%}
+        {{ nodes }}
