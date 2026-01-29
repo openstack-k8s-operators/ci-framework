@@ -194,7 +194,7 @@ def build_bullet(var, value, existing_block=None, line_numbers=None):
         # Normalize Defaults wording FIRST
         existing_block = normalize_default_text(existing_block, value, var, line_numbers)
 
-        # 1️. Redirect if value is complex
+        # 1. Redirect if value is complex
         if should_redirect(value):
             existing_block = strip_multiline_default(existing_block)
             defaults_link = get_defaults_link(var, line_numbers)
@@ -216,7 +216,7 @@ def build_bullet(var, value, existing_block=None, line_numbers=None):
                 )
             return existing_block
 
-        # 2️. RESTORE inline default if it was previously redirected
+        # 2.RESTORE inline default if it was previously redirected
         if re.search(r"See defaults in", existing_block):
             existing_block = re.sub(
                 r"Default value:\s*See defaults in.*",
@@ -226,7 +226,7 @@ def build_bullet(var, value, existing_block=None, line_numbers=None):
             )
             return existing_block
 
-        # 3️. Update inline default value if it changed
+        # 3. Update inline default value if it changed
         m = re.search(r"Default value:\s*`([^`]+)`", existing_block)
         if m:
             current_val = m.group(1).strip()
