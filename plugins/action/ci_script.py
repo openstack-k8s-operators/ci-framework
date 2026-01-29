@@ -194,7 +194,7 @@ class ActionModule(ActionBase):
         t_name = (
             re.sub(r"[^A-Za-z0-9_]+", "_", self._task.name)
             .lower()[:30]
-            .rsplit("_", 1)[0]
+            .rstrip("_")
         )
         chdir_path = task_args.get("chdir", None)
         log_path = output_dir.parent.joinpath(
