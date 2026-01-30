@@ -39,18 +39,20 @@ test_operator/
    - Python script that processes .subunit files and generates interactive HTML reports
    - Creates timeline visualization, test statistics, and detailed test information
 
-2. **roles/test_operator/tasks/generate-stackviz.yml**
-   - Main orchestration for stackviz generation
+2. **roles/test_operator/tasks/generate-stackviz-main.yml**
+   - Main orchestrator for stackviz generation
    - Dependency checking (done once, not per file)
    - Loops through all found subunit files
    - Creates summary index page
    - Optional auto-installation of missing dependencies
+   - Calls generate-stackviz-worker.yml for each file
 
-3. **roles/test_operator/tasks/generate-stackviz-single.yml**
-   - Processes individual subunit files
+3. **roles/test_operator/tasks/generate-stackviz-worker.yml**
+   - Worker that processes individual subunit files
    - Handles decompression in the source directory
    - Generates HTML reports alongside subunit files
    - Tracks generated reports for summary index
+   - Called in a loop by generate-stackviz-main.yml
 
 4. **scripts/README-stackviz.md**
    - Comprehensive documentation
