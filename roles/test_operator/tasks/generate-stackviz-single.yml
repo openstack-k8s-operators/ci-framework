@@ -1,0 +1,77 @@
+---
+# Process a single subunit.gz file and generate HTML report
+# This file is included in a loop from generate-stackviz.yml
+# Variables available:
+#   - subunit_file: the file object from find results
+#   - subunit_index: loop index
+
+- name: Set paths for current subunit file
+  ansible.builtin.set_fact:
+    _current_subunit_gz: "{{ subunit_file.path }}"
+    _current_dir: "{{ subunit_file.path | dirname }}"
+    _current_stage_name: "{{ subunit_file.path | dirname | basename }}"
+
+- name: Display processing information
+  ansible.builtin.debug:
+    msg: "Processing [{{ subunit_index + 1 }}/{{ subunit_gz_files.files | length }}]: {{ _current_stage_name }}"
+
+- name: Set output paths for decompressed file and HTML report
+  ansible.builtin.set_fact:
+    _current_subunit: "{{ _current_dir }}/tempest_results.subunit"
+    _current_html: "{{ _current_dir }}/tempest-viz.html"
+
+- name: Decompress tempest_results.subunit.gz
+  ansible.builtin.shell: |
+    gunzip -c "{{ _current_subunit_gz }}" > "{{ _current_subunit }}"
+  args:
+    creates: "{{ _current_subunit }}"
+
+- name: Verify decompressed subunit file exists
+  ansible.builtin.stat:
+    path: "{{ _current_subunit }}"
+  register: _current_subunit_stat
+
+- name: Generate stackviz HTML report for this stage
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ playbook_dir }}/scripts/generate-stackviz-report.py
+      {{ _current_subunit }}
+      {{ _current_html }}
+  register: _current_stackviz_generation
+  when: _current_subunit_stat.stat.exists
+
+- name: Display generation output
+  ansible.builtin.debug:
+    var: _current_stackviz_generation.stdout_lines
+  when:
+    - _current_stackviz_generation is defined
+    - _current_stackviz_generation is not skipped
+    - cifmw_test_operator_stackviz_debug | default(false)
+
+- name: Verify HTML report was created
+  ansible.builtin.stat:
+    path: "{{ _current_html }}"
+  register: _current_html_stat
+
+- name: Add report to generated reports list
+  ansible.builtin.set_fact:
+    _stackviz_generated_reports: >-
+      {{
+        _stackviz_generated_reports + [{
+          'stage_name': _current_stage_name,
+          'html_path': _current_html,
+          'subunit_path': _current_subunit,
+          'directory': _current_dir
+        }]
+      }}
+  when: _current_html_stat.stat.exists
+
+- name: Display success for this report
+  ansible.builtin.debug:
+    msg: "✓ Generated report for {{ _current_stage_name }}: {{ _current_html }}"
+  when: _current_html_stat.stat.exists
+
+- name: Display warning if report generation failed
+  ansible.builtin.debug:
+    msg: "✗ Failed to generate report for {{ _current_stage_name }}"
+  when: not _current_html_stat.stat.exists

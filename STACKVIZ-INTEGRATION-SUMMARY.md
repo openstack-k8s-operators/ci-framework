@@ -2,7 +2,36 @@
 
 ## Overview
 
-Successfully integrated StackViz report generation with test-operator for Tempest test visualization. The integration includes comprehensive dependency checking and optional auto-installation of required Python packages.
+Successfully integrated StackViz report generation with test-operator for Tempest test visualization. The integration includes:
+- Comprehensive dependency checking and optional auto-installation
+- **Multi-stage support** - Generates separate reports for each test stage/workflow step
+- Summary index page linking all generated reports
+- Individual reports stored alongside their respective subunit files
+
+## Key Features
+
+### Multi-Stage Test Support
+
+The integration handles multiple test stages intelligently:
+
+**Scenario:** Multiple tempest test stages in a workflow
+```
+test_operator/
+├── tempest-tests-tempest-s00-ironic-scenario-testing/
+│   └── tempest-viz.html
+├── tempest-tests-tempest-s01-multi-thread-testing/
+│   └── tempest-viz.html
+└── stackviz/
+    └── index.html  (links to all reports)
+```
+
+**How it works:**
+1. Finds all `tempest_results.subunit.gz` files recursively
+2. Processes each file individually:
+   - Decompresses in the same directory
+   - Generates HTML report in the same directory
+3. Creates a summary index with links to all reports
+4. Each report is self-contained and can be viewed independently
 
 ## Files Added
 
@@ -11,12 +40,19 @@ Successfully integrated StackViz report generation with test-operator for Tempes
    - Creates timeline visualization, test statistics, and detailed test information
 
 2. **roles/test_operator/tasks/generate-stackviz.yml**
-   - Ansible tasks for automatic stackviz generation
-   - Includes robust dependency checking
-   - Handles decompression of .gz files
+   - Main orchestration for stackviz generation
+   - Dependency checking (done once, not per file)
+   - Loops through all found subunit files
+   - Creates summary index page
    - Optional auto-installation of missing dependencies
 
-3. **scripts/README-stackviz.md**
+3. **roles/test_operator/tasks/generate-stackviz-single.yml**
+   - Processes individual subunit files
+   - Handles decompression in the source directory
+   - Generates HTML reports alongside subunit files
+   - Tracks generated reports for summary index
+
+4. **scripts/README-stackviz.md**
    - Comprehensive documentation
    - Installation instructions
    - Usage examples
@@ -42,6 +78,7 @@ Successfully integrated StackViz report generation with test-operator for Tempes
 | `cifmw_test_operator_generate_stackviz` | `true` | Enable/disable automatic stackviz generation |
 | `cifmw_test_operator_stackviz_debug` | `false` | Enable debug output during generation |
 | `cifmw_test_operator_stackviz_auto_install_deps` | `false` | Automatically install missing Python packages |
+| `cifmw_test_operator_stackviz_create_index` | `true` | Create summary index when multiple reports exist |
 
 ## Dependency Checking Features
 
@@ -78,24 +115,50 @@ The dependency check:
 ```
 Tempest Tests Complete
          ↓
-Logs Collected (including tempest_results.subunit.gz)
+Logs Collected (including all tempest_results.subunit.gz files)
          ↓
-Dependency Check
+Find All Subunit Files Recursively
+         ↓
+Dependency Check (once for all files)
          ↓
    [Missing?] → Auto-install (if enabled) → Re-check
          ↓
-   [OK] → Decompress .gz → Generate HTML
+   [OK] → For Each Subunit File:
+         ├─ Decompress .gz in same directory
+         ├─ Generate HTML in same directory
+         └─ Add to reports list
          ↓
-Report Available: stackviz/tempest-viz.html
+Create Summary Index (links to all reports)
+         ↓
+Reports Available:
+  - Individual: <stage-dir>/tempest-viz.html
+  - Summary: stackviz/index.html
 ```
 
 ### File Structure
 
+**Single Stage:**
 ```
 ~/ci-framework-data/tests/test_operator/
+└── tempest-tests-tempest/
+    ├── tempest_results.subunit.gz   # Original
+    ├── tempest_results.subunit      # Decompressed
+    └── tempest-viz.html              # Report
+```
+
+**Multiple Stages (Workflow):**
+```
+~/ci-framework-data/tests/test_operator/
+├── tempest-tests-tempest-s00-ironic-scenario-testing/
+│   ├── tempest_results.subunit.gz
+│   ├── tempest_results.subunit
+│   └── tempest-viz.html              # Stage 0 report
+├── tempest-tests-tempest-s01-multi-thread-testing/
+│   ├── tempest_results.subunit.gz
+│   ├── tempest_results.subunit
+│   └── tempest-viz.html              # Stage 1 report
 └── stackviz/
-    ├── tempest_results.subunit      # Decompressed input
-    └── tempest-viz.html              # Interactive report
+    └── index.html                    # Summary with links to all
 ```
 
 ## Usage Examples
@@ -213,12 +276,15 @@ Or simply double-click the HTML file in your file browser.
 ## Benefits
 
 1. **Automatic Integration**: No manual steps needed after test execution
-2. **Robust Dependency Checking**: Clear errors with actionable solutions
-3. **Optional Auto-Install**: Can automatically resolve missing dependencies
-4. **Interactive Visualization**: Rich HTML report with timeline, filtering, and search
-5. **Cross-Platform**: Works on macOS, Linux, and WSL
-6. **Self-Contained**: Single HTML file with embedded JavaScript
-7. **No External Dependencies**: Report works offline without internet
+2. **Multi-Stage Support**: Automatically handles workflows with multiple test stages
+3. **Individual Reports**: Each stage gets its own report in its directory
+4. **Summary Index**: Easy navigation between multiple reports via index page
+5. **Robust Dependency Checking**: Clear errors with actionable solutions
+6. **Optional Auto-Install**: Can automatically resolve missing dependencies
+7. **Interactive Visualization**: Rich HTML report with timeline, filtering, and search
+8. **Cross-Platform**: Works on macOS, Linux, and WSL
+9. **Self-Contained**: Single HTML file with embedded JavaScript
+10. **No External Dependencies**: Reports work offline without internet
 
 ## Next Steps
 
