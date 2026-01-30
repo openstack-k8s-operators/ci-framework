@@ -232,8 +232,9 @@ Ensure the script exists at:
 The integration is implemented in the following files:
 
 - **`scripts/generate-stackviz-report.py`**: The main stackviz generation script
-- **`roles/test_operator/tasks/generate-stackviz.yml`**: Ansible tasks for automatic generation
-- **`roles/test_operator/tasks/run-test-operator-job.yml`**: Integration point (includes generate-stackviz.yml)
+- **`roles/test_operator/tasks/generate-stackviz-main.yml`**: Main orchestrator for stackviz generation
+- **`roles/test_operator/tasks/generate-stackviz-worker.yml`**: Worker that processes individual subunit files
+- **`roles/test_operator/tasks/run-test-operator-job.yml`**: Integration point (includes generate-stackviz-main.yml)
 - **`roles/test_operator/defaults/main.yml`**: Configuration variables
 - **`test-stackviz-integration.yml`**: Example test playbook
 
