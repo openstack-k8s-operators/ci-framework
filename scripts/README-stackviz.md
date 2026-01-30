@@ -61,14 +61,40 @@ When you run Tempest tests using the test_operator role:
 
 ### File Locations
 
-All artifacts are stored under the test_operator artifacts directory:
+#### Single Test Stage
+
+For a single test stage, artifacts are stored:
 
 ```
 ~/ci-framework-data/tests/test_operator/
-└── stackviz/
+└── tempest-tests-tempest/
+    ├── tempest_results.subunit.gz   # Original compressed file
     ├── tempest_results.subunit      # Decompressed subunit file
     └── tempest-viz.html              # Interactive HTML report
 ```
+
+#### Multiple Test Stages
+
+When running multiple test stages (e.g., workflow with multiple steps), each stage gets its own report:
+
+```
+~/ci-framework-data/tests/test_operator/
+├── tempest-tests-tempest-s00-ironic-scenario-testing/
+│   ├── tempest_results.subunit.gz
+│   ├── tempest_results.subunit
+│   └── tempest-viz.html              # Report for ironic tests
+├── tempest-tests-tempest-s01-multi-thread-testing/
+│   ├── tempest_results.subunit.gz
+│   ├── tempest_results.subunit
+│   └── tempest-viz.html              # Report for multi-thread tests
+└── stackviz/
+    └── index.html                    # Summary index linking all reports
+```
+
+The integration automatically:
+- Finds all `tempest_results.subunit.gz` files recursively
+- Generates individual reports in each test stage directory
+- Creates a summary index page with links to all reports
 
 ## Configuration Variables
 
@@ -77,7 +103,36 @@ All artifacts are stored under the test_operator artifacts directory:
 - **`cifmw_test_operator_generate_stackviz`**: Enable/disable stackviz generation (default: `true`)
 - **`cifmw_test_operator_stackviz_debug`**: Enable debug output during stackviz generation (default: `false`)
 - **`cifmw_test_operator_stackviz_auto_install_deps`**: Automatically install missing Python dependencies using pip3 (default: `false`)
+- **`cifmw_test_operator_stackviz_create_index`**: Create a summary index page when multiple reports are generated (default: `true`)
 - **`cifmw_test_operator_artifacts_basedir`**: Base directory for test artifacts (default: `~/ci-framework-data/tests/test_operator`)
+
+## Multiple Test Stages Support
+
+The integration fully supports multiple test stages in workflows. When you have multiple Tempest test stages:
+
+1. **Each stage gets its own report** - Generated in the same directory as the subunit file
+2. **Summary index is created** - Links to all individual reports at `stackviz/index.html`
+3. **Parallel processing** - All reports are generated efficiently in a single run
+
+### Example with Workflows
+
+```yaml
+cifmw_test_operator_stages:
+  - name: workflow-tests
+    type: tempest
+    workflow:
+      - step_name: ironic-scenario-testing
+        include_list: |
+          tempest.api.baremetal.*
+      - step_name: multi-thread-testing
+        include_list: |
+          tempest.scenario.*
+```
+
+This will generate:
+- `tempest-tests-tempest-s00-ironic-scenario-testing/tempest-viz.html`
+- `tempest-tests-tempest-s01-multi-thread-testing/tempest-viz.html`
+- `stackviz/index.html` (summary page with links to both)
 
 ## Usage
 

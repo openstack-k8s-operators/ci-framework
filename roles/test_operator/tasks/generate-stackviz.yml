@@ -1,14 +1,9 @@
 ---
-# Generate stackviz HTML report from tempest subunit results
+# Generate stackviz HTML reports from tempest subunit results
 # This task file is included after log collection when tempest tests complete
+# Handles multiple test stages by generating separate reports for each
 
-- name: Create stackviz output directory
-  ansible.builtin.file:
-    path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
-    state: directory
-    mode: '0755'
-
-- name: Find tempest_results.subunit.gz file in collected logs
+- name: Find tempest_results.subunit.gz files in collected logs
   ansible.builtin.find:
     paths: "{{ cifmw_test_operator_artifacts_basedir }}"
     patterns: "tempest_results.subunit.gz"
@@ -18,27 +13,11 @@
 - name: Display found subunit.gz files
   ansible.builtin.debug:
     msg: "Found {{ subunit_gz_files.files | length }} subunit.gz file(s)"
-  when: cifmw_test_operator_stackviz_debug | default(false)
 
-- name: Process stackviz report
+- name: Process stackviz reports
   when: subunit_gz_files.files | length > 0
   block:
-    - name: Set subunit file path
-      ansible.builtin.set_fact:
-        _stackviz_subunit_gz_path: "{{ subunit_gz_files.files[0].path }}"
-        _stackviz_subunit_path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest_results.subunit"
-
-    - name: Decompress tempest_results.subunit.gz to stackviz directory
-      ansible.builtin.shell: |
-        gunzip -c "{{ _stackviz_subunit_gz_path }}" > "{{ _stackviz_subunit_path }}"
-      args:
-        creates: "{{ _stackviz_subunit_path }}"
-
-    - name: Verify subunit file was created
-      ansible.builtin.stat:
-        path: "{{ _stackviz_subunit_path }}"
-      register: subunit_file_stat
-
+    # Dependency checking (done once, not per file)
     - name: Check if Python script exists
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/scripts/generate-stackviz-report.py"
@@ -150,52 +129,142 @@
         - _stackviz_missing_packages | length == 0
         - cifmw_test_operator_stackviz_debug | default(false)
 
-    - name: Generate stackviz HTML report
-      ansible.builtin.command:
-        cmd: >
-          python3 {{ playbook_dir }}/scripts/generate-stackviz-report.py
-          {{ _stackviz_subunit_path }}
-          {{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest-viz.html
-      register: stackviz_generation
-      when:
-        - subunit_file_stat.stat.exists
-        - _stackviz_missing_packages | length == 0
-
-    - name: Display stackviz generation output
-      ansible.builtin.debug:
-        var: stackviz_generation.stdout_lines
-      when:
-        - stackviz_generation is defined
-        - stackviz_generation is not skipped
-
-    - name: Verify HTML report was created
-      ansible.builtin.stat:
-        path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest-viz.html"
-      register: stackviz_html_stat
-
-    - name: Set stackviz report path fact
+    # Initialize list to track generated reports
+    - name: Initialize stackviz reports list
       ansible.builtin.set_fact:
-        stackviz_html_path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest-viz.html"
-      when: stackviz_html_stat.stat.exists
+        _stackviz_generated_reports: []
 
-    - name: Display stackviz report information
+    # Process each subunit file
+    - name: Process each subunit file and generate individual reports
+      include_tasks: generate-stackviz-single.yml
+      loop: "{{ subunit_gz_files.files }}"
+      loop_control:
+        loop_var: subunit_file
+        index_var: subunit_index
+      when: _stackviz_missing_packages | length == 0
+
+    # Create summary index page
+    - name: Create stackviz summary index
+      when:
+        - _stackviz_generated_reports | length > 0
+        - cifmw_test_operator_stackviz_create_index | default(true)
+      block:
+        - name: Create stackviz directory
+          ansible.builtin.file:
+            path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
+            state: directory
+            mode: '0755'
+
+        - name: Generate summary index HTML
+          ansible.builtin.template:
+            src: stackviz-index.html.j2
+            dest: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html"
+            mode: '0644'
+          when: false  # Template will be created separately
+
+        - name: Generate simple summary index HTML
+          ansible.builtin.copy:
+            content: |
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Tempest Test Reports - Summary</title>
+                  <style>
+                      body {
+                          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                          background-color: #0d1117;
+                          color: #c9d1d9;
+                          margin: 40px;
+                          line-height: 1.6;
+                      }
+                      h1 { color: #58a6ff; margin-bottom: 30px; }
+                      h2 { color: #8b949e; margin-top: 30px; }
+                      .report-list { list-style: none; padding: 0; }
+                      .report-item {
+                          background-color: #161b22;
+                          border: 1px solid #30363d;
+                          border-radius: 6px;
+                          padding: 20px;
+                          margin-bottom: 15px;
+                          transition: background-color 0.2s;
+                      }
+                      .report-item:hover { background-color: #1c2128; }
+                      .report-link {
+                          color: #58a6ff;
+                          text-decoration: none;
+                          font-size: 18px;
+                          font-weight: bold;
+                      }
+                      .report-link:hover { text-decoration: underline; }
+                      .report-path {
+                          color: #8b949e;
+                          font-size: 14px;
+                          margin-top: 5px;
+                          font-family: monospace;
+                      }
+                      .report-count {
+                          color: #7ee787;
+                          font-size: 24px;
+                          font-weight: bold;
+                      }
+                      .timestamp {
+                          color: #8b949e;
+                          font-size: 12px;
+                          margin-top: 20px;
+                      }
+                  </style>
+              </head>
+              <body>
+                  <h1>Tempest Test Reports</h1>
+                  <p>Total Reports Generated: <span class="report-count">{{ _stackviz_generated_reports | length }}</span></p>
+
+                  <h2>Individual Test Stage Reports</h2>
+                  <ul class="report-list">
+              {% for report in _stackviz_generated_reports %}
+                      <li class="report-item">
+                          <a href="{{ report.html_path | relpath(cifmw_test_operator_artifacts_basedir ~ '/stackviz') }}" class="report-link">
+                              {{ report.stage_name }}
+                          </a>
+                          <div class="report-path">{{ report.html_path }}</div>
+                      </li>
+              {% endfor %}
+                  </ul>
+
+                  <div class="timestamp">
+                      Generated: {{ ansible_date_time.iso8601 }}
+                  </div>
+              </body>
+              </html>
+            dest: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html"
+            mode: '0644'
+
+    - name: Display stackviz summary
       ansible.builtin.debug:
         msg: |
           ===================================================
-          Stackviz HTML Report Generated Successfully!
+          Stackviz Report Generation Complete!
 
-          Report Location: {{ stackviz_html_path }}
+          Total Reports Generated: {{ _stackviz_generated_reports | length }}
 
-          To view in browser:
+          {% for report in _stackviz_generated_reports %}
+          - {{ report.stage_name }}
+            {{ report.html_path }}
+          {% endfor %}
+
+          {% if cifmw_test_operator_stackviz_create_index | default(true) %}
+          Summary Index: {{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html
+
+          To view all reports:
           {% if ansible_os_family == 'Darwin' %}
-          open {{ stackviz_html_path }}
+          open {{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html
           {% else %}
-          xdg-open {{ stackviz_html_path }}
+          xdg-open {{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html
           {% endif %}
-
-          Or manually open the file in your preferred browser.
+          {% endif %}
           ===================================================
-      when: stackviz_html_stat.stat.exists
+      when: _stackviz_generated_reports | length > 0
 
 - name: Display warning when no subunit files found
   ansible.builtin.debug:
