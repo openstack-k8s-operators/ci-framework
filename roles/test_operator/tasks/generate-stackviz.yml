@@ -1,0 +1,205 @@
+---
+# Generate stackviz HTML report from tempest subunit results
+# This task file is included after log collection when tempest tests complete
+
+- name: Create stackviz output directory
+  ansible.builtin.file:
+    path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
+    state: directory
+    mode: '0755'
+
+- name: Find tempest_results.subunit.gz file in collected logs
+  ansible.builtin.find:
+    paths: "{{ cifmw_test_operator_artifacts_basedir }}"
+    patterns: "tempest_results.subunit.gz"
+    recurse: true
+  register: subunit_gz_files
+
+- name: Display found subunit.gz files
+  ansible.builtin.debug:
+    msg: "Found {{ subunit_gz_files.files | length }} subunit.gz file(s)"
+  when: cifmw_test_operator_stackviz_debug | default(false)
+
+- name: Process stackviz report
+  when: subunit_gz_files.files | length > 0
+  block:
+    - name: Set subunit file path
+      ansible.builtin.set_fact:
+        _stackviz_subunit_gz_path: "{{ subunit_gz_files.files[0].path }}"
+        _stackviz_subunit_path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest_results.subunit"
+
+    - name: Decompress tempest_results.subunit.gz to stackviz directory
+      ansible.builtin.shell: |
+        gunzip -c "{{ _stackviz_subunit_gz_path }}" > "{{ _stackviz_subunit_path }}"
+      args:
+        creates: "{{ _stackviz_subunit_path }}"
+
+    - name: Verify subunit file was created
+      ansible.builtin.stat:
+        path: "{{ _stackviz_subunit_path }}"
+      register: subunit_file_stat
+
+    - name: Check if Python script exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/scripts/generate-stackviz-report.py"
+      register: stackviz_script_stat
+
+    - name: Fail if stackviz script not found
+      ansible.builtin.fail:
+        msg: >
+          Stackviz generation script not found at {{ playbook_dir }}/scripts/generate-stackviz-report.py.
+          Please ensure the script is available in the ci-framework repository.
+      when: not stackviz_script_stat.stat.exists
+
+    - name: Check for python-subunit package
+      ansible.builtin.command:
+        cmd: python3 -c "import subunit"
+      register: subunit_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check for testtools package
+      ansible.builtin.command:
+        cmd: python3 -c "import testtools"
+      register: testtools_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Set missing packages fact
+      ansible.builtin.set_fact:
+        _stackviz_missing_packages: >-
+          {{
+            ([] +
+            (['python-subunit'] if subunit_check.rc != 0 else []) +
+            (['testtools'] if testtools_check.rc != 0 else []))
+          }}
+
+    - name: Attempt to auto-install missing packages
+      when:
+        - _stackviz_missing_packages | length > 0
+        - cifmw_test_operator_stackviz_auto_install_deps | default(false)
+      block:
+        - name: Install missing Python packages via pip3
+          ansible.builtin.pip:
+            name: "{{ _stackviz_missing_packages }}"
+            executable: pip3
+            state: present
+          register: pip_install_result
+          ignore_errors: true
+
+        - name: Re-check for python-subunit package after installation
+          ansible.builtin.command:
+            cmd: python3 -c "import subunit"
+          register: subunit_recheck
+          ignore_errors: true
+          changed_when: false
+          when: "'python-subunit' in _stackviz_missing_packages"
+
+        - name: Re-check for testtools package after installation
+          ansible.builtin.command:
+            cmd: python3 -c "import testtools"
+          register: testtools_recheck
+          ignore_errors: true
+          changed_when: false
+          when: "'testtools' in _stackviz_missing_packages"
+
+        - name: Update missing packages fact after installation attempt
+          ansible.builtin.set_fact:
+            _stackviz_missing_packages: >-
+              {{
+                ([] +
+                (['python-subunit'] if (subunit_recheck is defined and subunit_recheck.rc != 0) or (subunit_check.rc != 0 and 'python-subunit' not in _stackviz_missing_packages) else []) +
+                (['testtools'] if (testtools_recheck is defined and testtools_recheck.rc != 0) or (testtools_check.rc != 0 and 'testtools' not in _stackviz_missing_packages) else []))
+              }}
+
+        - name: Display auto-install result
+          ansible.builtin.debug:
+            msg: "Successfully auto-installed Python dependencies for stackviz"
+          when:
+            - pip_install_result is succeeded
+            - _stackviz_missing_packages | length == 0
+
+    - name: Display installation instructions if packages are missing
+      ansible.builtin.fail:
+        msg: |
+          ERROR: Required Python packages are missing for stackviz report generation.
+
+          Missing packages: {{ _stackviz_missing_packages | join(', ') }}
+
+          Please install the missing packages using one of the following methods:
+
+          Using pip:
+            pip install {{ _stackviz_missing_packages | join(' ') }}
+
+          Using pip3:
+            pip3 install {{ _stackviz_missing_packages | join(' ') }}
+
+          Using system package manager (RHEL/CentOS/Fedora):
+            sudo dnf install {% for pkg in _stackviz_missing_packages %}python3-{{ pkg | replace('python-', '') }}{% if not loop.last %} {% endif %}{% endfor %}
+
+          Using system package manager (Ubuntu/Debian):
+            sudo apt-get install {% for pkg in _stackviz_missing_packages %}python3-{{ pkg | replace('python-', '') }}{% if not loop.last %} {% endif %}{% endfor %}
+
+          After installing the packages, re-run the playbook.
+      when: _stackviz_missing_packages | length > 0
+
+    - name: Display dependency check success
+      ansible.builtin.debug:
+        msg: "All required Python packages are installed (python-subunit, testtools)"
+      when:
+        - _stackviz_missing_packages | length == 0
+        - cifmw_test_operator_stackviz_debug | default(false)
+
+    - name: Generate stackviz HTML report
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ playbook_dir }}/scripts/generate-stackviz-report.py
+          {{ _stackviz_subunit_path }}
+          {{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest-viz.html
+      register: stackviz_generation
+      when:
+        - subunit_file_stat.stat.exists
+        - _stackviz_missing_packages | length == 0
+
+    - name: Display stackviz generation output
+      ansible.builtin.debug:
+        var: stackviz_generation.stdout_lines
+      when:
+        - stackviz_generation is defined
+        - stackviz_generation is not skipped
+
+    - name: Verify HTML report was created
+      ansible.builtin.stat:
+        path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest-viz.html"
+      register: stackviz_html_stat
+
+    - name: Set stackviz report path fact
+      ansible.builtin.set_fact:
+        stackviz_html_path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/tempest-viz.html"
+      when: stackviz_html_stat.stat.exists
+
+    - name: Display stackviz report information
+      ansible.builtin.debug:
+        msg: |
+          ===================================================
+          Stackviz HTML Report Generated Successfully!
+
+          Report Location: {{ stackviz_html_path }}
+
+          To view in browser:
+          {% if ansible_os_family == 'Darwin' %}
+          open {{ stackviz_html_path }}
+          {% else %}
+          xdg-open {{ stackviz_html_path }}
+          {% endif %}
+
+          Or manually open the file in your preferred browser.
+          ===================================================
+      when: stackviz_html_stat.stat.exists
+
+- name: Display warning when no subunit files found
+  ansible.builtin.debug:
+    msg: >
+      WARNING: No tempest_results.subunit.gz files found in {{ cifmw_test_operator_artifacts_basedir }}.
+      Stackviz report generation skipped.
+  when: subunit_gz_files.files | length == 0
