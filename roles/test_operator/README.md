@@ -4,6 +4,10 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 
 ## Parameters
 * `cifmw_test_operator_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/test_operator` which defaults to `~/ci-framework-data/tests/test_operator`
+* `cifmw_test_operator_generate_stackviz`: (Boolean) Enable automatic generation of Stackviz HTML reports from Tempest subunit test results. When enabled, generates interactive visualizations of test results that can be viewed in a browser. Default value: `true`
+* `cifmw_test_operator_stackviz_debug`: (Boolean) Enable debug mode for Stackviz report generation. When enabled, displays detailed information about the generation process. Default value: `false`
+* `cifmw_test_operator_stackviz_auto_install_deps`: (Boolean) Automatically install required Python dependencies (python-subunit, testtools) for Stackviz generation if they are missing. When disabled, the role will fail with installation instructions if dependencies are not found. Default value: `true`
+* `cifmw_test_operator_stackviz_create_index`: (Boolean) Create a summary index page (index.html) when multiple test stages are run. The index provides links to all individual Stackviz reports. Only applicable when using workflows with multiple test stages. Default value: `true`
 * `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
 * `cifmw_test_operator_controller_namespace`: (String) Namespace inside which the test-operator-controller-manager is created. Default value: `openstack-operators`
 * `cifmw_test_operator_controller_priv_key_file_path`: (String) Specifies the path to the CIFMW private key file. Note: Please ensure this file is available in the environment where the ci-framework test-operator role is executed. Default value: `~/.ssh/id_cifw`
