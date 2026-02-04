@@ -93,28 +93,6 @@
         name: openshift_setup
         tasks_from: patch_dependent_operators_source.yml
 
-    - name: Verify default CatalogSources are healthy before applying subscriptions
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        api_version: operators.coreos.com/v1alpha1
-        kind: CatalogSource
-        namespace: openshift-marketplace
-        name: "{{ item }}"
-      register: _cifmw_kustomize_deploy_catalog_health
-      until:
-        - _cifmw_kustomize_deploy_catalog_health.resources is defined
-        - _cifmw_kustomize_deploy_catalog_health.resources | length == 1
-        - >-
-          (_cifmw_kustomize_deploy_catalog_health.resources | first).status.connectionState.lastObservedState
-          | default('') == 'READY'
-      retries: 30
-      delay: 10
-      loop:
-        - redhat-operators
-        - certified-operators
-
     - name: Apply the kustomized CRs
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -124,6 +102,37 @@
         wait: true
         src: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
       register: _cifmw_kustomize_deploy_olm_apply_out
+
+    - name: Get all CatalogSources from the cluster
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+      register: _cifmw_kustomize_deploy_all_catalogsources
+
+    - name: Wait for all CatalogSources to be READY
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        namespace: "{{ item.metadata.namespace }}"
+        name: "{{ item.metadata.name }}"
+      register: _cifmw_kustomize_deploy_catalog_health
+      until:
+        - _cifmw_kustomize_deploy_catalog_health.resources is defined
+        - _cifmw_kustomize_deploy_catalog_health.resources | length == 1
+        - >-
+          (_cifmw_kustomize_deploy_catalog_health.resources | first).status.connectionState.lastObservedState
+          | default('') == 'READY'
+      retries: "{{ cifmw_kustomize_deploy_retries_subscription }}"
+      delay: "{{ cifmw_kustomize_deploy_delay }}"
+      loop: "{{ _cifmw_kustomize_deploy_all_catalogsources.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
 
     - name: Wait for subscription and handle resolution failures
       block:
@@ -155,14 +164,8 @@
             - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.failed is false
             - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources is defined
             - _cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | length == 1
-            # Stop waiting if installPlanRef exists
+            # Stop waiting when installPlanRef exists (let OLM reconciler handle transient errors)
             - (_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first)['status']['installPlanRef'] is defined
-
-        - name: Verify installPlanRef exists
-          ansible.builtin.assert:
-            that:
-              - (_cifmw_kustomize_deploy_olm_osp_operator_subscription_out.resources | first)['status']['installPlanRef'] is defined
-            fail_msg: "installPlanRef not found - subscription resolution may have failed"
 
       rescue:
         - name: Get resolution failure details and fail with clear message
