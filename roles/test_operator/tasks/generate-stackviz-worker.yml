@@ -12,16 +12,22 @@
     _current_stage_name: "{{ subunit_file.path | dirname | basename }}"
     _current_is_compressed: "{{ subunit_file.path.endswith('.gz') }}"
 
+- name: Determine file type and output naming
+  ansible.builtin.set_fact:
+    _is_retry_file: "{{ 'tempest_retry' in subunit_file.path }}"
+    _base_filename: "{{ 'tempest_retry' if 'tempest_retry' in subunit_file.path else 'tempest_results' }}"
+    _html_filename: "{{ 'tempest_retry_viz.html' if 'tempest_retry' in subunit_file.path else 'tempest-viz.html' }}"
+
 - name: Display processing information
   ansible.builtin.debug:
     msg: "Processing [{{ subunit_index + 1 }}/{{ subunit_gz_files.files | length }}]: {{ _current_stage_name }} (compressed: {{ _current_is_compressed }})"
 
 - name: Set output paths for decompressed file and HTML report
   ansible.builtin.set_fact:
-    _current_subunit: "{{ _current_dir }}/tempest_results.subunit"
-    _current_html: "{{ _current_dir }}/tempest-viz.html"
+    _current_subunit: "{{ _current_dir }}/{{ _base_filename }}.subunit"
+    _current_html: "{{ _current_dir }}/{{ _html_filename }}"
 
-- name: Decompress tempest_results.subunit.gz if compressed
+- name: Decompress subunit file if compressed
   ansible.builtin.shell: |
     gunzip -c "{{ _current_subunit_source }}" > "{{ _current_subunit }}"
   args:
@@ -60,7 +66,7 @@
     path: "{{ _current_html }}"
   register: _current_html_stat
 
-- name: Add report to generated reports list
+- name: Track generated report with type metadata
   ansible.builtin.set_fact:
     _stackviz_generated_reports: >-
       {{
@@ -68,7 +74,9 @@
           'stage_name': _current_stage_name,
           'html_path': _current_html,
           'subunit_path': _current_subunit,
-          'directory': _current_dir
+          'directory': _current_dir,
+          'is_retry': _is_retry_file | default(false),
+          'report_label': ('Retry Results: ' if (_is_retry_file | default(false)) else 'Original Results: ') + _current_stage_name
         }]
       }}
   when: _current_html_stat.stat.exists
