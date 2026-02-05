@@ -1,0 +1,243 @@
+---
+# SNO (Single Node OpenShift) base job definitions
+#
+# These jobs deploy OCP in SNO configuration using devscripts via the
+# reproducer approach. Unlike CRC jobs that use pre-built images,
+# SNO jobs provision OCP dynamically on a hypervisor node.
+#
+# SNO follows OCP 4.18 best practices:
+# - Single control plane node (num_masters: 1, num_workers: 0)
+# - OVN-Kubernetes network plugin (required)
+# - Suitable for edge, testing, and resource-constrained environments
+#
+# Usage:
+#   Use these jobs as parents for jobs that need SNO deployments.
+#   Example:
+#     - job:
+#         name: my-sno-test-job
+#         parent: cifmw-podified-multinode-edpm-base-sno
+#         vars:
+#           # your job-specific vars
+
+#
+# SNO Nodesets
+# These nodesets provide hypervisor nodes for SNO deployment
+#
+
+- nodeset:
+    name: centos-9-sno-hypervisor-xxl
+    nodes:
+      - name: controller
+        label: cloud-centos-9-stream-tripleo-xxl
+    groups:
+      - name: hypervisors
+        nodes:
+          - controller
+
+- nodeset:
+    name: centos-9-sno-hypervisor
+    nodes:
+      - name: controller
+        label: cloud-centos-9-stream-tripleo
+    groups:
+      - name: hypervisors
+        nodes:
+          - controller
+
+#
+# SNO Base Job
+#
+# This job deploys a Single Node OpenShift cluster using devscripts,
+# along with compute nodes for EDPM testing. All VMs are created on
+# the hypervisor node via libvirt.
+#
+- job:
+    name: cifmw-podified-multinode-edpm-base-sno
+    parent: base-ci-framework
+    abstract: true
+    timeout: 18000  # 5 hours - SNO installation takes longer than CRC
+    attempts: 1
+    # Single hypervisor node - devscripts will create SNO VM
+    nodeset: centos-9-sno-hypervisor-xxl
+    description: |
+      SNO-based multinode EDPM base job.
+      Deploys Single Node OpenShift via devscripts on a hypervisor,
+      then provisions EDPM compute nodes.
+    irrelevant-files: &sno_ir_files
+      - .*/*.md
+      - ^.github/.*$
+      - ^LICENSE$
+      - ^PROJECT$
+      - ^README.md$
+      - ^renovate.json$
+      - ^kuttl-test.yaml$
+      - molecule/.*
+      - molecule-requirements.txt
+      - .github/workflows
+      - docs/.*
+      - contribute/.*
+      - roles/.*/molecule/.*
+      - ci/playbooks/pre-commit.yml
+      - ci/playbooks/pre-doc.yml
+      - ci/playbooks/run-doc.yml
+      - ci/playbooks/molecule-prepare.yml
+      - ci/playbooks/molecule-test.yml
+      - .ansible-lint
+      - .config/molecule/.*
+      - .pre-commit-config.yaml
+      - .readthedocs.yaml
+      - .spellcheck.yml
+      - scripts/check-role-prefix.sh
+      - roles/dlrn_report
+      - roles/dlrn_promote
+      - roles/dnsmasq
+      - roles/nat64_appliance
+      - roles/virtualbmc
+      - roles/validations
+      - zuul.d/molecule.*
+      - containers/ci
+      - .ci-operator.yaml
+      - .dockerignore
+      - .gitignore
+      - .golangci.yaml
+      - tests?\/functional
+      - examples
+      - mkdocs.yml
+    required-projects: &sno_required_projects
+      - openstack-k8s-operators/ci-framework
+      - openstack-k8s-operators/install_yamls
+      - openstack-k8s-operators/infra-operator
+      - openstack-k8s-operators/openstack-baremetal-operator
+      - openstack-k8s-operators/openstack-must-gather
+      - openstack-k8s-operators/openstack-operator
+      - openstack-k8s-operators/repo-setup
+      - openstack-k8s-operators/edpm-ansible
+    roles: &sno_roles
+      - zuul: github.com/openstack-k8s-operators/ci-framework
+    pre-run: &sno_pre_run
+      - ci/playbooks/e2e-prepare.yml
+      - ci/playbooks/dump_zuul_data.yml
+    run: &sno_run
+      # The reproducer playbook handles:
+      # 1. Setting up the hypervisor
+      # 2. Deploying OCP via devscripts
+      # 3. Creating compute VMs
+      - reproducer.yml
+    post-run: &sno_post_run
+      - ci/playbooks/collect-logs.yml
+    vars: &sno_vars
+      zuul_log_collection: true
+      registry_login_enabled: true
+      push_registry: quay.rdoproject.org
+      quay_login_secret_name: quay_nextgen_zuulgithubci
+      # Target the hypervisor/controller node
+      cifmw_zuul_target_host: controller
+      # Load SNO scenario files
+      cifmw_reproducer_extra_vars_files:
+        - "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/reproducers/networking-definition.yml"
+        - "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/reproducers/sno.yml"
+
+#
+# SNO with minimal resources
+#
+- job:
+    name: cifmw-podified-multinode-edpm-base-sno-minimal
+    parent: cifmw-podified-multinode-edpm-base-sno
+    abstract: true
+    nodeset: centos-9-sno-hypervisor
+    description: |
+      SNO-based multinode EDPM job with minimal resources.
+      Uses OCP 4.18 SNO minimum requirements (8 vCPU, 16GB RAM, 120GB).
+      Suitable for development and basic testing.
+      Warning: May not support full OpenStack integration tests.
+    vars:
+      <<: *sno_vars
+      cifmw_reproducer_extra_vars_files:
+        - "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/reproducers/networking-definition.yml"
+        - "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/reproducers/sno-minimal.yml"
+
+#
+# SNO with 2 compute nodes
+#
+- job:
+    name: cifmw-podified-multinode-edpm-sno-2comp
+    parent: cifmw-podified-multinode-edpm-base-sno
+    abstract: true
+    description: |
+      SNO-based multinode EDPM job with 2 compute nodes.
+      For scenarios requiring multiple computes.
+    vars:
+      <<: *sno_vars
+      cifmw_libvirt_manager_compute_amount: 2
+
+#
+# SNO with custom OpenShift version
+# Example of how to override the OCP version
+#
+- job:
+    name: cifmw-podified-multinode-edpm-base-sno-ocp-4-17
+    parent: cifmw-podified-multinode-edpm-base-sno
+    abstract: true
+    description: |
+      SNO deployment with OCP 4.17 for backward compatibility testing.
+    vars:
+      <<: *sno_vars
+      cifmw_devscripts_config_overrides:
+        num_masters: 1
+        num_workers: 0
+        openshift_version: "stable-4.17"
+        openshift_release_type: "ga"
+        network_type: "OVNKubernetes"
+
+#
+# Test Jobs
+# These jobs can be used to validate SNO deployments
+#
+
+# Basic SNO deployment test - validates the reproducer creates SNO successfully
+- job:
+    name: cifmw-sno-deployment-test
+    parent: cifmw-podified-multinode-edpm-base-sno
+    description: |
+      Test job to validate SNO deployment via devscripts.
+      Deploys SNO and verifies the cluster is healthy.
+    voting: false
+    vars:
+      <<: *sno_vars
+      # After SNO deployment, run basic validation
+      cifmw_run_tests: false
+      # Additional validation after deployment
+      cifmw_deploy_edpm: false
+
+# Full SNO + EDPM deployment test
+- job:
+    name: cifmw-sno-edpm-deployment-test
+    parent: cifmw-podified-multinode-edpm-base-sno
+    description: |
+      Test job to validate full SNO + EDPM deployment.
+      Deploys SNO, then deploys EDPM compute nodes.
+    voting: false
+    run:
+      - reproducer.yml
+      - ci/playbooks/edpm/run.yml
+    vars:
+      <<: *sno_vars
+      cifmw_run_tests: false
+      cifmw_extras:
+        - '@scenarios/centos-9/multinode-ci.yml'
+
+# Minimal SNO test for quick validation
+- job:
+    name: cifmw-sno-minimal-deployment-test
+    parent: cifmw-podified-multinode-edpm-base-sno-minimal
+    description: |
+      Quick SNO deployment test with minimal resources.
+      For validating changes to SNO scenarios without full deployment.
+    voting: false
+    vars:
+      <<: *sno_vars
+      cifmw_reproducer_extra_vars_files:
+        - "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/reproducers/networking-definition.yml"
+        - "{{ ansible_user_dir }}/{{ zuul.projects['github.com/openstack-k8s-operators/ci-framework'].src_dir }}/scenarios/reproducers/sno-minimal.yml"
+      cifmw_run_tests: false
+      cifmw_deploy_edpm: false

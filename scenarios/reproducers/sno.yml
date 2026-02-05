@@ -1,0 +1,126 @@
+---
+# SNO (Single Node OpenShift) based deployment scenario.
+#
+# This scenario deploys OCP in SNO configuration (1 master, 0 workers)
+# using devscripts, following OCP 4.18 SNO best practices.
+#
+# Usage:
+#   ansible-playbook reproducer.yml \
+#     -e @scenarios/reproducers/sno.yml \
+#     -e @scenarios/reproducers/networking-definition.yml \
+#     -e cifmw_manage_secrets_pullsecret_file=/path/to/pull-secret.json \
+#     -e cifmw_manage_secrets_citoken_file=/path/to/ci-token
+#
+# Requirements:
+# - OpenShift pull secret from https://console.redhat.com/openshift/downloads
+# - CI Token from https://console-openshift-console.apps.ci.l2s4.p1.openshiftapps.com/
+# - Hypervisor with sufficient resources (see resource allocation below)
+#
+# OCP 4.18 SNO minimum requirements: 8 vCPU, 16GB RAM, 120GB storage
+# This scenario allocates more resources to support OpenStack workloads.
+
+cifmw_parent_scenario: "scenarios/reproducers/sno-common.yml"
+
+# ============================================
+# Libvirt configuration for SNO
+# ============================================
+cifmw_libvirt_manager_configuration:
+  networks:
+    osp_trunk: |
+      <network>
+        <name>osp_trunk</name>
+        <forward mode='nat'/>
+        <bridge name='osp_trunk' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4'
+        address='{{ cifmw_networking_definition.networks.ctlplane.network |
+                    ansible.utils.nthhost(1) }}'
+        prefix='{{ cifmw_networking_definition.networks.ctlplane.network |
+                   ansible.utils.ipaddr('prefix') }}'>
+        </ip>
+      </network>
+    ocpbm: |
+      <network>
+        <name>ocpbm</name>
+        <forward mode='nat'/>
+        <bridge name='ocpbm' stp='on' delay='0'/>
+        <dns enable="no"/>
+        <ip family='ipv4' address='192.168.111.1' prefix='24'>
+        </ip>
+      </network>
+    ocppr: |
+      <network>
+        <name>ocppr</name>
+        <forward mode='bridge'/>
+        <bridge name='ocppr'/>
+      </network>
+  vms:
+    # SNO: Single OCP node with increased resources
+    # Since all control plane and workloads run on one node, we need
+    # more resources than a standard 3-node OCP deployment per node.
+    ocp:
+      amount: 1
+      admin_user: core
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "ocp_master"
+      disksize: "200"
+      extra_disks_num: 1
+      extra_disks_size: "50G"
+      # Resource allocation for SNO running OpenStack control plane
+      # OCP 4.18 SNO minimum: 8 vCPU, 16GB RAM, 120GB storage
+      # We allocate more to support OpenStack operators and services
+      cpus: 16
+      memory: 64
+      root_part_id: 4
+      uefi: true
+      nets:
+        - ocppr
+        - ocpbm
+        - osp_trunk
+        - osp_trunk
+    compute:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      amount: "{{ [cifmw_libvirt_manager_compute_amount|int, 1] | max }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: "{{ [cifmw_libvirt_manager_compute_disksize|int, 50] | max }}"
+      memory: "{{ [cifmw_libvirt_manager_compute_memory|int, 8] | max }}"
+      cpus: "{{ [cifmw_libvirt_manager_compute_cpus|int, 4] | max }}"
+      nets:
+        - ocpbm
+        - osp_trunk
+    controller:
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 50
+      memory: 8
+      cpus: 4
+      nets:
+        - ocpbm
+        - osp_trunk
+
+# ============================================
+# Devscripts configuration for SNO
+# ============================================
+# num_masters: 1 and num_workers: 0 creates a Single Node OpenShift cluster
+cifmw_devscripts_config_overrides:
+  num_masters: 1
+  num_workers: 0
+  # Use "stable-X.Y" to get the latest patch release automatically
+  # Available versions: https://mirror.openshift.com/pub/openshift-v4/clients/ocp/
+  openshift_version: "stable-4.18"
+  openshift_release_type: "ga"
+  # OVN-Kubernetes is required for SNO (OpenShiftSDN not supported)
+  network_type: "OVNKubernetes"
+  fips_mode: "{{ cifmw_fips_enabled | default(false) | bool }}"
+
+# Please create a custom env file to provide:
+# cifmw_devscripts_ci_token:
+# cifmw_devscripts_pull_secret:
