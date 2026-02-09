@@ -9,6 +9,7 @@ LOSS_THRESHOLD=${1:-60}
 LOSS_THRESHOLD_PERCENT=${2:-1}
 # useful for testing
 BASE_DIR="${3:-{{ cifmw_update_artifacts_basedir }}}"
+IS_IPV6={{cifmw_os_net_setup_config | selectattr('name', 'equalto', 'public') | map(attribute='subnets') | flatten | selectattr('name', 'equalto', 'public_subnet') | map(attribute='ip_version') | first | default(4) == 6}}
 
 # Return total cut time in seconds
 function get_cut_time()
@@ -20,7 +21,11 @@ function get_cut_time()
 }
 
 # kill the ping process
-kill -s INT $(/usr/sbin/pidof ping)
+if [ "${IS_IPV6}" = "True" ]; then
+    kill -s INT $(/usr/sbin/pidof ping6)
+else
+    kill -s INT $(/usr/sbin/pidof ping)
+fi
 
 # print the ping results
 PING_RESULT_LOG=$(find "${BASE_DIR}" -maxdepth 1 -iname 'ping_results*' | sort | tail -1)
