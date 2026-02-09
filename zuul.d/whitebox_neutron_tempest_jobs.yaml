@@ -6,25 +6,43 @@
     name: whitebox-neutron-tempest-plugin-podified-multinode-edpm-deployment-crc-2comp
     parent: podified-multinode-edpm-deployment-crc-2comp
     nodeset: centos-9-2x-centos-9-xxl-crc-cloud-ocp-4-18-1-xxl
-    timeout: 12600
+    timeout: 14400
     override-checkout: main
     description: |
       A multinode EDPM Zuul job which one controller, one extracted crc and
       2 computes. This job will run with meta content provider to test
       whitebox-neutron-tempest-plugin opendev patches. It will validate the
       deployment by running whitebox-neutron-tempest-plugin tests.
+    files:
+      - ^zuul.d/whitebox_neutron_tempest_jobs.yaml
+    dependencies:
+      - openstack-k8s-operators-content-provider
     vars:
       cifmw_run_test_role: test_operator
-      cifmw_os_must_gather_timeout: 28800
+      cifmw_os_must_gather_timeout: "30m"
       cifmw_test_operator_timeout: 14400
       cifmw_block_device_size: 40G
+      cifmw_repo_setup_branch: antelope
+      cifmw_update_containers_org: podified-{{ cifmw_repo_setup_branch }}-centos9
+      cifmw_update_containers_registry: quay.rdoproject.org
+      cifmw_update_containers_tag: "{{ cifmw_repo_setup_full_hash }}"
       cifmw_test_operator_tempest_concurrency: 6
       cifmw_test_operator_tempest_network_attachments:
         - ctlplane
       cifmw_test_operator_tempest_container: openstack-tempest-all
-      cifmw_test_operator_tempest_registry: "{{ content_provider_os_registry_url | split('/') | first }}"
-      cifmw_test_operator_tempest_namespace: "{{ content_provider_os_registry_url | split('/') | last }}"
-      cifmw_test_operator_tempest_image_tag: "{{ content_provider_dlrn_md5_hash }}"
+      cifmw_test_operator_tempest_registry: >-
+        {{
+          content_provider_os_registry_url | default('') | split('/') | first
+          if content_provider_os_registry_url is defined and content_provider_os_registry_url != 'null'
+          else cifmw_update_containers_registry
+        }}
+      cifmw_test_operator_tempest_namespace: >-
+        {{
+          content_provider_os_registry_url | default('') | split('/') | last
+          if content_provider_os_registry_url is defined and content_provider_os_registry_url != 'null'
+          else cifmw_update_containers_org
+        }}
+      cifmw_test_operator_tempest_image_tag: "{{ content_provider_dlrn_md5_hash | default(cifmw_repo_setup_full_hash) }}"
       cifmw_test_operator_tempest_extra_images:
           # TODO(chandan): Replace rocky qcow2 url once rhos-ops hosts it
         - URL: "https://chandankumar.fedorapeople.org/rocky9_latest_neutron_whitebox.qcow2"
