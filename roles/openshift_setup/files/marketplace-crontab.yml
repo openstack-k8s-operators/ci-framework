@@ -1,0 +1,72 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cifmw-marketplace-fix
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cifmw-marketplace-fix-sa
+  namespace: cifmw-marketplace-fix
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cifmw-marketplace-fix-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cifmw-marketplace-fix-binding
+subjects:
+  - kind: ServiceAccount
+    name: cifmw-marketplace-fix-sa
+    namespace: cifmw-marketplace-fix
+roleRef:
+  kind: ClusterRole
+  name: cifmw-marketplace-fix-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cifmw-marketplace-fix-cron
+  namespace: cifmw-marketplace-fix
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: cifmw-marketplace-fix-sa
+          restartPolicy: Never
+          containers:
+            - name: cifmw-fix-marketplace
+              image: registry.redhat.io/openshift4/ose-cli:latest
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+
+                  echo "Checking if all pods in openshift-marketplace are Ready..."
+                  if oc wait pod --all --for=condition=Ready -n openshift-marketplace --timeout=1m; then
+                    echo "All pods are Ready - nothing to do."
+                    exit 0
+                  else
+                    echo "Timeout or not all pods Ready, restarting marketplace pods..."
+                    oc delete pods --all -n openshift-marketplace --grace-period=30 || true
+                    echo "Delete command executed."
+                    exit 1
+                  fi
