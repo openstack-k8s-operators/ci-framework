@@ -237,6 +237,81 @@
           failed_when: _kill_result.rc not in [0, 1]
           when: cifmw_update_monitoring_pid.stat.exists | bool
 
+    # Reboot compute nodes as described in Chapter 4 of the RHOSO 18.0
+    # minor update documentation:
+    # https://docs.redhat.com/en/documentation/red_hat_openstack_services_on_openshift/18.0/html-single/updating_your_environment_to_the_latest_maintenance_release/index#rebooting-compute-nodes_updating
+    # Without a reboot, nova-compute may retain stale state and fail to
+    # re-register the hypervisor with the updated control plane.
+    - name: Reboot compute nodes after control plane update
+      block:
+        - name: Set update step to Rebooting compute nodes
+          ansible.builtin.command:
+            cmd: >
+              {{ cifmw_update_artifacts_basedir }}/update_event.sh
+              Rebooting compute nodes after control plane update
+
+        - name: Fetch NodeSets for the reboot deployment
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.shell: >-
+            set -euxo pipefail;
+            oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}
+            get openstackdataplanenodeset -o name
+            | awk -F'/' '{print $2}'
+          register: _reboot_node_sets
+          changed_when: false
+
+        - name: Construct the reboot deployment name
+          ansible.builtin.set_fact:
+            _reboot_dep_name: "reboot-post-update-{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
+
+        - name: Create the OpenStackDataPlaneDeployment CR for reboot
+          ansible.builtin.copy:
+            dest: "{{ cifmw_update_artifacts_basedir }}/{{ _reboot_dep_name }}.yaml"
+            content: "{{ _content | to_nice_yaml }}"
+            mode: "0644"
+          vars:
+            _content:
+              apiVersion: dataplane.openstack.org/v1beta1
+              kind: OpenStackDataPlaneDeployment
+              metadata:
+                name: "{{ _reboot_dep_name }}"
+                namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}"
+              spec:
+                nodeSets: "{{ _reboot_node_sets.stdout | split('\n') | map('trim') | reject('equalto', '') | list }}"
+                servicesOverride:
+                  - reboot-os
+                ansibleExtraVars:
+                  edpm_reboot_strategy: force
+
+        - name: Apply the reboot deployment CR
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command: >-
+            oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}
+            create -f {{ cifmw_update_artifacts_basedir }}/{{ _reboot_dep_name }}.yaml
+
+        - name: Wait for the reboot deployment to finish
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command: >-
+            oc -n {{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}
+            wait --for=condition=Ready
+            openstackdataplanedeployment/{{ _reboot_dep_name }}
+            --timeout=300s
+
+        - name: Run nova-manage discover_hosts after compute reboot
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command: >-
+            oc rsh
+            -n {{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}
+            nova-cell0-conductor-0 nova-manage cell_v2 discover_hosts --verbose
+
     - name: Run post-update admin setup
       ansible.builtin.import_role:
         name: cifmw_setup
