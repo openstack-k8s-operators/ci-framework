@@ -111,6 +111,12 @@ that they do not need to be changed for a typical EDPM deployment.
 * `cifmw_cephadm_rgw_s3_glance`: (Bool) If this is value is `true`, then
   cephadm will create glance secrets using the discovered RGW settings
 
+* `cifmw_cephadm_nfsv3`: (Bool) If this value is `true`, cephadm enables
+  `NFSv3` during Ceph `NFS` cluster creation. This option is required to
+  explicitly enable `NFSv3` for Ceph releases starting with Tentacle. For
+  releases prior to Tentacle, this option is not required, as both `NFSv3`
+  and `NFSv4` are enabled by default.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
