@@ -50,3 +50,28 @@
     owner: "{{ cifmw_devscripts_user }}"
     group: "{{ cifmw_devscripts_user }}"
     mode: "0644"
+
+# FIXME in dev-scripts network.sh https://github.com/openshift-metal3/dev-scripts/pull/1860:
+# When API_VIPS and INGRESS_VIPS are pre-set, prevent
+# set_api_and_ingress_vip() from overwriting them with dig lookups
+# that may fail without local DNS.
+- name: Patch network.sh to respect pre-set API/Ingress VIPs
+  when:
+    - "'api_vips' in cifmw_devscripts_config"
+    - "'ingress_vips' in cifmw_devscripts_config"
+  ansible.builtin.lineinfile:
+    path: "{{ cifmw_devscripts_repo_dir }}/network.sh"
+    insertafter: '^function set_api_and_ingress_vip\(\)'
+    line: '  if [[ -n "${API_VIPS:-}" ]] && [[ -n "${INGRESS_VIPS:-}" ]]; then return; fi'
+
+# FIXME: in dev-scripts utils.sh https://github.com/openshift-metal3/dev-scripts/pull/1861:
+# It only emits disableCertificateVerification in
+# install-config when driver_prefix == "redfish".  The idrac driver
+# sets driver_prefix to "drac", skipping the block entirely, so the
+# self-signed iDRAC cert causes an SSL error in Ironic.  Extend the
+# condition to also cover the drac prefix.
+- name: Patch utils.sh to emit disableCertificateVerification for idrac driver
+  ansible.builtin.lineinfile:
+    path: "{{ cifmw_devscripts_repo_dir }}/utils.sh"
+    regexp: 'if \[\[ "\$driver_prefix" == "redfish" \]\]; then'
+    line: '      if [[ "$driver_prefix" == "redfish" ]] || [[ "$driver_prefix" == "drac" ]]; then'
