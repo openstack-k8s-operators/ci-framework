@@ -1,0 +1,60 @@
+---
+# Test bm_power_off.yml: idempotent power-off via Redfish mock.
+
+- name: "Power_off case 1: host already off -- no action taken"
+  block:
+    - name: Reset mock to power Off
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          power_state: "Off"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_power_off
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_power_off.yml
+
+    - name: Query mock state after power_off (already off)
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state_after
+
+    - name: Assert host is still Off
+      ansible.builtin.assert:
+        that:
+          - _state_after.json.power_state == "Off"
+        fail_msg: "Expected Off, got {{ _state_after.json.power_state }}"
+
+- name: "Power_off case 2: host On -- powers off"
+  block:
+    - name: Reset mock to power On
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          power_state: "On"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_power_off
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_power_off.yml
+
+    - name: Query mock state after power_off (was on)
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state_after
+
+    - name: Assert host is now Off
+      ansible.builtin.assert:
+        that:
+          - _state_after.json.power_state == "Off"
+        fail_msg: "Expected Off, got {{ _state_after.json.power_state }}"
