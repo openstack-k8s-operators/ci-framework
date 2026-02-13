@@ -1,0 +1,205 @@
+---
+# Test bm_discover_vmedia_target.yml: auto-discover, validate, and invalid path.
+# The task file also clears jobs, sets boot override, and verifies VirtualMedia.
+
+- name: "Discover_vmedia case 1: auto-discover Virtual Optical Drive"
+  block:
+    - name: Clear vmedia path from previous tests
+      ansible.builtin.set_fact:
+        cifmw_bm_agent_vmedia_uefi_path: ""
+
+    - name: Reset mock with VirtualMedia inserted
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: true
+          vmedia_image: "http://test/agent.iso"
+          power_state: "Off"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_discover_vmedia_target (auto-discover)
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_discover_vmedia_target.yml
+
+    - name: Assert discovered path is Virtual Optical Drive
+      ansible.builtin.assert:
+        that:
+          - cifmw_bm_agent_vmedia_uefi_path is defined
+          - "'USB' in cifmw_bm_agent_vmedia_uefi_path"
+          - "'Unit(0x0)' in cifmw_bm_agent_vmedia_uefi_path"
+        fail_msg: >-
+          Expected Virtual Optical Drive path, got:
+          {{ cifmw_bm_agent_vmedia_uefi_path | default('undefined') }}
+
+    - name: Query mock state after discover
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert boot override was set
+      ansible.builtin.assert:
+        that:
+          - _state.json.boot_override_target == "UefiTarget"
+          - _state.json.boot_override_enabled == "Once"
+          - _state.json.uefi_target is not none
+
+- name: "Discover_vmedia case 2: user-provided valid UEFI path"
+  block:
+    - name: Reset mock with VirtualMedia inserted
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: true
+          vmedia_image: "http://test/agent.iso"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_discover_vmedia_target with valid explicit path
+      vars:
+        cifmw_bm_agent_vmedia_uefi_path: "PciRoot(0x0)/Pci(0x14,0x0)/USB(0xD,0x0)/USB(0x0,0x0)/USB(0x2,0x0)/Unit(0x0)"
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_discover_vmedia_target.yml
+
+    - name: Query mock state
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert boot override set with user-provided path
+      ansible.builtin.assert:
+        that:
+          - _state.json.boot_override_target == "UefiTarget"
+          - _state.json.uefi_target == "PciRoot(0x0)/Pci(0x14,0x0)/USB(0xD,0x0)/USB(0x0,0x0)/USB(0x2,0x0)/Unit(0x0)"
+
+- name: "Discover_vmedia case 3: fallback to Virtual Floppy derived path"
+  block:
+    - name: Clear vmedia path from previous tests
+      ansible.builtin.set_fact:
+        cifmw_bm_agent_vmedia_uefi_path: ""
+
+    - name: Reset mock without Virtual Optical Drive
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: true
+          vmedia_image: "http://test/agent.iso"
+          power_state: "Off"
+          hidden_boot_options:
+            - "Boot0004"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_discover_vmedia_target (floppy fallback)
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_discover_vmedia_target.yml
+
+    - name: Assert derived path uses Unit(0x0) from Floppy Unit(0x1)
+      ansible.builtin.assert:
+        that:
+          - cifmw_bm_agent_vmedia_uefi_path is defined
+          - "'Unit(0x0)' in cifmw_bm_agent_vmedia_uefi_path"
+          - "'USB' in cifmw_bm_agent_vmedia_uefi_path"
+        fail_msg: >-
+          Expected derived Virtual Floppy path with Unit(0x0), got:
+          {{ cifmw_bm_agent_vmedia_uefi_path | default('undefined') }}
+
+    - name: Query mock state after floppy fallback
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert boot override was set
+      ansible.builtin.assert:
+        that:
+          - _state.json.boot_override_target == "UefiTarget"
+          - _state.json.boot_override_enabled == "Once"
+
+- name: "Discover_vmedia case 4: fallback to Generic USB Boot"
+  block:
+    - name: Clear vmedia path from previous tests
+      ansible.builtin.set_fact:
+        cifmw_bm_agent_vmedia_uefi_path: ""
+
+    - name: Reset mock without Virtual Optical or Floppy Drive
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: true
+          vmedia_image: "http://test/agent.iso"
+          power_state: "Off"
+          hidden_boot_options:
+            - "Boot0004"
+            - "Boot0003"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_discover_vmedia_target (generic usb fallback)
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_discover_vmedia_target.yml
+
+    - name: Assert Generic USB Boot path was used
+      ansible.builtin.assert:
+        that:
+          - cifmw_bm_agent_vmedia_uefi_path is defined
+          - "'VenHw' in cifmw_bm_agent_vmedia_uefi_path"
+        fail_msg: >-
+          Expected Generic USB Boot path, got:
+          {{ cifmw_bm_agent_vmedia_uefi_path | default('undefined') }}
+
+    - name: Query mock state after generic usb fallback
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert boot override was set
+      ansible.builtin.assert:
+        that:
+          - _state.json.boot_override_target == "UefiTarget"
+          - _state.json.boot_override_enabled == "Once"
+
+- name: "Discover_vmedia case 5: user-provided invalid UEFI path -- fails"
+  block:
+    - name: Reset mock with VirtualMedia inserted
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: true
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_discover_vmedia_target with invalid path (expect failure)
+      vars:
+        cifmw_bm_agent_vmedia_uefi_path: "PciRoot(0x0)/INVALID/PATH"
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_discover_vmedia_target.yml
+
+    - name: Should not reach here
+      ansible.builtin.fail:
+        msg: "bm_discover_vmedia_target should have failed with an invalid UEFI path"
+  rescue:
+    - name: Assert failure was about UEFI path
+      ansible.builtin.assert:
+        that:
+          - "'not listed in UEFI boot options' in ansible_failed_result.msg
+            or 'Assertion failed' in (ansible_failed_result.msg | default(''))"
+        fail_msg: "Unexpected failure: {{ ansible_failed_result.msg | default('unknown') }}"

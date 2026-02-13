@@ -1,0 +1,161 @@
+---
+# Simplified controller setup for bare metal OCP SNO.
+# The current host IS controller-0 (registered via add_host).
+# Provides the subset of configure_controller.yml needed when
+# there are no VMs and no libvirt_manager layout.
+- name: Configure controller for bare metal OCP
+  when:
+    - _use_bm_ocp | default(false) | bool
+  block:
+    - name: Ensure ci-framework-data directories exist
+      ansible.builtin.file:
+        path: "{{ cifmw_reproducer_controller_basedir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - parameters
+        - artifacts
+        - logs
+
+    - name: Install required packages
+      become: true
+      ansible.builtin.package:
+        name:
+          - bash-completion
+          - bind-utils
+          - git-core
+          - make
+          - podman
+          - python3-jmespath
+          - python3-netaddr
+          - python3-pip
+          - jq
+
+    - name: Ensure /etc/ci/env is created
+      become: true
+      ansible.builtin.file:
+        path: /etc/ci/env
+        state: directory
+        mode: "0755"
+
+    - name: Manage secrets on controller-0
+      vars:
+        cifmw_manage_secrets_basedir: "{{ cifmw_reproducer_controller_basedir }}"
+        cifmw_manage_secrets_owner: "{{ cifmw_reproducer_controller_user }}"
+      block:
+        - name: Initialize secret manager
+          ansible.builtin.import_role:
+            name: manage_secrets
+
+        - name: Inject secrets
+          ansible.builtin.import_role:
+            name: manage_secrets
+            tasks_from: reproducer.yml
+
+    - name: Write reproducer-variables.yml
+      vars:
+        _filtered_vars: >-
+          {{
+            hostvars[inventory_hostname] | default({}) |
+            dict2items |
+            selectattr('key', 'match',
+                       '^(pre|post|cifmw)_(?!install_yamls|devscripts).*') |
+            rejectattr('key', 'equalto', 'cifmw_target_host') |
+            rejectattr('key', 'equalto', 'cifmw_basedir') |
+            rejectattr('key', 'equalto', 'cifmw_path') |
+            rejectattr('key', 'equalto', 'cifmw_extras') |
+            rejectattr('key', 'equalto', 'cifmw_openshift_kubeconfig') |
+            rejectattr('key', 'equalto', 'cifmw_openshift_token') |
+            rejectattr('key', 'equalto', 'cifmw_networking_env_definition') |
+            rejectattr('key', 'match', '^cifmw_use_(?!lvms).*') |
+            rejectattr('key', 'match', '^cifmw_reproducer.*') |
+            rejectattr('key', 'match', '^cifmw_rhol.*') |
+            rejectattr('key', 'match', '^cifmw_discover.*') |
+            rejectattr('key', 'match', '^cifmw_libvirt_manager.*') |
+            rejectattr('key', 'match', '^cifmw_manage_secrets_(pullsecret|citoken).*') |
+            items2dict
+          }}
+      ansible.builtin.copy:
+        mode: "0644"
+        dest: "{{ cifmw_reproducer_controller_basedir }}/parameters/reproducer-variables.yml"
+        content: "{{ _filtered_vars | to_nice_yaml }}"
+
+    - name: Create reproducer-variables.yml symlink
+      ansible.builtin.file:
+        dest: "{{ cifmw_reproducer_controller_user_dir }}/reproducer-variables.yml"
+        src: "{{ cifmw_reproducer_controller_basedir }}/parameters/reproducer-variables.yml"
+        state: link
+
+    - name: Write openshift-environment.yml
+      ansible.builtin.copy:
+        mode: "0644"
+        dest: "{{ cifmw_reproducer_controller_basedir }}/parameters/openshift-environment.yml"
+        content: |-
+          {% raw %}
+          ---
+          cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+          cifmw_openshift_login_password_file: >-
+            {{ ansible_user_dir }}/.kube/kubeadmin-password
+          cifmw_openshift_login_kubeconfig: >-
+            {{ ansible_user_dir }}/.kube/config
+          cifmw_architecture_automation_file: >-
+            {{
+              (
+                cifmw_architecture_repo,
+                'automation/vars',
+                cifmw_architecture_scenario~'.yaml'
+              ) | ansible.builtin.path_join
+            }}
+          {% endraw %}
+
+    - name: Create openshift-environment.yml symlink
+      ansible.builtin.file:
+        dest: "{{ cifmw_reproducer_controller_user_dir }}/openshift-environment.yml"
+        src: "{{ cifmw_reproducer_controller_basedir }}/parameters/openshift-environment.yml"
+        state: link
+
+    - name: Create minimal zuul_inventory.yml
+      ansible.builtin.copy:
+        mode: "0644"
+        dest: "{{ cifmw_reproducer_controller_basedir }}/artifacts/zuul_inventory.yml"
+        content: |
+          all:
+            hosts:
+              localhost:
+                ansible_connection: local
+
+    - name: Install ansible dependencies
+      ansible.builtin.pip:
+        requirements: "{{ _reqs_file }}"
+      vars:
+        _reqs_check: >-
+          {{
+            (
+              cifmw_reproducer_controller_user_dir,
+              cifmw_repo_relative | default('src/github.com/openstack-k8s-operators/ci-framework'),
+              'common-requirements.txt'
+            ) | path_join
+          }}
+        _reqs_file: >-
+          {{
+            (_reqs_check is file) |
+            ternary(
+              _reqs_check,
+              'https://raw.githubusercontent.com/openstack-k8s-operators/ci-framework/main/common-requirements.txt'
+            )
+          }}
+      failed_when: false
+
+    - name: Generate networking definition
+      when:
+        - cifmw_networking_definition is defined or
+          cifmw_networking_env_definition is defined
+      vars:
+        cifmw_networking_mapper_basedir: "{{ cifmw_reproducer_controller_basedir }}"
+        cifmw_networking_mapper_gather_facts: false
+      ansible.builtin.import_role:
+        name: networking_mapper
+
+    - name: Configure ntp service
+      ansible.builtin.include_role:
+        name: cifmw_ntp
