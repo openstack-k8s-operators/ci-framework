@@ -1,0 +1,102 @@
+---
+# Test bm_ensure_usb_boot.yml: skip if enabled, enable+cycle if allowed, fail if not.
+
+- name: "Ensure_usb_boot case 1: already Enabled -- no power cycle"
+  block:
+    - name: Reset mock with usb_boot Enabled and host Off
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          usb_boot: "Enabled"
+          power_state: "Off"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_ensure_usb_boot
+      vars:
+        cifmw_bm_agent_enable_usb_boot: true
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_ensure_usb_boot.yml
+
+    - name: Query mock state
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert host stayed Off (no power cycle needed)
+      ansible.builtin.assert:
+        that:
+          - _state.json.power_state == "Off"
+          - _state.json.usb_boot == "Enabled"
+        fail_msg: "No power cycle expected when already enabled"
+
+- name: "Ensure_usb_boot case 2: Disabled + auto-enable -- BIOS change + power cycle"
+  block:
+    - name: Reset mock with usb_boot Disabled and host Off
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          usb_boot: "Disabled"
+          power_state: "Off"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_ensure_usb_boot with auto-enable
+      vars:
+        cifmw_bm_agent_enable_usb_boot: true
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_ensure_usb_boot.yml
+
+    - name: Query mock state after auto-enable
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert BIOS updated and host left Off
+      ansible.builtin.assert:
+        that:
+          - _state.json.usb_boot == "Enabled"
+          - _state.json.power_state == "Off"
+        fail_msg: >-
+          Expected usb_boot=Enabled and power_state=Off,
+          got usb_boot={{ _state.json.usb_boot }}
+          power_state={{ _state.json.power_state }}
+
+- name: "Ensure_usb_boot case 3: Disabled + auto-enable off -- fails"
+  block:
+    - name: Reset mock with usb_boot Disabled
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          usb_boot: "Disabled"
+          power_state: "Off"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_ensure_usb_boot without auto-enable (expect failure)
+      vars:
+        cifmw_bm_agent_enable_usb_boot: false
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_ensure_usb_boot.yml
+
+    - name: Should not reach here
+      ansible.builtin.fail:
+        msg: "bm_ensure_usb_boot should have failed when auto-enable is off"
+  rescue:
+    - name: Assert failure mentions GenericUsbBoot or auto-enable
+      ansible.builtin.assert:
+        that:
+          - "'GenericUsbBoot' in ansible_failed_result.msg
+            or 'enable_usb_boot' in ansible_failed_result.msg"
+        fail_msg: "Unexpected failure: {{ ansible_failed_result.msg }}"

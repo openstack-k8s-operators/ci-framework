@@ -1,0 +1,61 @@
+---
+# Test bm_eject_vmedia.yml: ejects inserted VirtualMedia.
+
+- name: "Eject_vmedia case 1: VirtualMedia inserted -- ejects"
+  block:
+    - name: Reset mock with VirtualMedia inserted
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: true
+          vmedia_image: "http://test/agent.iso"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_eject_vmedia
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_eject_vmedia.yml
+
+    - name: Query mock state after eject
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert VirtualMedia is ejected
+      ansible.builtin.assert:
+        that:
+          - not (_state.json.vmedia_inserted | bool)
+        fail_msg: "VirtualMedia should be ejected"
+
+- name: "Eject_vmedia case 2: VirtualMedia not inserted -- no error"
+  block:
+    - name: Reset mock with VirtualMedia not inserted
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          vmedia_inserted: false
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_eject_vmedia (idempotent)
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_eject_vmedia.yml
+
+    - name: Query mock state
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state
+
+    - name: Assert VirtualMedia is still not inserted
+      ansible.builtin.assert:
+        that:
+          - not (_state.json.vmedia_inserted | bool)
+        fail_msg: "VirtualMedia should remain not inserted"
