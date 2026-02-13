@@ -1,0 +1,94 @@
+---
+# Patch agent ISO ignition for discovery-phase console access.
+# Injects core password, autologin on tty1/tty2, set-core-password.service,
+# and enables systemd debug shell on tty6 via kernel arguments.
+# Requires: _work_dir, cifmw_bm_agent_core_password (user input)
+- name: Check if coreos-installer exists
+  ansible.builtin.stat:
+    path: "{{ _work_dir }}/coreos-installer"
+  register: _ci_bin
+
+- name: Download coreos-installer
+  when: not _ci_bin.stat.exists
+  ansible.builtin.get_url:
+    url: "https://mirror.openshift.com/pub/openshift-v4/clients/coreos-installer/latest/coreos-installer_amd64"
+    dest: "{{ _work_dir }}/coreos-installer"
+    mode: "0755"
+
+- name: Extract ignition from agent ISO
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.command:
+    cmd: >-
+      {{ _work_dir }}/coreos-installer iso ignition show
+      {{ _work_dir }}/agent.x86_64.iso
+  register: _agent_ign_extract
+
+- name: Write extracted ignition to file
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.copy:
+    dest: "{{ _work_dir }}/agent.ign"
+    content: "{{ _agent_ign_extract.stdout }}"
+    mode: "0600"
+
+- name: Generate ignition password hash
+  ansible.builtin.command:
+    cmd: "openssl passwd -6 -salt 16charsofsalt '{{ cifmw_bm_agent_core_password }}'"
+  register: _ign_password_hash
+  changed_when: false
+  no_log: true
+
+- name: Copy ignition patch script
+  ansible.builtin.copy:
+    src: patch_ignition.py
+    dest: "{{ _work_dir }}/patch_ignition.py"
+    mode: "0755"
+
+- name: Patch ignition with password and autologin
+  no_log: true
+  ansible.builtin.command:
+    cmd: >-
+      python3 {{ _work_dir }}/patch_ignition.py
+      {{ _work_dir }}/agent.ign
+      {{ _ign_password_hash.stdout }}
+
+- name: Copy ignition redact script
+  ansible.builtin.copy:
+    src: redact_ignition.py
+    dest: "{{ _work_dir }}/redact_ignition.py"
+    mode: "0755"
+
+- name: Save redacted ignition backup for inspection
+  ansible.builtin.command:
+    cmd: >-
+      python3 {{ _work_dir }}/redact_ignition.py
+      {{ _work_dir }}/agent.ign
+      {{ _work_dir }}/agent.ign.patched.bak
+  changed_when: false
+
+- name: Remove existing ignition from agent ISO
+  ansible.builtin.command:
+    cmd: >-
+      {{ _work_dir }}/coreos-installer iso ignition remove
+      {{ _work_dir }}/agent.x86_64.iso
+  failed_when: false
+
+- name: Embed patched ignition into agent ISO
+  no_log: true
+  ansible.builtin.command:
+    cmd: >-
+      {{ _work_dir }}/coreos-installer iso ignition embed
+      -i {{ _work_dir }}/agent.ign
+      {{ _work_dir }}/agent.x86_64.iso
+
+- name: Enable debug shell via kernel arguments
+  ansible.builtin.command:
+    cmd: >-
+      {{ _work_dir }}/coreos-installer iso kargs modify
+      -a systemd.debug_shell=/dev/tty6
+      {{ _work_dir }}/agent.x86_64.iso
+  failed_when: false
+
+- name: Clean up raw ignition file
+  ansible.builtin.file:
+    path: "{{ _work_dir }}/agent.ign"
+    state: absent
