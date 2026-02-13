@@ -1,0 +1,94 @@
+---
+# Test bm_power_on.yml: idempotent power-on via Redfish mock.
+
+- name: "Power_on case 1: host already On -- no action taken"
+  block:
+    - name: Reset mock to power On
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          power_state: "On"
+          post_state: "FinishedPost"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_power_on
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_power_on.yml
+
+    - name: Query mock state after power_on (already on)
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state_after
+
+    - name: Assert host is still On with POST complete
+      ansible.builtin.assert:
+        that:
+          - _state_after.json.power_state == "On"
+          - _state_after.json.post_state == "FinishedPost"
+        fail_msg: "Expected On/FinishedPost, got {{ _state_after.json.power_state }}/{{ _state_after.json.post_state }}"
+
+- name: "Power_on case 2: host Off -- powers on and completes POST"
+  block:
+    - name: Reset mock to power Off
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          power_state: "Off"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_power_on
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_power_on.yml
+
+    - name: Query mock state after power_on (was off)
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state_after
+
+    - name: Assert host is now On with POST complete
+      ansible.builtin.assert:
+        that:
+          - _state_after.json.power_state == "On"
+          - _state_after.json.post_state == "FinishedPost"
+        fail_msg: "Expected On/FinishedPost, got {{ _state_after.json.power_state }}/{{ _state_after.json.post_state }}"
+
+- name: "Power_on case 3: firmware without PostState -- falls back to PowerState"
+  block:
+    - name: Reset mock to power Off without PostState support
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          power_state: "Off"
+          post_state: null
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_power_on
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: bm_power_on.yml
+
+    - name: Query mock state after power_on (no PostState)
+      ansible.builtin.uri:
+        url: "{{ _mock_state_url }}"
+        validate_certs: false
+      register: _state_after
+
+    - name: Assert host is On (PostState stays null)
+      ansible.builtin.assert:
+        that:
+          - _state_after.json.power_state == "On"
+          - _state_after.json.post_state == None
+        fail_msg: "Expected On/null, got {{ _state_after.json.power_state }}/{{ _state_after.json.post_state }}"
