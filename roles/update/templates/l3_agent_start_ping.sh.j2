@@ -5,6 +5,7 @@
 
 INSTANCE_FILE="{{ cifmw_update_artifacts_basedir }}/vm_info.sh"
 PING_LOG="{{ cifmw_update_artifacts_basedir }}/ping_results_$(date +%Y%m%d%H%M%S).log"
+IS_IPV6={{cifmw_os_net_setup_config | selectattr('name', 'equalto', 'public') | map(attribute='subnets') | flatten | selectattr('name', 'equalto', 'public_subnet') | map(attribute='ip_version') | first | default(4) == 6}}
 
 if [ -f "${INSTANCE_FILE}" ]; then
     source "${INSTANCE_FILE}"
@@ -25,4 +26,8 @@ fi
 # we will make the awk wait until this ping exits as it will hold
 # the output pipes. So again &>> instead of >> is necessary.
 
-ping -D "${VM_IP}" &>> "${PING_LOG}" &
+if [ "${IS_IPV6}" = "True" ]; then
+    ping6 -D "${VM_IP}" &>> "${PING_LOG}" &
+else
+    ping -D "${VM_IP}" &>> "${PING_LOG}" &
+fi
