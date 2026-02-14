@@ -21,6 +21,53 @@
   ansible.builtin.import_role:
     name: discover_latest_image
 
+- name: Discover extra VM type images
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  when:
+    - cifmw_discover_latest_image_extra is defined
+    - cifmw_discover_latest_image_extra | length > 0
+  ansible.builtin.include_role:
+    name: discover_latest_image
+  vars:
+    cifmw_discover_latest_image_override:
+      base_url: "{{ item.value.base_url }}"
+      qcow_prefix: "{{ item.value.qcow_prefix }}"
+      images_file: "{{ item.value.images_file | default('SHA256SUM') }}"
+    cifmw_discover_latest_image_prefix: "{{ item.value.prefix }}"
+  loop: "{{ cifmw_discover_latest_image_extra | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Debug default discovered image facts
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  ansible.builtin.debug:
+    msg:
+      - "cifmw_discovered_image_name: {{ cifmw_discovered_image_name | default('UNDEFINED') }}"
+      - "cifmw_discovered_image_url: {{ cifmw_discovered_image_url | default('UNDEFINED') }}"
+      - "cifmw_discovered_hash: {{ cifmw_discovered_hash | default('UNDEFINED') }}"
+      - "cifmw_discovered_hash_algorithm: {{ cifmw_discovered_hash_algorithm | default('UNDEFINED') }}"
+
+- name: Debug extra discovered image facts
+  tags:
+    - bootstrap
+    - bootstrap_layout
+  when:
+    - cifmw_discover_latest_image_extra is defined
+    - cifmw_discover_latest_image_extra | length > 0
+  ansible.builtin.debug:
+    msg:
+      - "{{ item.value.prefix }}_image_name: {{ lookup('vars', item.value.prefix ~ '_image_name', default='UNDEFINED') }}"
+      - "{{ item.value.prefix }}_image_url: {{ lookup('vars', item.value.prefix ~ '_image_url', default='UNDEFINED') }}"
+      - "{{ item.value.prefix }}_hash: {{ lookup('vars', item.value.prefix ~ '_hash', default='UNDEFINED') }}"
+      - "{{ item.value.prefix }}_hash_algorithm: {{ lookup('vars', item.value.prefix ~ '_hash_algorithm', default='UNDEFINED') }}"
+  loop: "{{ cifmw_discover_latest_image_extra | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Load CI job environment
   tags:
     - bootstrap_layout
