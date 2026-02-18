@@ -102,42 +102,8 @@
         state: link
 
     # Collect pod usage
-    - name: Find all namespaces directories
-      ansible.builtin.find:
-        paths: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces"
-        file_type: directory
-        depth: 1
-      register: _os_gather_namespaces
-
-    - name: Get resource usage by pods per namespace
-      when: _os_gather_namespaces.files | length > 1
-      vars:
-        namespace_dir: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces/{{  _namespace_path.path | basename }}"
-      ansible.builtin.shell: |
-        oc adm top pods -n {{  _namespace_path.path | basename }} > {{ namespace_dir }}/pods-top.log
-      loop: "{{ _os_gather_namespaces.files }}"
-      loop_control:
-        loop_var: _namespace_path
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-    - name: Get node resource usage
-      ansible.builtin.shell: |
-        oc adm top nodes > {{ cifmw_os_must_gather_output_log_dir }}/latest/openstack-nodes-top.log
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-    - name: Get all containers usage - sort by cpu
-      ansible.builtin.shell: |
-        oc adm top pods --all-namespaces --sort-by=cpu --containers > {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-cpu-top.log
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-    - name: Get all containers usage - sort by memory
-      ansible.builtin.shell: |
-        oc adm top pods --all-namespaces --sort-by=memory --containers > {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-memory-top.log
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+    - name: Collect pod usage
+      ansible.builtin.include_tasks: get_top.yml
 
   rescue:
     - name: Openstack-must-gather failure
