@@ -126,6 +126,51 @@
       ansible.builtin.include_role:
         name: run_hook
 
+    - name: Debug stage information for metal3 detection
+      ansible.builtin.debug:
+        msg:
+          - "Stage path: {{ stage.path }}"
+          - "Stage path defined: {{ stage.path is defined }}"
+          - "Matches pattern: {{ stage.path is match('.*/edpm/nodeset.*') if stage.path is defined else false }}"
+
+    - name: Detect metal3 pod node for baremetal nodeset provisioning
+      when:
+        - stage.path is defined
+        - stage.path is match('.*/edpm/nodeset.*')
+      block:
+        - name: Debug - Entering metal3 detection block
+          ansible.builtin.debug:
+            msg: "INSIDE metal3 detection block for stage: {{ stage.path }}"
+
+        - name: Get metal3 pod information
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: openshift-machine-api
+            label_selectors:
+              - k8s-app=metal3
+          register: _cifmw_kustomize_deploy_metal3_pod_info
+
+        - name: Set metal3 node for provisionserver nodeSelector
+          ansible.builtin.set_fact:
+            cifmw_kustomize_deploy_metal3_node: "{{ _cifmw_kustomize_deploy_metal3_pod_info.resources[0].spec.nodeName }}"
+            cacheable: true
+          when:
+            - _cifmw_kustomize_deploy_metal3_pod_info.resources is defined
+            - _cifmw_kustomize_deploy_metal3_pod_info.resources | length > 0
+
+        - name: Log metal3 node location
+          ansible.builtin.debug:
+            msg: "Metal3 pod is running on {{ cifmw_kustomize_deploy_metal3_node }}, provisionserver will be co-located there"
+          when: cifmw_kustomize_deploy_metal3_node is defined
+
+        - name: Debug - metal3 pod info result
+          ansible.builtin.debug:
+            msg:
+              - "Resources found: {{ _cifmw_kustomize_deploy_metal3_pod_info.resources | default([]) | length }}"
+              - "Variable set: {{ cifmw_kustomize_deploy_metal3_node is defined }}"
+              - "Variable value: {{ cifmw_kustomize_deploy_metal3_node | default('NOT_SET') }}"
+
     - name: "Generate values.yaml for {{ stage.path }}"
       when:
         - _val.src_file is defined

@@ -39,6 +39,28 @@ data:
           - "{{ range }}"
 {%   endfor                                                                            %}
 {% endif                                                                               %}
+{% set _original_ansible_vars = (_original_nodeset.ansible | default({})).ansibleVars | default({}) %}
+{% set _original_bootstrap = _original_ansible_vars.edpm_bootstrap_command | default('') %}
+{% set _needs_policy_json = cifmw_ci_gen_kustomize_values_add_policy_json | default(true) | bool and 'policy.json' not in _original_bootstrap %}
+{% if _needs_policy_json or _original_bootstrap %}
+        edpm_bootstrap_command: |
+{%   if _original_bootstrap %}
+          {{ _original_bootstrap }}
+
+{%   endif %}
+{%   if _needs_policy_json %}
+          mkdir -p /root/.config/containers/ && echo '{"default":[{"type":"insecureAcceptAnything"}]}' > /root/.config/containers/policy.json
+{%   endif %}
+{% endif %}
+{% if cifmw_ci_gen_kustomize_values_registry_logins is defined and cifmw_ci_gen_kustomize_values_registry_logins | length > 0 %}
+        edpm_container_registry_logins:
+{%   for registry, creds in cifmw_ci_gen_kustomize_values_registry_logins.items() %}
+          {{ registry }}:
+{%     for username, password in creds.items() %}
+            {{ username }}: {{ password }}
+{%     endfor %}
+{%   endfor %}
+{% endif %}
     nodes:
 {% for instance in nodeset_one_instances                                               %}
       edpm-{{ instance }}:
