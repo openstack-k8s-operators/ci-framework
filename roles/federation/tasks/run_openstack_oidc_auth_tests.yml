@@ -1,0 +1,244 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# =============================================================================
+# OpenStack OIDC Authentication Methods Test Suite
+# =============================================================================
+# This task file tests all supported OIDC authentication methods:
+#   - v3oidcpassword: Resource Owner Password Credentials flow
+#   - v3oidcclientcredentials: Client Credentials flow
+#   - v3oidcaccesstoken: Reuse existing access token
+#   - v3oidcauthcode: Authorization Code flow
+#
+# Note: v3oidcdeviceauthz (Device Authorization flow) requires keystoneauth1
+# with Python 3.10+ support and is not available in OSP18.
+# =============================================================================
+
+- name: Display OIDC authentication test suite header
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      OpenStack OIDC Authentication Test Suite
+      ========================================
+      Testing the following authentication methods:
+        1. v3oidcpassword (Resource Owner Password Credentials)
+        2. v3oidcclientcredentials (Client Credentials)
+        3. v3oidcaccesstoken (Access Token Reuse)
+        4. v3oidcauthcode (Authorization Code)
+      ========================================
+
+# =============================================================================
+# TEST 1: v3oidcpassword - Resource Owner Password Credentials Flow
+# =============================================================================
+- name: "TEST 1: v3oidcpassword - Resource Owner Password Credentials"
+  block:
+    - name: "[v3oidcpassword] Get token for test user 1"
+      vars:
+        _osp_cmd: "/home/cloud-admin/get-token.sh {{ cifmw_federation_keycloak_testuser1_username }}"
+      ansible.builtin.include_tasks: run_osp_cmd.yml
+
+    - name: "[v3oidcpassword] Parse token response"
+      ansible.builtin.set_fact:
+        federation_oidcpassword_token: "{{ federation_run_ocp_cmd.stdout | from_json }}"
+
+    - name: "[v3oidcpassword] Validate token"
+      ansible.builtin.assert:
+        that:
+          - federation_oidcpassword_token.id is defined
+          - federation_oidcpassword_token.id | length >= 180
+          - federation_oidcpassword_token.user_id is defined
+          - federation_oidcpassword_token.expires is defined
+        fail_msg: "v3oidcpassword authentication failed"
+        success_msg: "v3oidcpassword authentication successful"
+
+    - name: "[v3oidcpassword] Display token info"
+      ansible.builtin.debug:
+        msg:
+          - "Auth Type: v3oidcpassword"
+          - "User ID: {{ federation_oidcpassword_token.user_id }}"
+          - "Expires: {{ federation_oidcpassword_token.expires }}"
+          - "Token ID (truncated): {{ federation_oidcpassword_token.id[:50] }}..."
+
+# =============================================================================
+# TEST 2: v3oidcclientcredentials - Client Credentials Flow
+# =============================================================================
+- name: "TEST 2: v3oidcclientcredentials - Client Credentials Flow"
+  block:
+    - name: "[v3oidcclientcredentials] Run token issue command"
+      vars:
+        _osp_cmd: >-
+          bash -c 'source /home/cloud-admin/oidc-clientcredentials.sh &&
+          openstack token issue -f json'
+      ansible.builtin.include_tasks: run_osp_cmd.yml
+
+    - name: "[v3oidcclientcredentials] Parse token response"
+      ansible.builtin.set_fact:
+        federation_oidcclientcreds_token: "{{ federation_run_ocp_cmd.stdout | from_json }}"
+
+    - name: "[v3oidcclientcredentials] Validate token"
+      ansible.builtin.assert:
+        that:
+          - federation_oidcclientcreds_token.id is defined
+          - federation_oidcclientcreds_token.id | length >= 180
+          - federation_oidcclientcreds_token.user_id is defined
+          - federation_oidcclientcreds_token.expires is defined
+        fail_msg: "v3oidcclientcredentials authentication failed"
+        success_msg: "v3oidcclientcredentials authentication successful"
+
+    - name: "[v3oidcclientcredentials] Display token info"
+      ansible.builtin.debug:
+        msg:
+          - "Auth Type: v3oidcclientcredentials"
+          - "User ID: {{ federation_oidcclientcreds_token.user_id }}"
+          - "Expires: {{ federation_oidcclientcreds_token.expires }}"
+          - "Token ID (truncated): {{ federation_oidcclientcreds_token.id[:50] }}..."
+
+# =============================================================================
+# TEST 3: v3oidcaccesstoken - Access Token Reuse Flow
+# =============================================================================
+- name: "TEST 3: v3oidcaccesstoken - Access Token Reuse Flow"
+  block:
+    - name: "[v3oidcaccesstoken] Get access token from Keycloak"
+      vars:
+        _osp_cmd: >-
+          /home/cloud-admin/get-keycloak-token.sh access_token
+          {{ cifmw_federation_keycloak_testuser1_username }}
+          {{ cifmw_federation_keycloak_testuser1_password }}
+      ansible.builtin.include_tasks: run_osp_cmd.yml
+
+    - name: "[v3oidcaccesstoken] Store access token"
+      ansible.builtin.set_fact:
+        federation_keycloak_access_token: "{{ federation_run_ocp_cmd.stdout | trim }}"
+
+    - name: "[v3oidcaccesstoken] Validate access token obtained"
+      ansible.builtin.assert:
+        that:
+          - federation_keycloak_access_token | length > 100
+        fail_msg: "Failed to obtain access token from Keycloak"
+        success_msg: "Successfully obtained access token from Keycloak"
+
+    - name: "[v3oidcaccesstoken] Run token issue with access token"
+      vars:
+        _osp_cmd: >-
+          bash -c 'source /home/cloud-admin/oidc-accesstoken.sh "{{ federation_keycloak_access_token }}" &&
+          openstack token issue -f json'
+      ansible.builtin.include_tasks: run_osp_cmd.yml
+
+    - name: "[v3oidcaccesstoken] Parse token response"
+      ansible.builtin.set_fact:
+        federation_oidcaccesstoken_token: "{{ federation_run_ocp_cmd.stdout | from_json }}"
+
+    - name: "[v3oidcaccesstoken] Validate token"
+      ansible.builtin.assert:
+        that:
+          - federation_oidcaccesstoken_token.id is defined
+          - federation_oidcaccesstoken_token.id | length >= 180
+          - federation_oidcaccesstoken_token.user_id is defined
+          - federation_oidcaccesstoken_token.expires is defined
+        fail_msg: "v3oidcaccesstoken authentication failed"
+        success_msg: "v3oidcaccesstoken authentication successful"
+
+    - name: "[v3oidcaccesstoken] Display token info"
+      ansible.builtin.debug:
+        msg:
+          - "Auth Type: v3oidcaccesstoken"
+          - "User ID: {{ federation_oidcaccesstoken_token.user_id }}"
+          - "Expires: {{ federation_oidcaccesstoken_token.expires }}"
+          - "Token ID (truncated): {{ federation_oidcaccesstoken_token.id[:50] }}..."
+
+# =============================================================================
+# TEST 4: v3oidcauthcode - Authorization Code Flow
+# =============================================================================
+- name: "TEST 4: v3oidcauthcode - Authorization Code Flow"
+  block:
+    - name: "[v3oidcauthcode] Get authorization code from Keycloak"
+      vars:
+        _osp_cmd: >-
+          /home/cloud-admin/get-keycloak-token.sh auth_code
+          {{ cifmw_federation_keycloak_testuser1_username }}
+          {{ cifmw_federation_keycloak_testuser1_password }}
+      ansible.builtin.include_tasks: run_osp_cmd.yml
+
+    - name: "[v3oidcauthcode] Store authorization code"
+      ansible.builtin.set_fact:
+        federation_auth_code: "{{ federation_run_ocp_cmd.stdout | trim }}"
+
+    - name: "[v3oidcauthcode] Validate authorization code obtained"
+      ansible.builtin.assert:
+        that:
+          - federation_auth_code | length > 10
+          - "'ERROR' not in federation_auth_code"
+        fail_msg: "Failed to obtain authorization code from Keycloak"
+        success_msg: "Successfully obtained authorization code from Keycloak"
+
+    - name: "[v3oidcauthcode] Run token issue with authorization code"
+      vars:
+        _osp_cmd: >-
+          bash -c 'source /home/cloud-admin/oidc-authcode.sh "{{ federation_auth_code }}" &&
+          openstack token issue -f json'
+      ansible.builtin.include_tasks: run_osp_cmd.yml
+
+    - name: "[v3oidcauthcode] Parse token response"
+      ansible.builtin.set_fact:
+        federation_oidcauthcode_token: "{{ federation_run_ocp_cmd.stdout | from_json }}"
+
+    - name: "[v3oidcauthcode] Validate token"
+      ansible.builtin.assert:
+        that:
+          - federation_oidcauthcode_token.id is defined
+          - federation_oidcauthcode_token.id | length >= 180
+          - federation_oidcauthcode_token.user_id is defined
+          - federation_oidcauthcode_token.expires is defined
+        fail_msg: "v3oidcauthcode authentication failed"
+        success_msg: "v3oidcauthcode authentication successful"
+
+    - name: "[v3oidcauthcode] Display token info"
+      ansible.builtin.debug:
+        msg:
+          - "Auth Type: v3oidcauthcode"
+          - "User ID: {{ federation_oidcauthcode_token.user_id }}"
+          - "Expires: {{ federation_oidcauthcode_token.expires }}"
+          - "Token ID (truncated): {{ federation_oidcauthcode_token.id[:50] }}..."
+
+# =============================================================================
+# TEST SUMMARY
+# =============================================================================
+- name: "Display OIDC authentication test summary"
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      OIDC Authentication Test Summary
+      ========================================
+      ✓ v3oidcpassword: PASSED
+        - User: {{ cifmw_federation_keycloak_testuser1_username }}
+        - Token User ID: {{ federation_oidcpassword_token.user_id }}
+
+      ✓ v3oidcclientcredentials: PASSED
+        - Client: {{ cifmw_federation_keystone_OIDC_ClientID }}
+        - Token User ID: {{ federation_oidcclientcreds_token.user_id }}
+
+      ✓ v3oidcaccesstoken: PASSED
+        - User: {{ cifmw_federation_keycloak_testuser1_username }}
+        - Token User ID: {{ federation_oidcaccesstoken_token.user_id }}
+
+      ✓ v3oidcauthcode: PASSED
+        - User: {{ cifmw_federation_keycloak_testuser1_username }}
+        - Token User ID: {{ federation_oidcauthcode_token.user_id }}
+
+      ----------------------------------------
+      Note: v3oidcdeviceauthz requires Python 3.10+
+            and is not available in OSP18.
+      ========================================
