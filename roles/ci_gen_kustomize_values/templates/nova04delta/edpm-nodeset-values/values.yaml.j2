@@ -38,12 +38,26 @@ data:
 
           # see https://access.redhat.com/solutions/253273
           dnf -y install conntrack-tools
+{% if cifmw_ci_gen_kustomize_values_add_policy_json | default(true) | bool %}
+
+          # Container policy.json
+          mkdir -p /root/.config/containers/ && echo '{"default":[{"type":"insecureAcceptAnything"}]}' > /root/.config/containers/policy.json
+{% endif %}
 {% if cifmw_ci_gen_kustomize_values_sshd_ranges | default([]) | length > 0             %}
         edpm_sshd_allowed_ranges:
 {%   for range in cifmw_ci_gen_kustomize_values_sshd_ranges                            %}
           - "{{ range }}"
 {%   endfor                                                                            %}
 {% endif                                                                               %}
+{% if cifmw_ci_gen_kustomize_values_registry_logins is defined and cifmw_ci_gen_kustomize_values_registry_logins | length > 0 %}
+        edpm_container_registry_logins:
+{%   for registry, creds in cifmw_ci_gen_kustomize_values_registry_logins.items() %}
+          {{ registry }}:
+{%     for username, password in creds.items() %}
+            {{ username }}: {{ password }}
+{%     endfor %}
+{%   endfor %}
+{% endif %}
 
 {% if cifmw_baremetal_hosts | default({}) | length > 0                                 %}
   # source roles/deploy_bmh/template/bmh.yml.j2, but it patches kustomize built outputs
