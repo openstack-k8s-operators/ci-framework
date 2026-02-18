@@ -35,6 +35,7 @@ with a message.
 * `ci_gen_kustomize_fetch_ocp_state`: (Boolean) If true it enables generating CI templates based on the OCP state. Defaults to `true`.
 * `cifmw_ci_gen_kustomize_values_storage_class_prefix`: (String) Prefix for `storageClass` in generated values.yaml files. Defaults to `"lvms-"` only if `cifmw_use_lvms` is True, otherwise it defaults to `""`. The prefix is prepended to the `cifmw_ci_gen_kustomize_values_storage_class`. It is not recommended to override this value, instead set `cifmw_use_lvms` True or False.
 * `cifmw_ci_gen_kustomize_values_storage_class`: (String) Value for `storageClass` in generated values.yaml files. Defaults to `"lvms-local-storage"` only if `cifmw_use_lvms` is True, otherwise it defaults to `"local-storage"`.
+* `cifmw_ci_gen_kustomize_values_detect_metal3`: (Boolean) Enable metal3 node detection for baremetal nodeset provisioning. When enabled, detects the node where metal3 pod is running and sets `provisionServerNodeSelector` in `baremetalSetTemplate` to co-locate the provision server with metal3. This prevents DHCP conflicts during baremetal provisioning. Defaults to `false`. Set to `true` for baremetal deployment scenarios (NFV, OVS-DPDK, SR-IOV).
 * `cifmw_ci_gen_kustomize_values_remove_keys_expressions*`: (List) Remove keys matching the regular expressions from source ConfigMaps (values.yaml).
   Defaults to `["^nodes$", "^node(_[0-9]+)?$"]`. Accepts passing additional expressions by passing variables that matches `cifmw_ci_gen_kustomize_values_remove_keys_expressions.+`.
 
