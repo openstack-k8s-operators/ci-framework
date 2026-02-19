@@ -186,6 +186,7 @@ Default value: {}
 * `cifmw_test_operator_ansibletest_compute_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for computes. Default value: `dataplane-ansible-ssh-private-key-secret`
 * `cifmw_test_operator_ansibletest_workload_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for the ansible workload. Default value: `""`
 * `cifmw_test_operator_ansibletest_ansible_git_repo`: (String) Git repo to clone into container. Default value: `""`
+* `cifmw_test_operator_ansibletest_ansible_git_branch`: (String) Git branch to checkout from the repo. Default value: `""`
 * `cifmw_test_operator_ansibletest_ansible_playbook_path`: (String) Path to ansible playbook. Default value: `""`
 * `cifmw_test_operator_ansibletest_ansible_collection`: (String) Extra ansible collections to install in addition to the ones that exist in the requirements.yaml. Default value: `""`
 * `cifmw_test_operator_ansibletest_ansible_var_files`: (String) interface to create ansible var files. Default value: `""`
@@ -212,6 +213,7 @@ Default value: {}
     computeSSHKeySecretName: "{{ cifmw_test_operator_ansibletest_compute_ssh_key_secret_name }}"
     workloadSSHKeySecretName: "{{ cifmw_test_operator_ansibletest_workload_ssh_key_secret_name }}"
     ansibleGitRepo: "{{ cifmw_test_operator_ansibletest_ansible_git_repo }}"
+    ansibleGitBranch: "{{ cifmw_test_operator_ansibletest_ansible_git_branch }}"
     ansiblePlaybookPath: "{{ cifmw_test_operator_ansibletest_ansible_playbook_path }}"
     ansibleCollections: "{{ cifmw_test_operator_ansibletest_ansible_collection }}"
     ansibleVarFiles: "{{ cifmw_test_operator_ansibletest_ansible_var_files }}"
