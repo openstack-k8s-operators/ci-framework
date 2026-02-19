@@ -61,7 +61,7 @@
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
         PATH: "{{ cifmw_path }}"
-        SOS_EDPM: "all"
+        SOS_EDPM: "{{ cifmw_os_must_gather_sos_edpm }}"
         SOS_DECOMPRESS: "0"
         OPENSTACK_DATABASES: "{{ cifmw_os_must_gather_dump_db }}"
         OMC: "{{ cifmw_os_must_gather_omc }}"
@@ -86,8 +86,31 @@
               echo "The must gather command did not finish on time!"
               echo "{{ shell_cmd_timeout }} seconds was not enough to finish the task."
             fi
+            exit $rc
           }
+      register: _must_gather_result
 
+  rescue:
+    - name: Log openstack-must-gather failure
+      ansible.builtin.debug:
+        msg: "OpenStack must-gather failed, running fallback generic must-gather"
+
+    - name: Run fallback generic must-gather command without SOS report when timed out
+      when:
+        - _must_gather_result is defined
+        - _must_gather_result.rc == 124
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          timeout {{ (cifmw_os_must_gather_timeout | community.general.to_seconds) + 120 }}
+          oc adm must-gather
+          --dest-dir {{ cifmw_os_must_gather_output_log_dir }}
+          --timeout {{ cifmw_os_must_gather_timeout }}
+          --volume-percentage={{ cifmw_os_must_gather_volume_percentage }}
+
+  always:
     - name: Find existing os-must-gather directories
       ansible.builtin.find:
         paths: "{{ cifmw_os_must_gather_output_log_dir }}"
@@ -95,90 +118,49 @@
         depth: 1
       register: _os_gather_latest_dir
 
-    - name: Create a symlink to newest os-must-gather directory
-      ansible.builtin.file:
-        src: "{{ (_os_gather_latest_dir.files | sort(attribute='mtime', reverse=True) | first).path | basename }}"
-        dest: "{{ cifmw_os_must_gather_output_log_dir }}/latest"
-        state: link
-
-    # Collect pod usage
-    - name: Find all namespaces directories
-      ansible.builtin.find:
-        paths: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces"
-        file_type: directory
-        depth: 1
-      register: _os_gather_namespaces
-
-    - name: Get resource usage by pods per namespace
-      when: _os_gather_namespaces.files | length > 1
-      vars:
-        namespace_dir: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces/{{  _namespace_path.path | basename }}"
-      ansible.builtin.shell: |
-        oc adm top pods -n {{  _namespace_path.path | basename }} > {{ namespace_dir }}/pods-top.log
-      loop: "{{ _os_gather_namespaces.files }}"
-      loop_control:
-        loop_var: _namespace_path
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-    - name: Get node resource usage
-      ansible.builtin.shell: |
-        oc adm top nodes > {{ cifmw_os_must_gather_output_log_dir }}/latest/openstack-nodes-top.log
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-    - name: Get all containers usage - sort by cpu
-      ansible.builtin.shell: |
-        oc adm top pods --all-namespaces --sort-by=cpu --containers > {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-cpu-top.log
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-    - name: Get all containers usage - sort by memory
-      ansible.builtin.shell: |
-        oc adm top pods --all-namespaces --sort-by=memory --containers > {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-memory-top.log
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-
-  rescue:
-    - name: Openstack-must-gather failure
+    - name: Symlink to newest log folder and run top commands
+      when: _os_gather_latest_dir.files | length > 0
       block:
-        - name: Log openstack-must-gather failure
-          ansible.builtin.debug:
-            msg: "OpenStack must-gather failed, running fallback generic must-gather"
+      - name: Create a symlink to newest os-must-gather directory
+        ansible.builtin.file:
+          src: "{{ (_os_gather_latest_dir.files | sort(attribute='mtime', reverse=True) | first).path | basename }}"
+          dest: "{{ cifmw_os_must_gather_output_log_dir }}/latest"
+          state: link
 
-        - name: Run fallback generic must-gather command
-          environment:
-            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-            PATH: "{{ cifmw_path }}"
-          ansible.builtin.command:
-            cmd: >-
-              timeout {{ (cifmw_os_must_gather_timeout | community.general.to_seconds) + 120 }}
-              oc adm must-gather
-              --dest-dir {{ ansible_user_dir }}/ci-framework-data/must-gather
-              --timeout {{ cifmw_os_must_gather_timeout }}
-              --volume-percentage={{ cifmw_os_must_gather_volume_percentage }}
-      always:
-        - name: Create oc_inspect log directory
-          ansible.builtin.file:
-            path: "{{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect"
-            state: directory
-            mode: "0755"
+      # Collect pod usage
+      - name: Find all namespaces directories
+        ansible.builtin.find:
+          paths: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces"
+          file_type: directory
+          depth: 1
+        register: _os_gather_namespaces
 
-        - name: Inspect the cluster after must-gather failure
-          ignore_errors: true # noqa: ignore-errors
-          environment:
-            KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
-            PATH: "{{ cifmw_path }}"
-          cifmw.general.ci_script:
-            output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
-            script: |
-              oc adm inspect namespace/{{ item }} --dest-dir={{ cifmw_os_must_gather_output_dir }}/logs/oc_inspect
-          loop: >-
-            {{
-              (
-                cifmw_os_must_gather_namespaces | default([]) +
-                (
-                  cifmw_os_must_gather_additional_namespaces | split(',') | list
-                )
-              ) | unique
-            }}
+      - name: Get resource usage by pods per namespace
+        when: _os_gather_namespaces.files | length > 1
+        vars:
+          namespace_dir: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces/{{  _namespace_path.path | basename }}"
+        ansible.builtin.shell: |
+          oc adm top pods -n {{  _namespace_path.path | basename }} > {{ namespace_dir }}/pods-top.log
+        loop: "{{ _os_gather_namespaces.files }}"
+        loop_control:
+          loop_var: _namespace_path
+        environment:
+          KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+
+      - name: Get node resource usage
+        ansible.builtin.shell: |
+          oc adm top nodes > {{ cifmw_os_must_gather_output_log_dir }}/latest/openstack-nodes-top.log
+        environment:
+          KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+
+      - name: Get all containers usage - sort by cpu
+        ansible.builtin.shell: |
+          oc adm top pods --all-namespaces --sort-by=cpu --containers > {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-cpu-top.log
+        environment:
+          KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+
+      - name: Get all containers usage - sort by memory
+        ansible.builtin.shell: |
+          oc adm top pods --all-namespaces --sort-by=memory --containers > {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-memory-top.log
+        environment:
+          KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
