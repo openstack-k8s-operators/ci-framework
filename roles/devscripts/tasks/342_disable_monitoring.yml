@@ -1,0 +1,45 @@
+---
+- name: Attempt to set managementState Removed on monitoring ClusterOperator
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition:
+      apiVersion: config.openshift.io/v1
+      kind: ClusterOperator
+      metadata:
+        name: monitoring
+      spec:
+        managementState: Removed
+    state: present
+
+- name: Override CVO management for cluster-monitoring-operator
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition:
+      apiVersion: config.openshift.io/v1
+      kind: ClusterVersion
+      metadata:
+        name: version
+      spec:
+        overrides:
+          - group: apps
+            kind: Deployment
+            name: cluster-monitoring-operator
+            namespace: openshift-monitoring
+            unmanaged: true
+    state: present
+
+- name: Scale down cluster-monitoring-operator deployment
+  kubernetes.core.k8s_scale:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: cluster-monitoring-operator
+    namespace: openshift-monitoring
+    replicas: 0
+  ignore_errors: true  # noqa: ignore-errors
