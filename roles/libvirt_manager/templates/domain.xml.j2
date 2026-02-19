@@ -16,7 +16,36 @@
     <boot dev='hd'/>
     <bootmenu enable='{{ vm_data.bootmenu_enable | default('no') }}'/>
   </os>
-  <cpu mode='host-passthrough' check='none'/>
+  <cpu mode='host-passthrough' check='none'>
+{% if vm_data.numa is defined and vm_data.numa|int > 1 %}
+    <topology sockets='1' dies='1' cores='{{ vm_data.cpus }}' threads='1'/>
+    <numa>
+      {% set base_cpu = (vm_data.cpus|int / vm_data.numa|int)|int %}
+      {% set cpu_rem = vm_data.cpus|int % vm_data.numa|int %}
+      {% set base_mem = (vm_data.memory|int / vm_data.numa|int)|int %}
+      {% set mem_rem = vm_data.memory|int % vm_data.numa|int %}
+      
+      {# Use a namespace to persist cpu_start across loop iterations #}
+      {% set tracker = namespace(cpu_start=0) %}
+      
+      {% for i in range(vm_data.numa|int) %}
+        {% set current_cores = base_cpu + (1 if i < cpu_rem else 0) %}
+        {% set current_mem = base_mem + (1 if i < mem_rem else 0) %}
+        {% set cpu_end = tracker.cpu_start + current_cores - 1 %}
+        
+        <cell id='{{ i }}' cpus='{{ tracker.cpu_start }}-{{ cpu_end }}' memory='{{ current_mem }}' unit='KiB'/>
+        
+        {# Update the tracker for the next iteration #}
+        {% set tracker.cpu_start = cpu_end + 1 %}
+      {% endfor %}
+    </numa>
+{% endif %}
+  </cpu>
+{% if vm_data.numa is defined and vm_data.numa|int > 1 %}
+  <numatune>
+    <memory mode='strict' nodeset='0-{{ vm_data.numa|int - 1 }}'/>
+  </numatune>
+{% endif %}
   <clock offset='utc'>
     <timer name='rtc' tickpolicy='catchup'/>
     <timer name='pit' tickpolicy='delay'/>
