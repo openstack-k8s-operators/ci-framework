@@ -1,4 +1,4 @@
-# set_openstack_containers
+# set_openstack_containers FOOBAR
 A role to set the environment variables for openstack services containers and friends
 used during OpenStack services deployment for any openstack operator.
 
