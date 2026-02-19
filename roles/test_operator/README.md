@@ -119,15 +119,16 @@ Default value: {}
 <!-- START ANSIBLETEST_SPECIFIC_PARAMETERS -->
 * `cifmw_test_operator_ansibletest_ansible_collection`: (String) Extra ansible collections to install in addition to the ones that exist in the requirements.yaml. Default value: ``
 * `cifmw_test_operator_ansibletest_ansible_extra_vars`: (String) string to pass parameters to ansible. Default value: ``
+* `cifmw_test_operator_ansibletest_ansible_git_branch`: (String) Git branch to checkout from the repo. Default value: ``
 * `cifmw_test_operator_ansibletest_ansible_git_repo`: (String) Git repo to clone into container. Default value: ``
 * `cifmw_test_operator_ansibletest_ansible_inventory`: (String) string that contains the inventory file content. Default value: ``
 * `cifmw_test_operator_ansibletest_ansible_playbook_path`: (String) Path to ansible playbook. Default value: ``
 * `cifmw_test_operator_ansibletest_ansible_var_files`: (String) interface to create ansible var files. Default value: ``
 * `cifmw_test_operator_ansibletest_compute_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for computes. Default value: `dataplane-ansible-ssh-private-key-secret`
-* `cifmw_test_operator_ansibletest_config`: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L246-L274)
+* `cifmw_test_operator_ansibletest_config`: Definition of AnsibleTest CRD instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html)). Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L247-L276)
 * `cifmw_test_operator_ansibletest_container`: (String) Name of the ansibletests container. Default value: `openstack-ansible-tests`
 * `cifmw_test_operator_ansibletest_debug`: (Bool) Run ansible playbook with -vvvv. Default value: `false`
-* `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: WARNING: This parameter will be deprecated! Please use `cifmw_test_operator_ansibletest_extra_mounts` parameter instead. (List) Extra configmaps for mounting in the pod. Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L245-L274)
+* `cifmw_test_operator_ansibletest_extra_configmaps_mounts`: WARNING: This parameter will be deprecated! Please use `cifmw_test_operator_ansibletest_extra_mounts` parameter instead. (List) Extra configmaps for mounting in the pod. Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L246-L276)
 * `cifmw_test_operator_ansibletest_extra_mounts`: (List) A list of additional volume mounts for the ansibletest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
 * `cifmw_test_operator_ansibletest_image`: (String) Ansibletests image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_ansibletest_registry }}/{{ stage_vars_dict.cifmw_test_operator_ansibletest_namespace }}/{{ stage_vars_dict.cifmw_test_operator_ansibletest_container }}`
 * `cifmw_test_operator_ansibletest_image_tag`: (String) Ansibletests image to be used. Default value: `{{ cifmw_test_operator_default_image_tag }}`
@@ -137,7 +138,7 @@ Default value: {}
 * `cifmw_test_operator_ansibletest_openstack_config_secret`: (String) The name of the Secret containing the secure.yaml. Default value: "openstack-config-secret"
 * `cifmw_test_operator_ansibletest_registry`: (String) The registry where to pull ansibletests container. Default value: `{{ cifmw_test_operator_default_registry }}`
 * `cifmw_test_operator_ansibletest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
-* `cifmw_test_operator_ansibletest_workflow`: (List) A parameter that contains a workflow definition. Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L244)
+* `cifmw_test_operator_ansibletest_workflow`: (List) A parameter that contains a workflow definition. Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L245)
 * `cifmw_test_operator_ansibletest_workload_ssh_key_secret_name`: (String) The name of the k8s secret that contains an ssh key for the ansible workload. Default value: ``
 <!-- END ANSIBLETEST_SPECIFIC_PARAMETERS -->
 
@@ -146,7 +147,7 @@ Default value: {}
 * `cifmw_test_operator_horizontest_admin_password`: (String) OpenStack admin credentials. Default value: `12345678`
 * `cifmw_test_operator_horizontest_admin_username`: (String) OpenStack admin credentials. Default value: `admin`
 * `cifmw_test_operator_horizontest_auth_url`: (String) The OpenStack authentication URL. Default value: `https://keystone-public-openstack.apps.ocp.openstack.lab`
-* `cifmw_test_operator_horizontest_config`: (Dict) Definition of HorizonTest CR instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#horizontest-custom-resource)). Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L299-L329)
+* `cifmw_test_operator_horizontest_config`: (Dict) Definition of HorizonTest CR instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#horizontest-custom-resource)). Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml#L301-L331)
 * `cifmw_test_operator_horizontest_container`: (String) Name of the horizontest container. Default value: `openstack-horizontest`
 * `cifmw_test_operator_horizontest_dashboard_url`: (String) The URL of the Horizon dashboard. Default value: `https://horizon-openstack.apps.ocp.openstack.lab/`
 * `cifmw_test_operator_horizontest_debug`: (Bool) Run HorizonTest in debug mode, it keeps the operator pod sleeping infinitely (it must only set to `true` only for debugging purposes). Default value: `false`
