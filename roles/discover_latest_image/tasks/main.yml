@@ -14,17 +14,34 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: If one override is set, ensure all are set
+  when: >-
+    _discover_latest_image_baseurl_override is defined or
+    _discover_latest_image_qcow_prefix_override is defined or
+    _discover_latest_image_images_file_override is defined
+  ansible.builtin.assert:
+    that:
+      - _discover_latest_image_baseurl_override is defined
+      - _discover_latest_image_qcow_prefix_override is defined
+      - _discover_latest_image_images_file_override is defined
+    fail_msg: >-
+      Attempted to call the discover_latest_image role with an override
+      var set, but not all were set. Ensure that either all are set or none of them are set.
+      _discover_latest_image_baseurl_override: {{ _discover_latest_image_baseurl_override | default('UNDEFINED') }}
+      _discover_latest_image_qcow_prefix_override: {{ _discover_latest_image_qcow_prefix_override | default('UNDEFINED') }}
+      _discover_latest_image_images_file_override: {{ _discover_latest_image_images_file_override | default('UNDEFINED') }}
+
 - name: Get latest image
   register: discovered_image
   cifmw.general.discover_latest_image:
-    url: "{{ cifmw_discover_latest_image_base_url }}"
-    image_prefix: "{{ cifmw_discover_latest_image_qcow_prefix }}"
-    images_file: "{{ cifmw_discover_latest_image_images_file }}"
+    url: "{{ _discover_latest_image_baseurl_override | default(cifmw_discover_latest_image_base_url) }}"
+    image_prefix: "{{ _discover_latest_image_qcow_prefix_override | default(cifmw_discover_latest_image_qcow_prefix) }}"
+    images_file: "{{ _discover_latest_image_images_file_override | default(cifmw_discover_latest_image_images_file) }}"
 
 - name: Export facts accordingly
   ansible.builtin.set_fact:
-    cifmw_discovered_image_name: "{{ discovered_image['data']['image_name'] }}"
-    cifmw_discovered_image_url: "{{ discovered_image['data']['image_url'] }}"
-    cifmw_discovered_hash: "{{ discovered_image['data']['hash'] }}"
-    cifmw_discovered_hash_algorithm: "{{ discovered_image['data']['hash_algorithm'] }}"
+    "{{ cifmw_discover_latest_image_prefix }}_image_name": "{{ discovered_image['data']['image_name'] }}"
+    "{{ cifmw_discover_latest_image_prefix }}_image_url": "{{ discovered_image['data']['image_url'] }}"
+    "{{ cifmw_discover_latest_image_prefix }}_hash": "{{ discovered_image['data']['hash'] }}"
+    "{{ cifmw_discover_latest_image_prefix }}_hash_algorithm": "{{ discovered_image['data']['hash_algorithm'] }}"
     cacheable: true
