@@ -125,6 +125,25 @@
     - _cifmw_lvms_storage_cluster_csv_phase_out.stdout_lines | length > 0
     - "(_cifmw_lvms_storage_cluster_csv_phase_out.stdout_lines[0] | lower) == 'succeeded'"
 
+- name: Wait for LVMCluster CRD to be established
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: CustomResourceDefinition
+    name: lvmclusters.lvm.topolvm.io
+  register: _cifmw_lvms_crd_out
+  retries: "{{ cifmw_lvms_retries }}"
+  delay: "{{ cifmw_lvms_delay }}"
+  until:
+    - _cifmw_lvms_crd_out.resources | default([]) | length == 1
+    - _cifmw_lvms_crd_out.resources[0].status.conditions is defined
+    - >-
+      _cifmw_lvms_crd_out.resources[0].status.conditions |
+      selectattr("type", "equalto", "Established") |
+      selectattr("status", "equalto", "True") |
+      list | length > 0
+
 - name: Apply lvms-cluster manifest file
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
