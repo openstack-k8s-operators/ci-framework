@@ -28,6 +28,14 @@
     }
     }' image.config.openshift.io/cluster
 
+- name: Add additional allowed registries
+  when: cifmw_crc_additional_allowed_registries is defined
+  ansible.builtin.shell: |
+    oc patch --type=json \
+    --patch='[{"op": "add", "path": "/spec/registrySources/allowedRegistries/-", "value": "{{ item }}"}]' \
+    image.config.openshift.io/cluster
+  loop: "{{ cifmw_crc_additional_allowed_registries }}"
+
 - name: Ensure registries.conf.d exists
   become: true
   ansible.builtin.file:
@@ -48,6 +56,16 @@
       blocked = false
       mirror-by-digest-only = false
       prefix = ""
+
+- name: Set registry mirror override
+  when: cifmw_crc_registry_mirror_content is defined
+  become: true
+  ansible.builtin.blockinfile:
+    state: present
+    insertafter: EOF
+    dest: /etc/containers/registries.conf.d/12-override.conf
+    create: true
+    content: "{{ cifmw_crc_registry_mirror_content }}"
 
 - name: Restart crio
   become: true
