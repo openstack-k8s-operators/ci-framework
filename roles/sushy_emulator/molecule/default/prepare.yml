@@ -23,6 +23,22 @@
     - name: Ensure CRC is started
       ansible.builtin.command:
         cmd: crc start
+      register: _crc_output
+      ignore_errors: true  # noqa: ignore-errors
+
+    - name: Login to the OpenShift when certificate is expired
+      when: "'Kubelet serving certificate has expired' in _crc_output.stderr"
+      ansible.builtin.command: >
+        oc login
+        -u kubeadmin
+        -p "{{ pass_kubeadmin }}"
+        https://api.crc.testing:6443
+        --insecure-skip-tls-verify=true
+      register: _openshift_login
+      until: _openshift_login.rc != 1
+      retries: 300
+      delay: 10
+      changed_when: false
 
     - name: Inject crc hostname/IP in hosts
       become: true
