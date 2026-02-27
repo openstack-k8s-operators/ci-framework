@@ -1,0 +1,102 @@
+---
+# Main: Generate stackviz HTML reports from tempest subunit results
+# This is the main orchestrator that coordinates stackviz report generation
+# Included after log collection when tempest tests complete
+# Handles multiple test stages by generating separate reports for each
+# Calls generate-stackviz-worker.yml for each subunit file found
+
+- name: Find all tempest subunit files (results and retries, compressed or uncompressed)
+  ansible.builtin.find:
+    paths: "{{ cifmw_test_operator_artifacts_basedir }}"
+    patterns:
+      - "tempest_results.subunit*"
+      - "tempest_retry.subunit*"
+    recurse: true
+  register: subunit_gz_files
+
+- name: Display found subunit files
+  ansible.builtin.debug:
+    msg: "Found {{ subunit_gz_files.files | length }} subunit file(s) (results + retries)"
+
+- name: Process stackviz reports
+  when: subunit_gz_files.files | length > 0
+  block:
+    - name: Install required RPM packages for stackviz
+      ansible.builtin.package:
+        name:
+          - python3-subunit
+          - python3-testtools
+        state: present
+      become: true
+      when: cifmw_test_operator_stackviz_auto_install_deps
+
+    # Initialize list to track generated reports
+    - name: Initialize stackviz reports list
+      ansible.builtin.set_fact:
+        _stackviz_generated_reports: []
+
+    # Process each subunit file
+    - name: Process each subunit file and generate individual reports
+      vars:
+        _current_subunit_source: "{{ subunit_file.path }}"
+        _current_dir: "{{ subunit_file.path | dirname }}"
+        _current_stage_name: "{{ subunit_file.path | dirname | basename }}"
+        _current_is_compressed: "{{ subunit_file.path.endswith('.gz') }}"
+        _is_retry_file: "{{ 'tempest_retry' in subunit_file.path }}"
+        _base_filename: "{{ 'tempest_retry' if 'tempest_retry' in subunit_file.path else 'tempest_results' }}"
+        _html_filename: "{{ 'tempest_retry_viz.html' if 'tempest_retry' in subunit_file.path else 'tempest-viz.html' }}"
+      ansible.builtin.include_tasks: generate-stackviz-worker.yml
+      loop: "{{ subunit_gz_files.files }}"
+      loop_control:
+        loop_var: subunit_file
+
+    # Create summary index page
+    - name: Create stackviz summary index
+      when:
+        - _stackviz_generated_reports | length > 0
+        - cifmw_test_operator_stackviz_create_index
+      block:
+        - name: Create stackviz directory
+          ansible.builtin.file:
+            path: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz"
+            state: directory
+            mode: '0755'
+
+        - name: Generate summary index HTML
+          ansible.builtin.template:
+            src: stackviz-index.html.j2
+            dest: "{{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html"
+            mode: '0644'
+
+    - name: Display stackviz summary
+      ansible.builtin.debug:
+        msg: |
+          ===================================================
+          Stackviz Report Generation Complete!
+
+          Total Reports Generated: {{ _stackviz_generated_reports | length }}
+
+          {% for report in _stackviz_generated_reports %}
+          - {{ report.report_label }}
+            {{ report.html_path }}
+          {% endfor %}
+
+          {% if cifmw_test_operator_stackviz_create_index %}
+          Summary Index: {{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html
+
+          To view all reports:
+          {% if ansible_os_family == 'Darwin' %}
+          open {{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html
+          {% else %}
+          xdg-open {{ cifmw_test_operator_artifacts_basedir }}/stackviz/index.html
+          {% endif %}
+          {% endif %}
+          ===================================================
+      when: _stackviz_generated_reports | length > 0
+
+- name: Display warning when no subunit files found
+  ansible.builtin.debug:
+    msg: >
+      WARNING: No tempest subunit files (tempest_results.subunit* or tempest_retry.subunit*) found in {{ cifmw_test_operator_artifacts_basedir }}.
+      Stackviz report generation skipped.
+  when: subunit_gz_files.files | length == 0
