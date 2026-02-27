@@ -1,0 +1,51 @@
+---
+- name: Trust SKMO leaf CA in central region
+  hosts: localhost
+  gather_facts: false
+  vars:
+    skmo_values_file: "{{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml"
+    central_namespace: openstack
+    leaf_namespace: openstack2
+    leaf_rootca_secret: rootca-public
+  tasks:
+    - name: Load SKMO values
+      ansible.builtin.set_fact:
+        skmo_values: "{{ lookup('file', skmo_values_file) | from_yaml }}"
+
+    - name: Set central CA bundle secret name
+      ansible.builtin.set_fact:
+        central_ca_bundle_secret_name: "{{ skmo_values.data.centralCaBundleSecretName }}"
+
+    - name: Create or append central CA bundle secret
+      ansible.builtin.shell: |
+        set -euo pipefail
+        tmpdir="$(mktemp -d)"
+        newkey="skmo-leaf-rootca.crt"
+        export TMPDIR="${tmpdir}"
+
+        if oc -n {{ central_namespace }} get secret \
+          {{ central_ca_bundle_secret_name }} >/dev/null 2>&1; then
+          oc -n {{ central_namespace }} get secret \
+            {{ central_ca_bundle_secret_name }} -o json | python3 -c '
+        import base64, json, os, sys
+        tmpdir = os.environ.get("TMPDIR")
+        data = json.load(sys.stdin).get("data", {})
+        for key, value in data.items():
+            path = os.path.join(tmpdir, key)
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(value))
+        '
+        fi
+
+        oc -n {{ leaf_namespace }} get secret {{ leaf_rootca_secret }} \
+          -o jsonpath='{.data.tls\.crt}' | base64 -d \
+          > "${tmpdir}/${newkey}"
+
+        oc -n {{ central_namespace }} create secret generic \
+          {{ central_ca_bundle_secret_name }} \
+          --from-file="${tmpdir}" \
+          --dry-run=client -o yaml | oc apply -f -
+
+        rm -rf "${tmpdir}"
+      args:
+        executable: /bin/bash
