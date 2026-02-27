@@ -15,14 +15,66 @@
 # under the License.
 
 
-- name: Converge
+- name: Test multiple image discovery
   hosts: all
   vars:
-    cifmw_repo_setup_os_release: centos
-  roles:
-    - role: "discover_latest_image"
+    cifmw_discover_latest_image_requests:
+      centos9:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+        images_file: "CHECKSUM"
+      centos10:
+        base_url: "https://cloud.centos.org/centos/10-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+        images_file: "CHECKSUM"
   tasks:
-    - name: Ensure proper facts are available
+    - name: Run role with multiple images
+      ansible.builtin.include_role:
+        name: "discover_latest_image"
+
+    - name: Ensure the result dict has both images
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_images_dict is defined
+          - cifmw_discovered_images_dict.centos9 is defined
+          - cifmw_discovered_images_dict.centos10 is defined
+          - cifmw_discovered_images_dict.default is not defined
+
+    - name: Ensure each entry has required fields
+      ansible.builtin.assert:
+        that:
+          - item.value.image_name is defined
+          - item.value.image_url is defined
+          - item.value.hash is defined
+          - item.value.hash_algorithm is defined
+      loop: "{{ cifmw_discovered_images_dict | dict2items }}"
+
+    - name: Ensure single-image facts are NOT set when no default entry
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_image_name is not defined
+          - cifmw_discovered_image_url is not defined
+          - cifmw_discovered_hash is not defined
+          - cifmw_discovered_hash_algorithm is not defined
+
+- name: Test multi-image discovery with default entry
+  hosts: all
+  vars:
+    cifmw_discover_latest_image_requests:
+      default:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+        images_file: "CHECKSUM"
+      centos10:
+        base_url: "https://cloud.centos.org/centos/10-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+        images_file: "CHECKSUM"
+  tasks:
+    - name: Run role with default entry
+      ansible.builtin.include_role:
+        name: "discover_latest_image"
+
+    - name: Ensure single-image facts are set from default entry
       ansible.builtin.assert:
         that:
           - cifmw_discovered_image_name is defined
@@ -30,6 +82,139 @@
           - cifmw_discovered_hash is defined
           - cifmw_discovered_hash_algorithm is defined
 
+    - name: Ensure the result dict has both entries including default
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_images_dict is defined
+          - cifmw_discovered_images_dict.default is defined
+          - cifmw_discovered_images_dict.centos10 is defined
+
+    - name: Ensure single-image facts match default dict entry
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_image_name == cifmw_discovered_images_dict.default.image_name
+          - cifmw_discovered_image_url == cifmw_discovered_images_dict.default.image_url
+          - cifmw_discovered_hash == cifmw_discovered_images_dict.default.hash
+          - cifmw_discovered_hash_algorithm == cifmw_discovered_images_dict.default.hash_algorithm
+
     - name: Print discover_latest_image variables
       ansible.builtin.debug:
         msg: "{{ cifmw_discovered_image_name, cifmw_discovered_image_url, cifmw_discovered_hash, cifmw_discovered_hash_algorithm }}"
+
+    - name: Ensure default facts point to centos9
+      ansible.builtin.assert:
+        that:
+          - "'CentOS-Stream-GenericCloud-x86_64-9' in cifmw_discovered_image_name"
+
+- name: Test single image discovery
+  hosts: all
+  roles:
+    - role: "discover_latest_image"
+  vars:
+    cifmw_discover_latest_image_base_url: "https://cloud.centos.org/centos/10-stream/x86_64/images/"
+    cifmw_discover_latest_image_qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+    cifmw_discover_latest_image_images_file: "CHECKSUM"
+  tasks:
+    - name: Ensure single-image facts are available
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_image_name is defined
+          - cifmw_discovered_image_url is defined
+          - cifmw_discovered_hash is defined
+          - cifmw_discovered_hash_algorithm is defined
+
+    - name: Ensure new dict fact is created
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_images_dict is defined
+          - cifmw_discovered_images_dict.default is defined
+          - cifmw_discovered_images_dict.default.image_name is defined
+          - cifmw_discovered_images_dict.default.image_url is defined
+          - cifmw_discovered_images_dict.default.hash is defined
+          - cifmw_discovered_images_dict.default.hash_algorithm is defined
+
+    - name: Ensure single-image facts match default dict entry
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_image_name == cifmw_discovered_images_dict.default.image_name
+          - cifmw_discovered_image_url == cifmw_discovered_images_dict.default.image_url
+          - cifmw_discovered_hash == cifmw_discovered_images_dict.default.hash
+          - cifmw_discovered_hash_algorithm == cifmw_discovered_images_dict.default.hash_algorithm
+
+    - name: Print discover_latest_image variables
+      ansible.builtin.debug:
+        msg: "{{ cifmw_discovered_image_name, cifmw_discovered_image_url, cifmw_discovered_hash, cifmw_discovered_hash_algorithm }}"
+
+    - name: Ensure the discovered_image vars are pointing to a centos10 image as expected
+      ansible.builtin.assert:
+        that:
+          - "'CentOS-Stream-GenericCloud-x86_64-10' in cifmw_discovered_image_name"
+
+- name: Test schema validation failure when missing some entries
+  hosts: all
+  vars:
+    cifmw_discover_latest_image_requests:
+      missing_fields:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+  tasks:
+    - name: Validate that invalid schema causes a failure
+      block:
+        - name: Run role with invalid schema
+          ansible.builtin.include_role:
+            name: "discover_latest_image"
+
+        - name: Fail if role did not error
+          ansible.builtin.fail:
+            msg: "Role should have failed due to missing qcow_prefix and images_file"
+      rescue:
+        - name: Confirm expected schema validation failure
+          ansible.builtin.debug:
+            msg: "Role correctly failed with invalid schema"
+
+- name: Test schema validation failure when an entry is a non-dict
+  hosts: all
+  vars:
+    cifmw_discover_latest_image_requests:
+      well_formatted_dict:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+        images_file: "CHECKSUM"
+      not_a_dict: testing
+  tasks:
+    - name: Validate that invalid schema causes a failure
+      block:
+        - name: Run role with invalid schema
+          ansible.builtin.include_role:
+            name: "discover_latest_image"
+
+        - name: Fail if role did not error
+          ansible.builtin.fail:
+            msg: "Role should have failed due to non-dict `not_a_dict` key"
+      rescue:
+        - name: Confirm expected schema validation failure
+          ansible.builtin.debug:
+            msg: "Role correctly failed with invalid schema"
+
+- name: Test schema validation failure when an entry has an extra key
+  hosts: all
+  vars:
+    cifmw_discover_latest_image_requests:
+      unnecessary_entry:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+        images_file: "CHECKSUM"
+        should_fail: "Because of this entry!"
+  tasks:
+    - name: Validate that invalid schema causes a failure
+      block:
+        - name: Run role with invalid schema
+          ansible.builtin.include_role:
+            name: "discover_latest_image"
+
+        - name: Fail if role did not error
+          ansible.builtin.fail:
+            msg: "Role should have failed due to an extra key"
+      rescue:
+        - name: Confirm expected schema validation failure
+          ansible.builtin.debug:
+            msg: "Role correctly failed with extra key/value"
