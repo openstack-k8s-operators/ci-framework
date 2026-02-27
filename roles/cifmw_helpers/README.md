@@ -3,6 +3,7 @@
 That role was created to replace nested Ansible (Ansible that execute
 ansible or ansible-playbook binary using command/shell module) execution in
 this project.
+Role might contain tasks, required for test jobs, like molecule job.
 
 ## Helper for Zuul executor cifmw general collection
 
@@ -388,4 +389,31 @@ it parse all yaml files available in the directory.
       ansible.builtin.debug:
         msg: |
           {{ noop_helper_var }}
+```
+
+## Test project helpers
+
+### Start CRC
+
+In some CI jobs, we are using [crc](https://crc.dev/) to verify the role functionality.
+Example usage:
+
+* Setup crc with default resources
+
+```yaml
+    - name: Start CRC
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: crc_start.yml
+```
+
+* Setup crc with limited resources, like memory, disk, cpu - [more](https://crc.dev/docs/installing/)
+
+```yaml
+    - name: Start CRC
+      vars:
+        cifmw_helpers_crc_additional_params: "--memory 14000 --disk-size 80 --cpus 6"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: crc_start.yml
 ```
