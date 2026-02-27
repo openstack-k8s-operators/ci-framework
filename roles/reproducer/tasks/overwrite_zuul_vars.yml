@@ -1,0 +1,67 @@
+---
+# NOTE(dpawlik): Most variables are available,
+# but we can not parse variables that were not dumped into
+# reproducer-variables.yml or they are unknown.
+# Get desired variables necessary during the bootstrap, like:
+# cifmw_discovered_image_url even when it is not needed, because
+# nodes that require that var are already deployed.
+# If some variables are missing, consider to add cifmw_discover.* vars into
+# reproducer-variables.yml - roles/reproducer/tasks/configure_controller.yml
+# https://github.com/openstack-k8s-operators/ci-framework/pull/3706
+
+# Based on: roles/cifmw_setup/tasks/bootstrap.yml
+- name: Get customized parameters
+  ansible.builtin.set_fact:
+    zuul_job_overwrite_vars: >-
+      {{
+        hostvars[cifmw_target_host | default('hypervisor')] |
+        dict2items |
+        selectattr("key", "match",
+                   "^(cifmw|pre|post)_(?!install_yamls|openshift_token|openshift_login|openshift_kubeconfig).*") |
+        list | items2dict
+      }}
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+- name: Overwrite reproducer-variables.yml when ZIronic used
+  block:
+    # NOTE: To avoid situation, that reproducer-variables.yml contains
+    # undefined variable, because not always all variables can be resolved
+    # (sometimes vars are defined in scenarios in later stage), it might
+    # fail because of that. Better is to set as a fact, and dump to a file,
+    # especially that the reproducer-variables.yml is taken as an argument
+    # var when calling nested ansible.
+    - name: Fetch reproducer-variables.yml to hypervisor
+      ansible.builtin.fetch:
+        src: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
+        dest: /tmp/reproducer-variables.yml
+        flat: true
+      delegate_to: controller-0
+
+    - name: Dump reproducer-variables.yml to var
+      ansible.builtin.slurp:
+        src: /tmp/reproducer-variables.yml
+      register: reproducer_original
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Read reproducer-variables.yml - in case if some variable are missing
+      ansible.builtin.include_vars:
+        file: /tmp/reproducer-variables.yml
+
+    - name: Deep merge and write back
+      ansible.builtin.copy:
+        content: >-
+          {{
+            (reproducer_original.content | b64decode | from_yaml)
+            | combine(zuul_job_overwrite_vars, recursive=true)
+            | to_nice_yaml
+          }}
+        dest: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
+        mode: '0644'
+        backup: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      delegate_to: controller-0
+  always:
+    - name: Remove temporary reproducer-variables.yml
+      ansible.builtin.file:
+        path: /tmp/reproducer-variables.yml
+        state: absent
