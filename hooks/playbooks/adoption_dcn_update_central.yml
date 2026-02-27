@@ -1,0 +1,221 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# This playbook updates the central site after all DCN sites are deployed.
+# 1. Copy Ceph keys and configuration from DCN sites to central controllers
+# 2. Configure Glance with DCN Ceph stores
+# 3. Restart Glance to apply the new configuration
+
+- name: Update central site with DCN Ceph stores
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _dcn_stack_names: "{{ dcn_stack_names | default('dcn1,dcn2') }}"
+    _glance_config_file: "/var/lib/config-data/puppet-generated/glance_api/etc/glance/glance-api.conf"
+  tasks:
+    - name: Build list of DCN sites from scenario
+      vars:
+        _dcn_name: "{{ item }}"
+        _dcn_stack: >-
+          {{ cifmw_adoption_osp_deploy_scenario.stacks |
+             selectattr('stackname', 'equalto', _dcn_name) |
+             first }}
+        _dcn_group: "{{ _dcn_stack.stack_nodes | first }}"
+        _dcn_node: "{{ _vm_groups[_dcn_group] | first }}"
+      ansible.builtin.set_fact:
+        _dcn_sites: >-
+          {{ _dcn_sites | default([]) + [{'name': _dcn_name, 'ceph_node': _dcn_node}] }}
+      loop: "{{ _dcn_stack_names.split(',') }}"
+
+    - name: Get list of controller nodes
+      vars:
+        _central_stack: >-
+          {{ cifmw_adoption_osp_deploy_scenario.stacks |
+             selectattr('stackname', 'equalto', central_stack_name | default('central')) |
+             first }}
+        _controller_group: >-
+          {{ _central_stack.stack_nodes |
+             select('search', 'controller') |
+             first | default('osp-controllers') }}
+      ansible.builtin.set_fact:
+        _controller_nodes: "{{ _vm_groups[_controller_group] | default([]) }}"
+
+    - name: Display discovered nodes
+      ansible.builtin.debug:
+        msg:
+          - "DCN sites: {{ _dcn_sites }}"
+          - "Controller nodes: {{ _controller_nodes }}"
+
+    - name: Build Glance DCN store configuration
+      ansible.builtin.set_fact:
+        _glance_dcn_config: |
+          {% for site in _dcn_sites %}
+          [{{ site.name }}]
+          rbd_store_ceph_conf=/etc/ceph/{{ site.name }}.conf
+          rbd_store_user=openstack
+          rbd_store_pool=images
+          rbd_thin_provisioning=False
+          store_description={{ site.name }} rbd glance store
+          {% endfor %}
+
+    - name: Copy Ceph files from DCN sites to controllers
+      block:
+        - name: Ensure ceph config directory exists on controllers
+          delegate_to: "{{ item }}"
+          become: true
+          ansible.builtin.file:
+            path: "/var/lib/tripleo-config/ceph"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop: "{{ _controller_nodes }}"
+
+        - name: Fetch Ceph config from DCN site
+          delegate_to: "{{ item.ceph_node }}"
+          become: true
+          ansible.builtin.fetch:
+            src: "/var/lib/tripleo-config/ceph/{{ item.name }}.conf"
+            dest: "/tmp/ceph_files/{{ item.name }}.conf"
+            flat: true
+          loop: "{{ _dcn_sites }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Fetch Ceph keyring from DCN site
+          delegate_to: "{{ item.ceph_node }}"
+          become: true
+          ansible.builtin.fetch:
+            src: "/var/lib/tripleo-config/ceph/{{ item.name }}.client.openstack.keyring"
+            dest: "/tmp/ceph_files/{{ item.name }}.client.openstack.keyring"
+            flat: true
+          loop: "{{ _dcn_sites }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Copy Ceph config to controllers
+          delegate_to: "{{ item.1 }}"
+          become: true
+          ansible.builtin.copy:
+            src: "/tmp/ceph_files/{{ item.0.name }}.conf"
+            dest: "/var/lib/tripleo-config/ceph/{{ item.0.name }}.conf"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ _dcn_sites | product(_controller_nodes) | list }}"
+          loop_control:
+            label: "{{ item.0.name }} -> {{ item.1 }}"
+
+        - name: Copy Ceph keyring to controllers
+          delegate_to: "{{ item.1 }}"
+          become: true
+          ansible.builtin.copy:
+            src: "/tmp/ceph_files/{{ item.0.name }}.client.openstack.keyring"
+            dest: "/var/lib/tripleo-config/ceph/{{ item.0.name }}.client.openstack.keyring"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: "{{ _dcn_sites | product(_controller_nodes) | list }}"
+          loop_control:
+            label: "{{ item.0.name }} -> {{ item.1 }}"
+
+    - name: Configure Glance with DCN stores
+      block:
+        - name: Check glance config status on each controller
+          delegate_to: "{{ controller }}"
+          become: true
+          ansible.builtin.stat:
+            path: "{{ _glance_config_file }}"
+          register: _glance_status
+          loop: "{{ _controller_nodes }}"
+          loop_control:
+            loop_var: controller
+
+        - name: Build list of controllers needing Glance update
+          ansible.builtin.set_fact:
+            _controllers_to_update: >-
+              {{ _glance_status.results |
+                 selectattr('stat.exists') |
+                 map(attribute='controller') |
+                 list }}
+
+        - name: Display controllers to update
+          ansible.builtin.debug:
+            msg: "Controllers needing Glance update: {{ _controllers_to_update }}"
+
+        - name: Get current enabled_backends value
+          delegate_to: "{{ controller }}"
+          become: true
+          ansible.builtin.command:
+            cmd: awk -F'\s*=\s*' '/^enabled_backends\s*=/{print $2; exit}' "{{ _glance_config_file }}"
+          register: _current_backends
+          changed_when: false
+          loop: "{{ _controllers_to_update }}"
+          loop_control:
+            loop_var: controller
+
+        - name: Build DCN backends string
+          ansible.builtin.set_fact:
+            _dcn_backends_suffix: >-
+              {{ _dcn_sites | map(attribute='name') | map('regex_replace', '^(.*)$', ',\1:rbd') | join('') }}
+
+        - name: Update enabled_backends to include DCN stores
+          delegate_to: "{{ item.controller }}"
+          become: true
+          ansible.builtin.lineinfile:
+            path: "{{ _glance_config_file }}"
+            regexp: '^enabled_backends\s*='
+            line: "enabled_backends={{ item.stdout }}{{ _dcn_backends_suffix }}"
+            backrefs: false
+          loop: "{{ _current_backends.results }}"
+          loop_control:
+            label: "{{ item.controller }}"
+          when: _dcn_sites[0].name ~ ':rbd' not in item.stdout
+
+        - name: Enable copy-image import method for multistore
+          delegate_to: "{{ controller }}"
+          become: true
+          ansible.builtin.lineinfile:
+            path: "{{ _glance_config_file }}"
+            regexp: '^enabled_import_methods\s*='
+            line: 'enabled_import_methods=["web-download","copy-image"]'
+            insertafter: '^\[DEFAULT\]'
+          loop: "{{ _controllers_to_update }}"
+          loop_control:
+            loop_var: controller
+
+        - name: Add DCN store configuration to glance-api.conf
+          delegate_to: "{{ controller }}"
+          become: true
+          ansible.builtin.blockinfile:
+            path: "{{ _glance_config_file }}"
+            block: "{{ _glance_dcn_config }}"
+            insertafter: EOF
+          loop: "{{ _controllers_to_update }}"
+          loop_control:
+            loop_var: controller
+          register: _glance_config_changed
+
+    - name: Restart Glance API service on updated controllers
+      delegate_to: "{{ controller }}"
+      become: true
+      ansible.builtin.systemd:
+        name: tripleo_glance_api.service
+        state: restarted
+      loop: "{{ _controllers_to_update }}"
+      loop_control:
+        loop_var: controller
+      when: _controllers_to_update | length > 0
