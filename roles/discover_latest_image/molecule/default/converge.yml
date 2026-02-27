@@ -15,14 +15,57 @@
 # under the License.
 
 
-- name: Converge
+- name: Test multiple image discovery
+  hosts: all
+  vars:
+    cifmw_repo_setup_os_release: centos
+    cifmw_discover_latest_image_requests:
+      rhel9:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-"
+        images_file: "CHECKSUM"
+      rhel8:
+        base_url: "https://cloud.centos.org/centos/8-stream/x86_64/images/"
+        qcow_prefix: "CentOS-Stream-GenericCloud-"
+        images_file: "CHECKSUM"
+  tasks:
+    - name: Run role with multiple images
+      ansible.builtin.include_role:
+        name: "discover_latest_image"
+
+    - name: Ensure dict has both images
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_images_dict is defined
+          - cifmw_discovered_images_dict.rhel9 is defined
+          - cifmw_discovered_images_dict.rhel8 is defined
+          - cifmw_discovered_images_dict.default is not defined
+
+    - name: Ensure each entry has required fields
+      ansible.builtin.assert:
+        that:
+          - item.value.image_name is defined
+          - item.value.image_url is defined
+          - item.value.hash is defined
+          - item.value.hash_algorithm is defined
+      loop: "{{ cifmw_discovered_images_dict | dict2items }}"
+
+    - name: Ensure legacy facts are NOT set when no default entry
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_image_name is not defined
+          - cifmw_discovered_image_url is not defined
+          - cifmw_discovered_hash is not defined
+          - cifmw_discovered_hash_algorithm is not defined
+
+- name: Test single image discovery with default entry
   hosts: all
   vars:
     cifmw_repo_setup_os_release: centos
   roles:
     - role: "discover_latest_image"
   tasks:
-    - name: Ensure proper facts are available
+    - name: Ensure legacy facts are available
       ansible.builtin.assert:
         that:
           - cifmw_discovered_image_name is defined
@@ -30,6 +73,50 @@
           - cifmw_discovered_hash is defined
           - cifmw_discovered_hash_algorithm is defined
 
+    - name: Ensure new dict fact is created
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_images_dict is defined
+          - cifmw_discovered_images_dict.default is defined
+          - cifmw_discovered_images_dict.default.image_name is defined
+          - cifmw_discovered_images_dict.default.image_url is defined
+          - cifmw_discovered_images_dict.default.hash is defined
+          - cifmw_discovered_images_dict.default.hash_algorithm is defined
+
+    - name: Ensure legacy facts match default dict entry
+      ansible.builtin.assert:
+        that:
+          - cifmw_discovered_image_name == cifmw_discovered_images_dict.default.image_name
+          - cifmw_discovered_image_url == cifmw_discovered_images_dict.default.image_url
+          - cifmw_discovered_hash == cifmw_discovered_images_dict.default.hash
+          - cifmw_discovered_hash_algorithm == cifmw_discovered_images_dict.default.hash_algorithm
+
     - name: Print discover_latest_image variables
       ansible.builtin.debug:
         msg: "{{ cifmw_discovered_image_name, cifmw_discovered_image_url, cifmw_discovered_hash, cifmw_discovered_hash_algorithm }}"
+
+- name: Test schema validation failure
+  hosts: all
+  vars:
+    cifmw_repo_setup_os_release: centos
+    cifmw_discover_latest_image_requests:
+      missing_fields:
+        base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
+  tasks:
+    - name: Clear facts from previous play
+      ansible.builtin.set_fact:
+        cifmw_discovered_images_dict: {}
+
+    - name: Validate that invalid schema causes a failure
+      block:
+        - name: Run role with invalid schema
+          ansible.builtin.include_role:
+            name: "discover_latest_image"
+
+        - name: Fail if role did not error
+          ansible.builtin.fail:
+            msg: "Role should have failed due to missing qcow_prefix and images_file"
+      rescue:
+        - name: Confirm expected schema validation failure
+          ansible.builtin.debug:
+            msg: "Role correctly failed with invalid schema"
