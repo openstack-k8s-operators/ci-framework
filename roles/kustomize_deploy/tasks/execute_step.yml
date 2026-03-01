@@ -126,6 +126,33 @@
       ansible.builtin.include_role:
         name: run_hook
 
+    - name: Detect metal3 pod node for baremetal nodeset provisioning
+      when:
+        - stage.name is defined
+        - stage.name is match('edpm-nodeset.*')
+      block:
+        - name: Get metal3 pod information
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Pod
+            namespace: openshift-machine-api
+            label_selectors:
+              - k8s-app=metal3
+          register: _cifmw_kustomize_deploy_metal3_pod_info
+
+        - name: Set metal3 node for provisionserver nodeSelector
+          ansible.builtin.set_fact:
+            cifmw_kustomize_deploy_metal3_node: "{{ _cifmw_kustomize_deploy_metal3_pod_info.resources[0].spec.nodeName }}"
+            cacheable: false
+          when:
+            - _cifmw_kustomize_deploy_metal3_pod_info.resources is defined
+            - _cifmw_kustomize_deploy_metal3_pod_info.resources | length > 0
+
+        - name: Log metal3 node location
+          ansible.builtin.debug:
+            msg: "Metal3 pod is running on {{ cifmw_kustomize_deploy_metal3_node }}, provisionserver will be co-located there"
+          when: cifmw_kustomize_deploy_metal3_node is defined
+
     - name: "Generate values.yaml for {{ stage.path }}"
       when:
         - _val.src_file is defined
