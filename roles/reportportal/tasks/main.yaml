@@ -29,6 +29,12 @@
     state: directory
     mode: "0755"
 
+- name: Check if Data router client binary is already present
+  ansible.builtin.stat:
+    path: "{{ cifmw_reportportal_droute_dir }}/{{ cifmw_reportportal_droute_binary }}"
+  register: droute_binary_stat
+  when: not cifmw_reportportal_dry_run | bool
+
 - name: Get the Data router client
   vars:
     _droute_url: >-
@@ -38,12 +44,16 @@
          cifmw_reportportal_droute_binary) |
         path_join
       }}
+    _droute_dest: "{{ cifmw_reportportal_droute_dir }}/{{ cifmw_reportportal_droute_binary }}"
   ansible.builtin.get_url:
     url: "{{ _droute_url }}"
-    dest: "{{ cifmw_reportportal_droute_dir }}"
+    dest: "{{ _droute_dest }}"
     backup: true
     mode: "0755"
-  when: not cifmw_reportportal_dry_run | bool
+  when:
+    - not cifmw_reportportal_dry_run | bool
+    - droute_binary_stat is not skipped
+    - not droute_binary_stat.stat.exists
 
 - name: Create the metadata file
   ansible.builtin.template:
