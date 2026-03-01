@@ -1,0 +1,115 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# =============================================================================
+# Keycloak Client Configuration for OIDC Authentication Methods
+# =============================================================================
+# This task configures the Keycloak client to support all OIDC authentication
+# methods including:
+#   - Service Accounts (for Client Credentials flow)
+#   - Device Authorization (for Device Authorization flow)
+#
+# Prerequisites:
+#   - Keycloak must be deployed and accessible
+#   - The OIDC client (rhoso) must already exist
+# =============================================================================
+
+- name: Get Keycloak admin token
+  ansible.builtin.uri:
+    url: "{{ cifmw_federation_keycloak_url }}/auth/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: password
+      client_id: admin-cli
+      username: "{{ cifmw_federation_keycloak_admin_username }}"
+      password: "{{ cifmw_federation_keycloak_admin_password }}"
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+    status_code: 200
+  register: federation_keycloak_admin_token_response
+
+- name: Set admin token fact
+  ansible.builtin.set_fact:
+    federation_keycloak_admin_token: "{{ federation_keycloak_admin_token_response.json.access_token }}"
+
+- name: Get current client configuration
+  ansible.builtin.uri:
+    url: "{{ cifmw_federation_keycloak_url }}/auth/admin/realms/{{ cifmw_federation_keycloak_realm }}/clients?clientId={{ cifmw_federation_keystone_OIDC_ClientID }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ federation_keycloak_admin_token }}"
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+    status_code: 200
+  register: federation_keycloak_client_response
+
+- name: Extract client ID
+  ansible.builtin.set_fact:
+    federation_keycloak_client_uuid: "{{ federation_keycloak_client_response.json[0].id }}"
+  when: federation_keycloak_client_response.json | length > 0
+
+- name: Display current client configuration
+  ansible.builtin.debug:
+    msg:
+      - "Client ID: {{ cifmw_federation_keystone_OIDC_ClientID }}"
+      - "Client UUID: {{ federation_keycloak_client_uuid }}"
+      - "Service Accounts Enabled: {{ federation_keycloak_client_response.json[0].serviceAccountsEnabled | default(false) }}"
+      - "Device Authorization: {{ federation_keycloak_client_response.json[0].attributes.get('oauth2.device.authorization.grant.enabled', 'false') | default('false') }}"
+  when: federation_keycloak_client_response.json | length > 0
+
+- name: Update client to enable Service Accounts and Device Authorization
+  ansible.builtin.uri:
+    url: "{{ cifmw_federation_keycloak_url }}/auth/admin/realms/{{ cifmw_federation_keycloak_realm }}/clients/{{ federation_keycloak_client_uuid }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ federation_keycloak_admin_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      clientId: "{{ cifmw_federation_keystone_OIDC_ClientID }}"
+      serviceAccountsEnabled: true
+      directAccessGrantsEnabled: true
+      standardFlowEnabled: true
+      implicitFlowEnabled: true
+      publicClient: false
+      attributes:
+        oauth2.device.authorization.grant.enabled: "true"
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+    status_code: 204
+  when: federation_keycloak_client_response.json | length > 0
+  register: federation_keycloak_client_update
+
+- name: Verify updated client configuration
+  ansible.builtin.uri:
+    url: "{{ cifmw_federation_keycloak_url }}/auth/admin/realms/{{ cifmw_federation_keycloak_realm }}/clients/{{ federation_keycloak_client_uuid }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ federation_keycloak_admin_token }}"
+    validate_certs: "{{ cifmw_federation_keycloak_url_validate_certs }}"
+    status_code: 200
+  register: federation_keycloak_client_updated
+  when: federation_keycloak_client_response.json | length > 0
+
+- name: Display updated client configuration
+  ansible.builtin.debug:
+    msg:
+      - "Client updated successfully"
+      - "Service Accounts Enabled: {{ federation_keycloak_client_updated.json.serviceAccountsEnabled }}"
+      - "Direct Access Grants: {{ federation_keycloak_client_updated.json.directAccessGrantsEnabled }}"
+      - "Standard Flow: {{ federation_keycloak_client_updated.json.standardFlowEnabled }}"
+      - "Device Authorization: {{ federation_keycloak_client_updated.json.attributes.get('oauth2.device.authorization.grant.enabled', 'false') }}"
+  when:
+    - federation_keycloak_client_response.json | length > 0
+    - federation_keycloak_client_updated is defined
