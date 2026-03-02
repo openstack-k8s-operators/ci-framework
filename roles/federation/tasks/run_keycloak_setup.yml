@@ -52,13 +52,11 @@
   kubernetes.core.k8s_info:
     api_version: operators.coreos.com/v1alpha1
     kind: InstallPlan
+    namespace: "{{ cifmw_federation_operator_namespace }}"
+    label_selectors:
+      - "operators.coreos.com/rhsso-operator.{{ cifmw_federation_operator_namespace }}"
   register: ip_list
-  until: >-
-    {{
-      ip_list.resources |
-      map(attribute='metadata.labels') |
-      select('match', '.*rhsso-operator.*')
-    }}
+  until: ip_list.resources | default([]) | length > 0
   retries: 30
   delay: 40
 
@@ -68,8 +66,9 @@
     PATH: "{{ cifmw_path }}"
   ansible.builtin.shell: >-
     oc patch installplan
-    $(oc get ip
-    -o=jsonpath='{.items[].metadata.name}')
+    $(oc get installplan -n {{ cifmw_federation_operator_namespace }}
+    -o=jsonpath='{.items[0].metadata.name}')
+    -n {{ cifmw_federation_operator_namespace }}
     --type merge --patch '{"spec":{"approved":true}}'
 
 - name: Add sso admin user secret
@@ -87,18 +86,72 @@
         ADMIN_USERNAME: "{{ cifmw_federation_keycloak_admin_username | b64encode }}"
         ADMIN_PASSWORD: "{{ cifmw_federation_keycloak_admin_password | b64encode }}"
 
-- name: Read federation sso template
-  ansible.builtin.template:
-    src: sso.yaml.j2
-    dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'sso.yaml' ] | path_join }}"
-    mode: "0644"
+- name: Install federation Keycloak instance
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: keycloak.org/v1alpha1
+      kind: Keycloak
+      metadata:
+        name: sso
+        namespace: "{{ cifmw_federation_keycloak_namespace }}"
+        labels:
+          app: sso
+      spec:
+        instances: 1
+        externalAccess:
+          enabled: true
 
-- name: Install federation sso pod
+- name: Wait for Keycloak service to be created
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: v1
+    kind: Service
+    name: keycloak
+    namespace: "{{ cifmw_federation_keycloak_namespace }}"
+  register: keycloak_service
+  until: keycloak_service.resources | length > 0
+  retries: 30
+  delay: 10
+
+- name: Create Route for Keycloak
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: keycloak
+        namespace: "{{ cifmw_federation_keycloak_namespace }}"
+      spec:
+        host: "keycloak-{{ cifmw_federation_keycloak_namespace }}.{{ cifmw_federation_domain }}"
+        to:
+          kind: Service
+          name: keycloak
+        port:
+          targetPort: 8443
+        tls:
+          termination: passthrough
+  register: _keycloak_route
+  until: _keycloak_route is succeeded
+  retries: 30
+  delay: 10
+
+- name: Grant privileged SCC to namespace default serviceaccount for Keycloak
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   ansible.builtin.command:
-    cmd: "oc apply -n {{ cifmw_federation_keycloak_namespace }} -f {{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'sso.yaml' ] | path_join }}"
+    cmd: >-
+      oc adm policy add-scc-to-user privileged
+      -n {{ cifmw_federation_keycloak_namespace }}
+      -z default
+  register: _scc_assignment
+  changed_when: >-
+    'clusterrole.rbac.authorization.k8s.io/system:openshift:scc:privileged added:'
+    in _scc_assignment.stdout
 
 - name: Add CRC IP address to hosts
   become: true
@@ -107,7 +160,7 @@
     block: |
       {{ hostvars['crc'].ansible_host }} api.crc.testing
       {{ hostvars['crc'].ansible_host }} oauth-openshift.apps-crc.testing
-      {{ hostvars['crc'].ansible_host }} keycloak-openstack.apps-crc.testing
+      {{ hostvars['crc'].ansible_host }} keycloak-{{ cifmw_federation_keycloak_namespace }}.{{ cifmw_federation_domain }}
   when: cifmw_federation_deploy_type == "crc"
 
 - name: Wait for SSO pod to be avalable
