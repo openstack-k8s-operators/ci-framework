@@ -10,6 +10,8 @@
     leaf_secret_name: osp-secret
     central_rootca_secret: rootca-public
     central_rootca_internal_secret: rootca-internal
+    leaf_transport_url_name: barbican-keystone-listener-regiontwo
+    leaf_transport_url_secret_copy: barbican-keystone-listener-regiontwo-transport
   tasks:
     - name: Load SKMO values
       ansible.builtin.set_fact:
@@ -131,5 +133,44 @@
           --dry-run=client -o yaml | oc apply -f -
 
         rm -rf "${tmpdir}"
+      args:
+        executable: /bin/bash
+
+    - name: Create TransportURL CR in central region for leaf listener
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc apply -f - <<EOF
+        apiVersion: rabbitmq.openstack.org/v1beta1
+        kind: TransportURL
+        metadata:
+          name: {{ leaf_transport_url_name }}
+          namespace: {{ central_namespace }}
+        spec:
+          rabbitmqClusterName: rabbitmq
+        EOF
+      args:
+        executable: /bin/bash
+
+    - name: Wait for TransportURL to be ready
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc wait transporturl {{ leaf_transport_url_name }} \
+          -n {{ central_namespace }} \
+          --for=condition=Ready --timeout=120s
+      args:
+        executable: /bin/bash
+
+    - name: Copy transport URL secret to leaf namespace
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc get secret {{ leaf_transport_url_name }} -n {{ central_namespace }} -o json \
+          | python3 -c '
+        import json, sys
+        secret = json.load(sys.stdin)
+        for key in ["namespace", "uid", "resourceVersion", "creationTimestamp", "ownerReferences", "managedFields"]:
+            secret.get("metadata", {}).pop(key, None)
+        secret["metadata"]["name"] = "{{ leaf_transport_url_secret_copy }}"
+        json.dump(secret, sys.stdout)
+        ' | oc apply -n {{ leaf_namespace }} -f -
       args:
         executable: /bin/bash

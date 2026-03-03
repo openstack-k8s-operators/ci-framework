@@ -1,0 +1,27 @@
+---
+- name: Patch leaf control plane with barbican-keystone-listener transport URL
+  hosts: localhost
+  gather_facts: false
+  vars:
+    central_namespace: openstack
+    leaf_namespace: openstack2
+    leaf_transport_url_name: barbican-keystone-listener-regiontwo
+  tasks:
+    - name: Extract transport_url from generated secret
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc get secret {{ leaf_transport_url_name }} -n {{ central_namespace }} \
+          -o jsonpath='{.data.transport_url}' | base64 -d
+      args:
+        executable: /bin/bash
+      register: leaf_notifications_transport_url
+      changed_when: false
+
+    - name: Patch OpenStackControlPlane in leaf region with notifications transport_url
+      ansible.builtin.shell: |
+        set -euo pipefail
+        transport_url="{{ leaf_notifications_transport_url.stdout }}"
+        oc patch openstackcontrolplane controlplane -n {{ leaf_namespace }} --type merge \
+          -p "{\"spec\":{\"barbican\":{\"template\":{\"barbicanKeystoneListener\":{\"customServiceConfig\":\"[DEFAULT]\\ntransport_url = ${transport_url}\\n[keystone_notifications]\\npool_name = barbican-listener-regionTwo\\n\"}}}}}"
+      args:
+        executable: /bin/bash
