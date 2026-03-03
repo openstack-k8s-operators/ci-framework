@@ -9,6 +9,7 @@
     leaf_namespace: openstack2
     leaf_secret_name: osp-secret
     central_rootca_secret: rootca-public
+    central_rootca_internal_secret: rootca-internal
   tasks:
     - name: Load SKMO values
       ansible.builtin.set_fact:
@@ -100,7 +101,6 @@
       ansible.builtin.shell: |
         set -euo pipefail
         tmpdir="$(mktemp -d)"
-        newkey="skmo-central-rootca.crt"
         export TMPDIR="${tmpdir}"
 
         if oc -n {{ leaf_namespace }} get secret {{ ca_bundle_secret_name }} \
@@ -119,7 +119,11 @@
 
         oc -n {{ central_namespace }} get secret {{ central_rootca_secret }} \
           -o jsonpath='{.data.tls\.crt}' | base64 -d \
-          > "${tmpdir}/${newkey}"
+          > "${tmpdir}/skmo-central-rootca.crt"
+
+        oc -n {{ central_namespace }} get secret {{ central_rootca_internal_secret }} \
+          -o jsonpath='{.data.tls\.crt}' | base64 -d \
+          > "${tmpdir}/skmo-central-rootca-internal.crt"
 
         oc -n {{ leaf_namespace }} create secret generic \
           {{ ca_bundle_secret_name }} \
