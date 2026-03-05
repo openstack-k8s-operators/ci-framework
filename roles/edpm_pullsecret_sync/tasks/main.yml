@@ -1,0 +1,111 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Validate required parameters
+  ansible.builtin.assert:
+    that:
+      - cifmw_edpm_pullsecret_sync_registry is defined
+      - cifmw_edpm_pullsecret_sync_registry | length > 0
+    fail_msg: "cifmw_edpm_pullsecret_sync_registry is required"
+
+- name: Get OpenShift pull-secret
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig | default(omit) }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: v1
+    kind: Secret
+    name: pull-secret
+    namespace: openshift-config
+  register: _cifmw_edpm_pullsecret_sync_secret
+
+- name: Validate pull-secret was retrieved
+  ansible.builtin.assert:
+    that:
+      - _cifmw_edpm_pullsecret_sync_secret.resources is defined
+      - _cifmw_edpm_pullsecret_sync_secret.resources | length > 0
+      - _cifmw_edpm_pullsecret_sync_secret.resources[0].data is defined
+      - _cifmw_edpm_pullsecret_sync_secret.resources[0].data['.dockerconfigjson'] is defined
+    fail_msg: "Failed to retrieve pull-secret from openshift-config namespace"
+
+- name: Parse pull-secret content
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    _cifmw_edpm_pullsecret_sync_dockerconfig: >-
+      {{ _cifmw_edpm_pullsecret_sync_secret.resources[0].data['.dockerconfigjson'] | b64decode | from_json }}
+
+- name: Validate registry exists in pull-secret
+  ansible.builtin.assert:
+    that:
+      - _cifmw_edpm_pullsecret_sync_dockerconfig.auths is defined
+      - cifmw_edpm_pullsecret_sync_registry in _cifmw_edpm_pullsecret_sync_dockerconfig.auths
+    fail_msg: >-
+      Registry '{{ cifmw_edpm_pullsecret_sync_registry }}' not found in pull-secret.
+      Available registries: {{ _cifmw_edpm_pullsecret_sync_dockerconfig.auths.keys() | list }}
+
+- name: Extract registry auth credentials
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    _cifmw_edpm_pullsecret_sync_registry_auth: >-
+      {{ _cifmw_edpm_pullsecret_sync_dockerconfig.auths[cifmw_edpm_pullsecret_sync_registry] }}
+
+- name: Validate auth field exists
+  ansible.builtin.assert:
+    that:
+      - _cifmw_edpm_pullsecret_sync_registry_auth.auth is defined
+      - _cifmw_edpm_pullsecret_sync_registry_auth.auth | length > 0
+    fail_msg: "Auth field not found for registry {{ cifmw_edpm_pullsecret_sync_registry }}"
+
+- name: Decode auth credentials
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    _cifmw_edpm_pullsecret_sync_decoded_auth: >-
+      {{ _cifmw_edpm_pullsecret_sync_registry_auth.auth | b64decode }}
+
+- name: Parse username and password
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    _cifmw_edpm_pullsecret_sync_username: >-
+      {{ _cifmw_edpm_pullsecret_sync_decoded_auth.split(':')[0] }}
+    _cifmw_edpm_pullsecret_sync_password: >-
+      {{ _cifmw_edpm_pullsecret_sync_decoded_auth.split(':')[1] }}
+
+- name: Set credentials fact
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    "{{ cifmw_edpm_pullsecret_sync_fact_name }}":
+      registry: "{{ cifmw_edpm_pullsecret_sync_registry }}"
+      username: "{{ _cifmw_edpm_pullsecret_sync_username }}"
+      password: "{{ _cifmw_edpm_pullsecret_sync_password }}"
+
+- name: Build credentials dictionary for edpm_container_registry_logins
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    _cifmw_edpm_pullsecret_sync_temp_dict: >-
+      {{ {_cifmw_edpm_pullsecret_sync_username: _cifmw_edpm_pullsecret_sync_password} }}
+
+- name: Set credentials dictionary fact
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  ansible.builtin.set_fact:
+    "{{ cifmw_edpm_pullsecret_sync_fact_name }}_dict": "{{ _cifmw_edpm_pullsecret_sync_temp_dict }}"
+
+- name: Display extraction success (without sensitive data)
+  ansible.builtin.debug:
+    msg: >-
+      Successfully extracted credentials for {{ cifmw_edpm_pullsecret_sync_registry }}.
+      Username: {{ _cifmw_edpm_pullsecret_sync_username }}.
+      Credentials available in {{ cifmw_edpm_pullsecret_sync_fact_name }}.

@@ -1,0 +1,106 @@
+---
+# Example playbook showing how to use edpm_pullsecret_sync role
+
+- name: Extract registry credentials and configure EDPM nodesets
+  hosts: controller
+  gather_facts: false
+  tasks:
+    # Step 1: Extract credentials from OpenShift pull-secret
+    - name: Extract registry.stage.redhat.io credentials
+      ansible.builtin.include_role:
+        name: edpm_pullsecret_sync
+      vars:
+        cifmw_edpm_pullsecret_sync_registry: "registry.stage.redhat.io"
+
+    # Step 2: Display extracted credentials (for verification)
+    - name: Show extracted credentials
+      ansible.builtin.debug:
+        msg: |
+          Registry: {{ cifmw_edpm_pullsecret_credentials.registry }}
+          Username: {{ cifmw_edpm_pullsecret_credentials.username }}
+          Password available: {{ cifmw_edpm_pullsecret_credentials.password | length > 0 }}
+
+    # Step 3: Use credentials in architecture configuration
+    # This is typically done by setting these variables before calling ci_gen_kustomize_values
+    - name: Set registry credentials for EDPM nodesets
+      ansible.builtin.set_fact:
+        cifmw_architecture_user_kustomize_registry_login:
+          edpm-nodeset:
+            edpm-nodeset-values:
+              data:
+                nodeset:
+                  ansible:
+                    ansibleVars:
+                      # Add policy.json configuration at the END of bootstrap command
+                      edpm_bootstrap_command: |
+                        {{ cifmw_edpm_bootstrap_command | default('') }}
+
+                        mkdir -p /root/.config/containers/ && echo '{"default":[{"type":"insecureAcceptAnything"}]}' > /root/.config/containers/policy.json
+                      # Add registry credentials
+                      edpm_container_registry_logins:
+                        "{{ cifmw_edpm_pullsecret_credentials.registry }}": "{{ cifmw_edpm_pullsecret_credentials_dict }}"
+
+---
+# Example: Extract multiple registries
+
+- name: Extract credentials for multiple registries
+  hosts: controller
+  gather_facts: false
+  tasks:
+    - name: Extract registry.redhat.io credentials
+      ansible.builtin.include_role:
+        name: edpm_pullsecret_sync
+      vars:
+        cifmw_edpm_pullsecret_sync_registry: "registry.redhat.io"
+        cifmw_edpm_pullsecret_sync_fact_name: cifmw_registry_redhat_io_creds
+
+    - name: Extract registry.stage.redhat.io credentials
+      ansible.builtin.include_role:
+        name: edpm_pullsecret_sync
+      vars:
+        cifmw_edpm_pullsecret_sync_registry: "registry.stage.redhat.io"
+        cifmw_edpm_pullsecret_sync_fact_name: cifmw_registry_stage_creds
+
+    - name: Configure EDPM with both registries
+      ansible.builtin.set_fact:
+        cifmw_architecture_user_kustomize_registry_login:
+          edpm-nodeset:
+            edpm-nodeset-values:
+              data:
+                nodeset:
+                  ansible:
+                    ansibleVars:
+                      edpm_bootstrap_command: |
+                        {{ cifmw_edpm_bootstrap_command | default('') }}
+
+                        mkdir -p /root/.config/containers/ && echo '{"default":[{"type":"insecureAcceptAnything"}]}' > /root/.config/containers/policy.json
+                      edpm_container_registry_logins:
+                        "{{ cifmw_registry_redhat_io_creds.registry }}": "{{ cifmw_registry_redhat_io_creds_dict }}"
+                        "{{ cifmw_registry_stage_creds.registry }}": "{{ cifmw_registry_stage_creds_dict }}"
+
+---
+# Example: Integration with existing deployment workflow
+
+- name: Full EDPM deployment with pull-secret sync
+  hosts: controller
+  gather_facts: false
+  tasks:
+    # Extract credentials before deployment
+    - name: Sync pull-secret credentials
+      ansible.builtin.include_role:
+        name: edpm_pullsecret_sync
+      vars:
+        cifmw_edpm_pullsecret_sync_registry: "registry.stage.redhat.io"
+
+    # Generate kustomize values with extracted credentials
+    - name: Generate EDPM configuration
+      ansible.builtin.include_role:
+        name: ci_gen_kustomize_values
+      vars:
+        # Credentials are automatically available from edpm_pullsecret_sync
+        # The role can reference them via cifmw_edpm_pullsecret_credentials
+
+    # Deploy EDPM
+    - name: Deploy EDPM nodes
+      ansible.builtin.include_role:
+        name: kustomize_deploy
