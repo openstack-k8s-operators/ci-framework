@@ -75,3 +75,113 @@
     path: "{{ cifmw_devscripts_repo_dir }}/utils.sh"
     regexp: 'if \[\[ "\$driver_prefix" == "redfish" \]\]; then'
     line: '      if [[ "$driver_prefix" == "redfish" ]] || [[ "$driver_prefix" == "drac" ]]; then'
+
+# When the bootstrap VM sits on an isolated NAT bridge (bkr06bm) the iDRAC
+# cannot reach Ironic's HTTP server directly.  We add iptables DNAT rules
+# on the controller to forward the Ironic ports from the management IP to
+# the bootstrap VM, and a background patcher that rewrites Ironic's
+# advertised HTTP/API URLs so the iDRAC (and later IPA) connect through
+# the controller.
+- name: Create DNAT helper script for bare metal virtual media
+  when:
+    - cifmw_devscripts_bm_nodes is defined
+    - cifmw_devscripts_bm_nodes | length > 0
+  vars:
+    _script_path: "{{ cifmw_devscripts_repo_dir }}/cifmw_ironic_dnat_setup.sh"
+  block:
+    - name: Write DNAT helper script
+      ansible.builtin.copy:
+        dest: "{{ _script_path }}"
+        mode: "0755"
+        owner: "{{ cifmw_devscripts_user }}"
+        group: "{{ cifmw_devscripts_user }}"
+        content: |
+          #!/bin/bash
+          # Sourced by 06_create_cluster.sh before create_cluster.
+          # Sets up iptables DNAT and a background Ironic-patcher so the
+          # iDRAC can reach the bootstrap VM's virtual media HTTP server
+          # through the controller's management interface.
+          set +e
+
+          if [[ "${NODES_PLATFORM:-}" != "baremetal" ]] || \
+              [[ -z "${ENABLE_BOOTSTRAP_STATIC_IP:-}" ]]; then
+            return 0 2>/dev/null || true
+          fi
+
+          _BOOT_IP="$(nth_ip $EXTERNAL_SUBNET_V4 9)"
+          _BMC_HOST=$(jq -r '.nodes[0].driver_info.address' \
+                      "$NODES_FILE" 2>/dev/null | sed 's|.*://||; s|/.*||')
+          _BMC_RESOLVED=$(getent ahosts "$_BMC_HOST" 2>/dev/null \
+                          | head -1 | awk '{print $1}')
+          _MGMT_IP=$(ip route get "$_BMC_RESOLVED" 2>/dev/null \
+              | grep -oP 'src \K\S+')
+          _SSH_KEY="${HOME}/ci-framework-data/artifacts/cifmw_ocp_access_key"
+
+          if [[ -z "${_MGMT_IP:-}" ]] || [[ -z "${_BOOT_IP:-}" ]]; then
+            echo "WARN: cannot determine management IP or bootstrap IP"
+            return 0 2>/dev/null || true
+          fi
+
+          echo "=== DNAT: ${_MGMT_IP}:{6180,6385} -> ${_BOOT_IP}:{6180,6385} ==="
+          sudo sysctl -w net.ipv4.ip_forward=1
+          for _port in 6180 6385; do
+            sudo iptables -t nat -I PREROUTING 1 \
+              -d "$_MGMT_IP" -p tcp --dport "$_port" \
+              -j DNAT --to-destination "${_BOOT_IP}:${_port}"
+            sudo iptables -t nat -I POSTROUTING 1 \
+              -d "$_BOOT_IP" -p tcp --dport "$_port" -j MASQUERADE
+            sudo iptables -I FORWARD 1 \
+              -d "$_BOOT_IP" -p tcp --dport "$_port" -j ACCEPT
+            sudo iptables -I FORWARD 1 \
+              -s "$_BOOT_IP" -p tcp --sport "$_port" -j ACCEPT
+          done
+
+          cat > /tmp/cifmw_patch_ironic.sh << 'PATCHEOF'
+          #!/bin/bash
+          MGMT_IP="$1"
+          BOOT_IP=$(awk '/^my_ip/{print $NF}' /etc/ironic/ironic.conf)
+          [ -z "$BOOT_IP" ] && exit 1
+          for cfg in /etc/ironic/ironic.conf /etc/ironic/*.conf; do
+            [ -f "$cfg" ] || continue
+            sudo sed -i \
+              "s|http://${BOOT_IP}:|http://${MGMT_IP}:|g" "$cfg"
+          done
+          echo "Replaced http://${BOOT_IP}: -> http://${MGMT_IP}: in ironic config"
+          CTR=$(sudo podman ps | awk '$NF ~ /ironic/{print $NF}' \
+                | head -1)
+          [ -n "$CTR" ] && sudo podman restart "$CTR" \
+            && echo "Restarted $CTR"
+          PATCHEOF
+
+          (
+            echo "[$(date)] Waiting for bootstrap VM at $_BOOT_IP..."
+            for _i in $(seq 1 120); do
+              ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                  -o ConnectTimeout=5 -i "$_SSH_KEY" core@"$_BOOT_IP" \
+                  true 2>/dev/null && break
+              sleep 5
+            done
+            echo "[$(date)] Waiting for Ironic containers..."
+            for _i in $(seq 1 60); do
+              ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                  -i "$_SSH_KEY" core@"$_BOOT_IP" \
+                  "sudo podman ps | grep -q ironic" 2>/dev/null && break
+              sleep 5
+            done
+            sleep 10
+            echo "[$(date)] Patching Ironic URLs to ${_MGMT_IP}..."
+            scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                -i "$_SSH_KEY" /tmp/cifmw_patch_ironic.sh \
+                core@"$_BOOT_IP":/tmp/
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                -i "$_SSH_KEY" core@"$_BOOT_IP" \
+                "bash /tmp/cifmw_patch_ironic.sh ${_MGMT_IP}"
+            echo "[$(date)] DNAT patcher complete"
+          ) &> /tmp/cifmw_ironic_dnat.log &
+          echo "Background Ironic DNAT patcher PID=$! log=/tmp/cifmw_ironic_dnat.log"
+
+    - name: Inject DNAT helper into 06_create_cluster.sh
+      ansible.builtin.lineinfile:
+        path: "{{ cifmw_devscripts_repo_dir }}/06_create_cluster.sh"
+        insertbefore: '^create_cluster'
+        line: 'source ./cifmw_ironic_dnat_setup.sh'
