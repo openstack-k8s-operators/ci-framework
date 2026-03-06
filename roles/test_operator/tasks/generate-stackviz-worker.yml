@@ -1,0 +1,72 @@
+---
+# Worker: Process a single subunit.gz file and generate HTML report
+# This file is included in a loop from generate-stackviz-main.yml
+# Variables available:
+#   - subunit_file: the file object from find results
+#   - All path and naming variables are passed as vars from the main file
+
+- name: Set output paths for decompressed file and HTML report
+  ansible.builtin.set_fact:
+    _current_subunit: "{{ _current_dir }}/{{ _base_filename }}.subunit"
+    _current_html: "{{ _current_dir }}/{{ _html_filename }}"
+
+# Tempest can produce compressed .subunit.gz files to save disk space,
+# especially for large test runs. We decompress them for processing.
+- name: Decompress subunit file if compressed
+  ansible.builtin.shell: |
+    gunzip -c "{{ _current_subunit_source }}" > "{{ _current_subunit }}"
+  args:
+    creates: "{{ _current_subunit }}"
+  when: _current_is_compressed | bool
+
+- name: Use uncompressed file directly if not compressed
+  ansible.builtin.set_fact:
+    _current_subunit: "{{ _current_subunit_source }}"
+  when: not (_current_is_compressed | bool)
+
+- name: Verify subunit file exists
+  ansible.builtin.stat:
+    path: "{{ _current_subunit }}"
+  register: _current_subunit_stat
+
+- name: Fail if subunit file is missing
+  ansible.builtin.fail:
+    msg: |
+      ERROR: Subunit file not found: {{ _current_subunit }}
+      Expected file after decompression or direct usage.
+      This may indicate an issue with test execution or file handling.
+  when: not _current_subunit_stat.stat.exists
+
+- name: Generate stackviz HTML report for this stage
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ cifmw_repo }}/scripts/generate-stackviz-report.py
+      {{ _current_subunit }}
+      {{ _current_html }}
+  register: _current_stackviz_generation
+
+- name: Display generation output
+  ansible.builtin.debug:
+    var: _current_stackviz_generation.stdout_lines
+  when:
+    - _current_stackviz_generation is defined
+    - _current_stackviz_generation is not skipped
+    - cifmw_test_operator_stackviz_debug | default(false)
+
+- name: Track generated report with type metadata
+  ansible.builtin.set_fact:
+    _stackviz_generated_reports: >-
+      {{
+        _stackviz_generated_reports + [{
+          'stage_name': _current_stage_name,
+          'html_path': _current_html,
+          'subunit_path': _current_subunit,
+          'directory': _current_dir,
+          'is_retry': _is_retry_file | default(false),
+          'report_label': ('Retry Results: ' if (_is_retry_file | default(false)) else 'Original Results: ') + _current_stage_name
+        }]
+      }}
+
+- name: Display success for this report
+  ansible.builtin.debug:
+    msg: "✓ Generated report for {{ _current_stage_name }}: {{ _current_html }}"
