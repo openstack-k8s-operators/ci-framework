@@ -1,0 +1,120 @@
+---
+# Bare metal OCP SNO deployment.
+# This task file is an alternative to ocp_layout.yml for cases where
+# OCP is installed directly on bare metal (no VMs).
+#
+# IMPORTANT: dev-scripts runs on a provisioner node (e.g. Zuul controller)
+# and targets the physical host via its real BMC (iDRAC/Redfish).
+# The physical host's disk is wiped and RHCOS is provisioned.
+# dev-scripts CANNOT run on the target host itself.
+
+- name: Build devscripts overrides for bare metal SNO
+  ansible.builtin.include_role:
+    name: "devscripts"
+    tasks_from: "build_config.yml"
+
+- name: Load BMC credentials and generate baremetal nodes JSON
+  when:
+    - cifmw_devscripts_bm_nodes is defined
+    - cifmw_devscripts_bm_nodes | length > 0
+  vars:
+    _creds_file: >-
+      {{ cifmw_bmc_credentials_file |
+         default(ansible_user_dir ~ '/secrets/idrac_access.yaml') }}
+    _bm_ironic_file: >-
+      {{
+        [cifmw_reproducer_basedir,
+         'artifacts', 'baremetal-ironic.json'] | path_join
+      }}
+  block:
+    - name: Read BMC credentials file
+      ansible.builtin.include_vars:
+        file: "{{ _creds_file }}"
+        name: _bmc_creds
+
+    - name: Inject BMC credentials into node definitions
+      vars:
+        _creds:
+          driver_info:
+            username: "{{ _bmc_creds.username }}"
+            password: "{{ _bmc_creds.password }}"
+      ansible.builtin.set_fact:
+        _bm_nodes_with_creds: >-
+          {{
+            cifmw_devscripts_bm_nodes |
+            map('combine', _creds, recursive=true) |
+            list
+          }}
+
+    - name: Ensure artifacts directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_reproducer_basedir }}/artifacts"
+        state: directory
+        mode: "0755"
+
+    - name: Write baremetal nodes JSON
+      vars:
+        _content:
+          nodes: "{{ _bm_nodes_with_creds }}"
+      ansible.builtin.copy:
+        content: "{{ _content | to_nice_json }}"
+        dest: "{{ _bm_ironic_file }}"
+        mode: "0644"
+
+    - name: Set devscripts overrides to use baremetal nodes file
+      ansible.builtin.set_fact:
+        cifmw_devscripts_config_overrides_patch_02_baremetal:
+          nodes_platform: 'baremetal'
+          nodes_file: "{{ _bm_ironic_file }}"
+          manage_br_bridge: 'y'
+
+- name: Add OCP API DNS entries to /etc/hosts
+  when:
+    - cifmw_devscripts_config is defined
+    - cifmw_devscripts_config.api_vips | default('') | length > 0
+  become: true
+  vars:
+    _cluster: "{{ cifmw_devscripts_config.cluster_name }}"
+    _domain: "{{ cifmw_devscripts_config.base_domain }}"
+    _api_vip: "{{ cifmw_devscripts_config.api_vips }}"
+    _ingress_vip: "{{ cifmw_devscripts_config.ingress_vips }}"
+  block:
+    - name: Add api / api-int host entry
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '\sapi\.{{ _cluster }}\.{{ _domain }}\s'
+        line: >-
+          {{ _api_vip }}  api.{{ _cluster }}.{{ _domain }}
+          api-int.{{ _cluster }}.{{ _domain }}
+        state: present
+
+    - name: Add wildcard apps host entry (console + oauth)
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '\sconsole-openshift-console\.apps\.{{ _cluster }}\.{{ _domain }}\s'
+        line: >-
+          {{ _ingress_vip }}  console-openshift-console.apps.{{ _cluster }}.{{ _domain }}
+          oauth-openshift.apps.{{ _cluster }}.{{ _domain }}
+          canary-openshift-ingress-canary.apps.{{ _cluster }}.{{ _domain }}
+        state: present
+
+- name: Check if devscript cluster exists
+  ansible.builtin.import_role:
+    name: "devscripts"
+    tasks_from: "110_check_ocp.yml"
+
+- name: Run devscripts for bare metal SNO deployment
+  when:
+    - not cifmw_devscripts_ocp_comply | bool
+  block:
+    - name: Ensure devscripts_override patch is in
+      ansible.builtin.include_role:
+        name: "devscripts"
+        tasks_from: "build_config.yml"
+
+    - name: Ensure dnsmasq is reloaded
+      ansible.builtin.meta: flush_handlers
+
+    - name: Run devscripts role
+      ansible.builtin.include_role:
+        name: devscripts

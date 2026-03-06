@@ -50,9 +50,13 @@ networks.
 * `cifmw_devscripts_external_net` (dict) Key/value pair containing information
   about the network infrastructure.
   Refer [section](#supported-keys-in-cifmw_devscripts_external_net).
+* `cifmw_devscripts_ext_iface` (str) The network interface name used in the
+  NMState static IP template for OCP nodes. Defaults to `enp2s0`. Override for
+  bare metal hosts whose RHCOS interface name differs (e.g. `eno12399`).
 * `cifmw_devscripts_cinder_volume_pvs` (list) a list of physical disks to be
   used for creating cinder-volumes volume-group. By default, the list contains
   `/dev/vda`.
+* `cifmw_devscripts_sno` (bool) Enable Single Node OpenShift. Defaults to `false`.
 
 ### Secrets management
 

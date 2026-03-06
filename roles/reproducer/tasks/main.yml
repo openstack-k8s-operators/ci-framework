@@ -45,6 +45,8 @@
 - name: Assert no conflicting parameters were passed
   tags:
     - always
+  when:
+    - not (cifmw_reproducer_bm_ocp | default(false) | bool)
   ansible.builtin.assert:
     that:
       - (_cifmw_libvirt_manager_layout.vms.crc is defined) or
@@ -86,10 +88,36 @@
         (_cifmw_libvirt_manager_layout.vms.ocp.amount is defined and
          _cifmw_libvirt_manager_layout.vms.ocp.amount|int > 0)
       }}
+    _use_bm_ocp: >-
+      {{ cifmw_reproducer_bm_ocp | default(false) | bool }}
   ansible.builtin.set_fact:
     _use_crc: "{{ _use_crc }}"
     _use_ocp: "{{ _use_ocp }}"
-    _has_openshift: "{{ _use_ocp or _use_crc }}"
+    _use_bm_ocp: "{{ _use_bm_ocp }}"
+    _has_openshift: "{{ _use_ocp or _use_crc or _use_bm_ocp }}"
+
+- name: Prepare bare metal OCP environment
+  when:
+    - _use_bm_ocp | bool
+  tags:
+    - always
+  block:
+    - name: Register current host as controller-0
+      ansible.builtin.add_host:
+        name: controller-0
+        ansible_connection: local
+        ansible_user: "{{ ansible_user_id }}"
+        ansible_ssh_user: "{{ ansible_user_id }}"
+        groups:
+          - controllers
+
+    - name: Set minimal libvirt layout for bare metal OCP
+      when:
+        - _cifmw_libvirt_manager_layout is not defined
+      ansible.builtin.set_fact:
+        _cifmw_libvirt_manager_layout:
+          vms: {}
+          networks: {}
 
 - name: Ensure directories are present
   tags:
@@ -182,6 +210,80 @@
         - devscripts_layout
         - ocp_layout
 
+- name: Consume dev-scripts for bare metal OCP SNO
+  when:
+    - _use_bm_ocp | default(false) | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+    - devscripts_layout
+    - ocp_layout
+    - bm_ocp_layout
+  ansible.builtin.include_tasks:
+    file: bm_ocp_layout.yml
+    apply:
+      tags:
+        - bootstrap
+        - bootstrap_layout
+        - devscripts_layout
+        - ocp_layout
+        - bm_ocp_layout
+
+- name: Post-setup for bare metal OCP SNO
+  when:
+    - _use_bm_ocp | default(false) | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+    - bm_ocp_layout
+  vars:
+    _auth_path: >-
+      {{
+        (
+          cifmw_devscripts_repo_dir,
+          'ocp',
+          cifmw_devscripts_config.cluster_name,
+          'auth'
+        ) | ansible.builtin.path_join
+      }}
+  block:
+    - name: Slurp kubeconfig from dev-scripts
+      register: _devscripts_kubeconfig
+      ansible.builtin.slurp:
+        path: "{{ (_auth_path, 'kubeconfig') | path_join }}"
+
+    - name: Slurp kubeadmin-password from dev-scripts
+      register: _devscripts_kubeadm
+      ansible.builtin.slurp:
+        path: "{{ (_auth_path, 'kubeadmin-password') | path_join }}"
+
+    - name: Ensure .kube directory exists
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/.kube"
+        state: directory
+        mode: "0750"
+
+    - name: Copy kubeconfig to local ~/.kube/config
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/.kube/config"
+        content: "{{ _devscripts_kubeconfig.content | b64decode }}"
+        mode: "0640"
+
+    - name: Copy kubeadmin-password
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/.kube/kubeadmin-password"
+        content: "{{ _devscripts_kubeadm.content | b64decode }}"
+        mode: "0600"
+
+    - name: Expose openshift_login related facts
+      ansible.builtin.import_role:
+        name: devscripts
+        tasks_from: set_cluster_fact.yml
+
+    - name: Set wait for OCP cluster flag
+      ansible.builtin.set_fact:
+        _wait_ocp_cluster: true
+
 - name: Load the architecture local kustomize patches
   when:
     - cifmw_architecture_scenario is defined
@@ -204,11 +306,27 @@
         - bootstrap_layout
         - bootstrap_env
 
+- name: Configure controller for bare metal OCP
+  when:
+    - _use_bm_ocp | default(false) | bool
+  tags:
+    - bootstrap
+    - bootstrap_layout
+    - bootstrap_env
+  ansible.builtin.include_tasks:
+    file: configure_bm_ocp_controller.yml
+    apply:
+      tags:
+        - bootstrap
+        - bootstrap_layout
+        - bootstrap_env
+
 - name: Apply VLAN ids to TAP type interfaces.
   when:
     - _cifmw_libvirt_manager_layout.networks is defined
-    - _use_ocp
-    - (
+    - _use_ocp or (_use_bm_ocp | default(false) | bool)
+    - (_use_bm_ocp | default(false) | bool) or
+      (
         _cifmw_libvirt_manager_layout.vms.ocp.target is defined and
         _cifmw_libvirt_manager_layout.vms.ocp.target == inventory_hostname
       ) or
@@ -261,6 +379,8 @@
       _cifmw_libvirt_manager_layout.vms.controller.target is undefined
   block:
     - name: Push local code
+      when:
+        - not (_use_bm_ocp | default(false) | bool)
       tags:
         - bootstrap_repositories
         - bootstrap
