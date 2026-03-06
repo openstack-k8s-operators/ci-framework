@@ -32,7 +32,7 @@ must be present on your system:
 
 * git
 * make
-* python3-pip
+* python3.14-pip
 * sudo
 
 # Needed specific configurations

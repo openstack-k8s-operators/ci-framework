@@ -14,7 +14,7 @@ podman run -it centos:stream9 bash
 ###  inside the container ###
 
 # install basic deps
-yum install -y git make sudo python3.11-pip
+yum install -y git make sudo python3.13-pip
 
 # clone CI framework
 git clone https://github.com/openstack-k8s-operators/ci-framework && cd ci-framework
