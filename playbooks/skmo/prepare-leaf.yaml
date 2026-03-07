@@ -11,8 +11,40 @@
     central_rootca_secret: rootca-public
     central_rootca_internal_secret: rootca-internal
     leaf_transport_url_name: barbican-keystone-listener-regiontwo
+    leaf_transport_url_name_secret: rabbitmq-transport-url-barbican-keystone-listener-regiontwo
     leaf_transport_url_secret_copy: barbican-keystone-listener-regiontwo-transport
   tasks:
+    - name: Wait for central Keystone API to be ready
+      kubernetes.core.k8s_info:
+        api_version: keystone.openstack.org/v1beta1
+        kind: KeystoneAPI
+        namespace: "{{ central_namespace }}"
+      register: _keystoneapi_info
+      retries: 60
+      delay: 10
+      until:
+        - _keystoneapi_info.resources | length > 0
+        - _keystoneapi_info.resources[0].status.conditions is defined
+        - _keystoneapi_info.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Wait for openstackclient pod to be ready in central region
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ central_namespace }}"
+        name: openstackclient
+      register: _osc_pod_info
+      retries: 30
+      delay: 10
+      until:
+        - _osc_pod_info.resources | length > 0
+        - _osc_pod_info.resources[0].status.conditions is defined
+        - _osc_pod_info.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
     - name: Load SKMO values
       ansible.builtin.set_fact:
         skmo_values: "{{ lookup('file', skmo_values_file) | from_yaml }}"
@@ -163,7 +195,7 @@
     - name: Copy transport URL secret to leaf namespace
       ansible.builtin.shell: |
         set -euo pipefail
-        oc get secret {{ leaf_transport_url_name }} -n {{ central_namespace }} -o json \
+        oc get secret {{ leaf_transport_url_name_secret }} -n {{ central_namespace }} -o json \
           | python3 -c '
         import json, sys
         secret = json.load(sys.stdin)
