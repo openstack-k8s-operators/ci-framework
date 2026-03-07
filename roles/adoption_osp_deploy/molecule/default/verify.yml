@@ -42,3 +42,49 @@
           - "adoption_vars.edpm_nodes.cell2['cell2-osp-compute-uni05epsilon-0'].ansible.ansibleHost == '192.168.122.120'"
         fail_msg: "Multi-cell edpm_nodes structure is incorrect"
         success_msg: "Successfully verified multi-cell edpm_nodes structure"
+    - name: "Load args override results"
+      ansible.builtin.set_fact:
+        args_override_results: "{{ hostvars[inventory_hostname].args_override_results }}"
+
+    - name: "Assert default args are preserved when no overrides"
+      ansible.builtin.assert:
+        that:
+          - "args_override_results.default == args_override_results.mock_args_joined"
+        fail_msg: >-
+          Default args mismatch.
+          Got: '{{ args_override_results.default }}'
+          Expected: '{{ args_override_results.mock_args_joined }}'
+
+    - name: "Assert removing an arg works"
+      ansible.builtin.assert:
+        that:
+          - "'--libvirt-type qemu' not in args_override_results.remove"
+          - "'--timeout 90' in args_override_results.remove"
+          - "'--deployed-server' in args_override_results.remove"
+
+    - name: "Assert adding an arg appends it"
+      ansible.builtin.assert:
+        that:
+          - "'--libvirt-type kvm' in args_override_results.add"
+          - "'--libvirt-type qemu' in args_override_results.add"
+          - "args_override_results.add.endswith('--libvirt-type kvm')"
+
+    - name: "Assert replace pattern (remove + add)"
+      ansible.builtin.assert:
+        that:
+          - "'--libvirt-type qemu' not in args_override_results.replace"
+          - "'--libvirt-type kvm' in args_override_results.replace"
+          - "args_override_results.replace.endswith('--libvirt-type kvm')"
+          - "'--timeout 90' in args_override_results.replace"
+
+    - name: "Assert removing multiple args works"
+      ansible.builtin.assert:
+        that:
+          - "'--libvirt-type qemu' not in args_override_results.remove_multi"
+          - "'--timeout 90' not in args_override_results.remove_multi"
+          - "'--deployed-server' in args_override_results.remove_multi"
+
+    - name: "Assert removing non-existent arg is a no-op"
+      ansible.builtin.assert:
+        that:
+          - "args_override_results.remove_noop == args_override_results.default"
