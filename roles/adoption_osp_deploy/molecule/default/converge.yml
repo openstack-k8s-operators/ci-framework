@@ -33,3 +33,90 @@
             cacheable: true
           vars:
             ip_version: ip_v4
+    - name: Test stack args override logic
+      vars:
+        _mock_args:
+          - "--override-ansible-cfg /home/zuul/ansible_config.cfg"
+          - "--templates /usr/share/openstack-tripleo-heat-templates"
+          - "--libvirt-type qemu"
+          - "--timeout 90"
+          - "--deployed-server"
+      block:
+        - name: Test default (no remove, no add) preserves args
+          ansible.builtin.set_fact:
+            _result_default: >-
+              {{
+                ((_mock_args |
+                 reject('in', []) |
+                 list) +
+                 []) |
+                join(' ')
+              }}
+
+        - name: Test removing a single arg
+          ansible.builtin.set_fact:
+            _result_remove: >-
+              {{
+                ((_mock_args |
+                 reject('in', ['--libvirt-type qemu']) |
+                 list) +
+                 []) |
+                join(' ')
+              }}
+
+        - name: Test adding an arg
+          ansible.builtin.set_fact:
+            _result_add: >-
+              {{
+                ((_mock_args |
+                 reject('in', []) |
+                 list) +
+                 ['--libvirt-type kvm']) |
+                join(' ')
+              }}
+
+        - name: Test removing and adding (replace pattern)
+          ansible.builtin.set_fact:
+            _result_replace: >-
+              {{
+                ((_mock_args |
+                 reject('in', ['--libvirt-type qemu']) |
+                 list) +
+                 ['--libvirt-type kvm']) |
+                join(' ')
+              }}
+
+        - name: Test removing multiple args
+          ansible.builtin.set_fact:
+            _result_remove_multi: >-
+              {{
+                ((_mock_args |
+                 reject('in', ['--libvirt-type qemu',
+                               '--timeout 90']) |
+                 list) +
+                 []) |
+                join(' ')
+              }}
+
+        - name: Test removing non-existent arg is a no-op
+          ansible.builtin.set_fact:
+            _result_remove_noop: >-
+              {{
+                ((_mock_args |
+                 reject('in', ['--nonexistent-flag']) |
+                 list) +
+                 []) |
+                join(' ')
+              }}
+
+        - name: Store args override results for verification
+          ansible.builtin.set_fact:
+            args_override_results:
+              mock_args_joined: "{{ _mock_args | join(' ') }}"
+              default: "{{ _result_default }}"
+              remove: "{{ _result_remove }}"
+              add: "{{ _result_add }}"
+              replace: "{{ _result_replace }}"
+              remove_multi: "{{ _result_remove_multi }}"
+              remove_noop: "{{ _result_remove_noop }}"
+            cacheable: true
