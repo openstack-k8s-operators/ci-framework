@@ -28,6 +28,13 @@ configure the OSP17.1 deployment.
 * `cifmw_adoption_osp_deploy_overcloud_extra_args`: (String) The content of a
   file which will be used with the -e option in the overcloud deploy command.
   This is useful to specify private/restricted parameters.
+* `cifmw_adoption_osp_deploy_stack_args_remove`: (List) List of CLI argument
+  strings to remove from the scenario's `stack.args` before running overcloud
+  deploy. Each entry must exactly match an element in `stack.args`. Defaults
+  to `[]`.
+* `cifmw_adoption_osp_deploy_stack_args_add`: (List) List of CLI argument
+  strings to append to the scenario's `stack.args` after removals are applied.
+  Defaults to `[]`.
 * `cifmw_adoption_osp_deploy_bgp`: (Boolean) Enable BGP support for the OSP
   deployment. When enabled, uses BGP-specific network configurations and
   templates. Defaults to `false`.
