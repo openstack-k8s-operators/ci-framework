@@ -1,42 +1,80 @@
 ---
-# noqa: schema[playbook]
-- name: Patch the image.config.openshift.io resource to include insecure registry
-  when: content_provider_registry_ip is defined
-  ansible.builtin.shell: >-
-    oc patch --type=merge --patch='{
-    "spec": {
-      "registrySources": {
-        "insecureRegistries": [
-        "{{ content_provider_registry_ip }}:5001"
-        ]
-      }
-    }
-    }' image.config.openshift.io/cluster
+- name: Locate kubeconfig on CRC node
+  vars:
+    kubeconfig_possible_paths:
+      - "{{ ansible_user_dir | default('/root') }}/.kube/config"
+      - "{{ ansible_user_dir | default('/root') }}/.crc/machines/crc/kubeconfig"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _kubeconfig_stat
+  loop: "{{ kubeconfig_possible_paths }}"
 
-- name: Patch the image.config.openshift.io resource to allow registries
-  when: content_provider_registry_ip is defined
-  ansible.builtin.shell: |
-    oc patch --type=merge --patch='{
-    "spec": {
-      "registrySources": {
-        "allowedRegistries": [
-        "{{ content_provider_registry_ip }}:5001",
-        "quay.io",
-        "gcr.io",
-        "registry.redhat.io",
-        "image-registry.openshift-image-registry.svc:5000"
-        ]
-      }
-    }
-    }' image.config.openshift.io/cluster
+- name: Set kubeconfig source path
+  ansible.builtin.set_fact:
+    _crc_kubeconfig_src: >-
+      {{
+        _kubeconfig_stat.results |
+        selectattr('stat.exists') |
+        map(attribute='item') |
+        first
+      }}
 
-- name: Add additional allowed registries
+- name: Fetch kubeconfig from CRC node to localhost
+  ansible.builtin.fetch:
+    src: "{{ _crc_kubeconfig_src }}"
+    dest: "/tmp/fetched_crc_kubeconfig"
+    flat: true
+  register: _fetched_kubeconfig
+
+- name: Replace api.crc.testing with CRC node IP in fetched kubeconfig
+  delegate_to: localhost
+  ansible.builtin.replace:
+    path: "{{ _fetched_kubeconfig.dest }}"
+    regexp: 'api\.crc\.testing'
+    replace: "{{ ansible_host }}"
+
+- name: Patch image.config.openshift.io to set insecure and allowed registries
+  when: content_provider_registry_ip is defined
+  delegate_to: localhost
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ _fetched_kubeconfig.dest }}"
+    validate_certs: false
+    api_version: image.config.openshift.io/v1
+    kind: Image
+    name: cluster
+    state: patched
+    definition:
+      spec:
+        registrySources:
+          insecureRegistries:
+            - "{{ content_provider_registry_ip }}:5001"
+          allowedRegistries:
+            - "{{ content_provider_registry_ip }}:5001"
+            - "quay.io"
+            - "gcr.io"
+            - "registry.redhat.io"
+            - "image-registry.openshift-image-registry.svc:5000"
+
+- name: Add additional allowed registries to OpenShift cluster configuration
   when: cifmw_crc_additional_allowed_registries is defined
-  ansible.builtin.shell: |
-    oc patch --type=json \
-    --patch='[{"op": "add", "path": "/spec/registrySources/allowedRegistries/-", "value": "{{ item }}"}]' \
-    image.config.openshift.io/cluster
+  delegate_to: localhost
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  kubernetes.core.k8s_json_patch:
+    kubeconfig: "{{ _fetched_kubeconfig.dest }}"
+    validate_certs: false
+    api_version: config.openshift.io/v1
+    kind: Image
+    name: cluster
+    patch:
+      - op: add
+        path: /spec/registrySources/allowedRegistries/-
+        value: "{{ registry_item }}"
   loop: "{{ cifmw_crc_additional_allowed_registries }}"
+  loop_control:
+    loop_var: registry_item
 
 - name: Ensure registries.conf.d exists
   become: true
