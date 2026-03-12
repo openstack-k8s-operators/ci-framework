@@ -5,6 +5,16 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 ## Generic parameters
 <!-- START GENERIC_PARAMETERS -->
 * `cifmw_test_operator_artifacts_basedir`: (String) Directory where we will have all test-operator related files. Default value: `{{ cifmw_basedir }}/tests/test_operator` which defaults to `~/ci-framework-data/tests/test_operator`
+* `cifmw_test_operator_stackviz_generate`: (Boolean) Enable automatic generation of tempest-viz HTML reports from Tempest subunit test results. When enabled, generates interactive visualizations of test results that can be viewed in a browser. When `cifmw_test_operator_tempest_rerun_failed_tests` is enabled, it will generate both `tempest-viz.html` (original test run) and `tempest_retry_viz.html` (retry test run) reports for easy comparison. Default value: `true`
+* `cifmw_test_operator_stackviz_debug`: (Boolean) Enable debug mode for tempest-viz report generation. When enabled, displays detailed information about the generation process. Default value: `false`
+* `cifmw_test_operator_stackviz_auto_install_deps`: (Boolean) Automatically install required RPM packages (python3-subunit, python3-testtools) for tempest-viz generation. When disabled, the role will fail if the packages are not already installed. Default value: `true`
+* `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
+* `cifmw_test_operator_controller_namespace`: (String) Namespace inside which the test-operator-controller-manager is created. Default value: `openstack-operators`
+* `cifmw_test_operator_controller_priv_key_file_path`: (String) Specifies the path to the CIFMW private key file. Note: Please ensure this file is available in the environment where the ci-framework test-operator role is executed. Default value: `~/.ssh/id_cifw`
+* `cifmw_test_operator_bundle`: (String) Full name of container image with bundle that contains the test-operator. Default value: `""`
+* `cifmw_test_operator_version`: (String) The commit hash corresponding to the version of test-operator the user wants to use. This parameter is only used when `cifmw_test_operator_bundle` is also set.
+* `cifmw_test_operator_timeout`: (Integer) Timeout in seconds for the execution of the tests. Default value: `3600`
+* `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
 * `cifmw_test_operator_bundle`: (String) Full name of container image with bundle that contains the test-operator. Default value: ``
 * `cifmw_test_operator_clean_last_run`: (Bool) Delete all resources created by the previous run at the beginning of the role. Default value: `false`
 * `cifmw_test_operator_cleanup`: (Bool) Delete all resources created by the role at the end of the testing. Default value: `false`
