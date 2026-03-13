@@ -1,0 +1,28 @@
+---
+- name: Ensure central control plane uses custom CA bundle
+  hosts: localhost
+  gather_facts: false
+  vars:
+    central_namespace: openstack
+    controlplane_name: controlplane
+    ca_bundle_secret_name: custom-ca-certs
+  tasks:
+    - name: Check current caBundleSecretName
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ central_namespace }} get osctlplane {{ controlplane_name }} \
+          -o jsonpath='{.spec.tls.caBundleSecretName}'
+      args:
+        executable: /bin/bash
+      register: ca_bundle_name
+      changed_when: false
+      failed_when: false
+
+    - name: Patch control plane to use custom CA bundle when unset
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ central_namespace }} patch osctlplane {{ controlplane_name }} \
+          --type json -p '[{"op":"add","path":"/spec/tls","value":{}},{"op":"add","path":"/spec/tls/caBundleSecretName","value":"{{ ca_bundle_secret_name }}"}]'
+      args:
+        executable: /bin/bash
+      when: ca_bundle_name.stdout | trim == ""
