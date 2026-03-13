@@ -1,0 +1,130 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Extract registry credentials from OpenShift pull-secret
+  when:
+    - cifmw_registry_pullsecret_enabled | default(false) | bool
+    - cifmw_registry_pullsecret_registry_url is defined
+  block:
+    - name: Get OpenShift pull-secret
+      no_log: true
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig | default(omit) }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: v1
+        kind: Secret
+        name: pull-secret
+        namespace: openshift-config
+      register: _pullsecret_info
+
+    - name: Validate pull-secret was retrieved
+      ansible.builtin.assert:
+        that:
+          - _pullsecret_info.resources is defined
+          - _pullsecret_info.resources | length > 0
+        fail_msg: "Could not retrieve pull-secret from OpenShift"
+
+    - name: Parse pull-secret content
+      no_log: true
+      ansible.builtin.set_fact:
+        _dockerconfig: "{{ _pullsecret_info.resources[0].data['.dockerconfigjson'] | b64decode | from_json }}"
+
+    - name: Validate registry exists in pull-secret
+      ansible.builtin.assert:
+        that:
+          - _dockerconfig.auths is defined
+          - cifmw_registry_pullsecret_registry_url in _dockerconfig.auths
+        fail_msg: "Registry {{ cifmw_registry_pullsecret_registry_url }} not found in pull-secret"
+
+    - name: Extract and decode registry auth
+      no_log: true
+      ansible.builtin.set_fact:
+        _registry_auth_decoded: "{{ _dockerconfig.auths[cifmw_registry_pullsecret_registry_url].auth | b64decode }}"
+
+    - name: Parse username and password
+      no_log: true
+      ansible.builtin.set_fact:
+        _pullsecret_username: "{{ _registry_auth_decoded.split(':')[0] }}"
+        _pullsecret_password: "{{ _registry_auth_decoded.split(':')[1] }}"
+
+    - name: Update cifmw_registry_token with pull-secret credentials
+      no_log: true
+      ansible.builtin.set_fact:
+        cifmw_registry_token:
+          name: "pullsecret_extracted"
+          description: "Extracted from OpenShift pull-secret"
+          created: "{{ ansible_date_time.iso8601 }}"
+          credentials:
+            username: "{{ _pullsecret_username }}"
+            password: "{{ _pullsecret_password }}"
+
+    - name: Update cifmw_registry_token_credentials for EDPM deployment
+      no_log: true
+      ansible.builtin.set_fact:
+        cifmw_registry_token_credentials:
+          - key: "{{ _pullsecret_username }}"
+            value: "{{ _pullsecret_password }}"
+
+    - name: Update architecture kustomize registry credentials for all stages
+      when: cifmw_architecture_user_kustomize_90_registry_mirror_login is defined
+      no_log: true
+      vars:
+        _new_logins:
+          registry.redhat.io:
+            "{{ cifmw_registry_token.credentials.username }}": "{{ cifmw_registry_token.credentials.password }}"
+          registry.stage.redhat.io:
+            "{{ cifmw_registry_token.credentials.username }}": "{{ cifmw_registry_token.credentials.password }}"
+        _stage_update:
+          data:
+            nodeset:
+              ansible:
+                ansibleVars:
+                  edpm_container_registry_logins: "{{ _new_logins }}"
+      ansible.builtin.set_fact:
+        cifmw_architecture_user_kustomize_90_registry_mirror_login: >-
+          {{
+            cifmw_architecture_user_kustomize_90_registry_mirror_login |
+            dict2items |
+            map('combine', {'value': _stage_update}, recursive=true) |
+            items2dict
+          }}
+
+    - name: Ensure destination directory exists
+      when: cifmw_registry_pullsecret_update_file | bool
+      ansible.builtin.file:
+        path: "{{ cifmw_registry_pullsecret_dest_file | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Update registry token file with pull-secret credentials
+      when: cifmw_registry_pullsecret_update_file | bool
+      vars:
+        _file_content:
+          cifmw_registry_token: "{{ cifmw_registry_token }}"
+      ansible.builtin.copy:
+        content: "{{ _file_content | to_nice_yaml }}"
+        dest: "{{ cifmw_registry_pullsecret_dest_file }}"
+        mode: "0644"
+
+    - name: Display success
+      ansible.builtin.debug:
+        msg: "Updated registry credentials for {{ cifmw_registry_pullsecret_registry_url }} from OpenShift pull-secret (user: {{ _pullsecret_username }})"
+
+  rescue:
+    - name: Pull-secret extraction failed
+      ansible.builtin.debug:
+        msg: "Could not extract credentials from pull-secret. Keeping existing credentials."

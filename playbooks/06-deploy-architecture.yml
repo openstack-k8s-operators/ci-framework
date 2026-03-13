@@ -163,6 +163,43 @@
                 msg: >-
                   Error detected. Check debugging output above.
 
+    - name: Extract registry credentials from OpenShift pull-secret
+      tags:
+        - always
+      when:
+        - cifmw_sync_pullsecret_credentials | default(true) | bool
+      block:
+        - name: Extract credentials for each configured registry
+          loop: "{{ cifmw_reproducer_registry_list | default(['registry.stage.redhat.io']) }}"
+          loop_control:
+            loop_var: registry
+          ansible.builtin.include_role:
+            name: edpm_pullsecret_sync
+          vars:
+            cifmw_edpm_pullsecret_sync_registry: "{{ registry }}"
+            cifmw_edpm_pullsecret_sync_fact_name: "cifmw_reproducer_registry_{{ registry | replace('.', '_') | replace('-', '_') }}_creds"
+
+        - name: Build registry credentials dictionary for templates
+          ansible.builtin.set_fact:
+            cifmw_ci_gen_kustomize_values_registry_logins: >-
+              {%- set result = {} -%}
+              {%- for registry in (cifmw_reproducer_registry_list | default(['registry.stage.redhat.io'])) -%}
+                {%- set fact_name = 'cifmw_reproducer_registry_' + (registry | replace('.', '_') | replace('-', '_')) + '_creds_dict' -%}
+                {%- if vars[fact_name] is defined -%}
+                  {%- set _ = result.update({registry: vars[fact_name]}) -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ result }}
+
+        - name: Log extracted registry credentials
+          ansible.builtin.debug:
+            msg: "Registry credentials extracted for: {{ cifmw_ci_gen_kustomize_values_registry_logins.keys() | list }}"
+
+      rescue:
+        - name: Log pull-secret extraction failure
+          ansible.builtin.debug:
+            msg: "Failed to extract credentials from pull-secret, templates will not include registry credentials"
+
     - name: Set cifmw_architecture_automation_file if not set before
       when: cifmw_architecture_automation_file is not defined
       ansible.builtin.set_fact:
