@@ -14,6 +14,22 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Wait for Keystone to be Ready with federation config applied
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: keystone.openstack.org/v1beta1
+    kind: KeystoneAPI
+    name: keystone
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: _keystone_ready
+  until: >-
+    _keystone_ready.resources | length > 0 and
+    (_keystone_ready.resources[0].status.conditions | default([]) |
+    selectattr('type', 'equalto', 'Ready') |
+    selectattr('status', 'equalto', 'True') | list | length > 0)
+  retries: 30
+  delay: 20
+
 - name: Build realm configurations for single realm OpenStack setup
   ansible.builtin.set_fact:
     _federation_openstack_realms_to_process:
