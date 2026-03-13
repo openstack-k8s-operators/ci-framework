@@ -21,12 +21,38 @@
     mode: "0640"
   when: cifmw_federation_deploy_type == "crc"
 
+- name: Check if federation domain already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack domain show {{ cifmw_federation_keystone_domain }} -f value -c id
+  register: _federation_domain_check
+  failed_when: false
+  changed_when: false
+
 - name: Run federation create domain
+  when: _federation_domain_check.rc != 0
   vars:
     _osp_cmd: "openstack domain create {{ cifmw_federation_keystone_domain }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
+- name: Check if federation identity provider already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack identity provider show {{ cifmw_federation_IdpName }} -f value -c id
+  register: _federation_idp_check
+  failed_when: false
+  changed_when: false
+
 - name: Run federation identity provider create
+  when: _federation_idp_check.rc != 0
   vars:
     _osp_cmd: "openstack identity provider create
       --remote-id {{ cifmw_federation_remote_id }}
@@ -47,38 +73,99 @@
     remote_path: "/home/cloud-admin/{{ cifmw_federation_rules_file }}"
     local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_rules_file ] | path_join }}"
 
+- name: Check if federation mapping already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack mapping show {{ cifmw_federation_mapping_name }} -f value -c id
+  register: _federation_mapping_check
+  failed_when: false
+  changed_when: false
+
 - name: Run federation mapping create
+  when: _federation_mapping_check.rc != 0
   vars:
     _osp_cmd: "openstack mapping create
       --rules {{ cifmw_federation_rules_file }}
       {{ cifmw_federation_mapping_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
+- name: Check if federation group already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack group show --domain {{ cifmw_federation_keystone_domain }}
+      {{ cifmw_federation_group_name }} -f value -c id
+  register: _federation_group_check
+  failed_when: false
+  changed_when: false
+
 - name: Run federation group create
+  when: _federation_group_check.rc != 0
   vars:
     _osp_cmd: "openstack group create
       --domain {{ cifmw_federation_keystone_domain }}
       {{ cifmw_federation_group_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
+- name: Check if federation project already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack project show --domain {{ cifmw_federation_keystone_domain }}
+      {{ cifmw_federation_project_name }} -f value -c id
+  register: _federation_project_check
+  failed_when: false
+  changed_when: false
+
 - name: Run federation project create
+  when: _federation_project_check.rc != 0
   vars:
     _osp_cmd: "openstack project create
       --domain {{ cifmw_federation_keystone_domain }}
       {{ cifmw_federation_project_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
-- name: Run federation rule add
-  vars:
-    _osp_cmd: "openstack role add
+- name: Run federation role add (safe to repeat - role add is idempotent)
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack role add
       --group {{ cifmw_federation_group_name }}
       --group-domain {{ cifmw_federation_keystone_domain }}
       --project {{ cifmw_federation_project_name }}
       --project-domain {{ cifmw_federation_keystone_domain }}
-      member"
-  ansible.builtin.include_tasks: run_osp_cmd.yml
+      member
+  failed_when: false
+  changed_when: true
+
+- name: Check if federation protocol already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack federation protocol show openid
+      --identity-provider {{ cifmw_federation_IdpName }} -f value -c id
+  register: _federation_protocol_check
+  failed_when: false
+  changed_when: false
 
 - name: Run federation protocol create
+  when: _federation_protocol_check.rc != 0
   vars:
     _osp_cmd: "openstack federation protocol create openid
       --mapping {{ cifmw_federation_mapping_name }}
