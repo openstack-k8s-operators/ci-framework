@@ -10,10 +10,10 @@ become - Required to install required rpm packages
 * `cifmw_tempest_default_groups`: (List) List of groups in the include list to search for tests to be executed
 * `cifmw_tempest_default_jobs`: (List) List of jobs in the exclude list to search for tests to be excluded
 * `cifmw_tempest_registry`: (String) The registry where to pull tempest container. Default to `quay.io`
-* `cifmw_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default to `podified-antelope-centos9`
+* `cifmw_tempest_namespace`: (String) Registry's namespace where to pull tempest container. Default to `{{ cifmw_default_container_image_namespace }}` (defined in group_vars/all.yml)
 * `cifmw_tempest_container`: (String) Name of the tempest container. Default to `openstack-tempest`
 * `cifmw_tempest_image`: (String) Tempest image to be used. Default to `{{ cifmw_tempest_registry }}/{{ cifmw_tempest_namespace }}/{{ cifmw_tempest_container }}`
-* `cifmw_tempest_image_tag`: (String) Tag for the `cifmw_tempest_image`. Default to `current-podified`
+* `cifmw_tempest_image_tag`: (String) Tag for the `cifmw_tempest_image`. Default to `{{ cifmw_default_container_image_tag }}` (defined in group_vars/all.yml)
 * `cifmw_tempest_dry_run`: (Boolean) Whether tempest should run or not. Default to `false`
 * `cifmw_tempest_remove_container`: (Boolean) Cleanup tempest container after it is done. Default to `false`
 * `cifmw_tempest_tests_skipped`: (List) List of tests to be skipped. Setting this will not use the `list_skipped` plugin
