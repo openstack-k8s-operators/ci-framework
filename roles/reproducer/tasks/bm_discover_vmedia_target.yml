@@ -1,0 +1,158 @@
+---
+# Discover or validate the UEFI device path for the iDRAC Virtual Optical Drive,
+# clear any pending iDRAC config jobs, and set a one-time boot override.
+# Requires: _bmc_host, _bmc_creds, _redfish_headers
+- name: Fetch UEFI boot option IDs
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/BootOptions"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+  register: _boot_option_list
+
+- name: Fetch each UEFI boot option detail
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}{{ item['@odata.id'] }}"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+  register: _boot_options
+  loop: "{{ _boot_option_list.json.Members }}"
+  loop_control:
+    label: "{{ item['@odata.id'] | basename }}"
+
+- name: Build list of known UEFI device paths
+  ansible.builtin.set_fact:
+    _known_uefi_paths: >-
+      {{ _boot_options.results | map(attribute='json') |
+         selectattr('UefiDevicePath', 'defined') |
+         map(attribute='UefiDevicePath') | list }}
+
+- name: Validate user-provided VirtualMedia UEFI path
+  when: cifmw_bm_agent_vmedia_uefi_path is defined
+  ansible.builtin.assert:
+    that:
+      - cifmw_bm_agent_vmedia_uefi_path in _known_uefi_paths
+    fail_msg: >-
+      cifmw_bm_agent_vmedia_uefi_path '{{ cifmw_bm_agent_vmedia_uefi_path }}'
+      is not listed in UEFI boot options. Available paths:
+      {{ _boot_options.results | map(attribute='json') |
+         map(attribute='DisplayName', default='?') | zip(_known_uefi_paths) |
+         map('join', ' -> ') | list | join(', ') }}
+
+- name: Auto-discover Virtual Optical Drive boot path
+  when: cifmw_bm_agent_vmedia_uefi_path is not defined
+  block:
+    - name: Find Virtual Optical Drive boot path
+      ansible.builtin.set_fact:
+        cifmw_bm_agent_vmedia_uefi_path: >-
+          {{ item.json.UefiDevicePath }}
+      when: "'Virtual Optical' in item.json.DisplayName | default('')"
+      loop: "{{ _boot_options.results }}"
+      loop_control:
+        label: "{{ item.json.DisplayName | default('unknown') }}"
+
+    - name: Fail if no Virtual Optical Drive found
+      when: cifmw_bm_agent_vmedia_uefi_path is not defined
+      ansible.builtin.fail:
+        msg: >-
+          Could not find a Virtual Optical Drive in UEFI boot options.
+          Set cifmw_bm_agent_vmedia_uefi_path manually in vars.yaml.
+
+- name: Show VirtualMedia UEFI boot target
+  ansible.builtin.debug:
+    msg: "VirtualMedia UEFI path: {{ cifmw_bm_agent_vmedia_uefi_path }}"
+
+- name: Clear pending iDRAC config jobs that block boot override
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Dell/Managers/iDRAC.Embedded.1/DellJobService/Actions/DellJobService.DeleteJobQueue"
+    method: POST
+    headers: "{{ _redfish_headers }}"
+    body_format: json
+    body:
+      JobID: "JID_CLEARALL"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 202, 204]
+  failed_when: false
+
+- name: Wait for iDRAC to settle after clearing jobs
+  ansible.builtin.pause:
+    seconds: 10
+
+- name: Set one-time boot from Virtual Optical Drive
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1"
+    method: PATCH
+    headers: "{{ _redfish_headers }}"
+    body_format: json
+    body:
+      Boot:
+        BootSourceOverrideTarget: UefiTarget
+        UefiTargetBootSourceOverride: "{{ cifmw_bm_agent_vmedia_uefi_path }}"
+        BootSourceOverrideEnabled: Once
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 204]
+
+- name: Verify boot override was applied
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+    status_code: [200]
+  register: _boot_verify
+
+- name: Assert boot override is set correctly
+  ansible.builtin.assert:
+    that:
+      - _boot_verify.json.Boot.BootSourceOverrideTarget == 'UefiTarget'
+      - _boot_verify.json.Boot.BootSourceOverrideEnabled == 'Once'
+      - _boot_verify.json.Boot.UefiTargetBootSourceOverride == cifmw_bm_agent_vmedia_uefi_path
+    fail_msg: >-
+      Boot override not applied.
+      Target: {{ _boot_verify.json.Boot.BootSourceOverrideTarget }}
+      (expected UefiTarget),
+      Enabled: {{ _boot_verify.json.Boot.BootSourceOverrideEnabled }}
+      (expected Once),
+      UefiPath: {{ _boot_verify.json.Boot.UefiTargetBootSourceOverride }}
+      (expected {{ cifmw_bm_agent_vmedia_uefi_path }})
+
+- name: Verify VirtualMedia is still inserted
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+    status_code: [200]
+  register: _vmedia_check
+
+- name: Assert VirtualMedia ISO is mounted
+  ansible.builtin.assert:
+    that:
+      - _vmedia_check.json.Inserted | bool
+    fail_msg: >-
+      VirtualMedia is not inserted. Image: {{ _vmedia_check.json.Image | default('none') }},
+      Inserted: {{ _vmedia_check.json.Inserted | default('unknown') }}.
+      The ISO may have been ejected during job queue clearing.
