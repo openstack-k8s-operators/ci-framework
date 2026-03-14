@@ -83,3 +83,38 @@
   loop: "{{ logsPVCs.resources }}"
   loop_control:
     index_var: index
+
+- name: Find subunit files
+  when: run_test_fw == 'tempest'
+  failed_when: false
+  ansible.builtin.find:
+    paths: "{{ cifmw_test_operator_artifacts_basedir }}"
+    patterns: "*.subunit"
+    recurse: true
+  register: _subunit_files
+
+- name: Install subunit and stestr packages
+  become: true
+  when:
+    - run_test_fw == 'tempest'
+    - _subunit_files.files | default([]) | length > 0
+  failed_when: false
+  ansible.builtin.package:
+    name:
+      - python3-subunit
+      - python3-stestr
+    state: present
+
+- name: Generate HTML report from subunit files
+  when:
+    - run_test_fw == 'tempest'
+    - _subunit_files.files | default([]) | length > 0
+  failed_when: false
+  ansible.builtin.command:
+    cmd: >-
+      python3 {{ role_path }}/files/subunit-to-html.py
+      {{ item.path }}
+      {{ item.path | regex_replace('\.subunit$', '-viz.html') }}
+  loop: "{{ _subunit_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
