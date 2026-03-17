@@ -1,0 +1,23 @@
+---
+# source: nova05epsilon/edpm-nodeset-values-post-ceph/values.yaml.j2
+# Auto-populates ceph_conf from files written by ceph.yml hook.
+# The ceph.yml post_stage_run hook (via cifmw_ceph_client role) writes
+# Ceph config files to cifmw_ceph_client_fetch_dir (default /tmp/).
+# This template reads those files and provides them as base64-encoded
+# values under data.ceph_conf (DCN convention).
+# When running in generate-CRs-only mode (mock validation), the files
+# won't exist; emit placeholders so kustomize can still build.
+{% set _fetch_dir = cifmw_ceph_client_fetch_dir | default('/tmp') %}
+{% set _cluster = cifmw_ceph_client_cluster | default('ceph') %}
+{% set _conf_file = (_fetch_dir, _cluster ~ '.conf') | path_join %}
+{% set _keyring_file = (_fetch_dir, _cluster ~ '.client.openstack.keyring') | path_join %}
+{% set _mock = cifmw_kustomize_deploy_generate_crs_only | default(false) | bool %}
+data:
+  ceph_conf:
+{% if not _mock and _keyring_file is file and _conf_file is file %}
+    {{ _cluster }}.client.openstack.keyring: {{ lookup('file', _keyring_file, rstrip=False) | b64encode }}
+    {{ _cluster }}.conf: {{ lookup('file', _conf_file, rstrip=False) | b64encode }}
+{% else %}
+    {{ _cluster }}.client.openstack.keyring: CHANGEME_CEPH_KEYRING
+    {{ _cluster }}.conf: CHANGEME_CEPH_CONF
+{% endif %}
