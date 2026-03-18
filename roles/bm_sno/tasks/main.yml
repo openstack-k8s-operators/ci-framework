@@ -24,22 +24,16 @@
 #   cifmw_bm_agent_node_ip                (node IP on BMO provision net)
 #   cifmw_bm_agent_node_iface             (RHCOS iface on BMO provision net)
 #   cifmw_bm_agent_bmc_host               (iDRAC on BMC mgmt network)
-#   cifmw_devscripts_bm_nodes             (list with mac / root_device)
+#   cifmw_bm_nodes                        (list with mac / root_device)
 #   cifmw_bm_agent_openshift_version      (e.g. "4.18.3"; or set
 #     cifmw_bm_agent_release_image (OPENSHIFT_RELEASE_IMAGE) instead)
 #
-# Optional (have defaults or are auto-discovered):
-#   cifmw_bm_agent_iso_http_port          (default: 80)
-#   cifmw_bm_agent_installer_timeout      (default: 7200)
-#   cifmw_manage_secrets_pullsecret_file  (default: ~/secrets/pull_secret.json)
-#   cifmw_bm_agent_enable_usb_boot        (enable it for ensuring GenericUsbBoot in BIOS)
-#   cifmw_bm_agent_vmedia_uefi_path       (UEFI path of the Virtual Optical Drive;
-#                                           auto-discovered if omitted)
-#   cifmw_bm_agent_core_password          (set core password post-install via MachineConfig)
-#   cifmw_bm_agent_live_debug             (patch the agent ISO with password, autologin,
-#                                           and systemd debug shell on tty6 for
-#                                           discovery-phase access; requires
-#                                           cifmw_bm_agent_core_password)
+# Optional variables have defaults in defaults/main.yml.
+# Secrets paths use ansible_user_dir and default inline:
+#   cifmw_manage_secrets_pullsecret_file  (default: ~/pull-secret)
+#   cifmw_bmc_credentials_file            (default: ~/secrets/idrac_access.yaml)
+#
+# See defaults/main.yml and README.md for the full reference.
 
 - name: Assert agent-based bare metal variables are set
   ansible.builtin.assert:
@@ -50,11 +44,11 @@
       - cifmw_bm_agent_node_ip is defined
       - cifmw_bm_agent_node_iface is defined
       - cifmw_bm_agent_bmc_host is defined
-      - cifmw_devscripts_bm_nodes is defined
-      - cifmw_devscripts_bm_nodes | length == 1
+      - cifmw_bm_nodes is defined
+      - cifmw_bm_nodes | length == 1
     fail_msg: >-
       Missing agent-based bare metal variables.
-      Check vars.yaml for cifmw_bm_agent_* and cifmw_devscripts_bm_nodes.
+      Check vars.yaml for cifmw_bm_agent_* and cifmw_bm_nodes.
 
 - name: Set internal facts
   ansible.builtin.set_fact:
@@ -63,10 +57,10 @@
     _machine_network: "{{ cifmw_bm_agent_machine_network }}"
     _node_ip: "{{ cifmw_bm_agent_node_ip }}"
     _node_iface: "{{ cifmw_bm_agent_node_iface }}"
-    _node_mac: "{{ cifmw_devscripts_bm_nodes[0].mac }}"
+    _node_mac: "{{ cifmw_bm_nodes[0].mac }}"
     _bmc_host: "{{ cifmw_bm_agent_bmc_host }}"
-    _iso_http_port: "{{ cifmw_bm_agent_iso_http_port | default(80) }}"
-    _installer_timeout: "{{ cifmw_bm_agent_installer_timeout | default(7200) }}"
+    _iso_http_port: "{{ cifmw_bm_agent_iso_http_port }}"
+    _installer_timeout: "{{ cifmw_bm_agent_installer_timeout }}"
     _work_dir: "{{ cifmw_reproducer_basedir }}/artifacts/agent-install"
     _creds_file: >-
       {{ cifmw_bmc_credentials_file |
@@ -133,7 +127,7 @@
       {{ cifmw_bm_agent_release_image |
          default(lookup('env', 'OPENSHIFT_RELEASE_IMAGE') | default('', true)) }}
     _ocp_version: >-
-      {{ cifmw_bm_agent_openshift_version | default('') }}
+      {{ cifmw_bm_agent_openshift_version }}
 
 - name: Assert an OCP version or release image is provided
   ansible.builtin.assert:
@@ -206,7 +200,7 @@
     - "{{ _work_dir }}/openshift"
 
 - name: Configure core user console access via MachineConfig
-  when: cifmw_bm_agent_core_password | default('') | length > 0
+  when: cifmw_bm_agent_core_password | length > 0
   ansible.builtin.include_tasks: bm_core_password_machineconfig.yml
 
 - name: Persist configs before openshift-install consumes them
@@ -230,7 +224,7 @@
     cmd: "{{ _work_dir }}/openshift-install agent create image --dir {{ _work_dir }}"
 
 - name: Patch agent ISO ignition for discovery-phase console access
-  when: (cifmw_bm_agent_live_debug | default(false)) | bool
+  when: cifmw_bm_agent_live_debug | bool
   ansible.builtin.include_tasks: bm_patch_agent_iso.yml
 
 - name: Set controller IP fact
@@ -285,6 +279,7 @@
   ansible.builtin.include_tasks: bm_eject_vmedia.yml
 
 - name: Insert agent ISO via VirtualMedia
+  no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
     method: POST
