@@ -1,7 +1,8 @@
 ---
-# Power on the bare metal host and wait for POST to complete.
+# Enusre power off the bare metal host.
 # Requires: _bmc_host, _bmc_creds, _redfish_headers
 - name: Query current power state
+  no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1"
     method: GET
@@ -11,24 +12,27 @@
     validate_certs: false
     force_basic_auth: true
     status_code: [200]
-  register: _power_state
+  register: _power_state_check
 
-- name: Power on bare metal host
-  when: _power_state.json.PowerState != 'On'
+- name: Force power off via Redfish
+  when: _power_state_check.json.PowerState != 'Off'
+  no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
     method: POST
     headers: "{{ _redfish_headers }}"
     body_format: json
     body:
-      ResetType: "On"
+      ResetType: ForceOff
     user: "{{ _bmc_creds.username }}"
     password: "{{ _bmc_creds.password }}"
     validate_certs: false
     force_basic_auth: true
     status_code: [200, 204]
 
-- name: Wait for host POST to complete
+- name: Wait for host to power off
+  when: _power_state_check.json.PowerState != 'Off'
+  no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1"
     method: GET
@@ -37,21 +41,8 @@
     password: "{{ _bmc_creds.password }}"
     validate_certs: false
     force_basic_auth: true
-    return_content: true
     status_code: [200]
-  register: _post_check
-  retries: 30
+  register: _power_off_wait
+  retries: 12
   delay: 10
-  until: >-
-    _post_check.json.Oem.Dell.DellSystem.PostState | default('')
-    in ['InPostDiscoveryComplete', 'FinishedPost'] or
-    ('PostState' not in (_post_check.json.Oem.Dell.DellSystem | default({}))
-    and _post_check.json.PowerState | default('') == 'On')
-
-- name: Show POST state
-  ansible.builtin.debug:
-    msg: >-
-      POST state:
-      {{ _post_check.json.Oem.Dell.DellSystem.PostState
-        | default('not supported by firmware, used PowerState='
-          + _post_check.json.PowerState | default('unknown')) }}
+  until: _power_off_wait.json.PowerState == 'Off'
