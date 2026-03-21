@@ -115,10 +115,14 @@
     - name: Get operator images and pods
       when: not cifmw_env_op_images_dryrun | bool
       vars:
-        selected_pod: "{{ pod_list.resources | selectattr('metadata.generateName', 'contains', 'rabbitmq-cluster-operator-') | list | first }}"
+        _rabbitmq_pods: "{{ pod_list.resources | selectattr('metadata.generateName', 'defined') | selectattr('metadata.generateName', 'contains', 'rabbitmq-cluster-operator-') | list }}"
+        _rabbitmq_img: >-
+          {{
+            {'RABBITMQ_OP_IMG': _rabbitmq_pods[0].status.containerStatuses[0].imageID}
+            if _rabbitmq_pods | length > 0 else {}
+          }}
       ansible.builtin.set_fact:
-        cifmw_openstack_operator_images_content:
-          RABBITMQ_OP_IMG: "{{ selected_pod.status.containerStatuses[0].imageID }}"
+        cifmw_openstack_operator_images_content: "{{ _rabbitmq_img }}"
         selected_pods: "{{ pod_list.resources |
                            rejectattr('metadata.generateName', 'contains', 'openstack-operator-index-') |
                            rejectattr('metadata.generateName', 'contains', 'rabbitmq-cluster-operator-') |
