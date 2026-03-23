@@ -61,6 +61,7 @@ provision IP via `/etc/hosts` entries managed by the role.
 | `cifmw_bm_agent_vmedia_uefi_path` | str | auto-discovered | UEFI device path for the Virtual Optical Drive; auto-discovered from UEFI boot options if omitted |
 | `cifmw_bm_agent_core_password` | str | — | Set a `core` user password post-install via MachineConfig |
 | `cifmw_bm_agent_live_debug` | bool | `false` | Patch the agent ISO with password, autologin, and systemd debug shell on `tty6` for discovery-phase console access (requires `cifmw_bm_agent_core_password`) |
+| `cifmw_bm_agent_disabled_ifaces` | list | `[]` | Extra NIC names to disable IPv4/IPv6 on during agent-based install. Prevents overlapping-subnet validation failures when multiple NICs share a native VLAN (e.g. `[eno2]`). The interfaces stay link-up but get no IP address; post-install NNCP configures them. |
 
 ## Secrets management
 
@@ -95,7 +96,7 @@ The agent-based deployment is composed of reusable task files under
 | `bm_ensure_usb_boot.yml` | Wraps `bm_check_usb_boot.yml`; if disabled and `cifmw_bm_agent_enable_usb_boot` is true, sets the BIOS attribute, creates a config job, and power-cycles to apply |
 | `bm_eject_vmedia.yml` | Ejects VirtualMedia from the iDRAC Virtual Optical Drive |
 | `bm_discover_vmedia_target.yml` | Discovers or validates the UEFI device path for VirtualMedia, clears pending iDRAC config jobs, and sets a one-time boot override |
-| `bm_patch_agent_iso.yml` | Patches the agent ISO ignition with core password, autologin, and debug shell (used when `cifmw_bm_agent_live_debug` is true) |
+| `bm_patch_agent_iso.yml` | Patches the agent ISO ignition with core password, autologin, and debug shell on tty6 (used when `cifmw_bm_agent_live_debug` is true) |
 | `bm_core_password_machineconfig.yml` | Generates a MachineConfig manifest to set the core user password hash post-install |
 
 ## openshift-install acquisition
@@ -176,6 +177,94 @@ cifmw_bm_agent_enable_usb_boot: true
 cifmw_bm_nodes:
   - mac: "b0:7b:25:xx:yy:zz"
     root_device: /dev/sda
+```
+
+## Local debugging on an autoheld Zuul node
+
+When a Zuul job is held (`autohold`), you can SSH into the Zuul controller
+and iterate on the deployment without re-provisioning SNO from scratch.
+
+### 1. Prepare the environment
+
+Edit `~/configs/zuul_vars.yaml` to skip SNO re-provisioning and OpenStack
+cleanup (there is nothing to clean up if doing the first RHOSO deployment):
+
+```yaml
+cifmw_cleanup_architecture: false
+reuse_ocp: true
+run_cleanup: false
+```
+
+### 2. Run the playbook
+
+From the `ci-framework-jobs` checkout on the Zuul controller:
+
+```bash
+cd ~/src/gitlab.cee.redhat.com/ci-framework/ci-framework-jobs
+
+ansible-playbook playbooks/baremetal/run-sno-bm.yaml \
+  --flush-cache \
+  -e@/home/zuul/configs/default-vars.yaml \
+  -e@/home/zuul/src/gitlab.cee.redhat.com/ci-framework/ci-framework-jobs/scenarios/test/test-tool-versions.yaml \
+  -e@/home/zuul/src/gitlab.cee.redhat.com/ci-framework/ci-framework-jobs/scenarios/uni/default-vars.yaml \
+  -e@/home/zuul/src/gitlab.cee.redhat.com/ci-framework/ci-framework-jobs/scenarios/baremetal/vaf/rhel-vars.yaml \
+  -e@/home/zuul/configs/networking_defintion.yaml \
+  -e@/home/zuul/configs/nmstate_config.yaml \
+  -e@/home/zuul/configs/scenario-vars.yaml \
+  -e@/home/zuul/configs/secrets.yaml \
+  -e@/home/zuul/configs/vars.yaml \
+  -e@/home/zuul/configs/zuul_vars.yaml
+```
+
+With `reuse_ocp: true`, `run-sno-bm.yaml` will:
+
+1. Copy the SNO kubeconfig from `dev-scripts/ocp/<cluster>/auth/` to
+   `~/.kube/config` and `oc login` as `kubeadmin` with
+   `--insecure-skip-tls-verify` (agent-based installer uses self-signed certs)
+2. Generate `openshift-login-params.yml` via the `openshift_login` role
+3. Write a static inventory mapping `controller-0` to `localhost`
+4. Run `deploy-edpm-reuse.yaml` instead of `reproducer.yml`, which skips
+   OCP provisioning and goes straight to architecture deployment
+
+### 3. Subsequent iterations
+
+Once the first EDPM deployment succeeds, set `cifmw_cleanup_architecture`
+back to `true` so that `cleanup-architecture.sh` tears down the previous
+OpenStack deployment before re-applying:
+
+```yaml
+cifmw_cleanup_architecture: true
+reuse_ocp: true
+run_cleanup: false
+```
+
+### 4. Quick OCP and agent/SNO SSH access
+
+The SNO kubeconfig and kubeadmin password live in the dev-scripts auth
+directory:
+
+```bash
+export KUBECONFIG=~/src/github.com/openshift-metal3/dev-scripts/ocp/<cluster>/auth/kubeconfig
+oc login -u kubeadmin \
+  -p "$(cat ~/src/github.com/openshift-metal3/dev-scripts/ocp/<cluster>/auth/kubeadmin-password)" \
+  --insecure-skip-tls-verify=true
+oc get nodes
+```
+
+For ssh access into SNO host:
+```bash
+ssh -i ~/ci-framework-data/artifacts/agent-install/agent_ssh_key \
+  core@<cluster>.<cifmw_bm_agent_base_domain>
+```
+
+Replace `<cluster>` with the value of `cifmw_bm_agent_cluster_name` (e.g.
+`sno`).
+
+For ssh into agent-install appliance, use `-i ci-framework-data/artifacts/cifmw_ocp_access_key`.
+You can also get autologin and debug shell on tty6 of the agent with:
+```bash
+cifmw_bm_agent_core_password: changeme
+cifmw_bm_agent_live_debug: true
 ```
 
 ## References
