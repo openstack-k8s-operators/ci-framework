@@ -1,0 +1,73 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Get all containers usage - sort by cpu
+  ansible.builtin.shell: >
+    oc adm top pods
+    --all-namespaces
+    --sort-by=cpu
+    --containers >
+    {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-cpu-top.log
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+  register: _top_pods_cpu
+  ignore_errors: true  # noqa: ignore-errors
+
+- name: Print message when metrics are not available
+  when:
+    - _top_pods_cpu.rc != 0
+    - "'not available' not in _top_pods_cpu.stderr"
+    - "'not available' not in _top_pods_cpu.stdout"
+  ansible.builtin.debug:
+    msg: |
+      Probably metrics are not available. Can not collect logs
+      Exact error is {{ _top_pods_cpu.stderr }}
+
+- name: Continue collecting resource usage when metrics available
+  when:
+    - _top_pods_cpu.rc == 0
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
+  block:
+    - name: Get all containers usage - sort by memory
+      ansible.builtin.shell: >
+        oc adm top pods
+        --all-namespaces
+        --sort-by=memory
+        --containers >
+        {{ cifmw_os_must_gather_output_log_dir }}/latest/all-containers-memory-top.log
+
+    - name: Find all namespaces directories
+      ansible.builtin.find:
+        paths: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces"
+        file_type: directory
+        depth: 1
+      register: _os_gather_namespaces
+
+    - name: Get resource usage by pods per namespace
+      when: _os_gather_namespaces.files | length > 1
+      vars:
+        namespace_dir: "{{ cifmw_os_must_gather_output_log_dir }}/latest/namespaces/{{  _namespace_path.path | basename }}"
+      ansible.builtin.shell: >
+        oc adm top pods
+        -n {{ _namespace_path.path | basename }} > {{ namespace_dir }}/pods-top.log
+      loop: "{{ _os_gather_namespaces.files }}"
+      loop_control:
+        loop_var: _namespace_path
+
+    - name: Get node resource usage
+      ansible.builtin.shell: |
+        oc adm top nodes > {{ cifmw_os_must_gather_output_log_dir }}/latest/openstack-nodes-top.log

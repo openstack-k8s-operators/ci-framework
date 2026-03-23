@@ -1,0 +1,60 @@
+---
+# NOTE(dpawlik): Earlier, our idea was to dump vars as
+# it is roles/cifmw_setup/tasks/bootstrap.yml and read it,
+# then dump it and replace reproducer-variables.yml.
+# Normally it make sense, but since we dump zuul_vars in
+# run.yml, we don't need to make such combination, which is
+# more safe - on making host variable dump, some variables
+# might not be defined, so later we can have an issue like:
+#     'cifmw_discovered_image_url' is undefined.
+
+- name: Check if zuul_vars.yaml file is available
+  ansible.builtin.stat:
+    path: "{{ ansible_user_dir }}/configs/zuul_vars.yaml"
+  register: _current_zuul_vars
+
+- name: Overwrite reproducer-variables.yml when ZIronic used
+  when: _current_zuul_vars.stat.exists
+  block:
+    - name: Dump reproducer-variables.yml to var
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
+      register: reproducer_original
+      delegate_to: controller-0
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Dump zuul_vars.yaml to var
+      ansible.builtin.slurp:
+        src: "{{ ansible_user_dir }}/configs/zuul_vars.yaml"
+      register: zuul_job_vars
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Load current job zuul_vars.yaml
+      ansible.builtin.include_vars:
+        file: "{{ ansible_user_dir }}/configs/zuul_vars.yaml"
+        name: _current_zuul_vars_include
+
+    - name: Decode reproducer-variables.yml content
+      ansible.builtin.set_fact:
+        reproducer_vars_content: "{{ reproducer_original.content | b64decode | from_yaml }}"
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Filter zuul vars to only keys present in reproducer-variables
+      ansible.builtin.set_fact:
+        _zuul_vars_filtered: >-
+          {{
+            _current_zuul_vars_include | dict2items
+            | selectattr('key', 'in', reproducer_vars_content.keys())
+            | items2dict
+          }}
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Write back merged reproducer-variables.yml
+      ansible.builtin.copy:
+        content: >-
+          {{ reproducer_vars_content | combine(_zuul_vars_filtered, recursive=true) | to_nice_yaml }}
+        dest: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
+        mode: '0664'
+        backup: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      delegate_to: controller-0

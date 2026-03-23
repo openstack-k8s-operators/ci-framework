@@ -25,6 +25,11 @@ Role for triggering Openshift on Openstack QA automation (installation and tests
 * `cifmw_shiftstack_sc`: (*string*) The storage class to be used for PVC for the shiftstackclient pod. Defaults to `local-storage`.
 * `cifmw_shiftstack_shiftstackclient_artifacts_dir`: (*string*) The artifacts directory path for the shiftstackclient pod. Defaults to `/home/cloud-admin/artifacts`.
 * `cifmw_shiftstack_shiftstackclient_incluster_kubeconfig_dir`: (*string*) The directory path in shiftstackclient pod the will hold the RHOSO kubeconfig. Defaults to `/home/cloud-admin/incluster-kubeconfig`.
+* `cifmw_shiftstack_client_pod_ram_requests`: (*string*) Memory request for the shiftstackclient pod. Defaults to `12Gi`.
+* `cifmw_shiftstack_client_pod_ram_limits`: (*string*) Memory limit for the shiftstackclient pod. Defaults to `12Gi`.
+* `cifmw_shiftstack_client_pod_cpu_requests`: (*string*) CPU request for the shiftstackclient pod. Defaults to `4`.
+* `cifmw_shiftstack_client_pod_cpu_limits`: (*string*) CPU limit for the shiftstackclient pod. Defaults to `4`.
+* `cifmw_shiftstack_storage_access_mode`: (*list*) A list of storage access mode for shiftstack pvc. defaults to `['ReadWriteOnce', 'ReadWriteMany', 'ReadOnlyMany']`
 
 ## Examples
 The role is imported in the test playbook, i.e. when:

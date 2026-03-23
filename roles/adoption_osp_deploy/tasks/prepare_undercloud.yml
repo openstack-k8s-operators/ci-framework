@@ -28,6 +28,10 @@
       community.general.rhsm_repository:
         name: "{{ cifmw_adoption_osp_deploy_repos }}"
         state: enabled
+      register: repo_result
+      until: repo_result is succeeded
+      retries: 5
+      delay: 30
 
     - name: Get current /etc/redhat-release
       ansible.builtin.command: cat /etc/redhat-release
@@ -108,17 +112,21 @@
     - name: Generate os-net-config file
       become: true
       vars:
+        _is_bgp: "{{ cifmw_adoption_osp_deploy_bgp | bool }}"
         _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
         _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
-        _ctlplane_ip: "{{ _undercloud_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
+        _ctlplane_net_name: "{{ 'ctlplaner0' if _is_bgp else 'ctlplane' }}"
+        _ctlplane_undercloud_net: "{{ _undercloud_net.networks[_ctlplane_net_name] }}"
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_ctlplane_net_name] }}"
+        _ctlplane_ip: "{{ _ctlplane_undercloud_net[ip_version|default('ip_v4')] }}"
         _ctlplane_vip: "{{ cifmw_adoption_osp_deploy_scenario.undercloud.ctlplane_vip }}"
-        _ctlplane_net: "{{ cifmw_networking_env_definition.networks.ctlplane }}"
         _dns_server: "{{ _ctlplane_net[dns_version|default('dns_v4')] }}"
         _gateway_ip: "{{ _ctlplane_net[gw_version|default('gw_v4')] }}"
-        _interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
-        _ctlplane_cidr: "{{ _undercloud_net.networks.ctlplane[prefix_length_version|default('prefix_length_v4')] }}"
+        _interface_mtu: "{{ _ctlplane_undercloud_net.mtu }}"
+        _ctlplane_cidr: "{{ _ctlplane_undercloud_net[prefix_length_version|default('prefix_length_v4')] }}"
+        _os_net_config_template: "{{ 'os_net_config_undercloud_bgp.yml.j2' if _is_bgp else 'os_net_config_undercloud.yml.j2' }}"
       ansible.builtin.template:
-        src: "os_net_config_undercloud.yml.j2"
+        src: "{{ _os_net_config_template }}"
         dest: /etc/os-net-config/tripleo_config.yaml
         mode: "0644"
 
@@ -131,53 +139,60 @@
 
 - name: Add environment specific vars for undercloud
   vars:
+    _is_bgp: "{{ cifmw_adoption_osp_deploy_bgp | bool }}"
     _undercloud_name: "{{ _vm_groups['osp-underclouds'] | first }}"
     _undercloud_net: "{{ cifmw_networking_env_definition.instances[_undercloud_name] }}"
-    _undercloud_ip: "{{ _undercloud_net.networks.ctlplane[ip_version|default('ip_v4')] }}"
-    _undercloud_net_prefix: "{{ _undercloud_net.networks.ctlplane[prefix_length_version|default('prefix_length_v4')] }}"
-    _ctlplane_cidr: "{{ cifmw_networking_env_definition.networks.ctlplane[network_version|default('network_v4')] }}"
-    _interface_mtu: "{{ _undercloud_net.networks.ctlplane.mtu }}"
+    _ctlplane_net_name: "{{ 'ctlplaner0' if _is_bgp else 'ctlplane' }}"
+    _ctlplane_undercloud_net: "{{ _undercloud_net.networks[_ctlplane_net_name] }}"
+    _undercloud_ip: "{{ _ctlplane_undercloud_net[ip_version|default('ip_v4')] }}"
+    _undercloud_net_prefix: "{{ _ctlplane_undercloud_net[prefix_length_version|default('prefix_length_v4')] }}"
+    _ctlplane_cidr: "{{ cifmw_networking_env_definition.networks[_ctlplane_net_name][network_version|default('network_v4')] }}"
+    _interface_mtu: "{{ _ctlplane_undercloud_net.mtu }}"
+    # Common config for both BGP and non-BGP
+    _common_config:
+      - section: DEFAULT
+        option: undercloud_ntp_servers
+        value: "{{ cifmw_adoption_osp_deploy_ntp_server }}"
+      - section: DEFAULT
+        option: container_images_file
+        value: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
+      - section: DEFAULT
+        option: net_config_override
+        value: "/etc/os-net-config/tripleo_config.yaml"
+    # Non-BGP specific config
+    _non_bgp_config:
+      - section: DEFAULT
+        option: local_ip
+        value: "{{ _undercloud_ip }}/{{ _undercloud_net_prefix }}"
+      - section: DEFAULT
+        option: local_mtu
+        value: "{{ _interface_mtu }}"
+      - section: DEFAULT
+        option: undercloud_public_host
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(122) }}"
+      - section: DEFAULT
+        option: undercloud_admin_host
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(123) }}"
+      - section: "ctlplane-subnet"
+        option: "cidr"
+        value: "{{ _ctlplane_cidr }}"
+      - section: "ctlplane-subnet"
+        option: "dhcp_start"
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(110) }}"
+      - section: "ctlplane-subnet"
+        option: "dhcp_end"
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(130) }}"
+      - section: "ctlplane-subnet"
+        option: "gateway"
+        value: "{{ cifmw_networking_env_definition.networks[_ctlplane_net_name][gw_version|default('gw_v4')] }}"
+      - section: "ctlplane-subnet"
+        option: "inspection_iprange"
+        value: "{{ _ctlplane_cidr | ansible.utils.nthhost(200) }},{{ _ctlplane_cidr | ansible.utils.nthhost(220) }}"
+      - section: "ctlplane-subnet"
+        option: "masquerade"
+        value: true
     _env_undercloud:
-      config:
-        - section: DEFAULT
-          option: local_ip
-          value: "{{ _undercloud_ip }}/{{ _undercloud_net_prefix }}"
-        - section: DEFAULT
-          option: local_mtu
-          value: "{{ _interface_mtu }}"
-        - section: DEFAULT
-          option: undercloud_ntp_servers
-          value: "{{ cifmw_adoption_osp_deploy_ntp_server }}"
-        - section: DEFAULT
-          option: container_images_file
-          value: "{{ ansible_user_dir }}/containers-prepare-parameters.yaml"
-        - section: DEFAULT
-          option: net_config_override
-          value: "/etc/os-net-config/tripleo_config.yaml"
-        - section: DEFAULT
-          option: undercloud_public_host
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(122) }}"
-        - section: DEFAULT
-          option: undercloud_admin_host
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(123) }}"
-        - section: "ctlplane-subnet"
-          option: "cidr"
-          value: "{{ _ctlplane_cidr }}"
-        - section: "ctlplane-subnet"
-          option: "dhcp_start"
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(110) }}"
-        - section: "ctlplane-subnet"
-          option: "dhcp_end"
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(130) }}"
-        - section: "ctlplane-subnet"
-          option: "gateway"
-          value: "{{ cifmw_networking_env_definition.networks.ctlplane[gw_version|default('gw_v4')] }}"
-        - section: "ctlplane-subnet"
-          option: "inspection_iprange"
-          value: "{{ _ctlplane_cidr | ansible.utils.nthhost(200) }},{{ _ctlplane_cidr | ansible.utils.nthhost(220) }}"
-        - section: "ctlplane-subnet"
-          option: "masquerade"
-          value: true
+      config: "{{ _common_config + (_non_bgp_config if not _is_bgp else []) }}"
   ansible.builtin.set_fact:
     _undercloud_conf: >-
       {{
@@ -261,3 +276,91 @@
     state: "present"
     mode: "0644"
   loop: "{{ _undercloud_conf.config }}"
+
+- name: Run undercloud FreeIPA enablement tasks
+  when: cifmw_adoption_osp_deploy_scenario.tlse | default(false)
+  vars:
+    cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
+    _freeipa_name: "{{ _vm_groups['osp-free-ipas'] | first }}"
+    _freeipa_net: "{{ cifmw_networking_env_definition.instances[_freeipa_name] }}"
+    freeipa_ip: "{{ _freeipa_net.networks.ocpbm[ip_version|default('ip_v4')] }}"
+  delegate_to: "osp-undercloud-0"
+  block:
+    - name: Create resolv.conf.manually-configured
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf.manually-configured"
+        content: |
+            search {{ cloud_domain }}
+            nameserver {{ freeipa_ip }}
+        mode: '0644'
+
+    - name: Create a symbolic link of systemd resolv.conf
+      become: true
+      ansible.builtin.file:
+        src: "/etc/resolv.conf.manually-configured"
+        dest: "/etc/resolv.conf"
+        owner: root
+        group: root
+        state: link
+        force: true
+
+    - name: Set hostname on undercloud
+      become: true
+      ansible.builtin.shell: |
+          sudo hostnamectl set-hostname osp-undercloud-0.{{ cloud_domain }}
+          sudo hostnamectl set-hostname --transient osp-undercloud-0.{{ cloud_domain }}
+
+    - name: Create ssh key pair
+      ansible.builtin.user:
+        name: zuul
+        generate_ssh_key: true
+        ssh_key_bits: 2048
+        ssh_key_file: "{{ ansible_user_dir }}/.ssh/id_rsa"
+
+    - name: Slurp pub key
+      ansible.builtin.slurp:
+        src: "{{ ansible_user_dir ~ '/.ssh/id_rsa.pub' }}"
+      register: pub_key
+
+    - name: Ensure zuul can ssh to localhost
+      ansible.posix.authorized_key:
+        user: zuul
+        key: "{{ pub_key['content'] | b64decode }}"
+
+    - name: Install ipa-client
+      become: true
+      ansible.builtin.dnf:
+        name: ipa-client
+        state: present
+
+    - name: Run undercloud ipa installer
+      vars:
+        _undercloud_ipa_install_cmd: |
+          export IPA_DOMAIN="{{ cloud_domain }}"
+          export IPA_REALM="{{ cloud_domain|upper }}"
+          export IPA_ADMIN_USER=admin
+          export IPA_ADMIN_PASSWORD="{{ cifmw_adoption_osp_deploy_freeipa_admin_password }}"
+          export IPA_SERVER_HOSTNAME="osp-free-ipa-0.{{ cloud_domain }}"
+          export UNDERCLOUD_FQDN="osp-undercloud-0.{{ cloud_domain }}"
+          export USER=zuul
+          export CLOUD_DOMAIN="{{ cloud_domain }}"
+          ansible-playbook \
+          --ssh-extra-args "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+          /usr/share/ansible/tripleo-playbooks/undercloud-ipa-install.yaml
+      cifmw.general.ci_script:
+        chdir: "{{ ansible_user_dir }}"
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        script: "{{ _undercloud_ipa_install_cmd }}"
+
+    - name: Edit undercloud.conf for ipa
+      community.general.ini_file:
+        path: ~/undercloud.conf
+        backup: true
+        mode: "0644"
+        section: "{{ item.section }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { section: "DEFAULT", option: "undercloud_nameservers", value: "{{ freeipa_ip }} " }
+        - { section: "DEFAULT", option: "overcloud_domain_name", value: "{{ cloud_domain }}" }

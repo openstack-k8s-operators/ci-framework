@@ -1,0 +1,489 @@
+---
+# By default, the OSP VMs will run using a default image.
+# In upstream, it's usually latest centos-stream-9
+# For downstream, it's usually rhel-9.4 image, depending on
+# the job configuration.
+#
+# Since OSP infra must use an older RHEL image, you can override it
+# by setting "osp_base_img_url" to point to the downstream QCOW2 image,
+# and "osp_base_img_sha256" holding the SHA256SUM of the image.
+#
+# We can't automatically discover the image, the role/module sets the
+# value globally, and it would clash with the needs for RHOSO images.
+
+# Use anchor to avoid repetitions. This block is common to all of OSP nodes.
+_osp_img_data: &osp_base_conf
+  image_local_dir: "{{ cifmw_basedir }}/images/"
+  disk_file_name: osp-base.qcow2
+  image_url: "{{ osp_base_img_url | default(cifmw_discovered_image_url) }}"
+  sha256_image_name: >-
+    {{ osp_base_img_sha256 | default(cifmw_discovered_hash) }}
+
+cifmw_architecture_scenario: bgp-l3-xl-adoption
+cifmw_arch_automation_file: "bgp-l3-xl-adoption.yaml"
+
+libvirt_manager_patch_layout:
+  vms:
+    # Let's remove the default computes, since we want to adopt the
+    # OSP ones
+    compute:
+      <<: *osp_base_conf
+      amount: 0
+    osp-undercloud:
+      <<: *osp_base_conf
+      amount: 1
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - r0_tr
+      spineleafnets:
+        -  # rack0 - undercloud
+          - "l00-node4"
+          - "l01-node4"
+    osp-r0-controller:
+      <<: *osp_base_conf
+      amount: 1
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - r0_tr
+      spineleafnets:
+        -  # rack0 - controller0
+          - "l00-node3"
+          - "l01-node3"
+    osp-r1-controller:
+      <<: *osp_base_conf
+      amount: 1
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - r1_tr
+      spineleafnets:
+        -  # rack1 - controller1
+          - "l10-node3"
+          - "l11-node3"
+    osp-r2-controller:
+      <<: *osp_base_conf
+      amount: 1
+      memory: 16
+      cpus: 8
+      disksize: 80
+      nets:
+        - ocpbm
+        - r2_tr
+      spineleafnets:
+        -  # rack2 - controller2
+          - "l20-node3"
+          - "l21-node3"
+    osp-r0-compute:
+      <<: *osp_base_conf
+      amount: 2
+      memory: 4
+      cpus: 4
+      disksize: 20
+      nets:
+        - ocpbm
+        - r0_tr
+      spineleafnets:
+        -  # rack0 - compute0
+          - "l00-node0"
+          - "l01-node0"
+        -  # rack0 - compute0
+          - "l00-node1"
+          - "l01-node1"
+    osp-r1-compute:
+      <<: *osp_base_conf
+      amount: 2
+      memory: 4
+      cpus: 4
+      disksize: 20
+      nets:
+        - ocpbm
+        - r1_tr
+      spineleafnets:
+        - # rack1 - compute0
+          - "l10-node0"
+          - "l11-node0"
+        - # rack1 - compute1
+          - "l10-node1"
+          - "l11-node1"
+    osp-r2-compute:
+      <<: *osp_base_conf
+      amount: 2
+      memory: 4
+      cpus: 4
+      disksize: 20
+      nets:
+        - ocpbm
+        - r2_tr
+      spineleafnets:
+        - # rack2 - compute0
+          - "l20-node0"
+          - "l21-node0"
+        - # rack2 - compute1
+          - "l20-node1"
+          - "l21-node1"
+
+    router:
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      amount: 1
+      disksize: 25
+      memory: 4
+      cpus: 2
+      nets:  # nets common to all the router nodes
+        - "ocpbm"
+      spineleafnets:
+        -  # router - ocp_tester
+          - "s0-rtr"
+          - "s1-rtr"
+          - "rtr-ocp"
+    spine:
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      amount: 2
+      disksize: 25
+      memory: 4
+      cpus: 2
+      nets:  # nets common to all the spine nodes
+        - "ocpbm"
+      spineleafnets:
+        -  # spine0
+          - "l00-s0"
+          - "l01-s0"
+          - "l10-s0"
+          - "l11-s0"
+          - "l20-s0"
+          - "l21-s0"
+          - "s0-rtr"
+        -  # spine1
+          - "l00-s1"
+          - "l01-s1"
+          - "l10-s1"
+          - "l11-s1"
+          - "l20-s1"
+          - "l21-s1"
+          - "s1-rtr"
+    leaf:
+      root_part_id: >-
+        {{
+          (cifmw_repo_setup_os_release is defined and cifmw_repo_setup_os_release == 'rhel') |
+          ternary(4, 1)
+        }}
+      image_url: "{{ cifmw_discovered_image_url }}"
+      sha256_image_name: "{{ cifmw_discovered_hash }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      amount: 6
+      disksize: 25
+      memory: 4
+      cpus: 2
+      nets:  # nets common to all the leaf nodes
+        - "ocpbm"
+      spineleafnets:
+        -  # rack0 - leaf00
+          - "l00-s0"
+          - "l00-s1"
+          - "l00-node0"
+          - "l00-node1"
+          - "l00-node2"
+          - "l00-ocp0"
+          - "l00-ocp1"
+          - "l00-ocp2"
+          - "l00-node3"
+          - "l00-node4"
+        -  # rack0 - leaf01
+          - "l01-s0"
+          - "l01-s1"
+          - "l01-node0"
+          - "l01-node1"
+          - "l01-node2"
+          - "l01-ocp0"
+          - "l01-ocp1"
+          - "l01-ocp2"
+          - "l01-node3"
+          - "l01-node4"
+        -  # rack1 - leaf10
+          - "l10-s0"
+          - "l10-s1"
+          - "l10-node0"
+          - "l10-node1"
+          - "l10-node2"
+          - "l10-ocp0"
+          - "l10-ocp1"
+          - "l10-ocp2"
+          - "l10-node3"
+          - "l10-node4"
+        -  # rack1 - leaf11
+          - "l11-s0"
+          - "l11-s1"
+          - "l11-node0"
+          - "l11-node1"
+          - "l11-node2"
+          - "l11-ocp0"
+          - "l11-ocp1"
+          - "l11-ocp2"
+          - "l11-node3"
+          - "l11-node4"
+        -  # rack2 - leaf20
+          - "l20-s0"
+          - "l20-s1"
+          - "l20-node0"
+          - "l20-node1"
+          - "l20-node2"
+          - "l20-ocp0"
+          - "l20-ocp1"
+          - "l20-ocp2"
+          - "l20-node3"
+          - "l20-node4"
+        -  # rack2 - leaf21
+          - "l21-s0"
+          - "l21-s1"
+          - "l21-node0"
+          - "l21-node1"
+          - "l21-node2"
+          - "l21-ocp0"
+          - "l21-ocp1"
+          - "l21-ocp2"
+          - "l21-node3"
+          - "l21-node4"
+
+
+    # set to zero
+    r0-compute:
+      amount: 0
+      <<: *osp_base_conf
+    r1-compute:
+      amount: 0
+      <<: *osp_base_conf
+    r2-compute:
+      amount: 0
+      <<: *osp_base_conf
+    r0-networker:
+      amount: 0
+      <<: *osp_base_conf
+    r1-networker:
+      amount: 0
+      <<: *osp_base_conf
+    r2-networker:
+      amount: 0
+      <<: *osp_base_conf
+
+
+cifmw_libvirt_manager_default_gw_nets:
+  - ocpbm
+  - r0_tr
+  - r1_tr
+  - r2_tr
+cifmw_networking_mapper_interfaces_info_translations:
+  osp_trunk:
+    - controlplane
+    - ctlplane
+  r0_tr:
+    - ctlplaner0
+  r1_tr:
+    - ctlplaner1
+  r2_tr:
+    - ctlplaner2
+
+networking_mapper_definition_patch:
+  networks:
+    ctlplane:
+      network: "192.168.125.0/24"
+      gateway: "192.168.125.1"
+      dns:
+        - "192.168.122.1"
+      mtu: 1500
+
+    ctlplaner0:
+      network: "192.168.122.0/24"
+      gateway: "192.168.122.1"
+      dns:
+        - "192.168.122.1"
+      mtu: 1500
+
+    ctlplaner1:
+      network: "192.168.123.0/24"
+      gateway: "192.168.123.1"
+      dns:
+        - "192.168.123.1"
+      mtu: 1500
+
+    ctlplaner2:
+      network: "192.168.124.0/24"
+      gateway: "192.168.124.1"
+      dns:
+        - "192.168.124.1"
+      mtu: 1500
+
+    internalapi:
+      network: "172.17.0.0/24"
+      vlan: 20
+      mtu: 1500
+
+    storage:
+      network: "172.18.0.0/24"
+      vlan: 21
+      mtu: 1500
+
+    tenant:
+      network: "172.19.0.0/24"
+      vlan: 22
+      mtu: 1500
+
+    octavia:
+      vlan: 23
+      mtu: 1500
+      network: "172.23.0.0/24"
+
+    # Not really used, but required by architecture
+    # https://github.com/openstack-k8s-operators/architecture/blob/main/lib/networking/netconfig/kustomization.yaml#L28-L36
+    external:
+      network: "192.168.32.0/20"
+      vlan: 99
+      mtu: 1500
+
+  # ensure ranges do not collide even if we don't create these vms
+  group-templates:
+    r0-computes:
+      network-template:
+        range:
+          start: 200
+          length: 5
+    r1-computes:
+      network-template:
+        range:
+          start: 205
+          length: 5
+    r2-computes:
+      network-template:
+        range:
+          start: 210
+          length: 5
+    r0-networkers:
+      network-template:
+        range:
+          start: 215
+          length: 5
+    r1-networkers:
+      network-template:
+        range:
+          start: 220
+          length: 5
+    r2-networkers:
+      network-template:
+        range:
+          start: 225
+          length: 5
+
+    osp-r0-controllers:
+      network-template:
+        range:
+          start: 140
+          length: 2
+      networks:
+        ctlplaner0: {}
+        external:
+          trunk-parent: ctlplaner0
+        internalapi:
+          trunk-parent: ctlplaner0
+        tenant:
+          trunk-parent: ctlplaner0
+        storage:
+          trunk-parent: ctlplaner0
+    osp-r1-controllers:
+      network-template:
+        range:
+          start: 142
+          length: 2
+      networks:
+        ctlplaner1: {}
+        external:
+          trunk-parent: ctlplaner1
+        internalapi:
+          trunk-parent: ctlplaner1
+        tenant:
+          trunk-parent: ctlplaner1
+        storage:
+          trunk-parent: ctlplaner1
+    osp-r2-controllers:
+      network-template:
+        range:
+          start: 144
+          length: 2
+      networks:
+        ctlplaner2: {}
+        external:
+          trunk-parent: ctlplaner2
+        internalapi:
+          trunk-parent: ctlplaner2
+        tenant:
+          trunk-parent: ctlplaner2
+        storage:
+          trunk-parent: ctlplaner2
+    osp-r0-computes:
+      network-template:
+        range:
+          start: 100
+          length: 5
+      networks:
+        ctlplaner0: {}
+        internalapi:
+          trunk-parent: ctlplaner0
+        tenant:
+          trunk-parent: ctlplaner0
+        storage:
+          trunk-parent: ctlplaner0
+    osp-r1-computes:
+      network-template:
+        range:
+          start: 105
+          length: 5
+      networks:
+        ctlplaner1: {}
+        internalapi:
+          trunk-parent: ctlplaner1
+        tenant:
+          trunk-parent: ctlplaner1
+        storage:
+          trunk-parent: ctlplaner1
+    osp-r2-computes:
+      network-template:
+        range:
+          start: 110
+          length: 5
+      networks:
+        ctlplaner2: {}
+        internalapi:
+          trunk-parent: ctlplaner2
+        tenant:
+          trunk-parent: ctlplaner2
+        storage:
+          trunk-parent: ctlplaner2
+    osp-underclouds:
+      network-template:
+        range:
+          start: 95
+          length: 1
+      networks:
+        ctlplaner0: {}

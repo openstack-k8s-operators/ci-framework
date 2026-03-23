@@ -43,9 +43,18 @@ function os_cmd {
 function set_vm_ip {
     ## assign floating ip or external ip
     local workload_sriov={{workload_sriov|default(false) | bool | ternary("True", "")}}
+
     if [ -n "${workload_sriov}" ]; then
         EXTERNAL_IP=$(os_cmd port show "${SRIOV_PORT}" -f yaml -c fixed_ips | awk '/ip_address/{print $3;exit}')
         VM_IP=${EXTERNAL_IP}
+    elif [ "${IS_IPV6}" = "True" ]; then
+        # For IPv6, get the direct IP from the instance (no floating IPs)
+        VM_IP=$(os_cmd server show ${INSTANCE_NAME} -f value -c addresses | grep -oE "2620:[^']+" | head -1)
+        if [ -z "${VM_IP}" ]; then
+            echo "Cannot get IPv6 address from instance"
+            exit 66
+        fi
+        echo "Using direct IPv6 address: ${VM_IP}"
     else
         INSTANCE_FIP=$(os_cmd floating ip create -f value -c floating_ip_address "${EXTERNAL_NET_NAME}")
         if [ -z "${INSTANCE_FIP}" ]; then
@@ -146,7 +155,19 @@ function prepare_env {
     export INSTANCE_FILE="${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}/vm_info.sh"
     export WORKLOAD_FILE="${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}/workload_suffix"
     export SSH_KEY_FILE="${HOME}/.ssh/${KEYPAIR_NAME}"
+    # Detect IPv6 subnet dynamically at runtime
+    export IPV6_SUBNET_ID=$(openstack subnet list --network "${EXTERNAL_NET_NAME}" --ip-version 6 -f value -c ID | head -1)
+    export IS_IPV6=$([ -n "${IPV6_SUBNET_ID}" ] && echo "True" || echo "False")
+    export IPV6_PORT_NAME="ipv6_port_${SUFFIX}"
+    export IPV6_PORT_ID=""  # Track port ID for IPv6 cleanup
     mkdir -p "${HOME}/{{ cifmw_update_artifacts_basedir_suffix }}"
+
+    # Validate SRIOV is not used with IPv6 (untested configuration)
+    local workload_sriov={{workload_sriov|default(false) | bool | ternary("True", "")}}
+    if [ "${IS_IPV6}" = "True" ] && [ -n "${workload_sriov}" ]; then
+        echo "ERROR: SRIOV configuration is not supported with IPv6 deployments (untested)"
+        exit 1
+    fi
 }
 
 function sanity_check {
@@ -187,20 +208,42 @@ function sanity_teardown {
 
     local timeout_seconds=${1:-180}
     local elapsed_seconds=0
+
     {% if workload_sriov|default(false) | bool -%}
-    openstack port delete "${SRIOV_PORT}"
-    {% elif workload_dpdk|default(false) | bool -%}
-    openstack port delete "${DPDK_PORT}"
-    {% else -%}
-    if [ -n "${INSTANCE_FIP}" ]; then
-        echo "Remove ${INSTANCE_FIP} from ${INSTANCE_NAME}"
-        openstack server remove floating ip ${INSTANCE_NAME} ${INSTANCE_FIP}
-        grep "${INSTANCE_FIP}" "${INSTANCE_FILE}"  && rm "${INSTANCE_FILE}"
-
-        echo "Delete floating ip ${INSTANCE_FIP}"
-        openstack floating ip delete ${INSTANCE_FIP}
+    if [ -n "${SRIOV_PORT}" ]; then
+        echo "Deleting SRIOV port ${SRIOV_PORT}"
+        openstack port delete "${SRIOV_PORT}" || echo "Warning: Failed to delete SRIOV port ${SRIOV_PORT}"
     fi
+    {% elif workload_dpdk|default(false) | bool -%}
+    if [ -n "${DPDK_PORT}" ]; then
+        echo "Deleting DPDK port ${DPDK_PORT}"
+        openstack port delete "${DPDK_PORT}" || echo "Warning: Failed to delete DPDK port ${DPDK_PORT}"
+    fi
+    {% else -%}
+    if [ "${IS_IPV6}" = "True" ]; then
+        # For IPv6, clean up the dedicated port
+        if [ -n "${IPV6_PORT_ID}" ]; then
+            echo "IPv6 deployment - deleting port ${IPV6_PORT_NAME} (${IPV6_PORT_ID})"
+            openstack port delete "${IPV6_PORT_ID}" || echo "Warning: Failed to delete port ${IPV6_PORT_ID}"
+        elif [ -n "${IPV6_PORT_NAME}" ]; then
+            echo "IPv6 deployment - deleting port ${IPV6_PORT_NAME} by name"
+            openstack port delete "${IPV6_PORT_NAME}" || echo "Warning: Failed to delete port ${IPV6_PORT_NAME}"
+        else
+            echo "IPv6 deployment - no port to clean up"
+        fi
+    else
+        # For IPv4, clean up floating IP
+        if [ -n "${INSTANCE_FIP}" ]; then
+            echo "Remove ${INSTANCE_FIP} from ${INSTANCE_NAME}"
+            openstack server remove floating ip ${INSTANCE_NAME} ${INSTANCE_FIP} || echo "Warning: Failed to remove floating IP from instance"
+            if [ -f "${INSTANCE_FILE}" ] && grep -q "${INSTANCE_FIP}" "${INSTANCE_FILE}"; then
+                rm "${INSTANCE_FILE}"
+            fi
 
+            echo "Delete floating ip ${INSTANCE_FIP}"
+            openstack floating ip delete ${INSTANCE_FIP} || echo "Warning: Failed to delete floating IP ${INSTANCE_FIP}"
+        fi
+    fi
     {%- endif %}
 
     {% if cifmw_update_create_volume | default(True) | bool -%}
@@ -248,20 +291,25 @@ function sanity_teardown {
     fi
     {%- endif %}
 
-    echo "Clear default gateway from ${TENANT_NET_NAME}_router"
-    openstack router unset --external-gateway "${TENANT_NET_NAME}"_router
+    # Only clean up tenant network resources if they were created (IPv4 mode)
+    if [ "${IS_IPV6}" != "True" ]; then
+        echo "Clear default gateway from ${TENANT_NET_NAME}_router"
+        openstack router unset --external-gateway "${TENANT_NET_NAME}"_router || echo "Warning: Failed to clear gateway"
 
-    echo "Remove subnet ${TENANT_NET_NAME}_subnet from router ${TENANT_NET_NAME}_router"
-    openstack router remove subnet "${TENANT_NET_NAME}"_router "${TENANT_NET_NAME}"_subnet
+        echo "Remove subnet ${TENANT_NET_NAME}_subnet from router ${TENANT_NET_NAME}_router"
+        openstack router remove subnet "${TENANT_NET_NAME}"_router "${TENANT_NET_NAME}"_subnet || echo "Warning: Failed to remove subnet from router"
 
-    echo "Remove router ${TENANT_NET_NAME}_router"
-    openstack router delete "${TENANT_NET_NAME}_router"
+        echo "Remove router ${TENANT_NET_NAME}_router"
+        openstack router delete "${TENANT_NET_NAME}_router" || echo "Warning: Failed to delete router"
 
-    echo "Remove subnet ${TENANT_NET_NAME}_subnet"
-    openstack subnet delete "${TENANT_NET_NAME}_subnet"
+        echo "Remove subnet ${TENANT_NET_NAME}_subnet"
+        openstack subnet delete "${TENANT_NET_NAME}_subnet" || echo "Warning: Failed to delete subnet"
 
-    echo "Remove network ${TENANT_NET_NAME}"
-    openstack network delete "${TENANT_NET_NAME}"
+        echo "Remove network ${TENANT_NET_NAME}"
+        openstack network delete "${TENANT_NET_NAME}" || echo "Warning: Failed to delete network"
+    else
+        echo "IPv6 deployment - skipping tenant network cleanup (using public network directly, bootstrap router persists)"
+    fi
 
     echo "Remove security group ${SECGROUP_NAME}"
     openstack security group delete "${SECGROUP_NAME}"
@@ -283,7 +331,7 @@ function sanity_teardown {
 function workload_launch {
     # create workload
     timeout_seconds=${1:-120}
-    ssh_timeout_seconds=${1:-180}
+    ssh_timeout_seconds=${2:-180}
     local workload_sriov={{workload_sriov|default(false) | bool | ternary("True", "")}}
     local workload_dpdk={{workload_dpdk|default(false) | bool | ternary("True", "")}}
 
@@ -338,47 +386,82 @@ function workload_launch {
         fi
     fi
 
-    ## create networking
-    openstack network list | grep ${TENANT_NET_NAME}
-    if [ $? -ne 0 ]; then
-        NAMESERVER=$(grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' /etc/resolv.conf  | head -1)
-        echo "Creating router ${TENANT_NET_NAME}_router"
-        os_cmd router create ${TENANT_NET_NAME}_router
+    ## create networking for IPv4
+    if [ "${IS_IPV6}" != "True" ]; then
+        openstack network list | grep ${TENANT_NET_NAME}
+        if [ $? -ne 0 ]; then
+            # Collect all nameservers from resolv.conf
+            NAMESERVERS=$(awk '/^nameserver[[:space:]]/ {print $2}' /etc/resolv.conf)
 
-        echo "Creating network ${TENANT_NET_NAME}"
-        if [ -n "${workload_dpdk}" ]; then
-            os_cmd network create ${TENANT_NET_NAME} --provider-network-type geneve
-        else
-            os_cmd network create ${TENANT_NET_NAME}
+            # Build DNS arguments
+            DNS_ARGS=""
+            if [ -n "$NAMESERVERS" ]; then
+                for ns in $NAMESERVERS; do
+                    DNS_ARGS="$DNS_ARGS --dns-nameserver $ns"
+                done
+            else
+                echo "Warning: No nameservers found, using public DNS fallback"
+                DNS_ARGS="--dns-nameserver 8.8.8.8"
+            fi
+            echo "Creating router ${TENANT_NET_NAME}_router"
+            os_cmd router create ${TENANT_NET_NAME}_router
+
+            echo "Creating network ${TENANT_NET_NAME}"
+            if [ -n "${workload_dpdk}" ]; then
+                os_cmd network create ${TENANT_NET_NAME} --provider-network-type geneve
+            else
+                os_cmd network create ${TENANT_NET_NAME}
+            fi
+
+            echo "Creating subnet ${TENANT_NET_NAME}_subnet"
+            os_cmd subnet create \
+                --subnet-range 192.168.0.0/24 \
+                --allocation-pool start=192.168.0.10,end=192.168.0.100 \
+                --gateway 192.168.0.254 \
+                $DNS_ARGS \
+                --network ${TENANT_NET_NAME} \
+                ${TENANT_NET_NAME}_subnet
+
+            echo "Add subnet ${TENANT_NET_NAME}_subnet to router ${TENANT_NET_NAME}_router"
+            os_cmd router add subnet  ${TENANT_NET_NAME}_router ${TENANT_NET_NAME}_subnet
+
+            echo "Set external-gateway for ${TENANT_NET_NAME}_router"
+            os_cmd router set --external-gateway ${EXTERNAL_NET_NAME} ${TENANT_NET_NAME}_router
         fi
+    else
+        # For IPv6, ensure OVN Router Advertisement bootstrap router exists
+        # This is infrastructure-level and persists across all workload operations
+        openstack router list | grep "ovn-ipv6-bootstrap-router"
+        if [ $? -ne 0 ]; then
+            echo "Creating OVN IPv6 bootstrap router (infrastructure-level, required for SLAAC)"
+            os_cmd router create ovn-ipv6-bootstrap-router
 
-        echo "Creating subnet ${TENANT_NET_NAME}_subnet"
-        os_cmd subnet create \
-            --subnet-range 192.168.0.0/24 \
-            --allocation-pool start=192.168.0.10,end=192.168.0.100 \
-            --gateway 192.168.0.254 \
-            --dns-nameserver ${NAMESERVER} \
-            --network ${TENANT_NET_NAME} \
-            ${TENANT_NET_NAME}_subnet
-
-        echo "Add subnet ${TENANT_NET_NAME}_subnet to router ${TENANT_NET_NAME}_router"
-        os_cmd router add subnet  ${TENANT_NET_NAME}_router ${TENANT_NET_NAME}_subnet
-
-        echo "Set external-gateway for ${TENANT_NET_NAME}_router"
-        os_cmd router set --external-gateway ${EXTERNAL_NET_NAME} ${TENANT_NET_NAME}_router
+            echo "Set external-gateway for OVN IPv6 bootstrap router"
+            os_cmd router set --external-gateway ${EXTERNAL_NET_NAME} ovn-ipv6-bootstrap-router
+        fi
     fi
-
     ## create security group
     openstack security group list | grep ${SECGROUP_NAME}
     if [ $? -ne 0 ]; then
         echo "Creating security group ${SECGROUP_NAME}"
         os_cmd security group create ${SECGROUP_NAME}
 
+        # Set protocol and ethertype based on IP version
+        if [ "${IS_IPV6}" = "True" ]; then
+            ICMP_PROTO="ipv6-icmp"
+            ETHERTYPE_ARG="--ethertype IPv6"
+            echo "Creating IPv6 rules for ports 22,80,443 in security group ${SECGROUP_NAME}"
+        else
+            ICMP_PROTO="icmp"
+            ETHERTYPE_ARG=""
+            echo "Creating IPv4 rules for ports 22,80,443 in security group ${SECGROUP_NAME}"
+        fi
+
         echo "Creating rules for ports 22,80,443 in security group ${SECGROUP_NAME}"
-        os_cmd security group rule create --proto icmp ${SECGROUP_NAME}
-        os_cmd security group rule create --proto tcp --dst-port 22 ${SECGROUP_NAME}
-        os_cmd security group rule create --proto tcp --dst-port 80 ${SECGROUP_NAME}
-        os_cmd security group rule create --proto tcp --dst-port 443 ${SECGROUP_NAME}
+        os_cmd security group rule create --proto ${ICMP_PROTO} ${ETHERTYPE_ARG} ${SECGROUP_NAME}
+        os_cmd security group rule create --proto tcp --dst-port 22 ${ETHERTYPE_ARG} ${SECGROUP_NAME}
+        os_cmd security group rule create --proto tcp --dst-port 80 ${ETHERTYPE_ARG} ${SECGROUP_NAME}
+        os_cmd security group rule create --proto tcp --dst-port 443 ${ETHERTYPE_ARG} ${SECGROUP_NAME}
     fi
 
     ## create sriov port
@@ -392,27 +475,55 @@ function workload_launch {
     openstack port create --vnic-type normal --network "${TENANT_NET_NAME=}" "${DPDK_PORT}"
     {%- endif %}
 
+    ## create IPv6 port for dual-stack deployments
+    if [ "${IS_IPV6}" = "True" ]; then
+        echo "Creating IPv6 port ${IPV6_PORT_NAME} on public network"
+        IPV6_PORT_ID=$(os_cmd port create \
+            --network "${EXTERNAL_NET_NAME}" \
+            --fixed-ip subnet="${IPV6_SUBNET_ID}" \
+            --security-group "${SECGROUP_NAME}" \
+            "${IPV6_PORT_NAME}" -f value -c id)
+
+        if [ -z "${IPV6_PORT_ID}" ]; then
+            echo "Failed to create IPv6 port"
+            exit 1
+        fi
+        echo "Created IPv6 port ${IPV6_PORT_NAME} with ID ${IPV6_PORT_ID}"
+    fi
+
 
     ## create instance
-    TENANT_NET_ID=$( openstack network show -f value -c id "${TENANT_NET_NAME}" )
-
-    echo "Creating overcloud instance ${INSTANCE_NAME}"
-    {% if workload_sriov|default(false) | bool -%}
-    os_cmd server create  \
-        --image "${IMAGE_NAME}" \
-        --flavor "${FLAVOR_NAME}" \
-        --key-name "${KEYPAIR_NAME}" \
-        --port "${SRIOV_PORT}" \
-        "${INSTANCE_NAME}"
-    {% else -%}
-    os_cmd server create  \
-        --image "${IMAGE_NAME}" \
-        --flavor "${FLAVOR_NAME}" \
-        --security-group "${SECGROUP_NAME}" \
-        --key-name  "${KEYPAIR_NAME}" \
-        --nic net-id="${TENANT_NET_ID}" \
-        "${INSTANCE_NAME}"
-    {%- endif %}
+    if [ "${IS_IPV6}" = "True" ]; then
+        # For IPv6, use the pre-created port with IPv6 subnet constraint
+        echo "Creating overcloud instance ${INSTANCE_NAME} with IPv6 port (dual-stack)"
+        # Note: SRIOV unsupported in IPv6 only setup (validated in prepare_env)
+        os_cmd server create  \
+            --image "${IMAGE_NAME}" \
+            --flavor "${FLAVOR_NAME}" \
+            --key-name  "${KEYPAIR_NAME}" \
+            --port "${IPV6_PORT_NAME}" \
+            "${INSTANCE_NAME}"
+    else
+        # For IPv4, use tenant network (original behavior)
+        TENANT_NET_ID=$( openstack network show -f value -c id "${TENANT_NET_NAME}" )
+        echo "Creating overcloud instance ${INSTANCE_NAME} on tenant network (IPv4)"
+        {% if workload_sriov|default(false) | bool -%}
+        os_cmd server create  \
+            --image "${IMAGE_NAME}" \
+            --flavor "${FLAVOR_NAME}" \
+            --key-name "${KEYPAIR_NAME}" \
+            --port "${SRIOV_PORT}" \
+            "${INSTANCE_NAME}"
+        {% else -%}
+        os_cmd server create  \
+            --image "${IMAGE_NAME}" \
+            --flavor "${FLAVOR_NAME}" \
+            --security-group "${SECGROUP_NAME}" \
+            --key-name  "${KEYPAIR_NAME}" \
+            --nic net-id="${TENANT_NET_ID}" \
+            "${INSTANCE_NAME}"
+        {% endif %}
+    fi
 
     elapsed_seconds=0
     while true; do
@@ -498,7 +609,12 @@ if [[ "${MODE}" == "workload" ]]; then
     {% if cifmw_update_create_volume | default(true) | bool -%}
     echo "export CINDER_VOL_ID=${CINDER_VOL_ID}" >> "${WORKLOAD_FILE}"
     {% endif -%}
-    echo "export INSTANCE_FIP=${INSTANCE_FIP}" >> "${WORKLOAD_FILE}"
+    if [ "${IS_IPV6}" = "True" ]; then
+        echo "export IPV6_PORT_ID=${IPV6_PORT_ID}" >> "${WORKLOAD_FILE}"
+        echo "export IPV6_PORT_NAME=${IPV6_PORT_NAME}" >> "${WORKLOAD_FILE}"
+    else
+        echo "export INSTANCE_FIP=${INSTANCE_FIP}" >> "${WORKLOAD_FILE}"
+    fi
 fi
 
 if [[ "${MODE}" == "workload_traffic" ]]; then
@@ -508,7 +624,12 @@ if [[ "${MODE}" == "workload_traffic" ]]; then
     workload_launch
     echo "export SUFFIX=${SUFFIX}" > ~/workload_suffix
     echo "export CINDER_VOL_ID=${CINDER_VOL_ID}" >> ~/workload_suffix
-    echo "export INSTANCE_FIP=${INSTANCE_FIP}" >> ~/workload_suffix
+    if [ "${IS_IPV6}" = "True" ]; then
+        echo "export IPV6_PORT_ID=${IPV6_PORT_ID}" >> ~/workload_suffix
+        echo "export IPV6_PORT_NAME=${IPV6_PORT_NAME}" >> ~/workload_suffix
+    else
+        echo "export INSTANCE_FIP=${INSTANCE_FIP}" >> ~/workload_suffix
+    fi
     echo "export VM_IP=${VM_IP}" > ~/vm_ip.sh
     generate_traffic
 fi
@@ -536,5 +657,10 @@ if [[ "${MODE}" == "sanityfast" ]]; then
     SUFFIX=$(openssl rand -hex 5)
     prepare_env
     sanity_check $FAST
-    workload_launch $FAST $FAST
+    if [ "${IS_IPV6}" = "True" ]; then
+        # IPv6 needs longer SSH timeout due to DHCP timeout, but keep boot timeout fast
+        workload_launch $FAST 180
+    else
+        workload_launch $FAST $FAST
+    fi
 fi

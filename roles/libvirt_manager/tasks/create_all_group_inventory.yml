@@ -1,0 +1,37 @@
+- name: Check if all-group.yml already exists
+  ansible.builtin.stat:
+    path: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+  register: _all_group_stat
+
+- name: Slurp existing all-group.yml if it exists
+  when: _all_group_stat.stat.exists
+  ansible.builtin.slurp:
+    src: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+  register: _all_group_slurped
+
+- name: Create new "all" group inventory file from template
+  ansible.builtin.template:
+    dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+    src: "all-inventory.yml.j2"
+    mode: "0644"
+
+- name: Merge existing children with newly generated content
+  when: _all_group_stat.stat.exists
+  block:
+    - name: Slurp newly created all-group.yml
+      ansible.builtin.slurp:
+        src: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+      register: _new_all_group_slurped
+
+    - name: Write merged all-group.yml
+      vars:
+        _existing_all_group: "{{ _all_group_slurped['content'] | b64decode | from_yaml }}"
+        _existing_all_group_dict:
+          all:
+            children: "{{ _existing_all_group.all.children }}"
+        _new_all_group: "{{ _new_all_group_slurped['content'] | b64decode | from_yaml }}"
+        _merged_all_group: "{{ _existing_all_group_dict | combine(_new_all_group, recursive=true) }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_libvirt_manager_basedir }}/reproducer-inventory/all-group.yml"
+        content: "{{ _merged_all_group | to_nice_yaml }}"
+        mode: "0644"

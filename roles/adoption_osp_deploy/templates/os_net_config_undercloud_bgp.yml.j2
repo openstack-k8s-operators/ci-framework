@@ -1,0 +1,63 @@
+#jinja2: trim_blocks:True, lstrip_blocks:True
+{% if ':' in _ctlplane_ip %}
+{%   set _ctlplane_ip_cidr = 128 %}
+{% else %}
+{%   set _ctlplane_ip_cidr = 32 %}
+{%   endif %}
+{% if ':' in _ctlplane_vip %}
+{%   set _ctlplane_vip_cidr = 128 %}
+{% else %}
+{%   set _ctlplane_vip_cidr = 32 %}
+{%   endif %}
+network_config:
+- type: interface
+  name: nic1
+  mtu: {{ _interface_mtu }}
+  use_dhcp: true
+  routes: []
+- type: ovs_bridge
+  name: br-ctlplane
+  mtu: {{ _interface_mtu }}
+  use_dhcp: false
+  dns_servers:
+  {% for _dns_ip in dns_server | default([]) %}
+  - {{ _dns_ip }}
+  {% endfor %}
+  - {{ _gateway_ip }}
+  domain: []
+  addresses:
+  - ip_netmask: {{ _ctlplane_ip }}/{{ _ctlplane_cidr }}
+  - ip_netmask: {{ _ctlplane_ip }}/{{ _ctlplane_ip_cidr }}
+  - ip_netmask: {{ _ctlplane_vip }}/{{ _ctlplane_vip_cidr }}
+  routes:
+    - ip_netmask: 192.168.123.0/24
+      next_hop: 192.168.122.1
+    - ip_netmask: 192.168.124.0/24
+      next_hop: 192.168.122.1
+  members:
+  - type: interface
+    name: {{ cifmw_adoption_osp_deploy_scenario.undercloud.os_net_config_iface |
+             default('nic2') }}
+    mtu: {{ _interface_mtu }}
+    # force the MAC address of the bridge to this interface
+    primary: true
+- type: interface
+  name: nic3
+  use_dhcp: false
+  addresses:
+  - ip_netmask:
+      100.64.0.30/30
+- type: interface
+  name: nic4
+  use_dhcp: false
+  addresses:
+  - ip_netmask:
+      100.65.0.30/30
+- type: interface
+  name: lo
+  use_dhcp: false
+  addresses:
+  - ip_netmask:
+      99.99.0.33/32
+  - ip_netmask:
+      f00d:f00d:f00d:f00d:f00d:f00d:f00d:25/128

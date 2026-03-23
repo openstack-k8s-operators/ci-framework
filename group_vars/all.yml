@@ -1,20 +1,43 @@
 ---
 # This file contains all repeating variables, that can be set
-# globaly instead of parse Zuul inventory file to get proper value.
+# globally instead of parse Zuul inventory file to get proper value.
 #### GLOBAL VARS ####
-ansible_user_dir: "{{ lookup('env', 'HOME') }}"
-cifmw_project_dir: src/github.com/openstack-k8s-operators/ci-framework
-cifmw_project_dir_absolute: "{{ ansible_user_dir }}/{{ cifmw_project_dir }}"
+# NOTE(dpawlik): In some case, when we read variables from group_vars,
+# HOME dir can be pointing to /var/lib/zuul, when it is not nested
+# ansible execution. In that case, to avoid error that we might be
+# pointing to the Zuul dir which is restricted or when the delegation
+# would be use, safe way would be to replace Zuul HOME dir to
+# /home/zuul, which is used in mostly.
+ansible_user_dir: >-
+  {{ '/home/zuul' if lookup('env', 'HOME').startswith('/var/lib/zuul/builds')
+     else lookup('env', 'HOME') }}
+cifmw_repo_relative: src/github.com/openstack-k8s-operators/ci-framework
+cifmw_repo: "{{ ansible_user_dir }}/{{ cifmw_repo_relative }}"
 cifmw_installyamls_repos_relative: src/github.com/openstack-k8s-operators/install_yamls
 # since cifmw_installyamls_repos var already exists, let's use that and move all definition here in single place instead of creating another variable.
 cifmw_installyamls_repos: "{{ ansible_user_dir }}/{{ cifmw_installyamls_repos_relative }}"
 cifmw_architecture_repo_relative: src/github.com/openstack-k8s-operators/architecture
 cifmw_architecture_repo: "{{ ansible_user_dir }}/{{ cifmw_architecture_repo_relative }}"
 
+# vars for namespaces in openshift
 cifmw_openstack_namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}"
 operator_namespace: "{{ cifmw_install_yamls_defaults['OPERATOR_NAMESPACE'] | default('openstack-operators') }}"
+cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+cifmw_manifests_dir: "{{ cifmw_basedir }}/artifacts/manifests"
 
 # Default DNS servers to use across the framework
 cifmw_default_dns_servers:
   - "1.1.1.1"
   - "8.8.8.8"
+
+# group_vars related to github repo URLs
+cifmw_openstack_k8s_operators_org_url: "https://github.com/openstack-k8s-operators"
+cifmw_repo_url: "{{ cifmw_openstack_k8s_operators_org_url }}/ci-framework"
+cifmw_installyamls_repo_url: "{{ cifmw_openstack_k8s_operators_org_url }}/install_yamls"
+cifmw_architecture_repo_url: "{{ cifmw_openstack_k8s_operators_org_url }}/architecture"
+
+# set to false to enable logging of sensitive data
+cifmw_nolog: true
+
+# Vars for defaults which may change in the future
+cifmw_default_registry: "quay.io"
