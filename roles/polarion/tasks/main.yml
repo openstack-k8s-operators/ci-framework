@@ -81,6 +81,11 @@
       loop:
         - ".pylero"
 
+    - name: Check if pylero is already present
+      ansible.builtin.stat:
+        path: "{{ cifmw_polarion_jump_repo_dir }}/pylero"
+      register: pylero_stat
+
     - name: Run prepare_pylero.sh
       ansible.builtin.shell: >
         source jump-venv/bin/activate && \
@@ -89,10 +94,12 @@
         chdir: "{{ cifmw_polarion_jump_repo_dir }}"
         executable: /bin/bash
       register: pylero_output
+      when: not pylero_stat.stat.exists
 
     - name: Output prepare_pylero
       ansible.builtin.debug:
         var: pylero_output.stdout_lines
+      when: not pylero_stat.stat.exists
 
     - name: Merge result XML files of each directory
       ansible.builtin.shell:
@@ -138,12 +145,13 @@
         index_var: loop_idx
       register: jump_script
 
+    - name: Output of jump
+      ansible.builtin.debug:
+        var: jump_script.stderr_lines
+
+  always:
     - name: Remove merged xml files
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: absent
       loop: "{{ merged_xml_files.files }}"
-
-    - name: Output of jump
-      ansible.builtin.debug:
-        var: jump_script.stderr_lines

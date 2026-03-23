@@ -52,17 +52,31 @@
   when: cifmw_cleanup_openstack_detach_bmh
 
 - name: Work around for stale rabbit cluster deletion
-  kubernetes.core.k8s_json_patch:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit) }}"
-    context: "{{ cifmw_openshift_context | default(omit) }}"
-    namespace: "{{ cifmw_openstack_namespace }}"
-    kind: RabbitmqCluster
-    name: rabbitmq-cell1
-    patch:
-      - op: replace
-        path: /metadata/finalizers
-        value: []
+  block:
+    - name: Check if rabbitmq-cell1 exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: RabbitmqCluster
+        name: rabbitmq-cell1
+      register: rabbitmq_cell1_info
+      failed_when: false
+
+    - name: Patch rabbitmq-cell1 finalizers
+      kubernetes.core.k8s_json_patch:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: RabbitmqCluster
+        name: rabbitmq-cell1
+        patch:
+          - op: replace
+            path: /metadata/finalizers
+            value: []
+      when: rabbitmq_cell1_info.resources | default([]) | length > 0
 
 - name: Delete deployment CRs
   vars:
@@ -83,8 +97,8 @@
         | unique
       }}
     _external_dns_crs:
-      - "{{ cifmw_basedir }}/artifacts/manifests/cifmw_external_dns/ceph-local-dns.yml"
-      - "{{ cifmw_basedir }}/artifacts/manifests/cifmw_external_dns/ceph-local-cert.yml"
+      - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-dns.yml"
+      - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-cert.yml"
     _operators_crs:
       - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
       - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"

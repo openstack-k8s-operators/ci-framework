@@ -1,0 +1,77 @@
+---
+- name: Create modified barbican image and get secrets
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    # Load HSM password from Zuul secret file if not already defined.
+    # The file is created by the qe-creds-crc.yaml pre-run playbook
+    # in the components-integration-config repository.
+    - name: Load HSM password from secrets file if not defined
+      when: cifmw_hsm_password is not defined
+      block:
+        - name: Check if Proteccio PIN file exists
+          ansible.builtin.stat:
+            path: /var/tmp/qe-secrets/proteccio_pin.yaml
+          register: _proteccio_pin_file
+
+        - name: Read Proteccio PIN from file
+          when: _proteccio_pin_file.stat.exists
+          ansible.builtin.include_vars:
+            file: /var/tmp/qe-secrets/proteccio_pin.yaml
+            name: _proteccio_pin_data
+
+        - name: Set cifmw_hsm_password from file
+          when: _proteccio_pin_file.stat.exists
+          ansible.builtin.set_fact:
+            cifmw_hsm_password: "{{ _proteccio_pin_data.rdu2Pin }}"
+
+    - name: Fail if HSM password is not available
+      when: cifmw_hsm_password is not defined
+      ansible.builtin.fail:
+        msg: >-
+          The HSM password (cifmw_hsm_password) is not defined and could not
+          be loaded from the secrets file at /var/tmp/qe-secrets/proteccio_pin.yaml.
+          Please ensure either:
+          1. The variable cifmw_hsm_password is set in your job configuration, or
+          2. The Zuul secret file exists (created by qe-creds-crc.yaml pre-run playbook)
+
+    - name: Check out the role Git repository
+      ansible.builtin.git:
+        dest: "./rhoso_proteccio_hsm"
+        repo: "{{ cifmw_hsm_proteccio_ansible_role_repo | default('https://github.com/openstack-k8s-operators/ansible-role-rhoso-proteccio-hsm.git', true) }}"
+        version: "{{ cifmw_hsm_proteccio_ansible_role_version| default('main', true) }}"
+
+    - name: Create and upload the new Barbican images
+      ansible.builtin.include_role:
+        name: rhoso_proteccio_hsm
+        tasks_from: create_image
+      vars:
+        barbican_src_api_image_name: "{{ cifmw_barbican_src_api_image_name }}"
+        barbican_src_worker_image_name: "{{ cifmw_barbican_src_worker_image_name }}"
+        barbican_src_image_registry: "{{ content_provider_registry_ip }}:5001"
+        barbican_src_image_namespace: "{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}"
+        barbican_src_image_tag: "{{ cifmw_update_containers_tag | default('component-ci-testing') }}"
+        barbican_dest_api_image_name: "{{ cifmw_barbican_dest_api_image_name }}"
+        barbican_dest_worker_image_name: "{{ cifmw_barbican_dest_worker_image_name }}"
+        barbican_dest_image_registry: "{{ content_provider_registry_ip }}:5001"
+        barbican_dest_image_namespace: "{{ cifmw_update_containers_org | default('podified-antelope-centos9') }}"
+        barbican_dest_image_tag: "{{ cifmw_update_containers_barbican_custom_tag }}"
+        image_registry_verify_tls: "{{ cifmw_image_registry_verify_tls | default('false', true) }}"
+        proteccio_client_src: "{{ cifmw_hsm_proteccio_client_src }}"
+        proteccio_client_iso: "{{ cifmw_hsm_proteccio_client_iso | default('Proteccio3.06.05.iso') }}"
+
+    - name: Create secrets with the HSM certificates and hsm-login credentials
+      ansible.builtin.include_role:
+        name: rhoso_proteccio_hsm
+        tasks_from: create_secrets
+      vars:
+        proteccio_conf_src: "{{ cifmw_hsm_proteccio_conf_src }}"
+        proteccio_client_crt_src: "{{ cifmw_hsm_proteccio_client_crt_src }}"
+        proteccio_client_key_src: "{{ cifmw_hsm_proteccio_client_key_src }}"
+        proteccio_server_crt_src: "{{ cifmw_hsm_proteccio_server_crt_src }}"
+        proteccio_password: "{{ cifmw_hsm_password }}"
+        kubeconfig_path: "{{ cifmw_openshift_kubeconfig }}"
+        oc_dir: "{{ cifmw_path }}"
+        proteccio_data_secret: "{{ cifmw_hsm_proteccio_client_data_secret | default('barbican-proteccio-client-data', true) }}"
+        proteccio_data_secret_namespace: "{{ cifmw_hsm_proteccio_client_data_secret_namespace }}"
+        login_secret: "{{ cifmw_hsm_login_secret | default('barbican-proteccio-login', true) }}"
+        login_secret_field: "{{ cifmw_hsm_login_secret_field | default('PKCS11Pin') }}"

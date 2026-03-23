@@ -45,19 +45,6 @@ Here is an example, based on a common use-case, on how to use those variables
     oc get openstackdataplane -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
 ~~~
 
-## A few words about using Git
-
-Before you make a pull request, make sure that:
-
-* the title of your git commit message begins with the role
-  name in brackets: `[my_wonderful_role]` or `(my_wonderful_role)`
-* the git commit body message is longer than 10 characters and describes
-  the reason why you added this change
-* sign your git commit using the `Signed-Off-By` option by
-  adding: `--signoff` or `-s` when using the command: `git commit`.
-* if you already make a commit, and you want to add `Signed-Off-By`,
-  use command: `git commit --amend --signoff`
-
 ### Documentation
 
 A new role must get proper documentation. Please edit the README.md located in
@@ -98,6 +85,71 @@ If your role can't be tested via molecule, you can remove the "molecule" directo
 role, and re-run `make role_molecule` to re-generate the the jobs and project list.
 
 Please add a note in the role README.md for future reference.
+
+## A few words about using Git
+
+Before you make a pull request, make sure that:
+
+* the title of your git commit message begins with the role
+  name in brackets: `[my_wonderful_role]` or `(my_wonderful_role)`
+* the git commit body message is longer than 10 characters and describes
+  the reason why you added this change
+* sign your git commit using the `Signed-Off-By` option by
+  adding: `--signoff` or `-s` when using the command: `git commit`.
+* if you already make a commit, and you want to add `Signed-Off-By`,
+  use command: `git commit --amend --signoff`
+
+## AI/LLM Assisted Development
+
+When using AI tools for contributions, follow these guidelines to ensure transparency and code quality.
+
+### Attribution Requirements
+
+* **Major AI contribution** (substantial code/logic generation): Use `Co-Authored-By:`
+* **Minor AI assistance** (refactoring/optimization): Use `Assisted-By:`
+
+~~~
+[role_name] Add EDPM validation logic
+
+Implements connectivity tests and health monitoring for EDPM nodes.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+Signed-off-by: Your Name <your.email@example.com>
+~~~
+
+~~~
+[role_name] Refactor validation error handling
+
+Simplified logic and improved debugging messages.
+
+Assisted-By: Gemini <noreply@google.com>
+Signed-off-by: Your Name <your.email@example.com>
+~~~
+
+### Code Quality Requirements
+
+Before submitting AI-assisted code:
+
+* Review all generated code for correctness and security
+* Ensure compliance with existing project patterns and naming conventions
+* Verify no hardcoded credentials or sensitive data exposure
+* Test thoroughly, especially edge cases and error scenarios
+* Add proper documentation and comments
+
+### Review Process
+
+* Complete thorough self-review before PR submission
+* Standard review policy applies (minimum 2 reviewers)
+* Security-sensitive code requires additional maintainer review
+* Disclose AI assistance scope in PR description
+
+### Security and Best Practices
+
+* Never share sensitive project data with AI tools
+* Don't use AI for credential generation or security policy decisions
+* Provide relevant project context when prompting AI tools
+* Use AI as a starting point, not final solution
+* Maintain human oversight throughout development process
 
 ## Adding new script
 

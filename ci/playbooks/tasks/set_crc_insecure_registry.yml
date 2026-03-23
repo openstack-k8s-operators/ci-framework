@@ -1,6 +1,7 @@
 ---
 # noqa: schema[playbook]
 - name: Patch the image.config.openshift.io resource to include insecure registry
+  when: content_provider_registry_ip is defined
   ansible.builtin.shell: >-
     oc patch --type=merge --patch='{
     "spec": {
@@ -13,6 +14,7 @@
     }' image.config.openshift.io/cluster
 
 - name: Patch the image.config.openshift.io resource to allow registries
+  when: content_provider_registry_ip is defined
   ansible.builtin.shell: |
     oc patch --type=merge --patch='{
     "spec": {
@@ -28,14 +30,24 @@
     }
     }' image.config.openshift.io/cluster
 
+- name: Add additional allowed registries
+  when: cifmw_crc_additional_allowed_registries is defined
+  ansible.builtin.shell: |
+    oc patch --type=json \
+    --patch='[{"op": "add", "path": "/spec/registrySources/allowedRegistries/-", "value": "{{ item }}"}]' \
+    image.config.openshift.io/cluster
+  loop: "{{ cifmw_crc_additional_allowed_registries }}"
+
 - name: Ensure registries.conf.d exists
   become: true
+  when: cifmw_crc_registry_mirror_content is defined or content_provider_registry_ip is defined
   ansible.builtin.file:
     path: /etc/containers/registries.conf.d
     state: directory
 
 - name: Set Insecure registry for content provider
   become: true
+  when: content_provider_registry_ip is defined
   ansible.builtin.blockinfile:
     state: present
     insertafter: EOF
@@ -49,7 +61,18 @@
       mirror-by-digest-only = false
       prefix = ""
 
+- name: Set registry mirror override
+  when: cifmw_crc_registry_mirror_content is defined
+  become: true
+  ansible.builtin.blockinfile:
+    state: present
+    insertafter: EOF
+    dest: /etc/containers/registries.conf.d/12-override.conf
+    create: true
+    content: "{{ cifmw_crc_registry_mirror_content }}"
+
 - name: Restart crio
+  when: cifmw_crc_registry_mirror_content is defined or content_provider_registry_ip is defined
   become: true
   ansible.builtin.service:
     name: crio
