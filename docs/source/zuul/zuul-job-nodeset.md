@@ -17,7 +17,7 @@ job parameter:
 - job:
     name: my-job-with-2-nodes
     parent: podified-multinode-edpm-deployment-crc
-    nodeset: centos-9-medium-crc-extracted-2-36-0-3xl
+    nodeset: centos-9-medium-crc-cloud-ocp-4-20-1-3xl
     vars:
       cifmw_deploy_edpm: false
       podified_validation: true
@@ -58,3 +58,49 @@ job parameter:
 We have to use that `extra_vars` in order to properly override the `vars` we define in the
 parent job - apparently, Zuul is merging mappings instead of properly overriding them like
 it does with actual string parameters.
+~~~
+
+## Nodesets
+
+Nodesets specify the sets of machines to be provisioned and used by Zuul
+during the execution of a specific job. Jobs inherit their nodesets from their
+parents, or can select their own nodesets to use by specifying `nodeset:`
+values in their own definitions.
+
+For example, the above example job, `my-job-with-2-nodes`
+specifies the nodeset `centos-9-medium-crc-cloud-ocp-4-20-1-3xl`.
+This and all other nodesets that are available to the ci-framework's jobs are
+defined in
+[zuul.d/nodeset.yaml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/zuul.d/nodeset.yaml).
+
+~~~{code-block} YAML
+:caption: zuul.d/nodeset.yaml
+:linenos:
+- nodeset:
+    name: centos-9-medium-crc-cloud-ocp-4-20-1-3xl
+    nodes:
+      - name: controller
+        label: cloud-centos-9-stream-tripleo-medium
+      - name: crc
+        label: crc-cloud-ocp-4-20-1-3xl
+    groups:
+      - name: computes
+        nodes: []
+      - name: ocps
+        nodes:
+          - crc
+~~~
+
+The `controller` and `crc` nodes in the above nodeset are assigned the labels
+`cloud-centos-9-stream-tripleo-medium` and `crc-cloud-ocp-4-20-1-3xl`
+respectively. These labels select which virtual machine flavors and disk
+images to use when creating the virtual machines. Flavors define the number of
+vCPUs and the amount of memory to allocate to a given node.
+The complete list of labels available to our Zuul instance can be found on the
+['Labels' tab](https://softwarefactory-project.io/zuul/t/rdoproject.org/labels)
+of the Zuul web interface. The definition of these labels is found in our Zuul
+instance's
+[config project](https://softwarefactory-project.io/cgit/config/tree/) - see
+[this commit](https://softwarefactory-project.io/cgit/config/commit/?id=23517ea396d9f602aec19625224eb71a8cd7642d)
+for an example of how a label like `crc-cloud-ocp-4-20-1-3xl` from the above
+nodeset is defined.
