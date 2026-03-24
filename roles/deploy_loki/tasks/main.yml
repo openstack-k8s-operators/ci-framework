@@ -1,0 +1,78 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Deploy MinIO for Loki object storage
+  vars:
+    cifmw_deploy_minio_namespace: "{{ cifmw_deploy_loki_minio_namespace }}"
+    cifmw_deploy_minio_root_user: "{{ cifmw_deploy_loki_minio_access_key }}"
+    cifmw_deploy_minio_root_password: "{{ cifmw_deploy_loki_minio_secret_key }}"
+  ansible.builtin.include_role:
+    name: deploy_minio
+  when: cifmw_deploy_loki_deploy_minio | bool
+
+- name: Ensure manifest output directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_deploy_loki_manifest_dest | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Render Loki operator manifests for CloudKitty
+  ansible.builtin.template:
+    src: deploy_loki_for_ck.yaml.j2
+    dest: "{{ cifmw_deploy_loki_manifest_dest }}"
+    mode: "0644"
+
+- name: Apply Loki operator manifests
+  kubernetes.core.k8s:
+    state: present
+    apply: true
+    kubeconfig: >-
+      {{
+        cifmw_openshift_kubeconfig |
+        default(ansible_env.HOME ~ '/.kube/config', true)
+      }}
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    src: "{{ cifmw_deploy_loki_manifest_dest }}"
+
+- name: Wait until Loki operator CSV reports Succeeded
+  when: cifmw_deploy_loki_wait_for_csv | bool
+  kubernetes.core.k8s_info:
+    kubeconfig: >-
+      {{
+        cifmw_openshift_kubeconfig |
+        default(ansible_env.HOME ~ '/.kube/config', true)
+      }}
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: "{{ cifmw_deploy_loki_operator_namespace }}"
+  register: cifmw_deploy_loki_csv_out
+  until: >-
+    (
+      cifmw_deploy_loki_csv_out.resources | default([]) |
+      selectattr('metadata.name', 'search', cifmw_deploy_loki_subscription_name) |
+      list | length == 1
+    ) and (
+      (
+        cifmw_deploy_loki_csv_out.resources | default([]) |
+        selectattr('metadata.name', 'search', cifmw_deploy_loki_subscription_name) |
+        first
+      ).status.phase | default('') == 'Succeeded'
+    )
+  retries: "{{ cifmw_deploy_loki_csv_wait_retries }}"
+  delay: "{{ cifmw_deploy_loki_csv_wait_delay }}"
