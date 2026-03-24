@@ -21,7 +21,8 @@ with a message.
   where the architecture repo is cloned on the controller node.
   Defaults to `~/src/github.com/openstack-k8s-operators/architecture`
 - `cifmw_kustomize_deploy_architecture_repo_version`: _(string)_ Default branch
-  of the architecture repo to clone.Defaults to `HEAD`
+  of the architecture repo to clone. Takes its value from group_vars
+  cifmw_architecture_repo_version_pin, defaults to `HEAD` if not defined.
 - `cifmw_kustomize_deploy_architecture_examples_common_path`: _(string)_
   Relative path of the common CRs in the architecture repo. Defaults to
   `/examples/common`
