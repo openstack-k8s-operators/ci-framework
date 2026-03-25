@@ -1,0 +1,45 @@
+---
+# NOTE(dpawlik): Synchronize data when PreMetal provision+bootstrap the
+# hypervisor AND Zuul job uses PreMetal flavor which is executing
+# job directly on hypervisor. When job starts, src and secrets dir are "recreated"
+# by zuul-executor with current job data. Sync the data with
+# controller-0 which is executing nested Ansible.
+- name: Synchronize hypervisor secrets dir with controller-0
+  vars:
+    sync_dir: "{{ ansible_user_dir }}/{{ subdir }}"
+  ansible.posix.synchronize:
+    src: "{{ sync_dir }}/"
+    dest: "zuul@controller-0:{{ sync_dir }}"
+    archive: true
+    recursive: true
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  loop:
+    - secrets
+    - src
+  loop_control:
+    loop_var: subdir
+
+# NOTE(dpawlik): Synchronize data when PreMetal provision+bootstrap the
+# hypervisor BUT legacy workflow is used (spawning controller VM
+# which is executing all other playbooks). When job starts, all
+# data like secrets, src dir etc. is stored on controller VM, but because
+# later tasks are using nested ansible execution, then all playbooks needs
+# to be up-to-date.
+# That case would be mostly used by developers. Synchronize module
+# would ignore if sync would happen to the same host. No need to synchronize
+# with controller-0 again, due tasks above would do that.
+- name: Synchronize controller VM configs, secrets and src dir with hypervisor
+  vars:
+    sync_dir: "{{ ansible_user_dir }}/{{ subdir }}"
+  ansible.posix.synchronize:
+    src: "{{ sync_dir }}/"
+    dest: "zuul@{{ hypervisor }}:{{ sync_dir }}"
+    archive: true
+    recursive: true
+  no_log: "{{ cifmw_nolog | default(true) | bool }}"
+  loop:
+    - configs
+    - secrets
+    - src
+  loop_control:
+    loop_var: subdir
