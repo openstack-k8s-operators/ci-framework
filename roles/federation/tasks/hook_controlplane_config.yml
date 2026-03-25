@@ -198,3 +198,68 @@
       type: Opaque
       stringData:
         federation.conf: "{{ lookup('template', 'federation-single.conf.j2') }}"
+
+# ---------------------------------------------------------------------------
+# Step 6 – directly patch the OpenStackControlPlane CR.
+#
+# The kustomization file written in Step 4 is only consumed by the
+# edpm_prepare / ci_kustomize flow (CRC/devscripts).  In the
+# kustomize_deploy flow (SKMO), nothing reads that directory, so we
+# also apply the patch directly here.
+#
+# This task requires the OSCP to already exist, so the hook must be
+# called from a post_stage_run (after the control-plane stage has
+# applied the CR), not a pre_stage_run.
+# ---------------------------------------------------------------------------
+- name: Check if OpenStackControlPlane exists
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackControlPlane
+    name: controlplane
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: _federation_oscp_info
+
+- name: Patch OpenStackControlPlane with Keystone federation config
+  when: _federation_oscp_info.resources | length > 0
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: patched
+    definition:
+      apiVersion: core.openstack.org/v1beta1
+      kind: OpenStackControlPlane
+      metadata:
+        name: controlplane
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      spec:
+        keystone:
+          template:
+            httpdCustomization:
+              customConfigSecret: keystone-httpd-override
+            customServiceConfig: |
+              [DEFAULT]
+              insecure_debug=true
+              debug=true
+              [federation]
+              trusted_dashboard={{ cifmw_federation_horizon_url }}/dashboard/auth/websso/
+              [openid]
+              remote_id_attribute=HTTP_OIDC_ISS
+              [auth]
+              methods = password,token,oauth1,mapped,application_credential,openid
+
+- name: Patch OpenStackControlPlane to set caBundleSecretName (dedicated keycloakca secret mode)
+  when:
+    - not (_federation_merge_ca | bool)
+    - _federation_oscp_info.resources | length > 0
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: patched
+    definition:
+      apiVersion: core.openstack.org/v1beta1
+      kind: OpenStackControlPlane
+      metadata:
+        name: controlplane
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      spec:
+        tls:
+          caBundleSecretName: keycloakca
