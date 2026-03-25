@@ -89,3 +89,18 @@
   ansible.builtin.assert:
     that:
       - cifmw_validations_hotfixed_edpm_nova_compute_image == post_change_nova_compute_image.stdout
+
+- name: Wait for all nova-compute services to be up after hotfix rollout
+  cifmw.general.ci_script:
+    output_dir: "{{ cifmw_validations_basedir }}/artifacts"
+    script: >-
+      oc -n {{ cifmw_validations_namespace }} rsh openstackclient
+      openstack compute service list --service nova-compute -f value -c State |
+      grep -v '^ *$' | sort -u
+  register: _hotfix_nova_states
+  until:
+    - _hotfix_nova_states.rc == 0
+    - "'down' not in _hotfix_nova_states.stdout"
+    - "'up' in _hotfix_nova_states.stdout"
+  retries: 20
+  delay: 30
