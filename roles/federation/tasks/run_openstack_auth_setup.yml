@@ -53,9 +53,21 @@
     remote_path: "/home/cloud-admin/{{ cifmw_federation_keycloak_testuser2_username }}"
     local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_keycloak_testuser2_username ] | path_join }}"
 
-- name: Copy system CA bundle
+# Build full-ca-list.crt starting from the openstackclient pod's own system CA
+# bundle (which already trusts all RHOSO/OCP internal CAs including rootca-public),
+# then append the ingress-operator CA so that Keycloak — accessed via the OCP
+# ingress route — is also trusted.  Using the pod's bundle as the base avoids
+# any mismatch between what controller-0 trusts and what the pod trusts.
+- name: Fetch system CA bundle from openstackclient pod
+  kubernetes.core.k8s_exec:
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+    pod: openstackclient
+    command: cat /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+  register: _pod_ca_bundle
+
+- name: Write pod CA bundle locally as base for full-ca-list.crt
   ansible.builtin.copy:
-    src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    content: "{{ _pod_ca_bundle.stdout }}"
     dest: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
     mode: "0444"
 
@@ -67,6 +79,7 @@
 - name: Add ingress operator CA to bundle
   ansible.builtin.blockinfile:
     path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'full-ca-list.crt' ] | path_join }}"
+    marker: "# {mark} ingress-operator CA"
     block: "{{ federation_sso_ca.content | b64decode }}"
 
 - name: Copy CA bundle to openstackclient pod

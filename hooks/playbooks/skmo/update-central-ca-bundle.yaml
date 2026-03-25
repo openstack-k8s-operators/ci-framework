@@ -1,0 +1,162 @@
+---
+- name: Update central CA bundle with leaf region CAs and wait for reconciliation
+  hosts: localhost
+  gather_facts: false
+  vars:
+    central_namespace: openstack
+    leaf_namespace: openstack2
+    controlplane_name: controlplane
+    leaf_rootca_secret: rootca-public
+    leaf_rootca_internal_secret: rootca-internal
+  tasks:
+    # -------------------------------------------------------------------------
+    # Step 1 - determine which secret holds the central CA bundle.
+    #
+    # Priority:
+    #   1. spec.tls.caBundleSecretName already set on the OSCP.
+    #   2. cifmw_custom_ca_certs_secret_name variable (if set by caller).
+    #   3. Hard default: "custom-ca-certs".
+    # -------------------------------------------------------------------------
+    - name: Read current OpenStackControlPlane state
+      kubernetes.core.k8s_info:
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackControlPlane
+        name: "{{ controlplane_name }}"
+        namespace: "{{ central_namespace }}"
+      register: _central_oscp_info
+
+    - name: Resolve CA bundle secret name
+      ansible.builtin.set_fact:
+        _ca_bundle_secret_name: >-
+          {{
+            ((_central_oscp_info.resources | first).spec.tls | default({})).caBundleSecretName
+            | default(cifmw_custom_ca_certs_secret_name | default('custom-ca-certs'))
+            | default('custom-ca-certs')
+          }}
+        _oscp_has_ca_bundle: >-
+          {{
+            (
+              ((_central_oscp_info.resources | first).spec.tls | default({})).caBundleSecretName
+              | default('')
+            ) | length > 0
+          }}
+
+    # -------------------------------------------------------------------------
+    # Step 2 - fetch the leaf region CA certs
+    # -------------------------------------------------------------------------
+    - name: Get leaf region rootca certs
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ leaf_namespace }}"
+        name: "{{ item }}"
+      register: _leaf_certs
+      loop:
+        - "{{ leaf_rootca_secret }}"
+        - "{{ leaf_rootca_internal_secret }}"
+
+    # -------------------------------------------------------------------------
+    # Step 3 - get existing central CA bundle data (if secret already exists)
+    # -------------------------------------------------------------------------
+    - name: Look up existing central CA bundle secret
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ central_namespace }}"
+        name: "{{ _ca_bundle_secret_name }}"
+      register: _existing_bundle
+
+    - name: Capture existing CA bundle secret data
+      ansible.builtin.set_fact:
+        _existing_bundle_data: >-
+          {{
+            (_existing_bundle.resources | first).data
+            if _existing_bundle.resources | length > 0
+            else {}
+          }}
+
+    # -------------------------------------------------------------------------
+    # Step 4 - create or update the secret, merging in the leaf CAs
+    # -------------------------------------------------------------------------
+    - name: Create or update central CA bundle secret with leaf region CAs
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _ca_bundle_secret_name }}"
+            namespace: "{{ central_namespace }}"
+          data: >-
+            {{
+              _existing_bundle_data | combine({
+                'skmo-leaf-rootca.crt':
+                  _leaf_certs.results[0].resources[0].data['tls.crt'],
+                'skmo-leaf-rootca-internal.crt':
+                  _leaf_certs.results[1].resources[0].data['tls.crt']
+              })
+            }}
+
+    # -------------------------------------------------------------------------
+    # Step 5 - patch the OSCP to reference the secret when not already set
+    # -------------------------------------------------------------------------
+    - name: Patch OpenStackControlPlane to set caBundleSecretName (when unset)
+      when: not _oscp_has_ca_bundle | bool
+      kubernetes.core.k8s:
+        state: patched
+        definition:
+          apiVersion: core.openstack.org/v1beta1
+          kind: OpenStackControlPlane
+          metadata:
+            name: "{{ controlplane_name }}"
+            namespace: "{{ central_namespace }}"
+          spec:
+            tls:
+              caBundleSecretName: "{{ _ca_bundle_secret_name }}"
+
+    # -------------------------------------------------------------------------
+    # Step 6 - wait for RHOSO to reconcile combined-ca-bundle.
+    #
+    # We compare the fingerprint of the leaf rootca cert we just added against
+    # every cert in combined-ca-bundle, retrying until it appears.
+    # -------------------------------------------------------------------------
+    - name: Wait for leaf region CA to appear in combined-ca-bundle
+      ansible.builtin.shell: |
+        set -euo pipefail
+        TMPDIR=$(mktemp -d)
+        trap "rm -rf $TMPDIR" EXIT
+
+        echo "{{ _leaf_certs.results[0].resources[0].data['tls.crt'] }}" | \
+          base64 -d > "$TMPDIR/leaf-ca.crt"
+        FINGERPRINT=$(openssl x509 -noout -fingerprint -in "$TMPDIR/leaf-ca.crt" \
+          | cut -d= -f2)
+
+        oc get secret combined-ca-bundle \
+          -n {{ central_namespace }} \
+          -o jsonpath='{.data.tls-ca-bundle\.pem}' \
+          | base64 -d > "$TMPDIR/bundle.pem"
+
+        python3 - "$FINGERPRINT" "$TMPDIR/bundle.pem" <<'PYEOF'
+        import sys, subprocess, re
+        target, bundle_file = sys.argv[1], sys.argv[2]
+        bundle = open(bundle_file).read()
+        certs = re.findall(
+            r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----',
+            bundle, re.DOTALL
+        )
+        for cert in certs:
+            r = subprocess.run(
+                ['openssl', 'x509', '-noout', '-fingerprint'],
+                input=cert.encode(), capture_output=True
+            )
+            if target in r.stdout.decode():
+                sys.exit(0)
+        sys.exit(1)
+        PYEOF
+      args:
+        executable: /bin/bash
+      register: _ca_reconciled
+      until: _ca_reconciled.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
