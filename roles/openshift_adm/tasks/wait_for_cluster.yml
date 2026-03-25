@@ -50,6 +50,73 @@
   retries: "{{ cifmw_openshift_adm_retry_count }}"
   delay: 30
 
+# MachineConfigs applied during devscripts install (e.g. iSCSI, Cinder LVM)
+# trigger an MCO update cycle that continues asynchronously after the cluster
+# is first reachable.  On compact (3-master) clusters the MCO controller can
+# get stuck: all nodes reboot and report state=Done / desiredDrain=uncordon-*,
+# but the controller never issues the final kubectl-uncordon, leaving every
+# node SchedulingDisabled indefinitely.  We handle this with a loop that:
+#   1. Waits until no MCP is mid-update (unavailableMachineCount drops to 0)
+#      OR detects the stuck state (all updated, none ready).
+#   2. If stuck, uncordons all nodes to break the deadlock.
+#   3. Repeats until all MCPs report Updated=True.
+- name: Wait for MachineConfigPools to complete, fixing stuck cordons if needed.
+  when:
+    - not cifmw_openshift_adm_dry_run
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell: |
+    set -eo pipefail
+    MCP_JSON=$(oc get mcp -o json)
+
+    UPDATING=$(echo "$MCP_JSON" | \
+      python3 -c "
+    import json, sys
+    data = json.load(sys.stdin)
+    updating = [
+        i['metadata']['name'] for i in data['items']
+        if next((c['status'] for c in i['status'].get('conditions', [])
+                  if c['type'] == 'Updating'), 'False') == 'True'
+    ]
+    print('\n'.join(updating))
+    ")
+
+    if [ -z "$UPDATING" ]; then
+      echo "All MCPs are up to date."
+      exit 0
+    fi
+
+    # At least one MCP is still Updating.  Check for the stuck-uncordon case:
+    # updatedMachineCount == machineCount but readyMachineCount == 0.
+    STUCK=$(echo "$MCP_JSON" | \
+      python3 -c "
+    import json, sys
+    data = json.load(sys.stdin)
+    stuck = [
+        i['metadata']['name'] for i in data['items']
+        if (i['status'].get('updatedMachineCount', 0) ==
+            i['status'].get('machineCount', 0) and
+            i['status'].get('readyMachineCount', 0) == 0 and
+            i['status'].get('machineCount', 0) > 0)
+    ]
+    print('\n'.join(stuck))
+    ")
+
+    if [ -n "$STUCK" ]; then
+      echo "Stuck MCPs detected: $STUCK -- uncordoning all nodes to break deadlock."
+      oc adm uncordon $(oc get nodes -o jsonpath='{.items[*].metadata.name}')
+    else
+      echo "MCPs still updating (normal progress): $UPDATING"
+    fi
+    exit 1
+  register: _mcp_wait
+  until: _mcp_wait.rc == 0
+  retries: 60
+  delay: 30
+  changed_when: "'uncordoning' in _mcp_wait.stdout"
+  failed_when: false
+
 - name: Check for pending certificate approval.
   when:
     - _openshift_adm_check_cert_approve | default(false) | bool
