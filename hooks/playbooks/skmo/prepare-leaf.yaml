@@ -1,0 +1,209 @@
+---
+- name: Prepare SKMO leaf prerequisites in regionZero
+  hosts: localhost
+  gather_facts: false
+  vars:
+    skmo_values_file: "{{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml"
+    osp_secrets_env_file: "{{ cifmw_architecture_repo }}/lib/control-plane/base/osp-secrets.env"
+    central_namespace: openstack
+    leaf_namespace: openstack2
+    leaf_secret_name: osp-secret
+    central_rootca_secret: rootca-public
+    central_rootca_internal_secret: rootca-internal
+    leaf_transport_url_name: barbican-keystone-listener-regiontwo
+    leaf_transport_url_name_secret: rabbitmq-transport-url-barbican-keystone-listener-regiontwo
+    leaf_transport_url_secret_copy: barbican-keystone-listener-regiontwo-transport
+  tasks:
+    - name: Wait for central Keystone API to be ready
+      kubernetes.core.k8s_info:
+        api_version: keystone.openstack.org/v1beta1
+        kind: KeystoneAPI
+        namespace: "{{ central_namespace }}"
+      register: _keystoneapi_info
+      retries: 60
+      delay: 10
+      until:
+        - _keystoneapi_info.resources | length > 0
+        - _keystoneapi_info.resources[0].status.conditions is defined
+        - _keystoneapi_info.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Wait for openstackclient pod to be ready in central region
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ central_namespace }}"
+        name: openstackclient
+      register: _osc_pod_info
+      retries: 30
+      delay: 10
+      until:
+        - _osc_pod_info.resources | length > 0
+        - _osc_pod_info.resources[0].status.conditions is defined
+        - _osc_pod_info.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Load SKMO values
+      ansible.builtin.set_fact:
+        skmo_values: "{{ lookup('file', skmo_values_file) | from_yaml }}"
+
+    - name: Set SKMO leaf facts
+      ansible.builtin.set_fact:
+        leaf_region: "{{ skmo_values.data.leafRegion }}"
+        leaf_admin_user: "{{ skmo_values.data.leafAdminUser }}"
+        leaf_admin_project: "{{ skmo_values.data.leafAdminProject }}"
+        leaf_admin_password_key: "{{ skmo_values.data.leafAdminPasswordKey }}"
+        keystone_internal_url: "{{ skmo_values.data.keystoneInternalURL }}"
+        keystone_public_url: "{{ skmo_values.data.keystonePublicURL }}"
+        ca_bundle_secret_name: "{{ skmo_values.data.leafCaBundleSecretName }}"
+
+    - name: Ensure leaf osp-secret exists (pre-create from env file)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if ! oc -n {{ leaf_namespace }} get secret {{ leaf_secret_name }} >/dev/null 2>&1; then
+          oc -n {{ leaf_namespace }} create secret generic {{ leaf_secret_name }} \
+            --from-env-file="{{ osp_secrets_env_file }}" \
+            --dry-run=client -o yaml | oc apply -f -
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: Read leaf admin password from leaf secret
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ leaf_namespace }} get secret {{ leaf_secret_name }} \
+          -o jsonpath='{.data.{{ leaf_admin_password_key }}}' | base64 -d
+      args:
+        executable: /bin/bash
+      register: leaf_admin_password
+      changed_when: false
+
+    - name: Ensure leaf region exists in central Keystone
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ central_namespace }} rsh openstackclient \
+          openstack region show {{ leaf_region }} >/dev/null 2>&1 || \
+        oc -n {{ central_namespace }} rsh openstackclient \
+          openstack region create {{ leaf_region }}
+      args:
+        executable: /bin/bash
+
+    - name: Ensure keystone catalog endpoints exist for leaf region
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if ! oc -n {{ central_namespace }} rsh openstackclient \
+          openstack endpoint list --service keystone --interface public --region {{ leaf_region }} \
+          -f value -c ID | head -1 | grep -q .; then
+          oc -n {{ central_namespace }} rsh openstackclient \
+            openstack endpoint create --region {{ leaf_region }} identity public "{{ keystone_public_url }}"
+        fi
+        if ! oc -n {{ central_namespace }} rsh openstackclient \
+          openstack endpoint list --service keystone --interface internal --region {{ leaf_region }} \
+          -f value -c ID | head -1 | grep -q .; then
+          oc -n {{ central_namespace }} rsh openstackclient \
+            openstack endpoint create --region {{ leaf_region }} identity internal "{{ keystone_internal_url }}"
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: Ensure leaf admin project exists in central Keystone
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ central_namespace }} rsh openstackclient \
+          openstack project show {{ leaf_admin_project }} >/dev/null 2>&1 || \
+        oc -n {{ central_namespace }} rsh openstackclient \
+          openstack project create {{ leaf_admin_project }}
+      args:
+        executable: /bin/bash
+
+    - name: Ensure leaf admin user exists and has admin role
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if ! oc -n {{ central_namespace }} rsh openstackclient \
+          openstack user show {{ leaf_admin_user }} >/dev/null 2>&1; then
+          oc -n {{ central_namespace }} rsh openstackclient \
+            openstack user create --domain Default --password "{{ leaf_admin_password.stdout | trim }}" {{ leaf_admin_user }}
+        fi
+        oc -n {{ central_namespace }} rsh openstackclient \
+          openstack role add --project {{ leaf_admin_project }} --user {{ leaf_admin_user }} admin
+      args:
+        executable: /bin/bash
+
+    - name: Get existing leaf CA bundle secret if present
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ leaf_namespace }}"
+        name: "{{ ca_bundle_secret_name }}"
+      register: _existing_bundle
+
+    - name: Get central rootca certs
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ central_namespace }}"
+        name: "{{ item }}"
+      register: _central_certs
+      loop:
+        - "{{ central_rootca_secret }}"
+        - "{{ central_rootca_internal_secret }}"
+
+    - name: Create or update leaf CA bundle secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ ca_bundle_secret_name }}"
+            namespace: "{{ leaf_namespace }}"
+          data: "{{ (_existing_bundle.resources[0].data | default({})) | combine({
+            'skmo-central-rootca.crt': _central_certs.results[0].resources[0].data['tls.crt'],
+            'skmo-central-rootca-internal.crt': _central_certs.results[1].resources[0].data['tls.crt']
+          }) }}"
+
+    - name: Create TransportURL CR in central region for leaf listener
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc apply -f - <<EOF
+        apiVersion: rabbitmq.openstack.org/v1beta1
+        kind: TransportURL
+        metadata:
+          name: {{ leaf_transport_url_name }}
+          namespace: {{ central_namespace }}
+        spec:
+          rabbitmqClusterName: rabbitmq
+        EOF
+      args:
+        executable: /bin/bash
+
+    - name: Wait for TransportURL to be ready
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc wait transporturl {{ leaf_transport_url_name }} \
+          -n {{ central_namespace }} \
+          --for=condition=Ready --timeout=120s
+      args:
+        executable: /bin/bash
+
+    - name: Get transport URL secret from central namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ central_namespace }}"
+        name: "{{ leaf_transport_url_name_secret }}"
+      register: _transport_secret
+
+    - name: Copy transport URL secret to leaf namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ leaf_transport_url_secret_copy }}"
+            namespace: "{{ leaf_namespace }}"
+          type: "{{ _transport_secret.resources[0].type }}"
+          data: "{{ _transport_secret.resources[0].data }}"

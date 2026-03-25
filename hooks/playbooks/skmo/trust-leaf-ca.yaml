@@ -1,0 +1,51 @@
+---
+- name: Trust SKMO leaf CA in central region
+  hosts: localhost
+  gather_facts: false
+  vars:
+    skmo_values_file: "{{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml"
+    central_namespace: openstack
+    leaf_namespace: openstack2
+    leaf_rootca_secret: rootca-public
+    leaf_rootca_internal_secret: rootca-internal
+  tasks:
+    - name: Load SKMO values
+      ansible.builtin.set_fact:
+        skmo_values: "{{ lookup('file', skmo_values_file) | from_yaml }}"
+
+    - name: Set central CA bundle secret name
+      ansible.builtin.set_fact:
+        central_ca_bundle_secret_name: "{{ skmo_values.data.centralCaBundleSecretName }}"
+
+    - name: Get existing central CA bundle if present
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ central_namespace }}"
+        name: "{{ central_ca_bundle_secret_name }}"
+      register: _existing_bundle
+
+    - name: Get leaf rootca certs
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ leaf_namespace }}"
+        name: "{{ item }}"
+      register: _leaf_certs
+      loop:
+        - "{{ leaf_rootca_secret }}"
+        - "{{ leaf_rootca_internal_secret }}"
+
+    - name: Create or update central CA bundle secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ central_ca_bundle_secret_name }}"
+            namespace: "{{ central_namespace }}"
+          data: "{{ (_existing_bundle.resources[0].data | default({})) | combine({
+            'skmo-leaf-rootca.crt': _leaf_certs.results[0].resources[0].data['tls.crt'],
+            'skmo-leaf-rootca-internal.crt': _leaf_certs.results[1].resources[0].data['tls.crt']
+          }) }}"

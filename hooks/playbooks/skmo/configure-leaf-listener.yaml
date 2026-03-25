@@ -1,0 +1,36 @@
+---
+- name: Patch leaf control plane with barbican-keystone-listener transport URL
+  hosts: localhost
+  gather_facts: false
+  vars:
+    central_namespace: openstack
+    leaf_namespace: openstack2
+    leaf_transport_url_name: rabbitmq-transport-url-barbican-keystone-listener-regiontwo
+  tasks:
+    - name: Get transport URL secret from central namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ central_namespace }}"
+        name: "{{ leaf_transport_url_name }}"
+      register: _transport_secret
+
+    - name: Patch OpenStackControlPlane in leaf region with notifications transport_url
+      vars:
+        _transport_url: "{{ _transport_secret.resources[0].data['transport_url'] | b64decode }}"
+      kubernetes.core.k8s:
+        state: patched
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackControlPlane
+        name: controlplane
+        namespace: "{{ leaf_namespace }}"
+        definition:
+          spec:
+            barbican:
+              template:
+                barbicanKeystoneListener:
+                  customServiceConfig: |
+                    [DEFAULT]
+                    transport_url = {{ _transport_url }}
+                    [keystone_notifications]
+                    pool_name = barbican-listener-regionTwo
