@@ -254,26 +254,14 @@
 
         - name: "Uniquify OpenStackDataPlaneDeployment names in {{ stage.path }}"
           when: _cifmw_kustomize_deploy_run_suffix | default('') | string | length > 0
-          changed_when: "'Renamed:' in _rename_osdpd.stdout"
+          ansible.builtin.script:
+            executable: python3
+            cmd: >-
+              {{ role_path }}/files/uniquify_osdpd.py
+              {{ _output | quote }}
+              {{ _cifmw_kustomize_deploy_run_suffix | string | quote }}
           register: _rename_osdpd
-          ansible.builtin.shell:
-            executable: /bin/bash
-            cmd: |
-              python3 - << 'PYEOF'
-              import yaml, sys
-              path = "{{ _output }}"
-              suffix = "{{ _cifmw_kustomize_deploy_run_suffix }}"
-              with open(path) as f:
-                  docs = [d for d in yaml.safe_load_all(f) if d is not None]
-              for doc in docs:
-                  if doc.get('kind') == 'OpenStackDataPlaneDeployment':
-                      name = doc['metadata']['name']
-                      if not name.endswith('-' + suffix):
-                          doc['metadata']['name'] = name + '-' + suffix
-                          print('Renamed: ' + name + ' -> ' + doc['metadata']['name'])
-              with open(path, 'w') as f:
-                  yaml.dump_all(docs, f, default_flow_style=False)
-              PYEOF
+          changed_when: "'Renamed:' in _rename_osdpd.stdout"
 
         - name: "Store kustomized content in artifacts for {{ stage.path }}"
           ansible.builtin.copy:

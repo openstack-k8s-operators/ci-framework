@@ -121,42 +121,19 @@
     # every cert in combined-ca-bundle, retrying until it appears.
     # -------------------------------------------------------------------------
     - name: Wait for leaf region CA to appear in combined-ca-bundle
-      ansible.builtin.shell: |
-        set -euo pipefail
-        TMPDIR=$(mktemp -d)
-        trap "rm -rf $TMPDIR" EXIT
-
-        echo "{{ _leaf_certs.results[0].resources[0].data['tls.crt'] }}" | \
-          base64 -d > "$TMPDIR/leaf-ca.crt"
-        FINGERPRINT=$(openssl x509 -noout -fingerprint -in "$TMPDIR/leaf-ca.crt" \
-          | cut -d= -f2)
-
-        oc get secret combined-ca-bundle \
-          -n {{ central_namespace }} \
-          -o jsonpath='{.data.tls-ca-bundle\.pem}' \
-          | base64 -d > "$TMPDIR/bundle.pem"
-
-        python3 - "$FINGERPRINT" "$TMPDIR/bundle.pem" <<'PYEOF'
-        import sys, subprocess, re
-        target, bundle_file = sys.argv[1], sys.argv[2]
-        bundle = open(bundle_file).read()
-        certs = re.findall(
-            r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----',
-            bundle, re.DOTALL
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ central_namespace }}"
+        name: combined-ca-bundle
+      register: _combined_bundle
+      until: >-
+        (_combined_bundle.resources | length > 0) and
+        (
+          _leaf_certs.results[0].resources[0].data['tls.crt'] | b64decode
+          in
+          (_combined_bundle.resources | first).data['tls-ca-bundle.pem'] | b64decode
         )
-        for cert in certs:
-            r = subprocess.run(
-                ['openssl', 'x509', '-noout', '-fingerprint'],
-                input=cert.encode(), capture_output=True
-            )
-            if target in r.stdout.decode():
-                sys.exit(0)
-        sys.exit(1)
-        PYEOF
-      args:
-        executable: /bin/bash
-      register: _ca_reconciled
-      until: _ca_reconciled.rc == 0
       retries: 30
       delay: 10
       changed_when: false
