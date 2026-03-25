@@ -93,6 +93,16 @@
     - _tag_name not in _skip_tags
     - _tag_name_id not in _skip_tags
   block:
+    - name: Generate OSDPD run suffix (once per play)
+      when: _cifmw_kustomize_deploy_run_suffix is not defined
+      ansible.builtin.set_fact:
+        _cifmw_kustomize_deploy_run_suffix: >-
+          {{
+            cifmw_kustomize_deploy_osdpd_suffix
+            if (cifmw_kustomize_deploy_osdpd_suffix | default('') | length > 0)
+            else (lookup('pipe', 'date +%Y%m%d%H%M%S'))
+          }}
+
     - name: Ensure source files exists
       register: _src
       when:
@@ -240,6 +250,30 @@
             dest: "{{ _output }}"
             content: "{{ _kustomize_output.stdout }}"
             mode: "0644"
+
+
+        - name: "Uniquify OpenStackDataPlaneDeployment names in {{ stage.path }}"
+          when: _cifmw_kustomize_deploy_run_suffix | default('') | length > 0
+          changed_when: "'Renamed:' in _rename_osdpd.stdout"
+          register: _rename_osdpd
+          ansible.builtin.shell:
+            executable: /bin/bash
+            cmd: |
+              python3 - << 'PYEOF'
+              import yaml, sys
+              path = "{{ _output }}"
+              suffix = "{{ _cifmw_kustomize_deploy_run_suffix }}"
+              with open(path) as f:
+                  docs = [d for d in yaml.safe_load_all(f) if d is not None]
+              for doc in docs:
+                  if doc.get('kind') == 'OpenStackDataPlaneDeployment':
+                      name = doc['metadata']['name']
+                      if not name.endswith('-' + suffix):
+                          doc['metadata']['name'] = name + '-' + suffix
+                          print('Renamed: ' + name + ' -> ' + doc['metadata']['name'])
+              with open(path, 'w') as f:
+                  yaml.dump_all(docs, f, default_flow_style=False)
+              PYEOF
 
         - name: "Store kustomized content in artifacts for {{ stage.path }}"
           ansible.builtin.copy:
