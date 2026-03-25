@@ -70,17 +70,15 @@
     set -eo pipefail
     MCP_JSON=$(oc get mcp -o json)
 
-    UPDATING=$(echo "$MCP_JSON" | \
-      python3 -c "
-    import json, sys
-    data = json.load(sys.stdin)
-    updating = [
-        i['metadata']['name'] for i in data['items']
-        if next((c['status'] for c in i['status'].get('conditions', [])
-                  if c['type'] == 'Updating'), 'False') == 'True'
-    ]
-    print('\n'.join(updating))
-    ")
+    UPDATING=$(echo "$MCP_JSON" | jq -r '
+      .items[] |
+      select(
+        .status.conditions // [] |
+        map(select(.type == "Updating" and .status == "True")) |
+        length > 0
+      ) |
+      .metadata.name
+    ')
 
     if [ -z "$UPDATING" ]; then
       echo "All MCPs are up to date."
@@ -89,19 +87,15 @@
 
     # At least one MCP is still Updating.  Check for the stuck-uncordon case:
     # updatedMachineCount == machineCount but readyMachineCount == 0.
-    STUCK=$(echo "$MCP_JSON" | \
-      python3 -c "
-    import json, sys
-    data = json.load(sys.stdin)
-    stuck = [
-        i['metadata']['name'] for i in data['items']
-        if (i['status'].get('updatedMachineCount', 0) ==
-            i['status'].get('machineCount', 0) and
-            i['status'].get('readyMachineCount', 0) == 0 and
-            i['status'].get('machineCount', 0) > 0)
-    ]
-    print('\n'.join(stuck))
-    ")
+    STUCK=$(echo "$MCP_JSON" | jq -r '
+      .items[] |
+      select(
+        .status.updatedMachineCount == .status.machineCount and
+        .status.readyMachineCount == 0 and
+        .status.machineCount > 0
+      ) |
+      .metadata.name
+    ')
 
     if [ -n "$STUCK" ]; then
       echo "Stuck MCPs detected: $STUCK -- uncordoning all nodes to break deadlock."
