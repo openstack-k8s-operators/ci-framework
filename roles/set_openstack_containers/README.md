@@ -10,8 +10,8 @@ The role will generate two 2 files in ~/ci-framework-data/artifacts/ directory a
 ## Parameters
 * `cifmw_set_openstack_containers_basedir`: Directory to store role generated contents. Defaults to `"{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"`
 * `cifmw_set_openstack_containers_registry`: Name of the container registry to pull containers from. Defaults to `quay.io`
-* `cifmw_set_openstack_containers_namespace`: Name of the container namespace. Defaults to `podified-antelope-centos9`
-* `cifmw_set_openstack_containers_tag`: Container tag. Defaults to `current-podified`
+* `cifmw_set_openstack_containers_namespace`: Name of the container namespace. Defaults to `{{ cifmw_default_container_image_namespace }}` (defined in group_vars/all.yml)
+* `cifmw_set_openstack_containers_tag`: Container tag. Defaults to `{{ cifmw_default_container_image_tag }}` (defined in group_vars/all.yml)
 * `cifmw_set_openstack_containers_tag_from_md5`: Get the tag from delorean.repo.md5. Defaults to `false`.
 * `cifmw_set_openstack_containers_dlrn_md5_path`: Full path of delorean.repo.md5. Defaults to `/etc/yum.repos.d/delorean.repo.md5`.
 * `cifmw_set_openstack_containers_overrides`: Extra container overrides. Defaults to `{}`
