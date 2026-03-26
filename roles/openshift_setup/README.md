@@ -27,3 +27,4 @@ effect if `cifmw_openshift_setup_ca_registry_to_add` is set.
               - mirror.quay.rdoproject.org
         ```
 * `cifmw_openshift_setup_apply_marketplace_fix`: (Boolean) Apply openshift-marketplace workaround which is recreating all pods in the namespace. NOTE: same step is done in `base` job.
+* `cifmw_openshift_setup_samples_registry`: (String) Registry sample

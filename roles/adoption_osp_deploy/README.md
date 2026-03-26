@@ -28,6 +28,10 @@ configure the OSP17.1 deployment.
 * `cifmw_adoption_osp_deploy_overcloud_extra_args`: (String) The content of a
   file which will be used with the -e option in the overcloud deploy command.
   This is useful to specify private/restricted parameters.
+* `cifmw_adoption_osp_deploy_bgp`: (Boolean) Enable BGP support for the OSP
+  deployment. When enabled, uses BGP-specific network configurations and
+  templates. Defaults to `false`.
+* `cifmw_adoption_osp_deploy_freeipa_admin_password`: (String)  FreeIPA server admin password.
 
 ### Break point
 

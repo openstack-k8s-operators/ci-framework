@@ -10,11 +10,12 @@ The role will generate two 2 files in ~/ci-framework-data/artifacts/ directory a
 ## Parameters
 * `cifmw_set_openstack_containers_basedir`: Directory to store role generated contents. Defaults to `"{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"`
 * `cifmw_set_openstack_containers_registry`: Name of the container registry to pull containers from. Defaults to `quay.io`
-* `cifmw_set_openstack_containers_namespace`: Name of the container namespace. Defaults to `podified-antelope-centos9`
-* `cifmw_set_openstack_containers_tag`: Container tag. Defaults to `current-podified`
+* `cifmw_set_openstack_containers_namespace`: Name of the container namespace. Defaults to `{{ cifmw_default_container_image_namespace }}` (defined in group_vars/all.yml)
+* `cifmw_set_openstack_containers_tag`: Container tag. Defaults to `{{ cifmw_default_container_image_tag }}` (defined in group_vars/all.yml)
 * `cifmw_set_openstack_containers_tag_from_md5`: Get the tag from delorean.repo.md5. Defaults to `false`.
 * `cifmw_set_openstack_containers_dlrn_md5_path`: Full path of delorean.repo.md5. Defaults to `/etc/yum.repos.d/delorean.repo.md5`.
 * `cifmw_set_openstack_containers_overrides`: Extra container overrides. Defaults to `{}`
+* `cifmw_set_openstack_containers_overrides_transform`: Extra container overrides but here the key is expected to be the IMAGE_URL name (like in `cifmw_set_openstack_containers_overrides`) but the value is the definite name of the image, so the registry and tag addition to that name will happen. Defaults to `{ RELATED_IMAGE_IRONIC_PYTHON_AGENT_IMAGE_URL_DEFAULT: "ironic-python-agent"}`
 * `cifmw_set_openstack_containers_prefix`: Container prefix name to set. Defaults to `openstack`
 * `cifmw_set_openstack_containers_prefix_filter`: Include in filter containers containing prefix in the name. Defaults to value of `cifmw_set_openstack_containers_prefix`
 * `cifmw_set_openstack_containers_excluded_envs`: (List[string]) List of excluded environment variables for container, that should not be modified by the role. Defaults to `[]`.
@@ -95,6 +96,29 @@ It is used in edpm-ansible job to update the `ANSIBLEEE_IMAGE_URL_DEFAULT`.
       ansible.builtin.include_role:
         name: set_openstack_containers
 ```
+
+### Update an image which doesn't have openstack- in its name
+
+For instance `RELATED_IMAGE_IRONIC_PYTHON_AGENT_IMAGE_URL_DEFAULT` has this kind of url `registry-proxy.engineering.redhat.com/rh-osbs/rhoso18-ironic-python-agent:18.0` where the usual `openstack-` prefix is absent.
+
+Setting `cifmw_set_openstack_containers_overrides_transform` will enable the transformation to happen.
+
+```yaml
+- hosts: all
+  tasks:
+    - name: Update IRONIC_PYTHON_AGENT_IMAGE environment variable with custom image.
+      vars:
+        cifmw_set_openstack_containers_registry: 'quay.io'
+        cifmw_set_openstack_containers_namespace: 'test-namespace'
+        cifmw_set_openstack_containers_prefix: 'openstack'
+        cifmw_set_openstack_containers_tag: 'test-tag'
+        cifmw_set_openstack_containers_overrides_transform:
+           RELATED_IMAGE_IRONIC_PYTHON_AGENT_IMAGE_URL_DEFAULT: "ironic-python-agent"
+      ansible.builtin.include_role:
+        name: set_openstack_containers
+```
+
+Will transform `registry-proxy.engineering.redhat.com/rh-osbs/rhoso18-ironic-python-agent:18.0` into `quay.io/test-namespace/ironic-python-agent:test-tag`
 
 ### Update all openstack services containers env vars in meta operator with tag from delorean and set OPENSTACK_RELEASE_VERSION env
 

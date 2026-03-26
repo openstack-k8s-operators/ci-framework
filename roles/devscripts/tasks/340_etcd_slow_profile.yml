@@ -1,0 +1,38 @@
+---
+# Based on https://www.redhat.com/en/blog/introducing-selectable-profiles-for-etcd
+- name: Apply slow profile rule
+  ansible.builtin.shell: >
+    oc patch etcd/cluster
+    --type=merge
+    -p '{ "spec": { "controlPlaneHardwareSpeed": "Slower" }}'
+  register: _slow_etcd_status
+  changed_when: false
+  retries: 60
+  delay: 10
+  until: >
+    ('patched' in _slow_etcd_status.stdout) or
+    ('no change' in _slow_etcd_status.stdout)
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+
+# We don't need to wait, because 310_prepare_overlay.yml would handle that
+- name: Wait for etcd pods to stabilize
+  when:
+    - "'no change' not in _slow_etcd_status.stdout"
+    - cifmw_devscripts_ocp_comply | bool
+    - not cifmw_use_ocp_overlay | default(true) | bool
+  block:
+    - name: Wait 30 seconds to apply
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Get pod phase status
+      ansible.builtin.shell: |
+        timeout 5 oc get pods -n openshift-etcd -o jsonpath='{.items[*].status.phase}'
+      register: pod_status
+      retries: 60
+      delay: 10
+      until: "pod_status.stdout == 'Running' or pod_status.stdout == 'Running Succeeded'"
+      changed_when: false
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"

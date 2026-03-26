@@ -1,0 +1,27 @@
+---
+# Task file for running a single wait condition with retry logic
+# Variables expected:
+#   - wait_condition: The wait command to execute
+#   - stage: The current stage information (for logging)
+
+- name: "Execute wait condition: {{ wait_condition | truncate(60) }}"
+  register: _wait_cmd_result
+  # Wait commands are read-only operations that don't modify resources
+  changed_when: false
+  ansible.builtin.command:
+    cmd: "{{ wait_condition }}"
+  # Retry logic to handle race conditions where resources are being created.
+  # Retries up to 5 times with 3 second delays, but only for transient errors.
+  # This helps resolve NotFound, connection refused, and similar errors that
+  # occur immediately after `oc apply` completes but before resources are
+  # fully registered in the Kubernetes API.
+  retries: 5
+  delay: 3
+  until: >-
+    _wait_cmd_result is success or
+    (_wait_cmd_result is failed and
+     _wait_cmd_result.stderr is defined and
+     not (_wait_cmd_result.stderr is search('no matching resources found', ignorecase=True) or
+          _wait_cmd_result.stderr is search('NotFound') or
+          _wait_cmd_result.stderr is search('tcp.*:6443: connect: connection refused', ignorecase=True) or
+          _wait_cmd_result.stderr is search('connection to the server.*:6443 was refused', ignorecase=True)))

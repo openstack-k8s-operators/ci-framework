@@ -1,0 +1,145 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure freeipa vm is started and reachable
+  vars:
+    _cifmw_libvirt_manager_layout:
+      vms:
+        osp-free-ipas:
+          start: true
+          disk_file_name: "dummy"
+    cifmw_libvirt_manager_all_vms: >-
+      {%- set vms = {} -%}
+      {%- for vm in _vm_groups['osp-free-ipas'] -%}
+        {%- set _ = vms.update({vm: 'osp-free-ipas'}) -%}
+      {%- endfor -%}
+      {{ vms }}
+    ansible_libvirt_pools: {}
+  ansible.builtin.include_role:
+    name: "libvirt_manager"
+    tasks_from: "start_vms.yml"
+    apply:
+      delegate_to: "{{ cifmw_target_host | default('localhost') }}"
+
+- name: Run prepration tasks on freeipa
+  delegate_to: "osp-free-ipa-0"
+  vars:
+    _freeipa_name: "{{ _vm_groups['osp-free-ipas'] | first }}"
+    _freeipa_net: "{{ cifmw_networking_env_definition.instances[_freeipa_name] }}"
+    freeipa_ip: "{{ _freeipa_net.networks.ocpbm[ip_version|default('ip_v4')] }}"
+    cloud_domain: "{{ cifmw_adoption_osp_deploy_scenario.cloud_domain }}"
+  block:
+    - name: Ensure needed logins
+      ansible.builtin.include_tasks: login_registries.yml
+      args:
+        apply:
+          delegate_to: "osp-free-ipa-0"
+
+    - name: Set hostname to osp-free-ipa-0.{{ cloud_domain }}
+      become: true
+      ansible.builtin.hostname:
+        name: "osp-free-ipa-0.{{ cloud_domain }}"
+        use: "systemd"
+
+    - name: Ensure /etc/hosts file correctly maps the FQDN to freeipa IP address
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ freeipa_ip }} {{ ansible_hostname }}.{{ cloud_domain }} {{ ansible_hostname }}"
+        create: true
+        state: present
+        mode: "0644"
+
+    - name: Find current nameserver from /etc/resolv.conf # noqa: risky-shell-pipe
+      ansible.builtin.shell:
+        cmd: grep "^nameserver" /etc/resolv.conf | cut -d' ' -f 2 | head -1
+      register: current_nameserver
+
+    - name: Install FreeIPA server packages
+      become: true
+      ansible.builtin.package:
+        name:
+          - ipa-server
+          - ipa-server-dns
+          - curl
+        state: present
+
+    - name: Update NSS (required for CA server to launch during deploy)
+      become: true
+      ansible.builtin.package:
+        name: nss
+        state: latest # noqa: package-latest
+
+    - name: Deploy FreeIPA server
+      become: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      ansible.builtin.command:
+        cmd: >-
+          ipa-server-install -U
+          --hostname osp-free-ipa-0.{{ cloud_domain }}
+          --realm {{ cloud_domain.upper() }}
+          --admin-password {{ cifmw_adoption_osp_deploy_freeipa_admin_password }}
+          --ds-password {{ cifmw_adoption_osp_deploy_freeipa_admin_password }}
+          --ip-address={{ freeipa_ip }}
+          --setup-dns
+          --auto-reverse
+          --no-dnssec-validation
+          --allow-zone-overlap
+          --forwarder={{ current_nameserver.stdout }}
+
+    - name: Create resolv.conf.manually-configured
+      become: true
+      ansible.builtin.copy:
+        dest: "/etc/resolv.conf.manually-configured"
+        content: |
+            search {{ cloud_domain }}
+            nameserver 127.0.0.1
+        mode: '0644'
+
+    - name: Create a symbolic link of systemd resolv.conf
+      become: true
+      ansible.builtin.file:
+        src: "/etc/resolv.conf.manually-configured"
+        dest: "/etc/resolv.conf"
+        owner: root
+        group: root
+        state: link
+        force: true
+
+    - name: Does the DNS ACL exist
+      become: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      ansible.builtin.shell: >-
+        ldapsearch -LLL -x -D "cn=Directory Manager" -w {{ cifmw_adoption_osp_deploy_freeipa_admin_password }} -s base
+        -b cn=dns,dc={{ cloud_domain.split(".")[0] }},dc={{ cloud_domain.split(".")[1] }}
+        aci='*Allow hosts to read DNS A/AAA/CNAME/PTR records*' numSubordinates |
+        sed -n 's/^[ \t]*numSubordinates:[ \t]*\(.*\)/\1/p'
+      register: dns_aci_count
+      ignore_errors: true
+
+    - name: Add ACL to allow hosts access to DNS
+      become: true
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          cat << EOF | ldapmodify -x -D "cn=Directory Manager" -w {{ cifmw_adoption_osp_deploy_freeipa_admin_password }}
+          dn: cn=dns,dc={{ cloud_domain.split(".")[0] }},dc={{ cloud_domain.split(".")[1] }}
+          changetype: modify
+          add: aci
+          aci: (targetattr = "aaaarecord || arecord || cnamerecord || idnsname || objectclass || ptrrecord")(targetfilter = "(&(objectclass=idnsrecord)(|(aaaarecord=*)(arecord=*)(cnamerecord=*)(ptrrecord=*)(idnsZoneActive=TRUE)))")(version 3.0; acl "Allow hosts to read DNS A/AAA/CNAME/PTR records"; allow (read,search,compare) userdn = "ldap:///fqdn=*,cn=computers,cn=accounts,dc={{ freeipa_domain.split('.')[0] }},dc={{ freeipa_domain.split('.')[1] }}";)
+          EOF
+      when: dns_aci_count.stdout|default(0)|int == 0
