@@ -97,6 +97,36 @@
         - src: /home/dev-scripts/pool/ocp_master_0_vdc.img
           dest: "{{ cifmw_basedir }}/ocp_volumes/base-cifmw-ocp-master-0-vol-2"
 
+    - name: Read baremetal MAC from ironic nodes config
+      become: true
+      ansible.builtin.slurp:
+        src: /home/dev-scripts/ocp/ironic_nodes.json
+      register: _ironic_nodes_raw
+
+    - name: Preserve baremetal MAC so reproducer VM keeps the static IP
+      vars:
+        _ironic_nodes: "{{ _ironic_nodes_raw.content | b64decode | from_json }}"
+        _bm_mac: "{{ _ironic_nodes.nodes[0].ports[0].address }}"
+        _existing_macs: >-
+          {{
+            cifmw_libvirt_manager_mac_map['ocp-master-0'] | default([]) |
+            rejectattr('network', 'equalto', 'ocpbm') | list
+          }}
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_mac_map: >-
+          {{
+            cifmw_libvirt_manager_mac_map | default({}) |
+            combine({'ocp-master-0': _existing_macs + [{'network': 'ocpbm', 'mac': _bm_mac}]})
+          }}
+        _devscripts_bm_mac: "{{ _bm_mac }}"
+
+    - name: Add DHCP host entry to ocpbm network for the baremetal MAC
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system net-update ocpbm add ip-dhcp-host
+          '<host mac="{{ _devscripts_bm_mac }}" name="master-0" ip="192.168.111.80"/>'
+          --live --config
+
     - name: Undefine all nodes part of OpenShift platform when SNO node with NVRAM removal
       community.libvirt.virt:
         command: "undefine"
