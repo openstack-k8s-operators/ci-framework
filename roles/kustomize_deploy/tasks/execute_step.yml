@@ -265,6 +265,30 @@
           register: _rename_osdpd
           changed_when: "'Renamed:' in _rename_osdpd.stdout"
 
+        - name: "Update wait conditions with uniquified OSDPD names"
+          when:
+            - _rename_osdpd is defined
+            - _rename_osdpd is not skipped
+            - _rename_osdpd.stdout is defined
+            - "'Renamed:' in _rename_osdpd.stdout"
+          ansible.builtin.set_fact:
+            _wait_conditions: >-
+              {{
+                _wait_conditions | map('regex_replace',
+                  '(?i)((?:openstackdataplanedeployment|osdpd)\s+)(' + item.split(' -> ')[0] | trim + ')(\s|$)',
+                  '\1' + item.split(' -> ')[1] | trim + '\3'
+                ) | list
+              }}
+          loop: >-
+            {{
+              _rename_osdpd.stdout_lines |
+              select('match', '^Renamed:') |
+              map('regex_replace', '^Renamed:\s*', '') |
+              list
+            }}
+          loop_control:
+            label: "{{ item }}"
+
         - name: "Store kustomized content in artifacts for {{ stage.path }}"
           ansible.builtin.copy:
             remote_src: true
