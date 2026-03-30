@@ -1,0 +1,252 @@
+---
+- name: Update cluster for disconnected deployment
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  vars:
+    oc_mirror_download_url: "{{ cifmw_disconnected_mirror_url | default('https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/latest/oc-mirror.rhel9.tar.gz') }}"
+    mirror_registry_url: "{{ cifmw_disconnected_registry_url | default('https://mirror.openshift.com/pub/cgw/mirror-registry/latest/mirror-registry-amd64.tar.gz') }}"
+    openstack_namespace: "{{ cifmw_openstack_namespace | default('openstack') }}"
+    disconnect_working_dir: "{{ cifmw_disconnected_working_dir | default('/home/zuul/disconnect_working_dir') }}"
+    mirror_location: "{{ disconnect_working_dir }}/mirror_location"
+    local_registry: "{{ disconnect_working_dir }}/local_registry"
+    mirror_registry_password: "JbmsjFR0yf6SNxKhk185BOVX2Dv39T74" # notsecret
+    oc_mirror_catalog_url: "{{ cifmw_ci_gen_kustomize_values_ooi_image | default('registry-proxy.engineering.redhat.com/rh-osbs/iib:1125611') }}"
+    oc_mirror_cert_manager_catalog_url: "{{ cifmw_cert_manager_catalog_url | default('registry.redhat.io/redhat/redhat-operator-index:v4.18') }}"
+  tasks:
+    - name: Create disconnected working directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0777'
+      loop:
+        - "{{ disconnect_working_dir }}"
+        - "{{ mirror_location }}"
+        - "{{ local_registry }}"
+
+    - name: Download oc mirror image to controller
+      ansible.builtin.get_url:
+        url: "{{ oc_mirror_download_url }}"
+        dest: "{{disconnect_working_dir}}/oc-mirror.rhel9.tar.gz"
+        mode: '0644'
+
+    - name: Install oc mirror
+      ansible.builtin.shell: |
+        set -eux
+        tar xvf {{disconnect_working_dir}}/oc-mirror.rhel9.tar.gz -C {{disconnect_working_dir}} &&
+        chmod +x {{disconnect_working_dir}}/oc-mirror &&
+        sudo mv {{disconnect_working_dir}}/oc-mirror /usr/local/bin/.
+
+    - name: Get host FQDN 
+      ansible.builtin.command: hostname -f
+      register: host_fqdn
+
+    - name: Create mirror location file
+      become: true
+      ansible.builtin.shell: |
+        cat <<EOF > /etc/containers/registries.conf.d/010-stage.conf
+        unqualified-search-registries = ["registry.access.redhat.com", "docker.io"]
+        short-name-mode = ""
+
+        [[registry]]
+        prefix = ""
+        location = "registry.redhat.io"
+
+        [[registry.mirror]]
+        location = "registry.stage.redhat.io"
+        pull-from-mirror = "digest-only"
+        EOF
+
+    - name: Create update service namespace
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        script: |
+          oc apply -f - <<EOF
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: openshift-update-service
+            annotations:
+              openshift.io/node-selector: ""
+            labels:
+              openshift.io/cluster-monitoring: "true"
+          EOF
+
+    - name: Create update service operator group
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        script: |
+          oc apply -f - <<EOF
+          apiVersion: operators.coreos.com/v1
+          kind: OperatorGroup
+          metadata:
+            name: update-service-operator-group
+            namespace: openshift-update-service
+          spec:
+            targetNamespaces:
+            - openshift-update-service
+          EOF
+
+    - name: Create subscription service
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir }}/artifacts"
+        script: |
+          oc apply -f - <<EOF
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: Subscription
+          metadata:
+            name: update-service-subscription
+            namespace: openshift-update-service
+          spec:
+            channel: v1
+            installPlanApproval: "Automatic"
+            source: "redhat-operators"
+            sourceNamespace: "openshift-marketplace"
+            name: "cincinnati-operator"
+          EOF
+
+    - name: Wait for update service operator to be installed
+      ansible.builtin.shell: |
+        set -eux
+        oc get crd | grep -i updateservice.operator.openshift.io
+      register: crd_out
+      until: "'updateservice.operator.openshift.io' in crd_out.stdout"
+      retries: 10
+      delay: 30
+
+    - name: Create Image Set yaml
+      ansible.builtin.shell: |
+        cat <<EOF >{{ disconnect_working_dir }}/imageset-config-v2.yaml
+        kind: ImageSetConfiguration
+        apiVersion: mirror.openshift.io/v2alpha1
+        mirror:
+          operators:
+            - catalog: {{ oc_mirror_catalog_url }}
+              packages:
+               - name: openstack-operator
+               - name: kubernetes-nmstate-operator
+               - name: metallb-operator
+               - name: local-storage-operator
+               - name: lvms-operator
+               - name: cluster-observability-operator
+            - catalog: {{ oc_mirror_cert_manager_catalog_url }}
+              packages:
+               - name: openshift-cert-manager-operator
+          additionalImages:
+           - name: registry.redhat.io/ubi8/ubi:latest
+           - name: registry.redhat.io/ubi9/ubi@sha256:20f695d2a91352d4eaa25107535126727b5945bff38ed36a3e59590f495046f0
+        EOF
+
+    - name: Get registry.redhat.io username and password from pull secret
+      ansible.builtin.shell: |
+        set -eux
+        oc get -n openshift-config secret pull-secret -o json | jq '.data[".dockerconfigjson"]' -r | base64 -d | jq '.auths["registry.redhat.io"].auth' -r | base64 -d
+      register: pull_secret_user_pass
+
+    - name: Login to registry.redhat.io
+      containers.podman.podman_login:
+        username: "{{ pull_secret_user_pass.stdout.split(':')[0] }}"
+        password: "{{ pull_secret_user_pass.stdout.split(':')[1] }}"
+        registry: "registry.redhat.io"
+
+    - name: Login to registry.stage.redhat.io
+      containers.podman.podman_login:
+        username: "{{ cifmw_registry_token.credentials.username }}"
+        password: "{{ cifmw_registry_token.credentials.password }}"
+        registry: "registry.stage.redhat.io"
+
+    - name: Mirror specified image set configuration to disk
+      ansible.builtin.shell: |
+        oc mirror --v2 --config {{ disconnect_working_dir }}/imageset-config-v2.yaml file://{{ mirror_location }} >>{{ disconnect_working_dir }}/mirror_images.log
+      register: mirror_image_result
+      until: mirror_image_result is not failed
+      retries: 1
+
+    - name: Download mirror registry to controller
+      ansible.builtin.get_url:
+        url: "{{ mirror_registry_url }}"
+        dest: "{{disconnect_working_dir}}/mirror-registry-amd64.tar.gz"
+        mode: '0644'
+
+    - name: Install mirror registry
+      ansible.builtin.shell: |
+        set -eux
+        tar xvf {{disconnect_working_dir}}/mirror-registry-amd64.tar.gz -C {{disconnect_working_dir}}
+        {{disconnect_working_dir}}/mirror-registry install --quayHostname {{ host_fqdn.stdout }} --quayRoot \
+        {{ local_registry }} --initPassword {{ mirror_registry_password }} >{{disconnect_working_dir}}/registry_install.log
+
+    - name: Increase gunicorn-web timeout in quay-app container
+      ansible.builtin.shell:
+        podman exec -it quay-app {% raw %}sed -i '/command=gunicorn -c %(ENV_QUAYCONF)s\/gunicorn_web.py web:application/c\command=gunicorn --timeout 900 -c %(ENV_QUAYCONF)s\/gunicorn_web.py web:application' /quay-registry/conf/supervisord.conf{% endraw %}
+
+    - name: Restart gunicorn-web quay-app container with new timeout value
+      ansible.builtin.shell:
+        set -eux
+        podman exec -it quay-app supervisorctl -c /quay-registry/conf/supervisord.conf help reread
+        podman exec -it quay-app supervisorctl -c /quay-registry/conf/supervisord.conf restart gunicorn-web
+
+    - name: Configure system to trust mirror registry root ca
+      become: true
+      ansible.builtin.shell: |
+        set -eux
+        cp {{ local_registry }}/quay-rootCA/rootCA.pem /etc/pki/ca-trust/source/anchors/
+        update-ca-trust extract
+
+    - name: Login to  mirror registry
+      ansible.builtin.shell: |
+        podman login -u init -p {{ mirror_registry_password }} {{ host_fqdn.stdout }}:8443
+
+    - name: Configure cluster to trust mirror registry root ca
+      ansible.builtin.shell: |
+        set -eux
+        oc create configmap registry-cas -n openshift-config --from-file={{ host_fqdn.stdout }}..8443={{ local_registry }}/quay-rootCA/rootCA.pem
+        oc patch image.config.openshift.io/cluster --patch '{"spec":{"additionalTrustedCA":{"name":"registry-cas"}}}' --type=merge
+
+    - name: Add mirror to clusters insecure and allowed registries
+      ansible.builtin.shell: |
+        set -eux
+        oc patch image.config.openshift.io/cluster --type='merge' -p '{"spec":{"registrySources":{"insecureRegistries":["*.redhat.com","'{{ host_fqdn.stdout }}':8443"]}}}'
+        oc patch image.config.openshift.io/cluster --type='merge' -p '{"spec":{"registrySources":{"allowedRegistries":["*.redhat.com","'{{ host_fqdn.stdout }}':8443"]}}}'
+
+    - name: Get cluster's current pull secret
+      ansible.builtin.shell: |
+        oc get secret {% raw %}pull-secret -n openshift-config -o template='{{index .data ".dockerconfigjson" | base64decode}}'{% endraw %} > {{ disconnect_working_dir }}/pull-secret.json
+
+    - name: Configure cluster to use pull secret from mirror registry
+      ansible.builtin.shell: |
+        set -eux
+        oc registry login --registry {{ host_fqdn.stdout }}:8443 --auth-basic=init:{{ mirror_registry_password }} --to={{ disconnect_working_dir }}/pull-secret.json
+        oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson={{ disconnect_working_dir }}/pull-secret.json
+
+    - name: Mirror contents of generated image set to target mirror registry
+      ansible.builtin.shell: |
+        oc mirror --v2 --config {{ disconnect_working_dir }}/imageset-config-v2.yaml --from file://{{ mirror_location }} docker://{{ host_fqdn.stdout }}:8443 >>{{ disconnect_working_dir }}/mirror_contents.log
+      register: mirror_contents_result
+      until: mirror_contents_result is not failed
+      retries: 1
+
+    - name: Disable catalog source
+      ansible.builtin.shell: |
+        oc patch OperatorHub cluster --type json -p '[{"op": "add", "path": "/spec/disableAllDefaultSources", "value": true}]'
+
+    - name: Extract image name and tag from catalog source
+      ansible.builtin.set_fact:
+        index_image_name_tag: "{{ oc_mirror_cert_manager_catalog_url.split('/') | last | replace(':', '-') | replace('.', '-') }}"
+
+    - name: Prepare catalog source for environment
+      ansible.builtin.shell: |
+        sed -i 's/cs-{{ index_image_name_tag | quote }}/redhat-operators/g' {{ mirror_location }}/working-dir/cluster-resources/cs-{{ index_image_name_tag }}.yaml
+
+    - name: Apply yaml files from results directory to cluster
+      ansible.builtin.shell: |
+        oc apply -f {{ mirror_location }}/working-dir/cluster-resources
+
+    - name: Wait for mirrored operators to be available
+      ansible.builtin.shell: |
+        oc get packagemanifests.packages.operators.coreos.com
+      register: packagemanifest_out
+      until: "'openstack-operator' and 'kubernetes-nmstate-operator' in packagemanifest_out.stdout"
+      retries: 10
+      delay: 30
+
+    - name: Wait until the OpenShift cluster is stable
+      ansible.builtin.command:
+        oc adm wait-for-stable-cluster --minimum-stable-period=5s --timeout=30m
