@@ -19,6 +19,7 @@ using `cifmw_repo_setup_src` role default var.
 * `cifmw_repo_setup_rdo_mirror`: (String) Address from which to install RDO packages. Defaults to `{{ cifmw_repo_setup_dlrn_uri }}`.
 * `cifmw_repo_setup_os_release`: (String) Operating system release. Defaults to `{{ ansible_distribution|lower }}`.
 * `cifmw_repo_setup_src`: (String) repo-setup repository location. Defaults to `https://github.com/openstack-k8s-operators/repo-setup`.
+* `cifmw_repo_setup_version`: (string) repo-setup repository version. Takes its value from cifmw_repo_setup_version_pin (from group_vars) if define, defaults to `HEAD`.
 * `cifmw_repo_setup_output`: (String) Repository files output. Defaults to `{{ cifmw_repo_setup_basedir }}/artifacts/repositories`.
 * `cifmw_repo_setup_additional_repos`: (String) Additional repos(ceph, deps) to enable. Defaults to `''`.
 * `cifmw_repo_setup_env`: (Dict) Environment variables to be passed to repo_setup cli . Defaults to `'{}'`.
