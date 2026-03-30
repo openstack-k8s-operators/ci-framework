@@ -1,0 +1,97 @@
+---
+# Eject VirtualMedia from iDRAC and reset to clear lingering RFS.
+# On iDRAC 9 (fw 4.x), EjectMedia sets Inserted=false but the Image URL
+# and underlying RFS connection linger indefinitely (RH BZ#1910739).
+# Neither Redfish PATCH (405), vmdisconnect (vConsole-only), nor
+# remoteimage -d reliably release it. A racreset is the only way to
+# guarantee the stale RFS is fully torn down.
+# Requires: _bmc_host, _bmc_creds, _redfish_headers
+- name: Eject VirtualMedia
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.EjectMedia"
+    method: POST
+    headers: "{{ _redfish_headers }}"
+    body_format: json
+    body: {}
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 204, 400, 500]
+  register: _eject_result
+  failed_when: false
+  no_log: true
+
+- name: Wait for VirtualMedia eject to settle
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: Check Remote File Share status
+  ansible.builtin.command:
+    argv:
+      - sshpass
+      - -p
+      - "{{ _bmc_creds.password }}"
+      - ssh
+      - -o
+      - StrictHostKeyChecking=no
+      - -o
+      - UserKnownHostsFile=/dev/null
+      - -o
+      - ConnectTimeout=30
+      - "{{ _bmc_creds.username }}@{{ _bmc_host }}"
+      - racadm
+      - remoteimage
+      - -s
+  register: _rfs_status
+  failed_when: false
+  no_log: true
+
+- name: Show Remote File Share status before reset
+  ansible.builtin.debug:
+    msg: "{{ _rfs_status.stdout | default('') | trim }}"
+
+- name: Reset iDRAC to clear lingering RFS connection
+  when: "'agentagent.' in (_rfs_status.stdout | default(''))"
+  block:
+    - name: Run racadm racreset
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -p
+          - "{{ _bmc_creds.password }}"
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - -o
+          - ConnectTimeout=30
+          - "{{ _bmc_creds.username }}@{{ _bmc_host }}"
+          - racadm
+          - racreset
+      register: _racreset_result
+      changed_when: _racreset_result.rc == 0
+      no_log: true
+
+    - name: Wait for iDRAC SSH to come back up
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -p
+          - "{{ _bmc_creds.password }}"
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - -o
+          - ConnectTimeout=10
+          - "{{ _bmc_creds.username }}@{{ _bmc_host }}"
+          - racadm
+          - getversion
+      register: _ssh_check
+      no_log: true
+      retries: 30
+      delay: 10
+      until: _ssh_check.rc == 0

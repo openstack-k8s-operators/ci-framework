@@ -1,0 +1,378 @@
+---
+# Agent-based bare metal SNO deployment.
+#
+# Three isolated networks (no shared L2 domain):
+#   BMC mgmt network   — iDRAC interfaces; controller reaches iDRAC via routing
+#   BMO provision net   — node's 1st NIC, OS interface IP; virtual media boot,
+#                         no PXE/DHCP
+#   Controller network  — Zuul controller; serves the agent ISO to iDRAC
+#
+# A 2nd NIC on the node carries isolated MetalLB networks for RHOSO
+# EDPM services (ctlplane, internalapi, storage, tenant) via VLANs.
+#
+# Bypasses dev-scripts entirely. Generates a self-contained ISO on the
+# controller, pushes it to the target host's iDRAC (BMC mgmt network)
+# via Redfish VirtualMedia, and waits for the host to self-install on
+# the BMO provision network.
+#
+# The api and *.apps DNS names resolve directly to bkr06's BMO provision IP.
+#
+# Required variables (typically set in the scenario's vars.yaml):
+#   cifmw_bm_agent_cluster_name
+#   cifmw_bm_agent_base_domain
+#   cifmw_bm_agent_machine_network        (BMO provision network CIDR)
+#   cifmw_bm_agent_node_ip                (node IP on BMO provision net)
+#   cifmw_bm_agent_node_iface             (RHCOS iface on BMO provision net)
+#   cifmw_bm_agent_bmc_host               (iDRAC on BMC mgmt network)
+#   cifmw_bm_nodes                        (list with mac / root_device)
+#   cifmw_bm_agent_openshift_version      (e.g. "4.18.3"; or set
+#     cifmw_bm_agent_release_image (OPENSHIFT_RELEASE_IMAGE) instead)
+#
+# Optional variables have defaults in defaults/main.yml.
+# Secrets paths use ansible_user_dir and default inline:
+#   cifmw_manage_secrets_pullsecret_file  (default: ~/pull-secret)
+#   cifmw_bmc_credentials_file            (default: ~/secrets/idrac_access.yaml)
+#
+# See defaults/main.yml and README.md for the full reference.
+
+- name: Assert agent-based bare metal variables are set
+  ansible.builtin.assert:
+    that:
+      - cifmw_bm_agent_cluster_name is defined
+      - cifmw_bm_agent_base_domain is defined
+      - cifmw_bm_agent_machine_network is defined
+      - cifmw_bm_agent_node_ip is defined
+      - cifmw_bm_agent_node_iface is defined
+      - cifmw_bm_agent_bmc_host is defined
+      - cifmw_bm_nodes is defined
+      - cifmw_bm_nodes | length == 1
+    fail_msg: >-
+      Missing agent-based bare metal variables.
+      Check vars.yaml for cifmw_bm_agent_* and cifmw_bm_nodes.
+
+- name: Set internal facts
+  ansible.builtin.set_fact:
+    _cluster_name: "{{ cifmw_bm_agent_cluster_name }}"
+    _base_domain: "{{ cifmw_bm_agent_base_domain }}"
+    _machine_network: "{{ cifmw_bm_agent_machine_network }}"
+    _node_ip: "{{ cifmw_bm_agent_node_ip }}"
+    _node_iface: "{{ cifmw_bm_agent_node_iface }}"
+    _node_mac: "{{ cifmw_bm_nodes[0].mac }}"
+    _bmc_host: "{{ cifmw_bm_agent_bmc_host }}"
+    _iso_http_port: "{{ cifmw_bm_agent_iso_http_port }}"
+    _installer_timeout: "{{ cifmw_bm_agent_installer_timeout }}"
+    _work_dir: "{{ cifmw_reproducer_basedir }}/artifacts/agent-install"
+    _creds_file: >-
+      {{ cifmw_bmc_credentials_file |
+        default(ansible_user_dir ~ '/secrets/idrac_access.yaml') }}
+    _pull_secret_file: >-
+      {{ cifmw_manage_secrets_pullsecret_file |
+        default(ansible_user_dir ~ '/pull-secret') }}
+    _kubeconfig_dest: >-
+      {{
+        (cifmw_devscripts_repo_dir | default(
+        ansible_user_dir ~ '/src/github.com/openshift-metal3/dev-scripts'),
+        'ocp', cifmw_bm_agent_cluster_name, 'auth')
+        | path_join
+      }}
+
+- name: Read BMC credentials
+  ansible.builtin.include_vars:
+    file: "{{ _creds_file }}"
+    name: _bmc_creds
+
+- name: Set common Redfish request parameters
+  ansible.builtin.set_fact:
+    _redfish_headers:
+      Accept: application/json
+      OData-Version: "4.0"
+
+- name: Ensure BIOS allows VirtualMedia boot
+  ansible.builtin.include_tasks: bm_ensure_usb_boot.yml
+
+- name: Ensure bare metal host is powered off for agent install
+  ansible.builtin.include_tasks: bm_power_off.yml
+
+- name: Create agent-install working directory
+  ansible.builtin.file:
+    path: "{{ _work_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Read pull secret
+  no_log: true
+  ansible.builtin.slurp:
+    src: "{{ _pull_secret_file }}"
+  register: _pull_secret_raw
+
+- name: Set pull secret fact
+  no_log: true
+  ansible.builtin.set_fact:
+    _pull_secret: "{{ _pull_secret_raw.content | b64decode | trim }}"
+
+- name: Generate SSH key for cluster access
+  community.crypto.openssh_keypair:
+    path: "{{ _work_dir }}/agent_ssh_key"
+    type: ed25519
+    force: false
+  register: _ssh_key
+
+- name: Set SSH public key fact
+  ansible.builtin.set_fact:
+    _ssh_pub_key: "{{ _ssh_key.public_key }}"
+
+- name: Resolve openshift-install acquisition method
+  ansible.builtin.set_fact:
+    _release_image: >-
+      {{ cifmw_bm_agent_release_image |
+         default(lookup('env', 'OPENSHIFT_RELEASE_IMAGE') | default('', true)) }}
+    _ocp_version: >-
+      {{ cifmw_bm_agent_openshift_version }}
+
+- name: Assert an OCP version or release image is provided
+  ansible.builtin.assert:
+    that:
+      - _ocp_version | length > 0 or _release_image | length > 0
+    fail_msg: >-
+      No OCP version or release image provided.
+      Set cifmw_bm_agent_openshift_version (e.g. "4.18.3") in vars.yaml,
+      or cifmw_bm_agent_release_image / OPENSHIFT_RELEASE_IMAGE env var.
+
+- name: Check if openshift-install already exists (local debug case)
+  ansible.builtin.stat:
+    path: "{{ _work_dir }}/openshift-install"
+  register: _oi_bin
+
+- name: Download openshift-install from OCP mirror
+  when:
+    - not _oi_bin.stat.exists
+    - _release_image | length == 0
+    - _ocp_version | length > 0
+  block:
+    - name: Download openshift-install tarball
+      ansible.builtin.get_url:
+        url: "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/{{ _ocp_version }}/openshift-install-linux.tar.gz"
+        dest: "{{ _work_dir }}/openshift-install-linux.tar.gz"
+        mode: "0644"
+
+    - name: Extract openshift-install binary
+      ansible.builtin.unarchive:
+        src: "{{ _work_dir }}/openshift-install-linux.tar.gz"
+        dest: "{{ _work_dir }}"
+        remote_src: true
+        extra_opts:
+          - openshift-install
+
+- name: Extract openshift-install from release image
+  when:
+    - not _oi_bin.stat.exists
+    - _release_image | length > 0
+  ansible.builtin.command:
+    cmd: >-
+      oc adm release extract
+      --command=openshift-install
+      --to={{ _work_dir }}
+      --registry-config={{ _pull_secret_file }}
+      {{ _release_image }}
+    creates: "{{ _work_dir }}/openshift-install"
+
+- name: Template install-config.yaml
+  no_log: true
+  ansible.builtin.template:
+    src: agent_install_config.yaml.j2
+    dest: "{{ _work_dir }}/install-config.yaml"
+    mode: "0600"
+
+- name: Template agent-config.yaml
+  ansible.builtin.template:
+    src: agent_config.yaml.j2
+    dest: "{{ _work_dir }}/agent-config.yaml"
+    mode: "0644"
+
+- name: Remove stale agent state from previous runs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ _work_dir }}/.openshift_install_state.json"
+    - "{{ _work_dir }}/agent.x86_64.iso"
+    - "{{ _work_dir }}/auth"
+    - "{{ _work_dir }}/openshift"
+
+- name: Configure core user console access via MachineConfig
+  when: cifmw_bm_agent_core_password | length > 0
+  ansible.builtin.include_tasks: bm_core_password_machineconfig.yml
+
+- name: Persist configs before openshift-install consumes them
+  ansible.builtin.copy:
+    src: "{{ _work_dir }}/{{ item }}"
+    dest: "{{ _work_dir }}/{{ item }}.bak"
+    remote_src: true
+    mode: "0600"
+  loop:
+    - install-config.yaml
+    - agent-config.yaml
+
+- name: Strip pullSecret from install-config backup
+  ansible.builtin.lineinfile:
+    path: "{{ _work_dir }}/install-config.yaml.bak"
+    regexp: '^pullSecret:'
+    line: "pullSecret: '<REDACTED>'"
+
+- name: Generate agent ISO
+  ansible.builtin.command:
+    cmd: "{{ _work_dir }}/openshift-install agent create image --dir {{ _work_dir }}"
+
+- name: Patch agent ISO ignition for discovery-phase console access
+  when: cifmw_bm_agent_live_debug | bool
+  ansible.builtin.include_tasks: bm_patch_agent_iso.yml
+
+- name: Set controller IP fact
+  ansible.builtin.set_fact:
+    _controller_ip: >-
+      {{ hostvars[inventory_hostname]['nodepool']['interface_ip'] |
+        default(ansible_default_ipv4.address |
+        default(ansible_host)) }}
+
+- name: Show ISO URL that iDRAC will fetch
+  ansible.builtin.debug:
+    msg: "ISO URL for iDRAC: http://{{ _controller_ip }}:{{ _iso_http_port }}/agent.x86_64.iso"
+
+- name: Stop any existing agent-iso-server container
+  become: true
+  ansible.builtin.command:
+    cmd: podman rm -f agent-iso-server
+  failed_when: false
+  changed_when: false
+
+- name: Serve agent ISO via podman httpd
+  become: true
+  ansible.builtin.command:
+    cmd: >-
+      podman run -d --name agent-iso-server
+      -v {{ _work_dir }}:/var/www/html:ro,Z
+      -p {{ _controller_ip }}:{{ _iso_http_port }}:8080
+      registry.access.redhat.com/ubi9/httpd-24:latest
+  register: _httpd_start
+
+- name: Check agent-iso-server container is running
+  become: true
+  ansible.builtin.command:
+    cmd: podman ps --filter name=agent-iso-server --format '{{ '{{' }}.Status{{ '}}' }}'
+  register: _httpd_status
+  changed_when: false
+
+- name: Show container status
+  ansible.builtin.debug:
+    msg: "agent-iso-server status: {{ _httpd_status.stdout }}"
+
+- name: Wait for HTTP server to respond
+  ansible.builtin.uri:
+    url: "http://{{ _controller_ip }}:{{ _iso_http_port }}/agent.x86_64.iso"
+    method: HEAD
+  register: _http_check
+  retries: 10
+  delay: 3
+  until: _http_check.status == 200
+
+- name: Eject any existing VirtualMedia before insert
+  ansible.builtin.include_tasks: bm_eject_vmedia.yml
+
+- name: Insert agent ISO via VirtualMedia
+  no_log: true
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
+    method: POST
+    headers: "{{ _redfish_headers }}"
+    body_format: json
+    body:
+      Image: "http://{{ _controller_ip }}:{{ _iso_http_port }}/agent.x86_64.iso"
+      Inserted: true
+      WriteProtected: true
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 204]
+  register: _insert_media
+  retries: 3
+  delay: 10
+  until: _insert_media.status in [200, 204]
+
+- name: Discover VirtualMedia target and set one-time boot override
+  ansible.builtin.include_tasks: bm_discover_vmedia_target.yml
+
+- name: Power on bare metal host to boot from VirtualMedia
+  ansible.builtin.include_tasks: bm_power_on.yml
+
+- name: Verify BIOS GenericUsbBoot is enabled after POST
+  ansible.builtin.include_tasks: bm_check_usb_boot.yml
+
+- name: Add api / api-int host entry before waiting for install
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '\sapi\.{{ _cluster_name }}\.{{ _base_domain }}\s'
+    line: >-
+      {{ _node_ip }}  api.{{ _cluster_name }}.{{ _base_domain }}
+      api-int.{{ _cluster_name }}.{{ _base_domain }}
+    state: present
+
+- name: Add wildcard apps host entry before waiting for install
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '\sconsole-openshift-console\.apps\.{{ _cluster_name }}\.{{ _base_domain }}\s'
+    line: >-
+      {{ _node_ip }}  console-openshift-console.apps.{{ _cluster_name }}.{{ _base_domain }}
+      oauth-openshift.apps.{{ _cluster_name }}.{{ _base_domain }}
+      canary-openshift-ingress-canary.apps.{{ _cluster_name }}.{{ _base_domain }}
+    state: present
+
+- name: Wait for bootstrap to complete
+  ansible.builtin.command:
+    cmd: >-
+      {{ _work_dir }}/openshift-install agent wait-for bootstrap-complete
+      --dir {{ _work_dir }}
+      --log-level info
+  register: _bootstrap_wait
+  timeout: "{{ _installer_timeout | int // 2 }}"
+
+- name: Wait for install to complete
+  ansible.builtin.command:
+    cmd: >-
+      {{ _work_dir }}/openshift-install agent wait-for install-complete
+      --dir {{ _work_dir }}
+      --log-level info
+  register: _install_wait
+  timeout: "{{ _installer_timeout | int // 2 }}"
+
+- name: Create kubeconfig destination directory
+  ansible.builtin.file:
+    path: "{{ _kubeconfig_dest }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy kubeconfig
+  ansible.builtin.copy:
+    src: "{{ _work_dir }}/auth/kubeconfig"
+    dest: "{{ _kubeconfig_dest }}/kubeconfig"
+    remote_src: true
+    mode: "0600"
+
+- name: Copy kubeadmin-password
+  ansible.builtin.copy:
+    src: "{{ _work_dir }}/auth/kubeadmin-password"
+    dest: "{{ _kubeconfig_dest }}/kubeadmin-password"
+    remote_src: true
+    mode: "0600"
+
+- name: Eject VirtualMedia after install
+  ansible.builtin.include_tasks: bm_eject_vmedia.yml
+
+- name: Stop HTTP ISO server
+  become: true
+  ansible.builtin.command:
+    cmd: podman rm -f agent-iso-server
+  failed_when: false
+  changed_when: false
