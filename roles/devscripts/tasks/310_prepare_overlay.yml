@@ -21,44 +21,152 @@
     uri: "qemu:///system"
   register: _current_vms
 
-- name: Initiate graceful shutdown of the cluster.
-  vars:
-    cifmw_openshift_adm_op: "shutdown"
-    cifmw_openshift_adm_cert_expire_date_file: >-
-      {{
-        (
-          cifmw_devscripts_config.working_dir, '.ocp_cert_not_after'
-        ) | ansible.builtin.path_join
-      }}
-  ansible.builtin.import_role:
-    name: openshift_adm
-
-- name: Stop all the OpenShift nodes.
-  failed_when: false
-  vars:
-    matcher: >-
-      ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
-  community.libvirt.virt:
-    command: "destroy"
-    name: "{{ item }}"
-    uri: "qemu:///system"
-  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
-
-- name: Undefine all nodes part of OpenShift platform
-  vars:
-    matcher: >-
-      ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
-  community.libvirt.virt:
-    command: "undefine"
-    flags:
-      - "keep_nvram"
-      - "snapshots_metadata"
-    name: "{{ item }}"
-    uri: "qemu:///system"
-  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
-
-- name: Disable online cluster flag
+- name: Destroy vms - when not SNO
   when:
-    - cifmw_devscripts_ocp_online | bool
-  ansible.builtin.set_fact:
-    cifmw_devscripts_ocp_online: false
+    - not cifmw_devscripts_sno | default(true) | bool
+  block:
+    - name: Initiate graceful shutdown of the cluster.
+      vars:
+        cifmw_openshift_adm_op: "shutdown"
+        cifmw_openshift_adm_cert_expire_date_file: >-
+          {{
+            (
+              cifmw_devscripts_config.working_dir, '.ocp_cert_not_after'
+            ) | ansible.builtin.path_join
+          }}
+      ansible.builtin.import_role:
+        name: openshift_adm
+
+    - name: Stop all the OpenShift nodes.
+      failed_when: false
+      vars:
+        matcher: >-
+          ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
+      community.libvirt.virt:
+        command: "destroy"
+        name: "{{ item }}"
+        uri: "qemu:///system"
+      loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+    - name: Undefine all nodes part of OpenShift platform
+      vars:
+        matcher: >-
+          ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
+      community.libvirt.virt:
+        command: "undefine"
+        flags:
+          - "keep_nvram"
+          - "snapshots_metadata"
+        name: "{{ item }}"
+        uri: "qemu:///system"
+      loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+    - name: Disable online cluster flag
+      when:
+        - cifmw_devscripts_ocp_online | bool
+      ansible.builtin.set_fact:
+        cifmw_devscripts_ocp_online: false
+
+- name: Destroy vms - when SNO
+  when:
+    - cifmw_devscripts_sno | default(false) | bool
+  block:
+    - name: Stop ocp_master_0 - bootstrap cluster VM before migration to reproducer VM
+      failed_when: false
+      community.libvirt.virt:
+        command: "destroy"
+        name: "ocp_master_0"
+        uri: "qemu:///system"
+
+    - name: Copy ocp qcow2 image to workload dir
+      become: true
+      ansible.builtin.copy:
+        src: /home/dev-scripts/pool/ocp_master_0.qcow2
+        dest: "{{ cifmw_basedir }}/workload/ocp-master-0.qcow2"
+        remote_src: true
+
+    - name: Convert extra disks to overlay volume bases
+      become: true
+      ansible.builtin.shell: >
+        qemu-img convert -f raw -O qcow2
+        {{ item.src }}
+        {{ item.dest }}
+      loop:
+        - src: /home/dev-scripts/pool/ocp_master_0_vdb.img
+          dest: "{{ cifmw_basedir }}/ocp_volumes/base-cifmw-ocp-master-0-vol-1"
+        - src: /home/dev-scripts/pool/ocp_master_0_vdc.img
+          dest: "{{ cifmw_basedir }}/ocp_volumes/base-cifmw-ocp-master-0-vol-2"
+
+    - name: Read baremetal MAC from ironic nodes config
+      become: true
+      ansible.builtin.slurp:
+        src: /home/dev-scripts/ocp/ironic_nodes.json
+      register: _ironic_nodes_raw
+
+    - name: Preserve baremetal MAC so reproducer VM keeps the static IP
+      vars:
+        _ironic_nodes: "{{ _ironic_nodes_raw.content | b64decode | from_json }}"
+        _bm_mac: "{{ _ironic_nodes.nodes[0].ports[0].address }}"
+        _existing_macs: >-
+          {{
+            cifmw_libvirt_manager_mac_map['ocp-master-0'] | default([]) |
+            rejectattr('network', 'equalto', 'ocpbm') | list
+          }}
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_mac_map: >-
+          {{
+            cifmw_libvirt_manager_mac_map | default({}) |
+            combine({'ocp-master-0': _existing_macs + [{'network': 'ocpbm', 'mac': _bm_mac}]})
+          }}
+        _devscripts_bm_mac: "{{ _bm_mac }}"
+
+    - name: Add DHCP host entry to ocpbm network for the baremetal MAC
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system net-update ocpbm add ip-dhcp-host
+          '<host mac="{{ _devscripts_bm_mac }}" name="master-0" ip="192.168.111.80"/>'
+          --live --config
+
+    - name: Undefine all nodes part of OpenShift platform when SNO node with NVRAM removal
+      community.libvirt.virt:
+        command: "undefine"
+        flags:
+          - "nvram"
+          - "snapshots_metadata"
+        name: "ocp_master_0"
+        uri: "qemu:///system"
+
+#    # FIXME: just for tests. move to other commit
+#    - name: Remove SNO NetworkManager config file
+#      become: true
+#      ansible.builtin.file:
+#        path: /etc/NetworkManager/dnsmasq.d/openshift-ocp.conf
+#        state: absent
+#
+#    - name: Reload NetworkManager
+#      become: true
+#      ansible.builtin.service:
+#        name: NetworkManager
+#        state: reloaded
+
+    - name: Update dnsmasq record
+      become: true
+      vars:
+        base_domain: "{{ cifmw_devscripts_config.base_domain | default('openstack.lab') }}"
+      ansible.builtin.shell: >
+        sed -i "s/api-int.ocp.{{ base_domain }},192.168.111.2/api-int.ocp.{{ base_domain }},192.168.122.10/g"
+        /etc/cifmw-dnsmasq.d/host_records.conf
+
+    - name: Restart cifmw dnsmasq
+      become: true
+      register: _dnsmasq
+      ansible.builtin.systemd_service:
+        name: cifmw-dnsmasq.service
+        state: restarted
+      failed_when:
+        - _dnsmasq.msg is defined
+        - _dnsmasq.msg is not
+          match('Could not find the requested service cifmw-dnsmasq.service')
+      retries: 5
+      delay: 15
+      until: _dnsmasq is succeeded

@@ -53,6 +53,9 @@ networks.
 * `cifmw_devscripts_cinder_volume_pvs` (list) a list of physical disks to be
   used for creating cinder-volumes volume-group. By default, the list contains
   `/dev/vda`.
+* `cifmw_devscripts_sno` (bool) Enable Single Node OpenShift. Defaults to `false`.
+* `cifmw_devscripts_sno_cpu_passthrough` (bool) Enable host-passthrough cpu model
+  to SNO virtual machine instead of using QEMU.
 
 ### Secrets management
 

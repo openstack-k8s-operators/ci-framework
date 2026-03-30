@@ -25,6 +25,9 @@ None
 * `cifmw_reproducer_supported_hypervisor_os`: (List) List of supported hypervisor operating systems and their minimum version.
 * `cifmw_reproducer_minimum_hardware_requirements`: (Dict) Define minimum hardware requirements for specific scenarios. Example below
 * `cifmw_reproducer_computes_rhos_release_args`: (String) Arguments to use when installing rhos-release repos on compute nodes. Not defined by default, and `cifmw_repo_setup_rhos_release_args` is used instead.
+* `cifmw_reproducer_allow_one_ocp` (Bool) Allow to deploy OpenShift cluster just with one master node.
+  NOTE: When using devscript, remember to set `cifmw_devscripts_sno` to `true`, otherwise it would fail.
+  If you don't set `cifmw_devscripts_sno` to `true`, minimum value for `ocp` nodes is `2`.
 
 ### Advanced parameters
 Those parameters shouldn't be used, unless the user is able to understand potential issues in their environment.
