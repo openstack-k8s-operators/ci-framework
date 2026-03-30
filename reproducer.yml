@@ -108,18 +108,22 @@
             name: firewalld
             state: restarted
 
+    # NOTE(dpawlik): Keep support for legacy workflow where
+    # controller host is created and actions are done not on
+    # hypervisor directly, but on controller.
     # NOTE(dpawlik): Synchronize current Zuul repositories stored in $HOME/src
     # to controller-0 to make sure all projects are in state as they should.
-    - name: Synchronize src dir with controller-0
+    # FIXME: that value should be available from playbooks/uni/run.yml
+    - name: Set hypervisor name if not defined
+      when: hypervisor is not defined
+      ansible.builtin.set_fact:
+        hypervisor: "{{ ansible_fqdn }}"
+    - name: Synchronize src dir
       when:
         - not cifmw_deploy_reproducer_env | default(true) | bool
-      vars:
-        sync_dir: "{{ ansible_user_dir }}/src"
-      ansible.posix.synchronize:
-        src: "{{ sync_dir }}/"
-        dest: "zuul@controller-0:{{ sync_dir }}"
-        archive: true
-        recursive: true
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: sync_src_dir.yml
 
     # NOTE(dpawlik): After calling reproducer role using ZIronic tool,
     # when the bootstrap phase has been completed, it generates a file
@@ -133,6 +137,28 @@
       ansible.builtin.include_role:
         name: reproducer
         tasks_from: overwrite_zuul_vars.yml
+
+    # NOTE(dpawlik): Since we use ZIronic, some variables are not
+    # redirected to nested ansible execution - they needs to be
+    # included on executing host - controller-0.
+    - name: Compute additional deploy_architecture_args with secrets
+      when:
+        - not cifmw_deploy_reproducer_env | default(true) | bool
+      vars:
+        basic_secret_files:
+          - "{{ ansible_user_dir }}/secrets/registry_token_creds.yaml"
+      ansible.builtin.include_role:
+        name: reproducer
+        tasks_from: compute_additional_args.yml
+      loop: "{{ cifmw_deploy_architecture_secret_files | default(basic_secret_files) }}"
+      loop_control:
+        loop_var: secret_file
+
+    - name: Print final cifmw_deploy_architecture_args
+      ansible.builtin.debug:
+        msg: >
+          Current cifmw_deploy_architecture_args {{ cifmw_deploy_architecture_args | default('') }}
+
     - name: Run deployment if instructed to
       when:
         - cifmw_deploy_architecture | default(false) | bool
@@ -141,7 +167,10 @@
       poll: 20
       delegate_to: controller-0
       ansible.builtin.command:
-        cmd: "$HOME/deploy-architecture.sh {{ cifmw_deploy_architecture_args | default('') }}"
+        cmd: >
+          $HOME/deploy-architecture.sh
+          -e hypervisor="{{ hypervisor }}"
+          {{ cifmw_deploy_architecture_args | default('') }}
 
     - name: Run post deployment if instructed to
       when:
