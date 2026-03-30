@@ -1,0 +1,102 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ cifmw_deploy_minio_namespace }}
+  labels:
+    name: {{ cifmw_deploy_minio_namespace }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: minio
+  name: minio
+  namespace: {{ cifmw_deploy_minio_namespace }}
+spec:
+  containers:
+    - name: minio
+      image: {{ cifmw_deploy_minio_image }}
+      command:
+        - /bin/bash
+        - -c
+        - |
+{% for bucket in cifmw_deploy_minio_buckets | default([]) %}
+          mkdir -p {{ ('/data/' ~ bucket) | quote }} && \
+{% endfor %}
+          minio server /data
+      env:
+        - name: MINIO_ROOT_USER
+          value: "{{ cifmw_deploy_minio_root_user }}"
+        - name: MINIO_ROOT_PASSWORD
+          value: "{{ cifmw_deploy_minio_root_password }}"
+      volumeMounts:
+        - mountPath: /data
+          name: storage
+  volumes:
+    - name: storage
+      persistentVolumeClaim:
+        claimName: minio-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: {{ cifmw_deploy_minio_namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ cifmw_deploy_minio_pvc_storage }}
+  storageClassName: {{ cifmw_deploy_minio_storage_class }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: {{ cifmw_deploy_minio_namespace }}
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      protocol: TCP
+      port: 9000
+    - name: console
+      protocol: TCP
+      port: 9090
+---
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  name: minio-console
+  namespace: {{ cifmw_deploy_minio_namespace }}
+spec:
+{% if cifmw_deploy_minio_route_console_host | length > 0 %}
+  host: {{ cifmw_deploy_minio_route_console_host }}
+{% endif %}
+  to:
+    kind: Service
+    name: minio
+    weight: 100
+  port:
+    targetPort: console
+  wildcardPolicy: None
+---
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  name: minio-api
+  namespace: {{ cifmw_deploy_minio_namespace }}
+spec:
+{% if cifmw_deploy_minio_route_api_host | length > 0 %}
+  host: {{ cifmw_deploy_minio_route_api_host }}
+{% endif %}
+  to:
+    kind: Service
+    name: minio
+    weight: 100
+  port:
+    targetPort: api
+  wildcardPolicy: None

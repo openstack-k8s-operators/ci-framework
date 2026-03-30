@@ -1,0 +1,28 @@
+---
+# Not invoked by default: add this file to a ci-framework hook list (see docs
+# usage "Hooks"), e.g. post_ctlplane_deploy or pre_end, with:
+#   type: playbook
+#   source: deploy-loki-for-ck.yaml
+- name: Deploy Loki for CloudKitty
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: true
+  vars_files:
+    # So cifmw_deploy_loki_minio_* exist before deploy_minio (import runs before deploy_loki).
+    - ../../roles/deploy_loki/defaults/main.yml
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(ansible_env.HOME + '/.kube/config') }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  tasks:
+    - name: Deploy MinIO for CloudKitty / Loki object storage
+      ansible.builtin.import_role:
+        name: deploy_minio
+      vars:
+        cifmw_deploy_minio_namespace: "{{ cifmw_deploy_loki_minio_namespace }}"
+        cifmw_deploy_minio_root_user: "{{ cifmw_deploy_loki_minio_access_key }}"
+        cifmw_deploy_minio_root_password: "{{ cifmw_deploy_loki_minio_secret_key }}"
+
+    - name: Deploy Loki operator for CloudKitty
+      ansible.builtin.import_role:
+        name: deploy_loki
+      vars:
+        cifmw_deploy_loki_deploy_minio: false
