@@ -120,6 +120,7 @@
         dest: "zuul@controller-0:{{ sync_dir }}"
         archive: true
         recursive: true
+      ignore_errors: true
 
     # NOTE(dpawlik): After calling reproducer role using ZIronic tool,
     # when the bootstrap phase has been completed, it generates a file
@@ -143,9 +144,24 @@
       ansible.builtin.command:
         cmd: "$HOME/deploy-architecture.sh {{ cifmw_deploy_architecture_args | default('') }}"
 
+    - name: Ensure ci-framework-data logs are writable on controller-0
+      when:
+        - cifmw_run_post_deployment | default(false) | bool
+        - not cifmw_deploy_reproducer_env | default(true) | bool
+      delegate_to: controller-0
+      become: true
+      ansible.builtin.shell:
+        cmd: >-
+          chown -R zuul:zuul {{ ansible_user_dir }}/ci-framework-data/logs &&
+          chmod -R u+rwX {{ ansible_user_dir }}/ci-framework-data/logs
+      changed_when: false
+      ignore_errors: true
+
     - name: Run post deployment if instructed to
       when:
-        - cifmw_deploy_architecture | default(false) | bool
+        - >-
+          (cifmw_deploy_architecture | default(false) | bool) or
+          (cifmw_run_post_deployment | default(false) | bool)
         - cifmw_post_deployment | default(true) | bool
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
       async: "{{ 7200 + cifmw_test_operator_timeout | default(3600) }}"  # 2h should be enough to deploy EDPM and rest for tests.
