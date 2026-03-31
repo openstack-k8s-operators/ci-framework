@@ -69,10 +69,37 @@
       ignore_errors: true
       register: testpod
 
+    - name: Wait for all workflow pods to reach terminal state - {{ run_test_fw }}
+      when:
+        - test_operator_workflow | length > 1
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ stage_vars_dict.cifmw_test_operator_namespace }}"
+        kind: Pod
+        label_selectors:
+          - "instanceName={{ test_operator_instance_name }}"
+      retries: "{{ (cifmw_test_operator_timeout / 10) | round | int }}"
+      delay: 10
+      until: >
+        _all_wf_pods.resources | length > 0 and
+        _all_wf_pods.resources |
+          map(attribute='status.phase') |
+          reject('in', ['Succeeded', 'Failed']) |
+          list | length == 0
+      ignore_errors: true
+      register: _all_wf_pods
+
     - name: Check whether timed out - {{ run_test_fw }}
+      vars:
+        _last_step_timed_out: >-
+          {{ testpod.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
+        _all_wf_timed_out: >-
+          {{ (_all_wf_pods.attempts | default(0)) == (cifmw_test_operator_timeout / 10) | round | int }}
       ansible.builtin.set_fact:
         testpod_timed_out: >-
-          {{ testpod.attempts == (cifmw_test_operator_timeout / 10) | round | int }}
+          {{ _last_step_timed_out or _all_wf_timed_out }}
 
     - name: Collect logs
       when:
