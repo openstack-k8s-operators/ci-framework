@@ -10,8 +10,8 @@ fi
 
 disk_str=''
 for disk in ${_disks}; do
-    pvcreate ${disk}
+    pvcreate "${disk}"
     disk_str="${disk_str} ${disk}"
 done
 
-vgcreate cinder-volumes ${disk_str}
+vgcreate cinder-volumes "${disk_str}"
