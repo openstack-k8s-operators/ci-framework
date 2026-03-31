@@ -61,6 +61,7 @@ provision IP via `/etc/hosts` entries managed by the role.
 | `cifmw_bm_agent_vmedia_uefi_path` | str | auto-discovered | UEFI device path for the Virtual Optical Drive; auto-discovered from UEFI boot options if omitted |
 | `cifmw_bm_agent_core_password` | str | — | Set a `core` user password post-install via MachineConfig |
 | `cifmw_bm_agent_live_debug` | bool | `false` | Patch the agent ISO with password, autologin, and systemd debug shell on `tty6` for discovery-phase console access (requires `cifmw_bm_agent_core_password`) |
+| `cifmw_bm_agent_disabled_ifaces` | list | `[]` | Extra NIC names to disable IPv4/IPv6 on during agent-based install. Prevents overlapping-subnet validation failures when multiple NICs share a native VLAN (e.g. `[eno2]`). The interfaces stay link-up but get no IP address; post-install NNCP configures them. |
 
 ## Secrets management
 
