@@ -54,11 +54,14 @@
         # - controller (in Zuul)
         # - controller-0.foo.com (FQDN)
         # - controller-0 (no FQDN) - compatibility match
+        # Falls back to the play host (e.g. localhost) when no controller
+        # host exists in inventory, which is the case for bare metal SNO.
         _ctl_data: >-
           {{
             hostvars | dict2items |
             selectattr('key', 'match', '^(controller-0.*|controller)') |
-            map(attribute='value') | first
+            map(attribute='value') | first |
+            default(hostvars[inventory_hostname])
           }}
         _ifaces_vars: >-
           {{
@@ -177,6 +180,7 @@
 
 - name: Reduce OCP cluster size in architecture
   when:
+    - "'ocps' in groups"
     - groups['ocps'] | length == 1
   ansible.builtin.import_role:
     name: kustomize_deploy
