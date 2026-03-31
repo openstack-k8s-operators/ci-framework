@@ -115,27 +115,43 @@
           {%   endfor %}
           {% endfor %}
           {{ entries }}
-      block:
-        - name: Save pulled images report to artifacts
-          ansible.builtin.copy:
-            dest: >-
-              {{
-                (cifmw_env_op_images_dir, 'artifacts',
-                 cifmw_env_op_images_pulled_report_file) | path_join
-              }}
-            content: "{{ _report | to_nice_yaml }}"
-            mode: "0644"
+      ansible.builtin.set_fact:
+        _pulled_images_report: "{{ _report }}"
 
-        - name: Images pulled from a registry
-          ansible.builtin.debug:
-            msg: |
-              {% for e in _report | rejectattr('source', 'equalto', 'mirror') | list %}
-              {{ e.image }} - pulled from registry {{ e.pulled_from }}
-              {% endfor %}
+    - name: Save pulled images report to artifacts
+      ansible.builtin.copy:
+        dest: >-
+          {{
+            (cifmw_env_op_images_dir, 'artifacts',
+             cifmw_env_op_images_pulled_report_file) | path_join
+          }}
+        content: "{{ _pulled_images_report | to_nice_yaml }}"
+        mode: "0644"
 
-        - name: Images pulled from a mirror
-          ansible.builtin.debug:
-            msg: |
-              {% for e in _report | selectattr('source', 'equalto', 'mirror') | list %}
-              {{ e.image }} - pulled from mirror {{ e.pulled_from }}
-              {% endfor %}
+    - name: Images pulled from a registry
+      vars:
+        _from_registry: >-
+          {{ _pulled_images_report |
+             rejectattr('source', 'equalto', 'mirror') | list }}
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.image }} ->
+          pulled from registry {{ item.pulled_from }}
+          ({{ item.namespace }}/{{ item.pod }}/{{ item.container }})
+      loop: "{{ _from_registry }}"
+      loop_control:
+        label: "{{ item.container }}"
+
+    - name: Images pulled from a mirror
+      vars:
+        _from_mirror: >-
+          {{ _pulled_images_report |
+             selectattr('source', 'equalto', 'mirror') | list }}
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.image }} ->
+          pulled from mirror {{ item.pulled_from }}
+          ({{ item.namespace }}/{{ item.pod }}/{{ item.container }})
+      loop: "{{ _from_mirror }}"
+      loop_control:
+        label: "{{ item.container }}"
