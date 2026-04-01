@@ -1,0 +1,56 @@
+---
+- name: Prepare mock iDRAC server
+  hosts: all
+  gather_facts: false
+  vars:
+    _mock_dir: /tmp/mock_idrac
+    _mock_port: 8443
+  tasks:
+    - name: Create mock server directory
+      ansible.builtin.file:
+        path: "{{ _mock_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Generate self-signed TLS certificate
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -x509 -newkey rsa:2048 -nodes
+          -keyout {{ _mock_dir }}/server.key
+          -out {{ _mock_dir }}/server.crt
+          -days 1 -subj '/CN=localhost'
+        creates: "{{ _mock_dir }}/server.crt"
+
+    - name: Copy mock iDRAC server script
+      ansible.builtin.copy:
+        src: mock_idrac.py
+        dest: "{{ _mock_dir }}/mock_idrac.py"
+        mode: "0755"
+
+    - name: Start mock iDRAC server
+      ansible.builtin.shell:
+        cmd: >-
+          nohup python3 {{ _mock_dir }}/mock_idrac.py
+          --port {{ _mock_port }}
+          --cert {{ _mock_dir }}/server.crt
+          --key {{ _mock_dir }}/server.key
+          > {{ _mock_dir }}/mock_idrac.log 2>&1 &
+        creates: "{{ _mock_dir }}/mock_idrac.pid"
+      register: _mock_start
+
+    - name: Record mock server PID
+      ansible.builtin.shell:
+        cmd: >-
+          pgrep -f 'mock_idrac.py.*--port {{ _mock_port }}'
+          > {{ _mock_dir }}/mock_idrac.pid
+      changed_when: false
+
+    - name: Wait for mock iDRAC to respond
+      ansible.builtin.uri:
+        url: "https://localhost:{{ _mock_port }}/test/state"
+        validate_certs: false
+        status_code: [200]
+      retries: 10
+      delay: 1
+      register: _mock_health
+      until: _mock_health.status == 200

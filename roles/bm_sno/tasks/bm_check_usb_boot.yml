@@ -1,0 +1,26 @@
+---
+# Check that GenericUsbBoot is enabled in BIOS. Fails if disabled.
+# Requires: _bmc_host, _bmc_creds, _redfish_headers
+- name: Read GenericUsbBoot BIOS attribute
+  no_log: true
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/Bios"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+  register: _bios_attrs
+
+- name: Set GenericUsbBoot status fact
+  ansible.builtin.set_fact:
+    _usb_boot_enabled: >-
+      {{ _bios_attrs.json.Attributes.GenericUsbBoot | default('Disabled') == 'Enabled' }}
+
+- name: Fail if GenericUsbBoot is disabled
+  when: not (_usb_boot_enabled | bool)
+  ansible.builtin.fail:
+    msg: >-
+      GenericUsbBoot is Disabled in BIOS. VirtualMedia cannot boot host {{ _bmc_host }}.
