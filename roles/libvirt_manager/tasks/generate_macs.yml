@@ -11,7 +11,6 @@
     vm: "{{ _vm.key }}"
     _vm_type: "{{ _vm.value }}"
     _mac_seed: "{{ '52:54:%02i' % vm_id }}"
-    _fixed_mac: "{{ _mac_seed | community.general.random_mac }}"
     # We don't generate MAC for spineleafnets - if that one is set
     # we won't get "nets" entry. Just use an empty list in that case.
     _nets_list: >-
@@ -25,6 +24,7 @@
       {%   set _macs = cifmw_libvirt_manager_mac_map[vm] -%}
       {% endif -%}
       {% for network in _nets_list -%}
+      {%   set _net_mac = ('52:54:%02i:%02i' % (vm_id, loop.index0)) | community.general.random_mac -%}
       {%   if cifmw_libvirt_manager_mac_map |
               dict2items | selectattr('key', 'equalto', vm) |
               map(attribute='value') | first | default([]) |
@@ -32,7 +32,7 @@
               dict2items | map(attribute='key') |
               select('equalto', network) | length == 0 -%}
       {%     set _ = _macs.append({'network': network,
-                                   'mac': _fixed_mac }) -%}
+                                   'mac': _net_mac }) -%}
       {%   endif -%}
       {% endfor -%}
       {% if _macs | length != 0 -%}
