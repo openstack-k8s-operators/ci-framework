@@ -25,11 +25,26 @@
 
     - name: Install internal CA from url
       when: cifmw_install_ca_url is defined
-      ansible.builtin.get_url:
-        url: "{{ cifmw_install_ca_url }}"
-        dest: "{{ cifmw_install_ca_trust_dir }}"
-        validate_certs: "{{ cifmw_install_ca_url_validate_certs | default(omit) }}"
-        mode: "0644"
+      block:
+        - name: Wait until CA URL is reachable
+          ansible.builtin.uri:
+            url: "{{ cifmw_install_ca_url }}"
+            method: HEAD
+            validate_certs: false
+            follow_redirects: all
+            status_code: [200, 301, 302, 303, 307, 308, 401, 403, 404, 405]
+          register: _cifmw_install_ca_dns_wait
+          until: _cifmw_install_ca_dns_wait is succeeded
+          retries: 30
+          delay: 10
+          changed_when: false
+
+        - name: Install internal CA from url
+          ansible.builtin.get_url:
+            url: "{{ cifmw_install_ca_url }}"
+            dest: "{{ cifmw_install_ca_trust_dir }}"
+            validate_certs: "{{ cifmw_install_ca_url_validate_certs | default(omit) }}"
+            mode: "0644"
 
     - name: Install custom CA bundle from inline
       register: ca_inline
