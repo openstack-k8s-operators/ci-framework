@@ -1,0 +1,211 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# For each pod, reports which registry its image was pulled from
+# and whether it came from the original registry or a mirror.
+# Uses ICSP/IDMS rules to determine mirror redirects.
+
+- name: Report pulled image registries per pod
+  when:
+    - cifmw_openshift_kubeconfig is defined
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  block:
+    - name: Ensure artifacts directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_env_op_images_dir }}/artifacts"
+        state: directory
+        mode: "0755"
+
+    - name: Get ICSP mirror rules
+      ansible.builtin.command:
+        cmd: oc get imagecontentsourcepolicy -o json
+      register: _pulled_report_icsp
+      failed_when: false
+
+    - name: Get IDMS mirror rules
+      ansible.builtin.command:
+        cmd: oc get imagedigestmirrorset -o json
+      register: _pulled_report_idms
+      failed_when: false
+
+    - name: Build source-to-mirror mapping from ICSP/IDMS
+      vars:
+        _icsp_items: >-
+          {{ (_pulled_report_icsp.stdout | default('{}') | from_json).get('items', []) }}
+        _idms_items: >-
+          {{ (_pulled_report_idms.stdout | default('{}') | from_json).get('items', []) }}
+        _mappings: >-
+          {% set maps = [] %}
+          {% for icsp in _icsp_items %}
+          {%   for rdm in icsp.spec.get('repositoryDigestMirrors', []) %}
+          {%     if rdm.source is defined and rdm.source %}
+          {%       for m in rdm.get('mirrors', []) %}
+          {%         set _ = maps.append({'source': rdm.source, 'mirror': m}) %}
+          {%       endfor %}
+          {%     endif %}
+          {%   endfor %}
+          {% endfor %}
+          {% for idms in _idms_items %}
+          {%   for rdm in idms.spec.get('imageDigestMirrors', []) %}
+          {%     if rdm.source is defined and rdm.source %}
+          {%       for m in rdm.get('mirrors', []) %}
+          {%         set _ = maps.append({'source': rdm.source, 'mirror': m}) %}
+          {%       endfor %}
+          {%     endif %}
+          {%   endfor %}
+          {% endfor %}
+          {{ maps }}
+      ansible.builtin.set_fact:
+        _pulled_report_mirror_mappings: "{{ _mappings | trim | from_yaml }}"
+
+    - name: Report ICSP/IDMS mirror rules found
+      when: _pulled_report_mirror_mappings | length > 0
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.source }} -> {{ item.mirror }}
+      loop: "{{ _pulled_report_mirror_mappings }}"
+      loop_control:
+        label: "{{ item.source }}"
+
+    - name: Warn if no ICSP/IDMS mirror rules found
+      when: _pulled_report_mirror_mappings | length == 0
+      ansible.builtin.debug:
+        msg: >-
+          No ICSP or IDMS mirror rules found on the cluster.
+          All images will be reported as pulled directly from their registry.
+
+    - name: Get pods per namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Pod
+        namespace: "{{ item }}"
+      register: _pulled_report_pods
+      loop: "{{ cifmw_env_op_images_pulled_report_namespaces | unique }}"
+      loop_control:
+        label: "{{ item }}"
+      failed_when: false
+
+    - name: Build per-pod pulled images report
+      vars:
+        _report: >-
+          {% set entries = [] %}
+          {% set all_pods = _pulled_report_pods.results |
+                            map(attribute='resources', default=[]) | flatten %}
+          {% for pod in all_pods %}
+          {%   set pod_labels = pod.metadata.labels | default({}) %}
+          {%   set operator_name = pod_labels.get('openstack.org/operator-name', '') %}
+          {%   set app_label = pod_labels.get('app', pod_labels.get('app.kubernetes.io/name', '')) %}
+          {%   set image_statuses = [] %}
+          {%   for cs in pod.status.containerStatuses | default([]) %}
+          {%     set _ = image_statuses.append({'cs': cs, 'type': 'container'}) %}
+          {%   endfor %}
+          {%   for cs in pod.status.initContainerStatuses | default([]) %}
+          {%     set _ = image_statuses.append({'cs': cs, 'type': 'init_container'}) %}
+          {%   endfor %}
+          {%   for entry in image_statuses %}
+          {%     set cs = entry.cs %}
+          {%     set image = cs.image | default('unknown') %}
+          {%     set image_id = cs.imageID | default('') %}
+          {%     set image_repo = image.split('@')[0].split(':')[0] %}
+          {%     set image_name = image_repo.split('/')[-1] %}
+          {%     set match = namespace(host=image.split('/')[0], source='registry') %}
+          {%     for m in _pulled_report_mirror_mappings if m.source is defined and m.source and image.startswith(m.source) %}
+          {%       if loop.first %}
+          {%         set match.host = m.mirror.split('/')[0] %}
+          {%         set match.source = 'mirror' %}
+          {%       endif %}
+          {%     endfor %}
+          {%     set _ = entries.append({
+                   'namespace': pod.metadata.namespace,
+                   'pod': pod.metadata.name,
+                   'container': cs.name,
+                   'container_type': entry.type,
+                   'operator': operator_name if operator_name else 'N/A',
+                   'app': app_label if app_label else image_name,
+                   'image': image,
+                   'image_id': image_id,
+                   'pulled_from': match.host,
+                   'source': match.source
+                 }) %}
+          {%   endfor %}
+          {% endfor %}
+          {{ entries }}
+      ansible.builtin.set_fact:
+        _pulled_images_report: "{{ _report | trim | from_yaml }}"
+
+    - name: Build report summary
+      vars:
+        _total: "{{ _pulled_images_report | length }}"
+        _from_mirror: >-
+          {{ _pulled_images_report |
+             selectattr('source', 'equalto', 'mirror') | list | length }}
+        _from_registry: >-
+          {{ _pulled_images_report |
+             rejectattr('source', 'equalto', 'mirror') | list | length }}
+        _mirror_rules: "{{ _pulled_report_mirror_mappings | length }}"
+      ansible.builtin.set_fact:
+        _pulled_report_summary:
+          mirror_rules_found: "{{ _mirror_rules | int }}"
+          mirror_rules: "{{ _pulled_report_mirror_mappings }}"
+          total_containers: "{{ _total | int }}"
+          pulled_from_registry: "{{ _from_registry | int }}"
+          pulled_from_mirror: "{{ _from_mirror | int }}"
+
+    - name: Save pulled images report to artifacts
+      vars:
+        _full_report:
+          summary: "{{ _pulled_report_summary }}"
+          images: "{{ _pulled_images_report }}"
+      ansible.builtin.copy:
+        dest: >-
+          {{
+            (cifmw_env_op_images_dir, 'artifacts',
+             cifmw_env_op_images_pulled_report_file) | path_join
+          }}
+        content: "{{ _full_report | to_nice_yaml }}"
+        mode: "0644"
+
+    - name: Images pulled from a registry
+      ansible.builtin.debug:
+        msg: >-
+          [{{ item.app }}] {{ item.image }} ->
+          pulled from registry {{ item.pulled_from }}
+          ({{ item.container_type }}: {{ item.container }}
+          | operator: {{ item.operator }}
+          | pod: {{ item.namespace }}/{{ item.pod }})
+      loop: >-
+        {{ _pulled_images_report |
+           rejectattr('source', 'equalto', 'mirror') | list }}
+      loop_control:
+        label: "{{ item.app }}/{{ item.container }}"
+
+    - name: Images pulled from a mirror
+      ansible.builtin.debug:
+        msg: >-
+          [{{ item.app }}] {{ item.image }} ->
+          pulled from mirror {{ item.pulled_from }}
+          ({{ item.container_type }}: {{ item.container }}
+          | operator: {{ item.operator }}
+          | pod: {{ item.namespace }}/{{ item.pod }})
+      loop: >-
+        {{ _pulled_images_report |
+           selectattr('source', 'equalto', 'mirror') | list }}
+      loop_control:
+        label: "{{ item.app }}/{{ item.container }}"
