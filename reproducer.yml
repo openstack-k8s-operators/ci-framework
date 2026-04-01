@@ -118,53 +118,12 @@
       ansible.builtin.set_fact:
         hypervisor: "{{ ansible_fqdn }}"
 
-    - name: Synchronize src dir
+    - name: Prepare job after earlier bootstrap by PreMetal
       when:
         - not cifmw_deploy_reproducer_env | default(true) | bool
       ansible.builtin.include_role:
         name: reproducer
-        tasks_from: sync_src_dir.yml
-
-    # NOTE(dpawlik): After calling reproducer role using ZIronic tool,
-    # when the bootstrap phase has been completed, it generates a file
-    # "reproducer-variables.yml" that contains all variables done in the
-    # CI job. The problem here is, that "testing" phase might have other
-    # variables than what was in the bootstrap phase. It means, that
-    # we need to overwrite the variables with current CI job vars.
-    - name: Overwrite reproducer-variables.yml when ZIronic bootstrap
-      when:
-        - not cifmw_deploy_reproducer_env | default(true) | bool
-      ansible.builtin.include_role:
-        name: reproducer
-        tasks_from: overwrite_zuul_vars.yml
-
-    - name: Overwrite pull-secret.json and add missing registries
-      when:
-        - not cifmw_deploy_reproducer_env | default(true) | bool
-      ansible.builtin.include_role:
-        name: reproducer
-        tasks_from: overwrite_pull_secret.yml
-
-    # NOTE(dpawlik): Since we use ZIronic, some variables are not
-    # redirected to nested ansible execution - they needs to be
-    # included on executing host - controller-0.
-    - name: Compute additional deploy_architecture_args with secrets
-      when:
-        - not cifmw_deploy_reproducer_env | default(true) | bool
-      vars:
-        basic_secret_files:
-          - "{{ ansible_user_dir }}/secrets/registry_token_creds.yaml"
-      ansible.builtin.include_role:
-        name: reproducer
-        tasks_from: compute_additional_args.yml
-      loop: "{{ cifmw_deploy_architecture_secret_files | default(basic_secret_files) }}"
-      loop_control:
-        loop_var: secret_file
-
-    - name: Print final cifmw_deploy_architecture_args
-      ansible.builtin.debug:
-        msg: >
-          Current cifmw_deploy_architecture_args {{ cifmw_deploy_architecture_args | default('') }}
+        tasks_from: premetal.yml
 
     - name: Run deployment if instructed to
       when:
