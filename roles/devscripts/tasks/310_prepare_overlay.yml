@@ -14,51 +14,116 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
-- name: Gather all of the OpenShift nodes.
-  community.libvirt.virt:
-    command: "list_vms"
-    uri: "qemu:///system"
-  register: _current_vms
-
-- name: Initiate graceful shutdown of the cluster.
-  vars:
-    cifmw_openshift_adm_op: "shutdown"
-    cifmw_openshift_adm_cert_expire_date_file: >-
-      {{
-        (
-          cifmw_devscripts_config.working_dir, '.ocp_cert_not_after'
-        ) | ansible.builtin.path_join
-      }}
-  ansible.builtin.import_role:
-    name: openshift_adm
-
-- name: Stop all the OpenShift nodes.
-  failed_when: false
-  vars:
-    matcher: >-
-      ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
-  community.libvirt.virt:
-    command: "destroy"
-    name: "{{ item }}"
-    uri: "qemu:///system"
-  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
-
-- name: Undefine all nodes part of OpenShift platform
-  vars:
-    matcher: >-
-      ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
-  community.libvirt.virt:
-    command: "undefine"
-    flags:
-      - "keep_nvram"
-      - "snapshots_metadata"
-    name: "{{ item }}"
-    uri: "qemu:///system"
-  loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
-
-- name: Disable online cluster flag
+- name: Prepare to overlay - multinode
   when:
-    - cifmw_devscripts_ocp_online | bool
-  ansible.builtin.set_fact:
-    cifmw_devscripts_ocp_online: false
+    - not cifmw_devscripts_sno | default(false) | bool
+  block:
+    - name: Gather all of the OpenShift nodes.
+      community.libvirt.virt:
+        command: "list_vms"
+        uri: "qemu:///system"
+      register: _current_vms
+
+    - name: Initiate graceful shutdown of the cluster.
+      vars:
+        cifmw_openshift_adm_op: "shutdown"
+        cifmw_openshift_adm_cert_expire_date_file: >-
+          {{
+            (
+              cifmw_devscripts_config.working_dir, '.ocp_cert_not_after'
+            ) | ansible.builtin.path_join
+          }}
+      ansible.builtin.import_role:
+        name: openshift_adm
+
+    - name: Stop all the OpenShift nodes.
+      failed_when: false
+      vars:
+        matcher: >-
+          ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
+      community.libvirt.virt:
+        command: "destroy"
+        name: "{{ item }}"
+        uri: "qemu:///system"
+      loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+    - name: Undefine all nodes part of OpenShift platform
+      vars:
+        matcher: >-
+          ^cifmw-{{ cifmw_devscripts_config.cluster_name }}-(master|worker).*
+      community.libvirt.virt:
+        command: "undefine"
+        flags:
+          - "keep_nvram"
+          - "snapshots_metadata"
+        name: "{{ item }}"
+        uri: "qemu:///system"
+      loop: "{{ _current_vms.list_vms | select('match', matcher) }}"
+
+- name: Prepare to overlay - SNO
+  when:
+    - cifmw_devscripts_sno | default(false) | bool
+  block:
+    - name: Stop ocp_master_0 before migration to reproducer VM
+      community.libvirt.virt:
+        command: "destroy"
+        name: "ocp_master_0"
+        uri: "qemu:///system"
+      failed_when: false
+
+    - name: Copy OCP qcow2 image to workload dir
+      become: true
+      ansible.builtin.copy:
+        src: /home/dev-scripts/pool/ocp_master_0.qcow2
+        dest: "{{ cifmw_basedir }}/workload/ocp-master-0.qcow2"
+        remote_src: true
+
+    - name: Convert extra disks to overlay volume bases
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          qemu-img convert -f raw -O qcow2
+          {{ item.src }}
+          {{ item.dest }}
+      loop:
+        - src: /home/dev-scripts/pool/ocp_master_0_vdb.img
+          dest: "{{ cifmw_basedir }}/ocp_volumes/base-cifmw-ocp-master-0-vol-1"
+        - src: /home/dev-scripts/pool/ocp_master_0_vdc.img
+          dest: "{{ cifmw_basedir }}/ocp_volumes/base-cifmw-ocp-master-0-vol-2"
+
+    - name: Undefine all nodes part of OpenShift platform when SNO node with NVRAM removal
+      community.libvirt.virt:
+        command: "undefine"
+        flags:
+          - "nvram"
+          - "snapshots_metadata"
+        name: "ocp_master_0"
+        uri: "qemu:///system"
+
+    - name: Disable online cluster flag
+      when:
+        - cifmw_devscripts_ocp_online | bool
+      ansible.builtin.set_fact:
+        cifmw_devscripts_ocp_online: false
+
+    - name: Update ocp.openstack.lab to new address
+      become: true
+      vars:
+        base_domain: "{{ cifmw_devscripts_config.base_domain | default('openstack.lab') }}"
+      ansible.builtin.shell: >
+        sed -i "s@apps.ocp.{{ base_domain }}/192.168.111.3@apps.ocp.{{ base_domain }}/192.168.111.80@g"
+        /etc/cifmw-dnsmasq.d/addresses.conf
+
+    - name: Restart cifmw dnsmasq
+      become: true
+      register: _dnsmasq
+      ansible.builtin.systemd_service:
+        name: cifmw-dnsmasq.service
+        state: restarted
+      failed_when:
+        - _dnsmasq.msg is defined
+        - _dnsmasq.msg is not
+          match('Could not find the requested service cifmw-dnsmasq.service')
+      retries: 5
+      delay: 15
+      until: _dnsmasq is succeeded
