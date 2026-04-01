@@ -54,7 +54,7 @@ set -eu
 ## AUTHOR
 ##   Athlan-Guyot Sofer <sathlang@redhat.com>
 ## ---------------------------------------------------------------------
-FILE=$(basename $0)
+FILE=$(basename "$0")
 
 CT_PARENT=${CT_PARENT:-true}
 CT_CHILD=${CT_CHILD:-false}
@@ -72,7 +72,7 @@ process_sigterm_parent() {
     echo "$$: Parent received term signal" >&2
     if [ -n "${CT_PID}" ]; then
         echo "$$: received term signal: killing $CT_PID" >&2
-        kill -s USR1 $CT_PID
+        kill -s USR1 "$CT_PID"
     else
         # Should not happen.
         echo "$$: received term signal: killing group" >&2
@@ -114,7 +114,7 @@ if "${CT_PARENT}"; then
     else
         export CT_TTY=/dev/null
     fi
-    exec 2>$CT_TTY
+    exec 2>"$CT_TTY"
     echo "entering parent $$ $FILE" >&2
     export CT_SCRIPT_ARGS=${CT_SCRIPT_ARGS:-""}
     export CT_SCRIPT="${@:?'SCRIPT cannot be empty.'}"
@@ -122,7 +122,7 @@ if "${CT_PARENT}"; then
     export CT_PIDFILE="${CT_PIDFILE:-}"
     export CT_CHILD=true
     export CT_PARENT=false
-    setsid ${CT_DIR}/${FILE} "$@" </dev/null >$CT_TTY 2>$CT_TTY &
+    setsid "${CT_DIR}"/"${FILE}" "$@" </dev/null >"$CT_TTY" 2>"$CT_TTY" &
     CT_PID=$!
     if $DEBUG ; then
         trap process_sigterm_parent SIGTERM SIGINT
@@ -137,8 +137,8 @@ fi
 
 if "${CT_CHILD}"; then
     if [ -n "${CT_TTY}" ]; then
-        exec 2> ${CT_TTY}
-        exec 1> ${CT_TTY}
+        exec 2> "${CT_TTY}"
+        exec 1> "${CT_TTY}"
     else
         CT_TTY=/dev/null
     fi
@@ -160,7 +160,7 @@ if "${CT_CHILD}"; then
     echo $$ > "${CT_PIDFILE}"
     # Main loop where eventually run the script.
     while ! $CT_STOP; do
-        setsid ${CT_DIR}/$FILE "$@" </dev/null 2>$CT_TTY
+        setsid "${CT_DIR}"/"$FILE" "$@" </dev/null 2>"$CT_TTY"
     done
     echo "Leaving child $$ running $FILE" >&2
     if [ -z "${CT_PREFIX}" ]; then
@@ -168,22 +168,22 @@ if "${CT_CHILD}"; then
     else
         CT_ENDFILE="${CT_DIR}/${CT_PREFIX}-$$.done"
     fi
-    date > $CT_ENDFILE
+    date > "$CT_ENDFILE"
     sync
     exit 0
 fi
 
-exec >>$CT_LOGFILE
+exec >>"$CT_LOGFILE"
 mkdir -p "${CT_CMD_OUT_DIR}"
 echo "entering loop $$ $CT_SCRIPT" >&2
 # We cannot have to jobs in the same seconds, or else we will
 # overwrite the file. sleep 1 prevents this.
 sleep 1
 start_time="$(date +%s)"
-start_time_h="$(date -d@${start_time})"
+start_time_h="$(date -d@"${start_time}")"
 echo -n "${start_time_h} (${start_time}) "
 set +e
-"${CT_SCRIPT}" ${CT_SCRIPT_ARGS} &>> "${CT_CMD_OUT_DIR}/${start_time}.log"
+"${CT_SCRIPT}" "${CT_SCRIPT_ARGS}" &>> "${CT_CMD_OUT_DIR}/${start_time}.log"
 RC="${?}"
 set -e
 end_time="$(date +%s)"
