@@ -87,8 +87,7 @@ class FilterModule:
             tc_elm = ET.SubElement(ts_elm, "testcase", attrib=attributes)
             if "error" in data:
                 ET.SubElement(tc_elm, "failure", attrib={"message": data["error"]})
-        ET.indent(tree, "  ")
-        return ET.tostring(root_elm, encoding="utf-8", xml_declaration=True)
+        return ET.tostring(root_elm, encoding="utf-8", xml_declaration=True).decode("utf-8")
 
     def filters(self):
         return {
