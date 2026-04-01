@@ -23,6 +23,25 @@
         state: directory
         mode: "0755"
 
+    - name: Wait until CA URL hostname resolves
+      when:
+        - cifmw_install_ca_url is defined
+        - not (cifmw_install_ca_wait_openshift_dns | bool)
+      vars:
+        _cifmw_install_ca_url_host: "{{ cifmw_install_ca_url | regex_replace('^https?://([^/:]+).*', '\\1') }}"
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            import socket as _s;
+            _s.getaddrinfo({{ _cifmw_install_ca_url_host | tojson }}, 443, type=_s.SOCK_STREAM)
+      register: _cifmw_install_ca_dns_wait
+      until: _cifmw_install_ca_dns_wait.rc == 0
+      retries: "{{ cifmw_install_ca_dns_wait_retries }}"
+      delay: "{{ cifmw_install_ca_dns_wait_delay }}"
+      changed_when: false
+
     - name: Install internal CA from url
       when: cifmw_install_ca_url is defined
       ansible.builtin.get_url:
