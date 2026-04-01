@@ -1,0 +1,39 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Wait for DNS operator to be ready
+  ansible.builtin.command:
+    cmd: >-
+      oc wait dns.operator.openshift.io/default
+      --for=condition=Available=true
+      --timeout={{ cifmw_openshift_dns_ready_timeout }}s
+  environment: "{{ _cifmw_dns_ready_env }}"
+  vars:
+    _cifmw_dns_ready_path: >-
+      {{
+        cifmw_path
+        | default(
+            cifmw_openshift_dns_ready_path_prefix ~ ':' ~ ansible_env.PATH,
+            true
+          )
+      }}
+    _cifmw_dns_ready_env: >-
+      {{
+        {'PATH': _cifmw_dns_ready_path}
+        | combine({'KUBECONFIG': cifmw_openshift_kubeconfig} if cifmw_openshift_kubeconfig is defined else {})
+      }}
+  delegate_to: "{{ cifmw_openshift_dns_ready_delegate_to | default(cifmw_target_host | default(inventory_hostname)) }}"
+  changed_when: false
