@@ -23,21 +23,17 @@
         state: directory
         mode: "0755"
 
-    - name: Wait until CA URL hostname resolves
+    - name: Wait until CA URL is reachable
       when:
         - cifmw_install_ca_url is defined
-        - not (cifmw_install_ca_wait_openshift_dns | bool)
-      vars:
-        _cifmw_install_ca_url_host: "{{ cifmw_install_ca_url | regex_replace('^https?://([^/:]+).*', '\\1') }}"
-      ansible.builtin.command:
-        argv:
-          - python3
-          - -c
-          - >-
-            import socket as _s;
-            _s.getaddrinfo({{ _cifmw_install_ca_url_host | tojson }}, 443, type=_s.SOCK_STREAM)
+      ansible.builtin.uri:
+        url: "{{ cifmw_install_ca_url }}"
+        method: HEAD
+        validate_certs: false
+        follow_redirects: all
+        status_code: [200, 301, 302, 303, 307, 308, 401, 403, 404, 405]
       register: _cifmw_install_ca_dns_wait
-      until: _cifmw_install_ca_dns_wait.rc == 0
+      until: _cifmw_install_ca_dns_wait is succeeded
       retries: "{{ cifmw_install_ca_dns_wait_retries }}"
       delay: "{{ cifmw_install_ca_dns_wait_delay }}"
       changed_when: false
