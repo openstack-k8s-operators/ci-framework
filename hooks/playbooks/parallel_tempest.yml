@@ -1,0 +1,304 @@
+---
+# Parallel Tempest Execution Hook
+#
+# Applies multiple independent Tempest CRs simultaneously, leveraging
+# the test-operator's inter-CR parallelism (spec.parallel: true).
+# Each CR runs a distinct subset of the Tempest test suite.
+#
+# Required variables:
+#   cifmw_parallel_tempest_chunks: list of dicts with keys:
+#     - name: unique step name (e.g., "compute-image-security")
+#     - concurrency: int (tempest --concurrency value)
+#     - includeList: string (test patterns to include)
+#     - excludeList: string (test patterns to exclude, optional)
+#   cifmw_openshift_kubeconfig: path to kubeconfig
+#
+# All other configuration is inherited from the standard test_operator
+# variables loaded via scenario files and Zuul job vars.
+#
+- name: "Run parallel Tempest tests"
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    _pt_ns: >-
+      {{ cifmw_test_operator_namespace | default('openstack') }}
+    _pt_storage_class: >-
+      {{ cifmw_test_operator_storage_class | default('lvms-local-storage') }}
+    _pt_selinux_level: >-
+      {{ cifmw_test_operator_selinux_level | default('s0:c478,c978') }}
+    _pt_network_attachments: >-
+      {{ cifmw_test_operator_tempest_network_attachments | default([]) }}
+    _pt_extra_rpms: >-
+      {{ cifmw_test_operator_tempest_extra_rpms | default([]) }}
+    _pt_extra_images: >-
+      {{ cifmw_test_operator_tempest_extra_images | default([]) }}
+    _pt_timeout: >-
+      {{ cifmw_test_operator_timeout | default(86400) }}
+    _pt_priv_key_path: >-
+      {{ cifmw_test_operator_controller_priv_key_file_path | default('~/.ssh/id_cifw') }}
+    _pt_priv_key_secret_name: >-
+      {{ cifmw_test_operator_controller_priv_key_secret_name | default('test-operator-controller-priv-key') }}
+    _pt_controller_ip: >-
+      {{ cifmw_test_operator_controller_ip |
+         default(ansible_default_ipv4.address) |
+         default(ansible_default_ipv6.address) |
+         default('') }}
+    _pt_image: >-
+      {{ cifmw_parallel_tempest_image | default(
+           (cifmw_test_operator_tempest_registry |
+            default(cifmw_test_operator_default_registry |
+            default(cifmw_default_registry | default('quay.io')))) + '/' +
+           (cifmw_test_operator_tempest_namespace |
+            default(cifmw_test_operator_default_namespace |
+            default(cifmw_default_container_image_namespace | default('podified-antelope-centos9')))) + '/' +
+           (cifmw_test_operator_tempest_container | default('openstack-tempest-all'))
+         )
+      }}
+    _pt_image_tag: >-
+      {{ cifmw_parallel_tempest_image_tag | default(
+           cifmw_test_operator_tempest_image_tag |
+           default(cifmw_test_operator_default_image_tag |
+           default(cifmw_default_container_image_tag | default('current-podified')))
+         )
+      }}
+    _pt_resources:
+      requests:
+        cpu: "{{ cifmw_parallel_tempest_cpu_request | default('500m') }}"
+        memory: "{{ cifmw_parallel_tempest_memory_request | default('512Mi') }}"
+      limits:
+        cpu: "{{ cifmw_parallel_tempest_cpu_limit | default('4') }}"
+        memory: "{{ cifmw_parallel_tempest_memory_limit | default('4Gi') }}"
+    _pt_tempestconf_defaults: >-
+      {{ cifmw_tempest_tempestconf_config_defaults | default({}) }}
+    _pt_tempestconf_scenario: >-
+      {{ cifmw_test_operator_tempest_tempestconf_config | default({}) }}
+    _pt_default_deployer_input: |
+      [auth]
+      tempest_roles =
+
+      [enforce_scope]
+      barbican = true
+      cinder = true
+      designate = true
+      glance = true
+      ironic = true
+      ironic_inspector = true
+      neutron = true
+      nova = true
+      octavia = true
+      keystone = true
+      manila = true
+      placement = true
+
+      [identity-feature-enabled]
+      enforce_scope = true
+
+      [compute-feature-enabled]
+      dhcp_domain = ''
+
+      [load_balancer]
+      member_role = load-balancer_member
+      admin_role = load-balancer_admin
+      RBAC_test_type = keystone_default_roles
+      enforce_new_defaults = true
+      enforce_scope = false
+
+      [volume]
+      catalog_type = volumev3
+    _pt_crs_path: >-
+      {{ cifmw_basedir | default('~/ci-framework-data') }}/artifacts/parallel-tempest-crs
+    _pt_results_path: >-
+      {{ cifmw_basedir | default('~/ci-framework-data') }}/tests/test_operator
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - cifmw_parallel_tempest_chunks is defined
+          - cifmw_parallel_tempest_chunks | length > 0
+          - cifmw_openshift_kubeconfig is defined
+        msg: >-
+          cifmw_parallel_tempest_chunks and cifmw_openshift_kubeconfig
+          must be defined.
+
+    - name: Ensure output directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ _pt_crs_path }}"
+        - "{{ _pt_results_path }}"
+
+    - name: Create SSH key secret
+      block:
+        - name: Check if private key file exists
+          ansible.builtin.stat:
+            path: "{{ _pt_priv_key_path }}"
+          register: _pt_priv_key_stat
+
+        - name: Slurp private key file
+          when: _pt_priv_key_stat.stat.exists
+          ansible.builtin.slurp:
+            path: "{{ _pt_priv_key_path }}"
+          register: _pt_priv_key_content
+
+        - name: Ensure SSH key secret exists in OpenShift
+          when: _pt_priv_key_stat.stat.exists
+          kubernetes.core.k8s:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            api_key: "{{ cifmw_openshift_token | default(omit) }}"
+            context: "{{ cifmw_openshift_context | default(omit) }}"
+            state: present
+            wait: true
+            definition:
+              apiVersion: v1
+              kind: Secret
+              type: Opaque
+              metadata:
+                name: "{{ _pt_priv_key_secret_name | trim }}"
+                namespace: "{{ _pt_ns | trim }}"
+              data:
+                ssh-privatekey: "{{ _pt_priv_key_content.content }}"
+
+    - name: Build merged tempestconfRun overrides
+      vars:
+        _base_overrides: >-
+          {{ (_pt_tempestconf_defaults.overrides | default('')) | trim }}
+        _scenario_overrides: >-
+          {{ (_pt_tempestconf_scenario.overrides | default('')) | trim }}
+        _controller_override: >-
+          {{ 'whitebox_neutron_plugin_options.proxy_host_address ' + (_pt_controller_ip | trim)
+             if (_pt_controller_ip | trim) != '' else '' }}
+        _nl: "\n"
+      ansible.builtin.set_fact:
+        _pt_merged_overrides: >-
+          {{ [_base_overrides, _scenario_overrides, _controller_override] |
+             select | join(_nl) }}
+        _pt_deployer_input: >-
+          {{ _pt_tempestconf_defaults.deployerInput |
+             default(_pt_tempestconf_scenario.deployerInput |
+             default(_pt_default_deployer_input)) }}
+
+    - name: Build Tempest CR definitions
+      ansible.builtin.set_fact:
+        _pt_cr_definitions: >-
+          {{
+            _pt_cr_definitions | default([]) + [{
+              'apiVersion': 'test.openstack.org/v1beta1',
+              'kind': 'Tempest',
+              'metadata': {
+                'name': 'parallel-tempest-' + item.name,
+                'namespace': _pt_ns | trim
+              },
+              'spec': {
+                'SELinuxLevel': _pt_selinux_level | trim,
+                'containerImage': (_pt_image | trim) + ':' + (_pt_image_tag | trim),
+                'storageClass': _pt_storage_class | trim,
+                'privileged': true,
+                'parallel': true,
+                'debug': false,
+                'cleanup': false,
+                'rerunFailedTests': true,
+                'rerunOverrideStatus': true,
+                'resources': _pt_resources,
+                'networkAttachments': _pt_network_attachments,
+                'SSHKeySecretName': _pt_priv_key_secret_name | trim,
+                'tempestRun': {
+                  'concurrency': item.concurrency | default(4) | int,
+                  'includeList': item.includeList | default(''),
+                  'excludeList': item.excludeList | default(''),
+                  'extraRPMs': _pt_extra_rpms,
+                  'extraImages': _pt_extra_images,
+                },
+                'tempestconfRun': {
+                  'deployerInput': _pt_deployer_input | trim,
+                  'overrides': _pt_merged_overrides | trim,
+                },
+              }
+            }]
+          }}
+      loop: "{{ cifmw_parallel_tempest_chunks }}"
+
+    - name: Write CRs to disk for reference
+      ansible.builtin.copy:
+        content: "{{ item | to_nice_yaml }}"
+        dest: "{{ _pt_crs_path }}/{{ item.metadata.name }}.yaml"
+        mode: "0644"
+      loop: "{{ _pt_cr_definitions }}"
+
+    - name: Log CR names being applied
+      ansible.builtin.debug:
+        msg: >-
+          Applying {{ _pt_cr_definitions | length }} parallel Tempest CRs:
+          {{ _pt_cr_definitions | map(attribute='metadata.name') | list | join(', ') }}
+
+    - name: Apply all Tempest CRs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        definition: "{{ item }}"
+      loop: "{{ _pt_cr_definitions }}"
+
+    - name: "Wait for all {{ _pt_cr_definitions | length }} Tempest pods to complete"
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ _pt_ns | trim }}"
+        kind: Pod
+        label_selectors:
+          - "service=tempest"
+      register: _pt_final_pods
+      retries: "{{ ((_pt_timeout | int) / 30) | int }}"
+      delay: 30
+      until: >-
+        (_pt_final_pods.resources |
+         selectattr('metadata.labels.instanceName', 'defined') |
+         selectattr('metadata.labels.instanceName', 'match', '^parallel-tempest-') |
+         selectattr('status.phase', 'defined') |
+         selectattr('status.phase', 'in', ['Succeeded', 'Failed']) |
+         list | length) >= (_pt_cr_definitions | length)
+
+    - name: Summarize results
+      vars:
+        _tempest_pods: >-
+          {{ _pt_final_pods.resources |
+             selectattr('metadata.labels.instanceName', 'defined') |
+             selectattr('metadata.labels.instanceName', 'match', '^parallel-tempest-') |
+             list }}
+        _succeeded: >-
+          {{ _tempest_pods |
+             selectattr('status.phase', 'equalto', 'Succeeded') |
+             list }}
+        _failed: >-
+          {{ _tempest_pods |
+             selectattr('status.phase', 'equalto', 'Failed') |
+             list }}
+      block:
+        - name: Print summary
+          ansible.builtin.debug:
+            msg: |
+              === Parallel Tempest Results ===
+              Total pods:   {{ _tempest_pods | length }}
+              Succeeded:    {{ _succeeded | length }}
+              Failed:       {{ _failed | length }}
+              Failed names: {{ _failed | map(attribute='metadata.name') | list | join(', ') }}
+
+        - name: Save parallel tempest result
+          ansible.builtin.copy:
+            dest: >-
+              {{ cifmw_basedir | default('~/ci-framework-data') }}/artifacts/{{ step | default('pre_test_hooks') }}_{{ hook_name | default('parallel_tempest') }}.yml
+            content: |
+              cifmw_parallel_tempest_succeeded: {{ (_failed | length) == 0 }}
+              cifmw_parallel_tempest_total_pods: {{ _tempest_pods | length }}
+              cifmw_parallel_tempest_failed_pods: {{ _failed | length }}
+            mode: "0644"
+
+        - name: Fail if any Tempest CR failed
+          when: (_failed | length) > 0
+          ansible.builtin.fail:
+            msg: >-
+              {{ _failed | length }} parallel Tempest CR(s) failed:
+              {{ _failed | map(attribute='metadata.name') | list | join(', ') }}
