@@ -6,7 +6,7 @@
 
 ## Documentation
 
-All the documentation can be checked on [ReadTheDocs](https://ci-framework.readthedocs.io/en/latest/).
+All the documentation can be checked on [ReadTheDocs](https://ci-framework.readthedocs.io/en/latest/). 
 
 ## Licenses
 
