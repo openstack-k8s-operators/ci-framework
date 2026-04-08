@@ -7,7 +7,6 @@
     osp_secrets_env_file: "{{ cifmw_architecture_repo }}/lib/control-plane/base/osp-secrets.env"
     central_namespace: openstack
     leaf_namespace: openstack2
-    leaf_secret_name: osp-secret
     central_rootca_secret: rootca-public
     central_rootca_internal_secret: rootca-internal
     leaf_transport_url_name: barbican-keystone-listener-regiontwo
@@ -59,26 +58,11 @@
         keystone_public_url: "{{ skmo_values.data.keystonePublicURL }}"
         ca_bundle_secret_name: "{{ skmo_values.data.leafCaBundleSecretName }}"
 
-    - name: Ensure leaf osp-secret exists (pre-create from env file)
-      ansible.builtin.shell: |
-        set -euo pipefail
-        if ! oc -n {{ leaf_namespace }} get secret {{ leaf_secret_name }} >/dev/null 2>&1; then
-          oc -n {{ leaf_namespace }} create secret generic {{ leaf_secret_name }} \
-            --from-env-file="{{ osp_secrets_env_file }}" \
-            --dry-run=client -o yaml | oc apply -f -
-        fi
-      args:
-        executable: /bin/bash
-
-    - name: Read leaf admin password from leaf secret
-      ansible.builtin.shell: |
-        set -euo pipefail
-        oc -n {{ leaf_namespace }} get secret {{ leaf_secret_name }} \
-          -o jsonpath='{.data.{{ leaf_admin_password_key }}}' | base64 -d
-      args:
-        executable: /bin/bash
-      register: leaf_admin_password
-      changed_when: false
+    - name: Read leaf admin password from env file
+      ansible.builtin.set_fact:
+        leaf_admin_password: >-
+          {{ dict(lookup('file', osp_secrets_env_file) |
+                  regex_findall('^([^#=\n][^=\n]*)=(.*)', multiline=True))[leaf_admin_password_key] | trim }}
 
     - name: Ensure leaf region exists in central Keystone
       ansible.builtin.shell: |
@@ -124,7 +108,7 @@
         if ! oc -n {{ central_namespace }} rsh openstackclient \
           openstack user show {{ leaf_admin_user }} >/dev/null 2>&1; then
           oc -n {{ central_namespace }} rsh openstackclient \
-            openstack user create --domain Default --password "{{ leaf_admin_password.stdout | trim }}" {{ leaf_admin_user }}
+            openstack user create --domain Default --password "{{ leaf_admin_password }}" {{ leaf_admin_user }}
         fi
         oc -n {{ central_namespace }} rsh openstackclient \
           openstack role add --project {{ leaf_admin_project }} --user {{ leaf_admin_user }} admin
@@ -165,28 +149,33 @@
           }) }}"
 
     - name: Create TransportURL CR in central region for leaf listener
-      ansible.builtin.shell: |
-        set -euo pipefail
-        oc apply -f - <<EOF
-        apiVersion: rabbitmq.openstack.org/v1beta1
-        kind: TransportURL
-        metadata:
-          name: {{ leaf_transport_url_name }}
-          namespace: {{ central_namespace }}
-        spec:
-          rabbitmqClusterName: rabbitmq
-        EOF
-      args:
-        executable: /bin/bash
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rabbitmq.openstack.org/v1beta1
+          kind: TransportURL
+          metadata:
+            name: "{{ leaf_transport_url_name }}"
+            namespace: "{{ central_namespace }}"
+          spec:
+            rabbitmqClusterName: rabbitmq
 
     - name: Wait for TransportURL to be ready
-      ansible.builtin.shell: |
-        set -euo pipefail
-        oc wait transporturl {{ leaf_transport_url_name }} \
-          -n {{ central_namespace }} \
-          --for=condition=Ready --timeout=120s
-      args:
-        executable: /bin/bash
+      kubernetes.core.k8s_info:
+        api_version: rabbitmq.openstack.org/v1beta1
+        kind: TransportURL
+        name: "{{ leaf_transport_url_name }}"
+        namespace: "{{ central_namespace }}"
+      register: _transport_url_info
+      retries: 12
+      delay: 10
+      until:
+        - _transport_url_info.resources | length > 0
+        - _transport_url_info.resources[0].status is defined
+        - _transport_url_info.resources[0].status.conditions is defined
+        - _transport_url_info.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
 
     - name: Get transport URL secret from central namespace
       kubernetes.core.k8s_info:
