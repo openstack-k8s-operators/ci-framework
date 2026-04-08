@@ -6,6 +6,20 @@
       ansible.builtin.include_vars:
         dir: "{{ cifmw_basedir }}/artifacts/parameters"
 
+    - name: Check if primary namespace has customContainerImages
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc get openstackversion
+          -n {{ cifmw_openstack_namespace }}
+          -o jsonpath='{.items[0].spec.customContainerImages}'
+      register: _primary_custom_images
+      changed_when: false
+
     - name: "Update containers in {{ cifmw_update_containers_namespace }}"
+      when:
+        - _primary_custom_images.stdout not in ['', '{}']
       ansible.builtin.include_role:
         name: update_containers
