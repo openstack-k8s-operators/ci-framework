@@ -13,43 +13,45 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
+- name: Edit vm_setup_vars
+  when: not cifmw_devscripts_sno | default(false) | bool
+  block:
+    - name: Read the vm_setup_vars contents.
+      ansible.builtin.slurp:
+        src: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"
+      register: vm_setup_data
 
-- name: Read the vm_setup_vars contents.
-  ansible.builtin.slurp:
-    src: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"
-  register: vm_setup_data
-
-# Note: Override When external network is being reused.
-- name: Ensure dev-scripts vm_setup_vars reflects external network address
-  when:
-    - "'manage_br_bridge' in cifmw_devscripts_config"
-    - cifmw_devscripts_config['manage_br_bridge'] == 'n'
-  vars:
-    _vm_setup_vars: "{{ vm_setup_data.content | b64decode | from_yaml }}"
-    _to_merge:
-      - name: "{{ '{{' }} baremetal_network_name {{ '}}' }}"
-        address_v4: >-
+    # Note: Override When external network is being reused.
+    - name: Ensure dev-scripts vm_setup_vars reflects external network address
+      when:
+        - "'manage_br_bridge' in cifmw_devscripts_config"
+        - cifmw_devscripts_config['manage_br_bridge'] == 'n'
+      vars:
+        _vm_setup_vars: "{{ vm_setup_data.content | b64decode | from_yaml }}"
+        _to_merge:
+          - name: "{{ '{{' }} baremetal_network_name {{ '}}' }}"
+            address_v4: >-
+              {{
+                cifmw_devscripts_host_bm_net_ip_addr |
+                default(ansible_default_ipv4.address)
+              }}
+        _merge_ext_net:
+          external_network: >-
+            {{
+              _vm_setup_vars.external_network |
+              community.general.lists_mergeby(_to_merge, 'name')
+            }}
+        _merged_data: >-
           {{
-            cifmw_devscripts_host_bm_net_ip_addr |
-            default(ansible_default_ipv4.address)
+            _vm_setup_vars |
+            combine(_merge_ext_net | default({}), recursive=true)
           }}
-    _merge_ext_net:
-      external_network: >-
-        {{
-          _vm_setup_vars.external_network |
-          community.general.lists_mergeby(_to_merge, 'name')
-        }}
-    _merged_data: >-
-      {{
-        _vm_setup_vars |
-        combine(_merge_ext_net | default({}), recursive=true)
-      }}
-  ansible.builtin.copy:
-    dest: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"
-    content: "{{ _merged_data | to_nice_yaml }}"
-    owner: "{{ cifmw_devscripts_user }}"
-    group: "{{ cifmw_devscripts_user }}"
-    mode: "0644"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_devscripts_repo_dir }}/vm_setup_vars.yml"
+        content: "{{ _merged_data | to_nice_yaml }}"
+        owner: "{{ cifmw_devscripts_user }}"
+        group: "{{ cifmw_devscripts_user }}"
+        mode: "0644"
 
 - name: Force KVM domain type in dev-scripts configure to preserve host-passthrough CPU
   when:
@@ -60,3 +62,26 @@
     insertbefore: '.*-b -vvv.*setup-playbook.yml'
     firstmatch: true
     line: '    -e "libvirt_domain_type=kvm" \'
+
+- name: Add user to group qemu
+  when:
+    - cifmw_devscripts_sno | bool
+  block:
+    - name: Ensure qemu-user is installed to create user, group and others config
+      become: true
+      ansible.builtin.package:
+        name: qemu-kvm
+        state: present
+
+    - name: Add user into qemu group
+      become: true
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: qemu
+        append: true
+
+    # https://github.com/openshift-metal3/dev-scripts/blob/master/agent/README.md#troubleshooting
+    - name: Set proper selinux permissions
+      become: true
+      ansible.builtin.shell: >
+        setfacl -m u:qemu:rx /home/{{ ansible_user }}/
