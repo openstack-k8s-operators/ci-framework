@@ -213,6 +213,7 @@
                                   else []),
                 },
                 'tempestconfRun': {
+                  'create': (ansible_loop.index0 == 0),
                   'deployerInput': _pt_deployer_input | trim,
                   'overrides': _pt_merged_overrides | trim,
                 },
@@ -236,14 +237,29 @@
           Applying {{ _pt_cr_definitions | length }} parallel Tempest CRs:
           {{ _pt_cr_definitions | map(attribute='metadata.name') | list | join(', ') }}
 
-    - name: Apply all Tempest CRs
+    - name: "Apply first Tempest CR (creates shared images/flavors)"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        definition: "{{ _pt_cr_definitions[0] }}"
+
+    - name: "Wait {{ _pt_resource_creation_wait }}s for first pod to create shared resources"
+      vars:
+        _pt_resource_creation_wait: >-
+          {{ cifmw_parallel_tempest_resource_wait | default(120) }}
+      ansible.builtin.pause:
+        seconds: "{{ _pt_resource_creation_wait | int }}"
+
+    - name: Apply remaining Tempest CRs
       kubernetes.core.k8s:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit) }}"
         context: "{{ cifmw_openshift_context | default(omit) }}"
         state: present
         definition: "{{ item }}"
-      loop: "{{ _pt_cr_definitions }}"
+      loop: "{{ _pt_cr_definitions[1:] }}"
 
     - name: "Wait for all {{ _pt_cr_definitions | length }} Tempest pods to complete"
       kubernetes.core.k8s_info:
