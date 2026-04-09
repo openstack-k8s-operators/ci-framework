@@ -1,0 +1,103 @@
+---
+# Create a Skupper Connector in the central namespace that exposes the internal
+# Keystone service endpoint to workload regions over the Skupper application
+# network.
+#
+# In a standard SKMO deployment the workload regions reach the central
+# Keystone service through its *public* (external) endpoint.  By creating a
+# Skupper Connector here and a matching Listener in each workload namespace
+# (via skupper-listener.yaml), all service-to-service authentication traffic
+# from a workload region travels over the mTLS Skupper tunnel instead of the
+# public internet.
+#
+# This playbook also rewrites keystoneInternalURL in skmo-values.yaml to the
+# correct URL (Skupper virtual Service or public endpoint) before the kustomize
+# build runs, so the leaf OSCP is created with the right endpoint from the
+# first apply — no rolling restart required (Option A).
+#
+# Connector creation and the wait for Configured status are handled by the
+# shared skupper-connector-tasks.yaml task file.
+#
+# Variables:
+#   cifmw_skupper_central_namespace        (default: openstack)
+#   cifmw_skupper_keystone_routing_key     (default: keystone-internal)
+#   cifmw_skupper_keystone_port            (default: 5000)
+#   cifmw_skupper_keystone_cert_secret     (default: "")
+#     TLS Secret name for the Keystone backend.  Auto-discovered from the
+#     KeystoneAPI CR (spec.tls.api.internal.secretName) when empty.
+#   cifmw_skupper_keystone_enabled         (default: true)
+#     When true, keystoneInternalURL is set to the Skupper virtual Service URL
+#     and the Connector is created.  When false, keystoneInternalURL is left at
+#     the public URL and all Skupper tasks are skipped.
+#   cifmw_skupper_keystone_internal_url    (default: https://keystone-regionone.openstack2.svc.cluster.local:5000)
+#   cifmw_skupper_keystone_public_url      (default: https://keystone-public-openstack.apps.ocp.openstack.lab)
+- name: Create Skupper Connector for central Keystone internal endpoint
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skupper_central_namespace: openstack
+    cifmw_skupper_keystone_routing_key: keystone-internal
+    cifmw_skupper_keystone_port: 5000
+    cifmw_skupper_keystone_cert_secret: ""
+    cifmw_skupper_keystone_enabled: true
+    cifmw_skupper_keystone_internal_url: "https://keystone-regionone.openstack2.svc.cluster.local:5000"
+    cifmw_skupper_keystone_public_url: "https://keystone-public-openstack.apps.ocp.openstack.lab"
+    _skmo_values_file: "{{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml"
+  tasks:
+    - name: Set keystoneInternalURL in skmo-values.yaml based on Skupper flag
+      # Both values are constants — no discovery needed.  This task runs before
+      # the kustomize build so the correct URL is baked into the leaf OSCP from
+      # its first apply, avoiding a rolling restart (Option A).
+      ansible.builtin.lineinfile:
+        path: "{{ _skmo_values_file }}"
+        regexp: '^\s+keystoneInternalURL:'
+        line: "  keystoneInternalURL: {{ cifmw_skupper_keystone_internal_url if cifmw_skupper_keystone_enabled | bool else cifmw_skupper_keystone_public_url }}"
+
+    - name: Get KeystoneAPI CR to discover internal TLS cert secret name
+      when:
+        - cifmw_skupper_keystone_enabled | bool
+        - cifmw_skupper_keystone_cert_secret | length == 0
+      kubernetes.core.k8s_info:
+        api_version: keystone.openstack.org/v1beta1
+        kind: KeystoneAPI
+        name: keystone
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+      register: _keystone_api
+      retries: 60
+      delay: 10
+      until:
+        - _keystone_api.resources | length > 0
+        - _keystone_api.resources[0].spec.tls is defined
+        - _keystone_api.resources[0].spec.tls.api is defined
+        - _keystone_api.resources[0].spec.tls.api.internal is defined
+        - _keystone_api.resources[0].spec.tls.api.internal.secretName is defined
+
+    - name: Set Keystone TLS secret fact from KeystoneAPI CR
+      when:
+        - cifmw_skupper_keystone_enabled | bool
+        - cifmw_skupper_keystone_cert_secret | length == 0
+      ansible.builtin.set_fact:
+        _keystone_tls_secret: >-
+          {{ _keystone_api.resources[0].spec.tls.api.internal.secretName }}
+
+    - name: Set Keystone TLS secret fact from variable override
+      when:
+        - cifmw_skupper_keystone_enabled | bool
+        - cifmw_skupper_keystone_cert_secret | length > 0
+      ansible.builtin.set_fact:
+        _keystone_tls_secret: "{{ cifmw_skupper_keystone_cert_secret }}"
+
+    - name: Create Skupper Connector and wait for Configured
+      when: cifmw_skupper_keystone_enabled | bool
+      ansible.builtin.include_tasks: skupper-connector-tasks.yaml
+      vars:
+        _cifmw_connector_name: keystone-internal
+        _cifmw_connector_namespace: "{{ cifmw_skupper_central_namespace }}"
+        _cifmw_connector_routing_key: "{{ cifmw_skupper_keystone_routing_key }}"
+        _cifmw_connector_host: "keystone-internal.{{ cifmw_skupper_central_namespace }}.svc.cluster.local"
+        _cifmw_connector_port: "{{ cifmw_skupper_keystone_port }}"
+        _cifmw_connector_tls_credentials: "{{ _keystone_tls_secret }}"
+        # verifyHostname is false because the cluster-internal service name may
+        # differ from the SANs in the Keystone TLS certificate.
+        _cifmw_connector_verify_hostname: false
+        _cifmw_connector_ignore_wait_errors: false

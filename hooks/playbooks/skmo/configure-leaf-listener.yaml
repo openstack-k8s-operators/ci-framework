@@ -1,29 +1,57 @@
 ---
-- name: Patch leaf control plane with barbican-keystone-listener transport URL
-  hosts: localhost
+# Configure the leaf barbican-keystone-listener to use the Skupper
+# application network for cross-region RabbitMQ access.
+#
+# In the leaf region:
+#   - Read the RabbitMQ credentials from the dedicated user credentials secret
+#     created by the RabbitMQ operator when the TransportURL CR is reconciled.
+#   - Patch barbicanKeystoneListener to connect to the central RabbitMQ via the
+#     Skupper Listener endpoint using those credentials and its own pool_name.
+#
+# Variables:
+#   cifmw_skupper_central_namespace       (default: openstack)
+#   cifmw_skupper_leaf_namespace          (default: openstack2)
+#   cifmw_skupper_listener_host           (default: rabbitmq-regionone)
+#     Must match the host set in skupper-listener.yaml.
+#   cifmw_skupper_rabbitmq_port           (default: 5671)
+#   cifmw_skupper_transport_url_name      (default: barbican-keystone-listener-regiontwo)
+#     Name of the TransportURL CR created in prepare-leaf.yaml.  The operator
+#     creates a user credentials secret named:
+#     rabbitmq-user-<name>-<username>-user
+#   cifmw_skupper_transport_url_username  (default: barbican-keystone-listener-regiontwo)
+#     Must match the username field set on the TransportURL CR in prepare-leaf.yaml.
+- name: Configure barbican-keystone-listener to use Skupper for cross-region RabbitMQ
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
   vars:
-    central_namespace: openstack
-    leaf_namespace: openstack2
-    leaf_transport_url_name: rabbitmq-transport-url-barbican-keystone-listener-regiontwo
+    cifmw_skupper_central_namespace: openstack
+    cifmw_skupper_leaf_namespace: openstack2
+    cifmw_skupper_listener_host: rabbitmq-regionone
+    cifmw_skupper_rabbitmq_port: 5671
+    cifmw_skupper_transport_url_name: barbican-keystone-listener-regiontwo
+    cifmw_skupper_transport_url_username: barbican-keystone-listener-regiontwo
   tasks:
-    - name: Get transport URL secret from central namespace
+    - name: Get RabbitMQ user credentials secret for leaf listener
+      # The RabbitMQ operator creates a secret named
+      # rabbitmq-user-<transport-url-name>-<username>-user that contains
+      # the username and password fields for the dedicated RabbitMQ user.
       kubernetes.core.k8s_info:
         api_version: v1
         kind: Secret
-        namespace: "{{ central_namespace }}"
-        name: "{{ leaf_transport_url_name }}"
-      register: _transport_secret
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+        name: "rabbitmq-user-{{ cifmw_skupper_transport_url_name }}-{{ cifmw_skupper_transport_url_username }}-user"
+      register: _rabbitmq_user_secret
 
-    - name: Patch OpenStackControlPlane in leaf region with notifications transport_url
+    - name: Patch leaf barbicanKeystoneListener to use Skupper RabbitMQ endpoint
       vars:
-        _transport_url: "{{ _transport_secret.resources[0].data['transport_url'] | b64decode }}"
+        _username: "{{ _rabbitmq_user_secret.resources[0].data['username'] | b64decode }}"
+        _password: "{{ _rabbitmq_user_secret.resources[0].data['password'] | b64decode }}"
       kubernetes.core.k8s:
         state: patched
         api_version: core.openstack.org/v1beta1
         kind: OpenStackControlPlane
         name: controlplane
-        namespace: "{{ leaf_namespace }}"
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
         definition:
           spec:
             barbican:
@@ -31,6 +59,6 @@
                 barbicanKeystoneListener:
                   customServiceConfig: |
                     [DEFAULT]
-                    transport_url = {{ _transport_url }}
+                    transport_url = rabbit://{{ _username }}:{{ _password }}@{{ cifmw_skupper_listener_host }}:{{ cifmw_skupper_rabbitmq_port }}/?ssl=1
                     [keystone_notifications]
-                    pool_name = barbican-listener-regionTwo
+                    pool_name = barbican-listener-regiontwo
