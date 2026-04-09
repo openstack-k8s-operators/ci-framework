@@ -1,0 +1,51 @@
+---
+# Shared task file: Create a Skupper Connector CR and wait for it to be
+# Configured.  Include this from service-specific connector playbooks after
+# the TLS credentials have been discovered and stored in the variables below.
+#
+# Expected variables (set via include_tasks vars: block):
+#   _cifmw_connector_name              Skupper Connector CR name
+#   _cifmw_connector_namespace         Namespace for the Connector
+#   _cifmw_connector_routing_key       Skupper routing key (must match Listener)
+#   _cifmw_connector_host              Backend service hostname
+#   _cifmw_connector_port              Backend service port
+#   _cifmw_connector_tls_credentials   Name of the TLS Secret for the backend
+#   _cifmw_connector_verify_hostname   Whether Skupper verifies the backend cert hostname
+#   _cifmw_connector_ignore_wait_errors  Whether to ignore wait failures
+
+- name: Create Skupper Connector
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: skupper.io/v2alpha1
+      kind: Connector
+      metadata:
+        name: "{{ _cifmw_connector_name }}"
+        namespace: "{{ _cifmw_connector_namespace }}"
+      spec:
+        routingKey: "{{ _cifmw_connector_routing_key }}"
+        host: "{{ _cifmw_connector_host }}"
+        port: "{{ _cifmw_connector_port }}"
+        type: tcp
+        tlsCredentials: "{{ _cifmw_connector_tls_credentials }}"
+        verifyHostname: "{{ _cifmw_connector_verify_hostname }}"
+
+- name: Wait for Skupper Connector to be configured
+  # A Connector shows "Ready" only after a matching Listener is deployed in
+  # the remote namespace.  Waiting for "Configured" is sufficient here.
+  ignore_errors: "{{ _cifmw_connector_ignore_wait_errors | bool }}"
+  kubernetes.core.k8s_info:
+    api_version: skupper.io/v2alpha1
+    kind: Connector
+    name: "{{ _cifmw_connector_name }}"
+    namespace: "{{ _cifmw_connector_namespace }}"
+  register: _connector
+  retries: 30
+  delay: 10
+  until:
+    - _connector.resources | length > 0
+    - _connector.resources[0].status is defined
+    - _connector.resources[0].status.conditions is defined
+    - _connector.resources[0].status.conditions |
+      selectattr('type', 'equalto', 'Configured') |
+      selectattr('status', 'equalto', 'True') | list | length > 0

@@ -1,0 +1,78 @@
+---
+# Install the Skupper operator (cluster-scope) on the current cluster.
+#
+# Variables:
+#   cifmw_skupper_install_source   (default: upstream)
+#     upstream   - apply the upstream install YAML from skupper.io
+#     downstream - apply a locally-downloaded Red Hat Service Interconnect YAML
+#   cifmw_skupper_upstream_install_url (default: https://skupper.io/v2/install.yaml)
+#   cifmw_skupper_downstream_install_file (no default; required when source=downstream)
+- name: Install Skupper operator
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skupper_install_source: upstream
+    cifmw_skupper_upstream_install_url: "https://skupper.io/v2/install.yaml"
+    cifmw_skupper_downstream_install_file: ""
+  tasks:
+    - name: Check if Skupper CRD is already present
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: sites.skupper.io
+      register: _skupper_crd
+
+    - name: Fetch upstream Skupper install YAML
+      when:
+        - _skupper_crd.resources | length == 0
+        - cifmw_skupper_install_source == 'upstream'
+      ansible.builtin.uri:
+        url: "{{ cifmw_skupper_upstream_install_url }}"
+        return_content: true
+      register: _skupper_upstream_content
+
+    - name: Apply upstream Skupper install YAML
+      when:
+        - _skupper_crd.resources | length == 0
+        - cifmw_skupper_install_source == 'upstream'
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ item }}"
+      loop: "{{ _skupper_upstream_content.content | from_yaml_all | select('ne', None) | list }}"
+
+    - name: Apply downstream Skupper install YAML (Red Hat Service Interconnect)
+      when:
+        - _skupper_crd.resources | length == 0
+        - cifmw_skupper_install_source == 'downstream'
+      ansible.builtin.assert:
+        that: cifmw_skupper_downstream_install_file | length > 0
+        fail_msg: >-
+          cifmw_skupper_downstream_install_file must be set when
+          cifmw_skupper_install_source is 'downstream'.
+
+    - name: Apply downstream install file
+      when:
+        - _skupper_crd.resources | length == 0
+        - cifmw_skupper_install_source == 'downstream'
+        - cifmw_skupper_downstream_install_file | length > 0
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ cifmw_skupper_downstream_install_file }}"
+
+    - name: Wait for Skupper controller to be ready
+      # The upstream install names the deployment "skupper-controller" while the
+      # downstream Red Hat Service Interconnect install uses
+      # "skupper-controller-manager".  List all Deployments in the namespace and
+      # wait until at least one is fully ready, regardless of name.
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: skupper
+      register: _skupper_deploy
+      retries: 30
+      delay: 10
+      until:
+        - _skupper_deploy.resources | length > 0
+        - _skupper_deploy.resources |
+          selectattr('status.readyReplicas', 'defined') |
+          selectattr('status.readyReplicas', 'ge', 1) | list | length > 0

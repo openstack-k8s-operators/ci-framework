@@ -1,6 +1,6 @@
 ---
 - name: Prepare SKMO leaf prerequisites in regionZero
-  hosts: localhost
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
   vars:
     skmo_values_file: "{{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml"
@@ -10,8 +10,8 @@
     central_rootca_secret: rootca-public
     central_rootca_internal_secret: rootca-internal
     leaf_transport_url_name: barbican-keystone-listener-regiontwo
+    leaf_transport_url_username: barbican-keystone-listener-regiontwo
     leaf_transport_url_name_secret: rabbitmq-transport-url-barbican-keystone-listener-regiontwo
-    leaf_transport_url_secret_copy: barbican-keystone-listener-regiontwo-transport
   tasks:
     - name: Wait for central Keystone API to be ready
       kubernetes.core.k8s_info:
@@ -159,6 +159,7 @@
             namespace: "{{ central_namespace }}"
           spec:
             rabbitmqClusterName: rabbitmq
+            username: "{{ leaf_transport_url_username }}"
 
     - name: Wait for TransportURL to be ready
       kubernetes.core.k8s_info:
@@ -176,23 +177,3 @@
         - _transport_url_info.resources[0].status.conditions |
           selectattr('type', 'equalto', 'Ready') |
           selectattr('status', 'equalto', 'True') | list | length > 0
-
-    - name: Get transport URL secret from central namespace
-      kubernetes.core.k8s_info:
-        api_version: v1
-        kind: Secret
-        namespace: "{{ central_namespace }}"
-        name: "{{ leaf_transport_url_name_secret }}"
-      register: _transport_secret
-
-    - name: Copy transport URL secret to leaf namespace
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: "{{ leaf_transport_url_secret_copy }}"
-            namespace: "{{ leaf_namespace }}"
-          type: "{{ _transport_secret.resources[0].type }}"
-          data: "{{ _transport_secret.resources[0].data }}"

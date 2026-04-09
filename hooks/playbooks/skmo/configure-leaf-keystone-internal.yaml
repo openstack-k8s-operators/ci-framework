@@ -1,0 +1,160 @@
+---
+# Patch the leaf/workload region OpenStackControlPlane to use the Skupper
+# Listener virtual endpoint for internal Keystone authentication traffic.
+#
+# The public endpoint override is left unchanged so that end-user traffic and
+# the Keystone service catalog continue to reference the central region's
+# external (public) URL.  Only the *internal* override — used for all
+# service-to-service communication inside the workload namespace — is updated
+# to point at the Skupper Listener.
+#
+# After the OSCP is updated, this playbook also ensures that EDPM compute
+# nodes can resolve the Skupper Keystone virtual service name.  The Skupper
+# Listener creates a ClusterIP-only Service (keystone-regionone) that is not
+# reachable from outside the OCP cluster.  EDPM nodes use the dnsmasq
+# LoadBalancer Service (in the leaf namespace) as their DNS server and require
+# a resolvable hostname for the Keystone auth_url configured in nova.conf.
+# To bridge this gap, the playbook:
+#   1. Creates a dedicated MetalLB LoadBalancer Service that selects the
+#      Skupper router pod and exposes port 5000 on the leaf internalapi network.
+#   2. Creates a DNSData CR so dnsmasq resolves both the short (.svc) and
+#      fully-qualified (.svc.cluster.local) names to the LoadBalancer IP.
+#
+# This playbook is a no-op when cifmw_skupper_keystone_enabled is false.  In
+# that case, skupper-keystone-connector.yaml (pre_stage hook) has already
+# written the public Keystone URL into skmo-values.yaml so the leaf OSCP is
+# created with the public endpoint — no Skupper tunnel is used and there is no
+# matching Connector for the Skupper Listener, so the OSCP must not be patched
+# to point at the Skupper virtual Service.
+#
+# Run skupper-keystone-connector.yaml and skupper-keystone-listener.yaml
+# before this playbook so that the Skupper virtual service is in place.
+#
+# Variables:
+#   cifmw_skupper_keystone_enabled            (default: true)
+#     When false, all tasks in this playbook are skipped.
+#   cifmw_skupper_leaf_namespace              (default: openstack2)
+#   cifmw_skupper_keystone_listener_host      (default: keystone-regionone)
+#   cifmw_skupper_keystone_port               (default: 5000)
+#   cifmw_skupper_keystone_metallb_pool       (default: internalapi2)
+#     MetalLB address-pool name for the leaf internalapi network.  An IP is
+#     auto-assigned from this pool; no static address is required.
+- name: Configure leaf region to use Skupper Keystone internal endpoint
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skupper_keystone_enabled: true
+    cifmw_skupper_leaf_namespace: openstack2
+    cifmw_skupper_keystone_listener_host: keystone-regionone
+    cifmw_skupper_keystone_port: 5000
+    cifmw_skupper_keystone_metallb_pool: internalapi2
+  tasks:
+    - name: Skip all tasks when Skupper Keystone routing is disabled
+      ansible.builtin.meta: end_play
+      when: not cifmw_skupper_keystone_enabled | bool
+
+    - name: Build the Skupper Keystone internal URL
+      ansible.builtin.set_fact:
+        _skupper_keystone_internal_url: >-
+          https://{{ cifmw_skupper_keystone_listener_host }}.{{ cifmw_skupper_leaf_namespace }}.svc.cluster.local:{{ cifmw_skupper_keystone_port }}
+
+    - name: Patch leaf OSCP internal Keystone override to use Skupper endpoint
+      # This switches the internal keystone endpoint URL from the central
+      # region's public URL to the Skupper Listener virtual service.  The
+      # public endpoint override is not touched.
+      kubernetes.core.k8s:
+        state: patched
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackControlPlane
+        name: controlplane
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+        definition:
+          spec:
+            keystone:
+              template:
+                override:
+                  service:
+                    internal:
+                      endpointURL: "{{ _skupper_keystone_internal_url }}"
+
+    - name: Wait for leaf OSCP to reconcile after Keystone endpoint change
+      kubernetes.core.k8s_info:
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackControlPlane
+        name: controlplane
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _leaf_oscp
+      retries: 60
+      delay: 30
+      until:
+        - _leaf_oscp.resources | length > 0
+        - _leaf_oscp.resources[0].status is defined
+        - _leaf_oscp.resources[0].status.conditions is defined
+        - _leaf_oscp.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Create LoadBalancer service to expose Skupper Keystone for EDPM nodes
+      # The Skupper Listener creates a ClusterIP-only Service that EDPM nodes
+      # outside the OCP cluster cannot reach.  This LoadBalancer Service selects
+      # the same Skupper router pod and obtains a MetalLB IP on the leaf
+      # internalapi network, making port 5000 reachable from EDPM compute nodes.
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ cifmw_skupper_keystone_listener_host }}-lb"
+            namespace: "{{ cifmw_skupper_leaf_namespace }}"
+            annotations:
+              metallb.universe.tf/address-pool: "{{ cifmw_skupper_keystone_metallb_pool }}"
+          spec:
+            type: LoadBalancer
+            selector:
+              application: skupper-router
+              skupper.io/component: router
+            ports:
+              - name: keystone-internal
+                port: "{{ cifmw_skupper_keystone_port | int }}"
+                protocol: TCP
+                targetPort: 1024
+
+    - name: Wait for MetalLB to assign an external IP to the keystone LoadBalancer
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ cifmw_skupper_keystone_listener_host }}-lb"
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _keystone_lb_svc
+      retries: 12
+      delay: 10
+      until:
+        - _keystone_lb_svc.resources | length > 0
+        - _keystone_lb_svc.resources[0].status.loadBalancer.ingress is defined
+        - _keystone_lb_svc.resources[0].status.loadBalancer.ingress | length > 0
+
+    - name: Set keystone LoadBalancer IP fact
+      ansible.builtin.set_fact:
+        _keystone_lb_ip: >-
+          {{ _keystone_lb_svc.resources[0].status.loadBalancer.ingress[0].ip }}
+
+    - name: Create DNSData entry for Skupper Keystone endpoint
+      # Adds both the short (.svc) and fully-qualified (.svc.cluster.local)
+      # names to the dnsmasq instance serving EDPM nodes, so that nova-compute
+      # auth_url lookups resolve to the LoadBalancer IP above.
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: network.openstack.org/v1beta1
+          kind: DNSData
+          metadata:
+            name: keystone-skupper
+            namespace: "{{ cifmw_skupper_leaf_namespace }}"
+          spec:
+            dnsDataLabelSelectorValue: dnsdata
+            hosts:
+              - hostnames:
+                  - "{{ cifmw_skupper_keystone_listener_host }}.{{ cifmw_skupper_leaf_namespace }}.svc"
+                  - "{{ cifmw_skupper_keystone_listener_host }}.{{ cifmw_skupper_leaf_namespace }}.svc.cluster.local"
+                ip: "{{ _keystone_lb_ip }}"

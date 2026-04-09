@@ -1,0 +1,136 @@
+---
+# Generic Skupper Listener playbook.
+#
+# Creates a cert-manager Certificate and a Skupper Listener CR in a workload
+# namespace, exposing a remote service (from the central namespace) as a
+# cluster-local virtual Service over the Skupper mTLS application network.
+#
+# Invoke this playbook from the automation vars with extra_vars that supply
+# the service-specific values.  All variables have empty or conservative
+# defaults; required variables are noted below.
+#
+# Variables:
+#   cifmw_skupper_listener_namespace         (default: openstack2)
+#   cifmw_skupper_listener_name             (required) Skupper Listener CR name
+#   cifmw_skupper_listener_cert_name        (required) cert-manager Certificate CR name
+#   cifmw_skupper_listener_cert_secret      (required) Secret name for the TLS cert
+#   cifmw_skupper_listener_routing_key      (required) Must match the Connector routing key
+#   cifmw_skupper_listener_host             (required) Hostname for the virtual Service
+#   cifmw_skupper_listener_port             (required) Port for the virtual Service
+#   cifmw_skupper_listener_ignore_wait_errors  (default: false)
+#     Set to true when running in pre_stage_run before the leaf OSCP is
+#     deployed.  The cert-manager Certificate will be pending until the OSCP
+#     operator creates the rootca-internal Issuer; the Skupper Listener virtual
+#     Service is still created immediately, and TLS credentials are picked up
+#     automatically once cert-manager issues the certificate.  The leaf OSCP's
+#     wait condition provides the convergence guarantee.
+#   cifmw_skupper_listener_enabled  (default: true)
+#     Set to false to skip all tasks.  Pass this alongside any feature flag
+#     (e.g. cifmw_skupper_keystone_enabled) that controls whether this Listener
+#     should be created at all.
+- name: Create Skupper Listener
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skupper_listener_namespace: openstack2
+    cifmw_skupper_listener_name: ""
+    cifmw_skupper_listener_cert_name: ""
+    cifmw_skupper_listener_cert_secret: ""
+    cifmw_skupper_listener_routing_key: ""
+    cifmw_skupper_listener_host: ""
+    cifmw_skupper_listener_port: ""
+    cifmw_skupper_listener_ignore_wait_errors: false
+    cifmw_skupper_listener_enabled: true
+  tasks:
+    - name: Check if Skupper Listener already exists
+      when: cifmw_skupper_listener_enabled | bool
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Listener
+        name: "{{ cifmw_skupper_listener_name }}"
+        namespace: "{{ cifmw_skupper_listener_namespace }}"
+      register: _existing_listener
+
+    - name: Create cert-manager Certificate for Skupper Listener
+      when:
+        - cifmw_skupper_listener_enabled | bool
+        - _existing_listener.resources | length == 0
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: "{{ cifmw_skupper_listener_cert_name }}"
+            namespace: "{{ cifmw_skupper_listener_namespace }}"
+          spec:
+            secretName: "{{ cifmw_skupper_listener_cert_secret }}"
+            issuerRef:
+              name: rootca-internal
+              kind: Issuer
+            dnsNames:
+              - "{{ cifmw_skupper_listener_host }}"
+              - "{{ cifmw_skupper_listener_host }}.{{ cifmw_skupper_listener_namespace }}.svc"
+              - "{{ cifmw_skupper_listener_host }}.{{ cifmw_skupper_listener_namespace }}.svc.cluster.local"
+            usages:
+              - digital signature
+              - key encipherment
+              - server auth
+
+    - name: Wait for Listener certificate Secret to be created
+      when:
+        - cifmw_skupper_listener_enabled | bool
+        - _existing_listener.resources | length == 0
+      ignore_errors: "{{ cifmw_skupper_listener_ignore_wait_errors | bool }}"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ cifmw_skupper_listener_cert_secret }}"
+        namespace: "{{ cifmw_skupper_listener_namespace }}"
+      register: _listener_cert_secret
+      retries: 12
+      delay: 10
+      until: _listener_cert_secret.resources | length > 0
+
+    - name: Create Skupper Listener
+      when:
+        - cifmw_skupper_listener_enabled | bool
+        - _existing_listener.resources | length == 0
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: skupper.io/v2alpha1
+          kind: Listener
+          metadata:
+            name: "{{ cifmw_skupper_listener_name }}"
+            namespace: "{{ cifmw_skupper_listener_namespace }}"
+          spec:
+            routingKey: "{{ cifmw_skupper_listener_routing_key }}"
+            host: "{{ cifmw_skupper_listener_host }}"
+            port: "{{ cifmw_skupper_listener_port }}"
+            type: tcp
+            tlsCredentials: "{{ cifmw_skupper_listener_cert_secret }}"
+
+    - name: Wait for Skupper Listener to be configured
+      # A Listener shows "Ready" only after its matching Connector activates the
+      # link.  Waiting for "Configured" is sufficient here; both sides will
+      # transition to "Ready" once the application network is fully established.
+      when:
+        - cifmw_skupper_listener_enabled | bool
+        - _existing_listener.resources | length == 0
+      ignore_errors: "{{ cifmw_skupper_listener_ignore_wait_errors | bool }}"
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Listener
+        name: "{{ cifmw_skupper_listener_name }}"
+        namespace: "{{ cifmw_skupper_listener_namespace }}"
+      register: _listener
+      retries: 30
+      delay: 10
+      until:
+        - _listener.resources | length > 0
+        - _listener.resources[0].status is defined
+        - _listener.resources[0].status.conditions is defined
+        - _listener.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Configured') |
+          selectattr('status', 'equalto', 'True') | list | length > 0

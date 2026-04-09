@@ -1,0 +1,58 @@
+---
+# Create a Skupper Connector in the central namespace that exposes the central
+# RabbitMQ service to workload regions over the Skupper application network.
+#
+# The TLS Secret name is auto-discovered from the RabbitmqCluster CR.
+# Connector creation and the wait for Configured status are handled by the
+# shared skupper-connector-tasks.yaml task file.
+#
+# Variables:
+#   cifmw_skupper_central_namespace    (default: openstack)
+#   cifmw_skupper_routing_key          (default: rabbit-keystone)
+#   cifmw_skupper_rabbitmq_port        (default: 5671)
+- name: Create Skupper Connector for central RabbitMQ
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skupper_central_namespace: openstack
+    cifmw_skupper_routing_key: rabbit-keystone
+    cifmw_skupper_rabbitmq_port: 5671
+  tasks:
+    - name: Check if Skupper Connector already exists
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Connector
+        name: rabbitmq-keystone
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+      register: _existing_connector
+
+    - name: Get RabbitMQ TLS certificate secret name from RabbitMq CR
+      # The OpenStack infra-operator uses rabbitmq.openstack.org/v1beta1 (RabbitMq),
+      # not the community rabbitmq.com/v1beta1 (RabbitmqCluster).
+      when: _existing_connector.resources | length == 0
+      kubernetes.core.k8s_info:
+        api_version: rabbitmq.openstack.org/v1beta1
+        kind: RabbitMq
+        name: rabbitmq
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+      register: _rabbitmq_cluster
+      retries: 30
+      delay: 10
+      until:
+        - _rabbitmq_cluster.resources | length > 0
+        - _rabbitmq_cluster.resources[0].spec.tls is defined
+        - _rabbitmq_cluster.resources[0].spec.tls.secretName is defined
+        - _rabbitmq_cluster.resources[0].spec.tls.secretName | length > 0
+
+    - name: Create Skupper Connector and wait for Configured
+      when: _existing_connector.resources | length == 0
+      ansible.builtin.include_tasks: skupper-connector-tasks.yaml
+      vars:
+        _cifmw_connector_name: rabbitmq-keystone
+        _cifmw_connector_namespace: "{{ cifmw_skupper_central_namespace }}"
+        _cifmw_connector_routing_key: "{{ cifmw_skupper_routing_key }}"
+        _cifmw_connector_host: "rabbitmq.{{ cifmw_skupper_central_namespace }}.svc.cluster.local"
+        _cifmw_connector_port: "{{ cifmw_skupper_rabbitmq_port }}"
+        _cifmw_connector_tls_credentials: "{{ _rabbitmq_cluster.resources[0].spec.tls.secretName }}"
+        _cifmw_connector_verify_hostname: true
+        _cifmw_connector_ignore_wait_errors: false
