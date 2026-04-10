@@ -1,0 +1,59 @@
+---
+# Set the applicationCredentialEnabled flag in skmo-values.yaml before the
+# leaf control plane kustomize build runs.
+#
+# The flag is read by the kustomization.yaml replacement and applied to
+# spec.applicationCredential.enabled on the OpenStackControlPlane CR.  Setting
+# it here means the OSCP is created with AC enabled or disabled from the very
+# first apply — no reload or restart required.
+#
+# When enabled (the default), all leaf region services (barbican, cinder,
+# glance, neutron, nova, placement) authenticate to Keystone using Application
+# Credentials instead of plain passwords, enabling near zero downtime password
+# rotation.  EDPM compute nodes receive AC credentials during their initial
+# deployment (stages 7+) so no separate EDPM redeployment is needed.
+#
+# Variables:
+#   cifmw_skmo_appcred_enabled    (default: true)
+#     When false, applicationCredentialEnabled is written as false and the OSCP
+#     is created without AC — identical to omitting the patch entirely.
+#   cifmw_architecture_repo
+#     Path to the local checkout of the architecture repository.
+- name: Set Application Credential enablement in skmo-values.yaml
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skmo_appcred_enabled: true
+    _skmo_values_file: >-
+      {{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml
+  tasks:
+    - name: Check skmo-values.yaml exists
+      ansible.builtin.stat:
+        path: "{{ _skmo_values_file }}"
+      register: _skmo_values_stat
+
+    - name: Assert skmo-values.yaml is present
+      ansible.builtin.assert:
+        that: _skmo_values_stat.stat.exists
+        fail_msg: >-
+          skmo-values.yaml not found at {{ _skmo_values_file }}.
+          Ensure cifmw_architecture_repo points to a valid architecture checkout.
+
+    - name: Read skmo-values.yaml
+      ansible.builtin.slurp:
+        src: "{{ _skmo_values_file }}"
+      register: _skmo_values_content
+
+    - name: Parse and update applicationCredentialEnabled
+      ansible.builtin.set_fact:
+        _skmo_values_updated: >-
+          {{ _skmo_values_content.content | b64decode | from_yaml |
+             combine({'data': (_skmo_values_content.content | b64decode | from_yaml).data |
+             combine({'applicationCredentialEnabled': cifmw_skmo_appcred_enabled | bool})},
+             recursive=True) }}
+
+    - name: Write updated skmo-values.yaml
+      ansible.builtin.copy:
+        content: "{{ _skmo_values_updated | to_nice_yaml(indent=2) }}"
+        dest: "{{ _skmo_values_file }}"
+        mode: '0644'
