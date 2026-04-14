@@ -168,51 +168,8 @@
             additionalTrustedCA:
               name: "registry-cas"
 
-- name: Add insecure registry
-  when: cifmw_update_containers_registry is defined
-  vars:
-    default_allowed_registries:
-      - "quay.io"
-      - "gcr.io"
-      - "registry.k8s.io"
-      - "registry.redhat.io"
-      - "registry.connect.redhat.com"
-      - "registry-proxy.engineering.redhat.com"
-      - "registry.stage.redhat.io"
-      - "images.paas.redhat.com"
-      - "image-registry.openshift-image-registry.svc:5000"
-    all_registries: "{{ [cifmw_update_containers_registry] + default_allowed_registries | unique }}"
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    merge_type: "merge"
-    definition:
-      apiVersion: config.openshift.io/v1
-      kind: Image
-      metadata:
-        name: cluster
-      spec:
-        registrySources:
-          insecureRegistries:
-            - "{{ cifmw_update_containers_registry }}"
-          allowedRegistries: "{{ all_registries }}"
-
-- name: Create a ICSP with repository digest mirrors
-  when:
-    - cifmw_openshift_setup_digest_mirrors is defined
-    - cifmw_openshift_setup_digest_mirrors | length > 0
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    api_key: "{{ cifmw_openshift_token | default(omit)}}"
-    context: "{{ cifmw_openshift_context | default(omit)}}"
-    definition:
-      apiVersion: operator.openshift.io/v1alpha1
-      kind: ImageContentSourcePolicy
-      metadata:
-        name: registry-digest-mirrors
-      spec:
-        repositoryDigestMirrors: "{{ cifmw_openshift_setup_digest_mirrors }}"
+- name: Configure insecure registries and ICSP
+  ansible.builtin.import_tasks: configure_registries.yml
 
 - name: Patch network operator when using OVNKubernetes backend
   ansible.builtin.import_tasks: patch_network_operator.yml
