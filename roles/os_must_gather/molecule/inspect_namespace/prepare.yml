@@ -1,0 +1,78 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Prepare inspect_namespace test environment
+  hosts: all
+  tasks:
+    - name: Create mock bin directory
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/mock-bin"
+        state: directory
+        mode: '0755'
+
+    - name: Create mock oc command that simulates must-gather failure
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/mock-bin/oc"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # Mock oc command for testing inspect_namespace fallback
+
+          # Check if this is the must-gather command (which should fail)
+          if [[ "$*" == *"must-gather"* ]] && [[ "$*" != *"adm inspect"* ]]; then
+            echo "Mock oc adm must-gather starting..."
+            echo "Command: $@"
+            echo "Error: Image pull failed" >&2
+            # Exit with a non-timeout error code
+            exit 1
+          fi
+
+          # Check if this is the oc adm inspect command (fallback)
+          if [[ "$*" == *"adm inspect"* ]]; then
+            echo "Mock oc adm inspect running..."
+            echo "Command: $@"
+            # Create a simple output to verify this was called
+            dest_dir=$(echo "$@" | grep -oP '(?<=--dest-dir=)\S+')
+            if [ -n "$dest_dir" ]; then
+              mkdir -p "$dest_dir"
+              echo "Namespace inspection completed" > "$dest_dir/inspect.log"
+            fi
+            exit 0
+          fi
+
+          # For any other oc command, just succeed
+          echo "Mock oc command: $@"
+          exit 0
+
+    - name: Create fake kubeconfig
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/fake-kubeconfig"
+        mode: '0644'
+        content: |
+          apiVersion: v1
+          kind: Config
+          current-context: fake
+
+    - name: Create output directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ ansible_user_dir }}/test-output"
+        - "{{ ansible_user_dir }}/test-output/artifacts"
+        - "{{ ansible_user_dir }}/test-output/logs/openstack-must-gather"
