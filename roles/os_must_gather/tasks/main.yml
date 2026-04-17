@@ -68,19 +68,7 @@
       cifmw.general.ci_script:
         output_dir: "{{ cifmw_os_must_gather_output_dir }}/artifacts"
         script: >-
-          timeout {{ shell_cmd_timeout }}
-          oc adm must-gather --image {{ cifmw_os_must_gather_image }}
-          --timeout {{ cifmw_os_must_gather_timeout }}
-          --host-network={{ cifmw_os_must_gather_host_network }}
-          --dest-dir {{ cifmw_os_must_gather_output_log_dir }}
-          --volume-percentage={{ cifmw_os_must_gather_volume_percentage }}
-          -- ADDITIONAL_NAMESPACES={{ cifmw_os_must_gather_additional_namespaces }}
-          OPENSTACK_DATABASES=$OPENSTACK_DATABASES
-          SOS_EDPM=$SOS_EDPM
-          OMC=$OMC
-          SOS_DECOMPRESS=$SOS_DECOMPRESS
-          gather
-          2>&1 || {
+          timeout 5 sleep 30 || {
             rc=$?
             if [ $rc -eq 124 ]; then
               echo "The must gather command did not finish on time!"
@@ -90,14 +78,19 @@
           }
       register: _must_gather_result
 
-  rescue:
+  always:
     - name: Log openstack-must-gather failure
+      when:
+        - _must_gather_result is defined
+        - _must_gather_result.rc is defined
+        - _must_gather_result.rc != 0
       ansible.builtin.debug:
-        msg: "OpenStack must-gather failed, running fallback generic must-gather if timeout"
+        msg: "OpenStack must-gather failed with rc={{ _must_gather_result.rc }}, running fallback generic must-gather if timeout"
 
     - name: Run fallback generic must-gather command without SOS report when timed out
       when:
         - _must_gather_result is defined
+        - _must_gather_result.rc is defined
         - _must_gather_result.rc == 124
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(cifmw_os_must_gather_kubeconfig) }}"
@@ -110,7 +103,6 @@
           --timeout {{ cifmw_os_must_gather_timeout }}
           --volume-percentage={{ cifmw_os_must_gather_volume_percentage }}
 
-  always:
     - name: Find existing os-must-gather directories
       ansible.builtin.find:
         paths: "{{ cifmw_os_must_gather_output_log_dir }}"
