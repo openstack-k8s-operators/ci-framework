@@ -28,6 +28,10 @@
       - source: quay.rdoproject.org
         mirrors:
           - mirror.quay.rdoproject.org
+    cifmw_openshift_setup_tag_mirrors:
+      - source: registry.redhat.io
+        mirrors:
+          - mirror.registry.redhat.io
   roles:
     - role: "openshift_setup"
   tasks:
@@ -66,13 +70,29 @@
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
         context: "{{ cifmw_openshift_context | default(omit)}}"
-        api_version: operator.openshift.io/v1alpha1
-        kind: ImageContentSourcePolicy
+        api_version: config.openshift.io/v1
+        kind: ImageDigestMirrorSet
         name: registry-digest-mirrors
       register: _registry_mirror
 
     - name: Assert that digest mirrors are correct
       ansible.builtin.assert:
         that:
-          - _registry_mirror.resources[0].spec.repositoryDigestMirrors[0].source == "quay.rdoproject.org"
-          - _registry_mirror.resources[0].spec.repositoryDigestMirrors[0].mirrors[0] == "mirror.quay.rdoproject.org"
+          - _registry_mirror.resources[0].spec.imageDigestMirrors[0].source == "quay.rdoproject.org"
+          - _registry_mirror.resources[0].spec.imageDigestMirrors[0].mirrors[0] == "mirror.quay.rdoproject.org"
+
+    - name: Check that tag mirror resource is created
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        api_version: config.openshift.io/v1
+        kind: ImageTagMirrorSet
+        name: registry-tag-mirrors
+      register: _tag_mirror
+
+    - name: Assert that tag mirrors are correct
+      ansible.builtin.assert:
+        that:
+          - _tag_mirror.resources[0].spec.imageTagMirrors[0].source == "registry.redhat.io"
+          - _tag_mirror.resources[0].spec.imageTagMirrors[0].mirrors[0] == "mirror.registry.redhat.io"
