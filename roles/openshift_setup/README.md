@@ -15,7 +15,7 @@ should be configured for in an OCP/CRC cluster.
 * `cifmw_openshift_setup_ca_bundle_path`: (String) Path to the CA bundle.
 Defaults to `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`. Only has an
 effect if `cifmw_openshift_setup_ca_registry_to_add` is set.
-* `cifmw_openshift_setup_digest_mirrors`: (List) List of alternative mirrored repository locations. Defaults to `[]`.
+* `cifmw_openshift_setup_digest_mirrors`: (List) List of alternative mirrored repository locations for digest-based image pulls. Used to create ImageDigestMirrorSet resources. Defaults to `[]`.
     * Example:
         ```yaml
         cifmw_openshift_setup_digest_mirrors:
@@ -25,6 +25,17 @@ effect if `cifmw_openshift_setup_ca_registry_to_add` is set.
           - source: quay.rdoproject.org
             mirrors:
               - mirror.quay.rdoproject.org
+        ```
+* `cifmw_openshift_setup_tag_mirrors`: (List) List of alternative mirrored repository locations for tag-based image pulls. Used to create ImageTagMirrorSet resources. When both digest and tag mirrors are configured, digest mirrors take precedence for digest-based pulls, while tag mirrors act as a fallback for tag-based pulls. Defaults to `[]`.
+    * Example:
+        ```yaml
+        cifmw_openshift_setup_tag_mirrors:
+          - source: quay.io
+            mirrors:
+              - mirror.quay.io
+          - source: registry.redhat.io
+            mirrors:
+              - my-mirror.example.com
         ```
 * `cifmw_openshift_setup_allowed_registries`: (List) List of allowed registries when setting up insecure registry configuration. Used in conjunction with `cifmw_update_containers_registry`. Defaults to common registries.
     * Example:
