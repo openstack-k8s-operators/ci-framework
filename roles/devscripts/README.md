@@ -56,6 +56,10 @@ networks.
 * `cifmw_devscripts_cinder_volume_pvs` (list) a list of physical disks to be
   used for creating cinder-volumes volume-group. By default, the list contains
   `/dev/vda`.
+* `cifmw_devscripts_exclude_qemu_libvirt` (bool) Exclude package qemu-kvm and
+  libvirt for being updated to newer version that might be broken.
+  When value is set to "true", it will add into /etc/dnf/dnf.conf `exclude`
+  parameter.
 
 ### Secrets management
 
