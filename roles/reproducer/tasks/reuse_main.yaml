@@ -127,16 +127,14 @@
           environment:
             ANSIBLE_LOG_PATH: "{{ ansible_user_dir }}/ansible-bootstrap.log"
           no_log: "{{ cifmw_nolog | default(true) | bool }}"
-          ansible.builtin.import_role:
+          ansible.builtin.include_role:
             name: cifmw_setup
             tasks_from: bootstrap.yml
           vars:
             ansible_extra_vars:
               - "{{ ansible_user_dir }}/ci-framework-data/parameters/reproducer-variables.yml"
               - "scenarios/reproducers/networking-definition.yml"
-          changed_when: false
-          args:
-            chdir: "{{ _cifmw_reproducer_framework_location }}"
+            cifmw_basedir: "{{ _cifmw_reproducer_framework_location }}"
 
         - name: Install dev tools from install_yamls on controller-0
           environment:
@@ -281,3 +279,17 @@
         mode: "0755"
         owner: "{{ cifmw_reproducer_controller_user }}"
         group: "{{ cifmw_reproducer_controller_user }}"
+
+    - name: Execute deployment automatically
+      when:
+        - cifmw_job_uri is undefined
+        - cifmw_reproducer_auto_deploy | default(false) | bool
+      delegate_to: controller-0
+      environment:
+        ANSIBLE_LOG_PATH: "{{ cifmw_reproducer_controller_user_dir }}/ansible-deploy-edpm.log"
+      ansible.builtin.command:
+        cmd: "{{ cifmw_reproducer_controller_user_dir }}/deploy-edpm.sh"
+      async: 7200
+      poll: 60
+      register: _deploy_result
+      changed_when: true
