@@ -19,6 +19,8 @@ This role doesn't need privilege escalation.
 * `cifmw_edpm_deploy_baremetal_repo_setup_override`: (Boolean) Override the repo-setup service in OpenStackDataPlane with repo-setup-downstream. Default: `false`
 * `cifmw_edpm_deploy_baremetal_create_vms`: (Boolean) If enabled, compute nodes are pre-provisioned using Ironic else OpenStackProvisioner. Default: `true`
 * `cifmw_edpm_deploy_baremetal_nova_compute_extra_config`: (String) Oslo config snippet defining extra configuration for the nova-compute services. Defaults to an empty string.
+* `cifmw_edpm_deploy_baremetal_custom_bootstrap`: (Boolean) When true, skips the inline `edpm_bootstrap_command` kustomization patch so that a file-based kustomization can provide a custom bootstrap command instead. Default: `false`
+* `cifmw_edpm_deploy_baremetal_bootc`: (Boolean) Disables the inline `edpm_bootstrap_command` patch and `dnf update` for bootc-based immutable nodes. Default: `false`
 
 ## Examples
 
