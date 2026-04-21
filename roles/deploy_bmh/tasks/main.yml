@@ -14,19 +14,27 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Load baremetal hosts information from file
+- name: Load baremetal hosts from file for type-safe MAC handling
   when:
     - cifmw_deploy_bmh_parameters_file is file
     - cifmw_baremetal_hosts is not defined
   ansible.builtin.include_vars:
     file: "{{ cifmw_deploy_bmh_parameters_file }}"
+    name: _deploy_bmh_file_data
 
 - name: Set baremetal hosts facts
+  vars:
+    _bmh_source: >-
+      {{
+        (_deploy_bmh_file_data | default({})).cifmw_baremetal_hosts |
+        default(cifmw_baremetal_hosts) |
+        default({})
+      }}
   ansible.builtin.set_fact:
     cifmw_deploy_bmh_bm_hosts: >-
       {{
-        cifmw_baremetal_hosts | default({}) | dict2items |
-        rejectattr('key', 'in', ['crc', 'controller', 'ocp']) |
+        _bmh_source | dict2items |
+        rejectattr('key', 'match', '^(crc|controller|ocp)') |
         items2dict
       }}
 
