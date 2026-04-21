@@ -56,6 +56,9 @@ networks.
 * `cifmw_devscripts_cinder_volume_pvs` (list) a list of physical disks to be
   used for creating cinder-volumes volume-group. By default, the list contains
   `/dev/vda`.
+* `cifmw_devscripts_disable_remember_owner` (bool), Disable the remember_owner
+  feature which in some cases might raise unexpected issues on starting the
+  VM. Defaults to `true`.
 
 ### Secrets management
 
