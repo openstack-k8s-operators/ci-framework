@@ -78,7 +78,7 @@
             value: []
       when: rabbitmq_cell1_info.resources | default([]) | length > 0
 
-- name: Delete deployment CRs
+- name: Delete deployment CRs (Phase 1 - Application Resources)
   vars:
     _stages_crs: >-
       {{
@@ -99,11 +99,6 @@
     _external_dns_crs:
       - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-dns.yml"
       - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-cert.yml"
-    _operators_crs:
-      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
-      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     _bmh_crs: >-
       {{
         bmh_crs.files |
@@ -121,9 +116,41 @@
         _external_dns_crs +
         _stages_crs_path +
         _bmh_crs +
-        _bmh_secrets_crs +
-        _operators_crs
+        _bmh_secrets_crs
       }}
+  ansible.builtin.import_tasks: cleanup_crs.yaml
+
+- name: Wait for Phase 1 resources to be deleted
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_openstack_namespace }}"
+    kind: "{{ item }}"
+    api_version: "{{ api_versions[item] }}"
+  register: _phase1_resources
+  until: _phase1_resources.resources | default([]) | length == 0
+  retries: 60
+  delay: 10
+  loop:
+    - OpenStackControlPlane
+    - OpenStackDataPlaneNodeSet
+    - OpenStackDataPlaneDeployment
+  vars:
+    api_versions:
+      OpenStackControlPlane: core.openstack.org/v1beta1
+      OpenStackDataPlaneNodeSet: dataplane.openstack.org/v1beta1
+      OpenStackDataPlaneDeployment: dataplane.openstack.org/v1beta1
+  failed_when: false
+
+- name: Delete deployment CRs (Phase 2 - Operators)
+  vars:
+    _operators_crs:
+      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
+      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+    _crs_to_delete: "{{ _operators_crs }}"
   ansible.builtin.import_tasks: cleanup_crs.yaml
 
 - name: Get artifacts scripts
