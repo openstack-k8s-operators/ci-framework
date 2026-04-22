@@ -1,0 +1,33 @@
+---
+- name: "Ensure resources are removed - {{ cifmw_cleanup_resource_kind }}"
+  block:
+    - name: "Wait for resource to be deleted - {{ cifmw_cleanup_resource_kind }}"
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: "{{ cifmw_cleanup_resource_kind }}"
+        api_version: "{{ cifmw_cleanup_resource_api_version }}"
+      register: cifmw_cleanup_resource_result
+      until: cifmw_cleanup_resource_result.resources | default([]) | length == 0
+      retries: 60
+      delay: 10
+  rescue:
+    - name: "Force-remove finalizers from stuck resource - {{ cifmw_cleanup_resource_kind }}"
+      kubernetes.core.k8s_json_patch:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: "{{ cifmw_cleanup_resource_kind }}"
+        api_version: "{{ cifmw_cleanup_resource_api_version }}"
+        name: "{{ item.metadata.name }}"
+        patch:
+          - op: replace
+            path: /metadata/finalizers
+            value: []
+      loop: "{{ cifmw_cleanup_resource_result.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      failed_when: false
