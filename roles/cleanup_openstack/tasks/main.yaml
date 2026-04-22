@@ -51,7 +51,7 @@
   ansible.builtin.import_tasks: detach_bmh.yaml
   when: cifmw_cleanup_openstack_detach_bmh
 
-- name: Work around for stale rabbit cluster deletion
+- name: Work around for stale resources with finalizers
   block:
     - name: Check if rabbitmq-cell1 exists
       kubernetes.core.k8s_info:
@@ -78,7 +78,34 @@
             value: []
       when: rabbitmq_cell1_info.resources | default([]) | length > 0
 
-- name: Delete deployment CRs
+    - name: Check if OpenStackVersion resources exist
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: OpenStackVersion
+        api_version: core.openstack.org/v1beta1
+      register: openstackversion_info
+      failed_when: false
+
+    - name: Patch OpenStackVersion finalizers
+      kubernetes.core.k8s_json_patch:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ cifmw_openstack_namespace }}"
+        kind: OpenStackVersion
+        api_version: core.openstack.org/v1beta1
+        name: "{{ item.metadata.name }}"
+        patch:
+          - op: replace
+            path: /metadata/finalizers
+            value: []
+      loop: "{{ openstackversion_info.resources | default([]) }}"
+      when: openstackversion_info.resources | default([]) | length > 0
+
+- name: Delete deployment CRs (Phase 1 - Application Resources)
   vars:
     _stages_crs: >-
       {{
@@ -99,11 +126,6 @@
     _external_dns_crs:
       - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-dns.yml"
       - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-cert.yml"
-    _operators_crs:
-      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
-      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     _bmh_crs: >-
       {{
         bmh_crs.files |
@@ -121,9 +143,18 @@
         _external_dns_crs +
         _stages_crs_path +
         _bmh_crs +
-        _bmh_secrets_crs +
-        _operators_crs
+        _bmh_secrets_crs
       }}
+  ansible.builtin.import_tasks: cleanup_crs.yaml
+
+- name: Delete deployment CRs (Phase 2 - Operators)
+  vars:
+    _operators_crs:
+      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
+      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+    _crs_to_delete: "{{ _operators_crs }}"
   ansible.builtin.import_tasks: cleanup_crs.yaml
 
 - name: Get artifacts scripts
@@ -147,3 +178,30 @@
     - "{{ cifmw_basedir }}/logs"
     - "{{ cifmw_basedir }}/tests"
   become: true
+
+- name: Find residual deployment scripts in home directory
+  ansible.builtin.find:
+    path: "{{ ansible_user_dir }}"
+    patterns:
+      - "deploy-*.sh"
+      - "cleanup-architecture.sh"
+      - "post_deployment.sh"
+      - "ansible-*.log*"
+    file_type: file
+  register: home_scripts_to_remove
+
+- name: Remove residual deployment scripts and logs
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ home_scripts_to_remove.files }}"
+  when: home_scripts_to_remove.files | length > 0
+
+- name: Remove residual directories and symlinks
+  ansible.builtin.file:
+    path: "{{ ansible_user_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - ansible_facts_cache
+    - reproducer-variables.yml
+    - openshift-environment.yml
