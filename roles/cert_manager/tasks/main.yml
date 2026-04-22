@@ -20,7 +20,7 @@
     state: directory
     mode: "0755"
 
-- name: Create the cifmw_cert_manager_operator_namespace namespace"
+- name: Create the cifmw_cert_manager_operator_namespace namespace
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -28,6 +28,10 @@
     name: "{{ cifmw_cert_manager_operator_namespace }}"
     kind: Namespace
     state: present
+  register: _cm_operator_ns
+  until: _cm_operator_ns is succeeded
+  retries: 5
+  delay: 10
 
 - name: Install from Release Manifest
   when: cifmw_cert_manager_install_from_release_manifest | bool
@@ -37,7 +41,7 @@
   when: not cifmw_cert_manager_install_from_release_manifest | bool
   ansible.builtin.include_tasks: olm_manifest.yml
 
-- name: Check for cert-manager namspeace existance
+- name: Check for cert-manager namespace existence
   kubernetes.core.k8s_info:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -46,6 +50,10 @@
     kind: Namespace
     field_selectors:
       - status.phase=Active
+  register: _cm_ns_info
+  until: _cm_ns_info is succeeded
+  retries: 5
+  delay: 10
 
 - name: Wait for cert-manager pods to be ready
   kubernetes.core.k8s_info:
@@ -66,6 +74,10 @@
     - cainjector
     - webhook
     - cert-manager
+  register: _cm_pods_ready
+  until: _cm_pods_ready is succeeded
+  retries: 5
+  delay: 10
 
 - name: Validate cert-manager installation
   when: cifmw_cert_manager_validate | bool
