@@ -51,34 +51,7 @@
   ansible.builtin.import_tasks: detach_bmh.yaml
   when: cifmw_cleanup_openstack_detach_bmh
 
-- name: Work around for stale rabbit cluster deletion
-  block:
-    - name: Check if rabbitmq-cell1 exists
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        namespace: "{{ cifmw_openstack_namespace }}"
-        kind: RabbitmqCluster
-        name: rabbitmq-cell1
-      register: rabbitmq_cell1_info
-      failed_when: false
-
-    - name: Patch rabbitmq-cell1 finalizers
-      kubernetes.core.k8s_json_patch:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        namespace: "{{ cifmw_openstack_namespace }}"
-        kind: RabbitmqCluster
-        name: rabbitmq-cell1
-        patch:
-          - op: replace
-            path: /metadata/finalizers
-            value: []
-      when: rabbitmq_cell1_info.resources | default([]) | length > 0
-
-- name: Delete deployment CRs
+- name: Delete deployment CRs (Phase 1 - Application Resources)
   vars:
     _stages_crs: >-
       {{
@@ -99,11 +72,6 @@
     _external_dns_crs:
       - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-dns.yml"
       - "{{ cifmw_manifests_dir }}/cifmw_external_dns/ceph-local-cert.yml"
-    _operators_crs:
-      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
-      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
-      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     _bmh_crs: >-
       {{
         bmh_crs.files |
@@ -121,9 +89,35 @@
         _external_dns_crs +
         _stages_crs_path +
         _bmh_crs +
-        _bmh_secrets_crs +
-        _operators_crs
+        _bmh_secrets_crs
       }}
+  ansible.builtin.import_tasks: cleanup_crs.yaml
+
+- name: Ensure Phase 1 resources are removed before deleting operators
+  ansible.builtin.include_tasks: wait_and_cleanup_resource.yaml
+  loop:
+    - kind: OpenStackDataPlaneDeployment
+      api_version: dataplane.openstack.org/v1beta1
+    - kind: OpenStackDataPlaneNodeSet
+      api_version: dataplane.openstack.org/v1beta1
+    - kind: OpenStackControlPlane
+      api_version: core.openstack.org/v1beta1
+    - kind: RabbitmqCluster
+      api_version: rabbitmq.com/v1beta1
+  loop_control:
+    loop_var: cifmw_cleanup_resource
+  vars:
+    cifmw_cleanup_resource_kind: "{{ cifmw_cleanup_resource.kind }}"
+    cifmw_cleanup_resource_api_version: "{{ cifmw_cleanup_resource.api_version }}"
+
+- name: Delete deployment CRs (Phase 2 - Operators)
+  vars:
+    _operators_crs:
+      - "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+      - "{{ cifmw_kustomize_deploy_kustomizations_dest_dir }}/openstack.yaml"
+      - "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+    _crs_to_delete: "{{ _operators_crs }}"
   ansible.builtin.import_tasks: cleanup_crs.yaml
 
 - name: Get artifacts scripts
