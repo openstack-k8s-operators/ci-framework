@@ -1,0 +1,83 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# OVN Northbound and Southbound DB backups (see dev-docs backup-restore user-guide).
+# Backup files are written to OVN PVCs and included in the subsequent OADP PVC backup.
+
+- name: "Step 2: OVN database backup (label PVCs and ovsdb-client backup)"
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "Step 2: OVN Database Backup"
+      - "========================================"
+
+- name: Wait for OVN NB database pod
+  ansible.builtin.command:
+    cmd: >-
+      oc wait pod -n {{ cifmw_backup_restore_namespace }}
+      -l service=ovsdbserver-nb
+      --for=condition=Ready
+      --timeout={{ cifmw_backup_restore_ovn_db_ready_timeout }}
+  changed_when: false
+
+- name: Wait for OVN SB database pod
+  ansible.builtin.command:
+    cmd: >-
+      oc wait pod -n {{ cifmw_backup_restore_namespace }}
+      -l service=ovsdbserver-sb
+      --for=condition=Ready
+      --timeout={{ cifmw_backup_restore_ovn_db_ready_timeout }}
+  changed_when: false
+
+- name: Label OVN NB PVCs for backup and restore
+  ansible.builtin.command:
+    cmd: >-
+      oc label pvc -n {{ cifmw_backup_restore_namespace }}
+      -l service=ovsdbserver-nb
+      backup.openstack.org/backup=true
+      backup.openstack.org/restore=true
+      backup.openstack.org/restore-order=00
+      backup.openstack.org/category=controlplane
+      --overwrite
+  changed_when: true
+
+- name: Label OVN SB PVCs for backup and restore
+  ansible.builtin.command:
+    cmd: >-
+      oc label pvc -n {{ cifmw_backup_restore_namespace }}
+      -l service=ovsdbserver-sb
+      backup.openstack.org/backup=true
+      backup.openstack.org/restore=true
+      backup.openstack.org/restore-order=00
+      backup.openstack.org/category=controlplane
+      --overwrite
+  changed_when: true
+
+- name: Backup OVN Northbound database to PVC
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc exec ovsdbserver-nb-0 -n {{ cifmw_backup_restore_namespace }} -c ovsdbserver-nb -- \
+      bash -c "ovsdb-client backup unix:/etc/ovn/ovnnb_db.sock OVN_Northbound \
+        > /etc/ovn/ovnnb_db.db.{{ cifmw_backup_restore_backup_name_suffix }}"
+  changed_when: true
+
+- name: Backup OVN Southbound database to PVC
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc exec ovsdbserver-sb-0 -n {{ cifmw_backup_restore_namespace }} -c ovsdbserver-sb -- \
+      bash -c "ovsdb-client backup unix:/etc/ovn/ovnsb_db.sock OVN_Southbound \
+        > /etc/ovn/ovnsb_db.db.{{ cifmw_backup_restore_backup_name_suffix }}"
+  changed_when: true

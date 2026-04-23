@@ -1,0 +1,114 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Pin PVCs to Original Nodes
+#
+# For Data Mover restores with WaitForFirstConsumer storage (e.g., LVM/TopoLVM),
+# creates dummy Deployments with nodeSelector to bind restored PVCs to their
+# original nodes. Downloads backup metadata to extract PVC-to-node mapping
+# from PV nodeAffinity.
+
+- name: Download backup metadata
+  ansible.builtin.shell: |
+    set -e
+    TMPDIR=$(mktemp -d)
+    REMOTE_FILE="/tmp/backup-$$.tar.gz"
+    VELERO_POD=$(oc get pods -n {{ cifmw_backup_restore_oadp_namespace }} -l deploy=velero --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+    oc exec -n {{ cifmw_backup_restore_oadp_namespace }} ${VELERO_POD} -- rm -f ${REMOTE_FILE} >&2 || true
+    oc exec -n {{ cifmw_backup_restore_oadp_namespace }} ${VELERO_POD} -- \
+      /velero backup download {{ _pvc_backup_name }} --insecure-skip-tls-verify -o ${REMOTE_FILE} >&2
+    oc exec -n {{ cifmw_backup_restore_oadp_namespace }} ${VELERO_POD} -- cat ${REMOTE_FILE} > ${TMPDIR}/backup.tar.gz
+    oc exec -n {{ cifmw_backup_restore_oadp_namespace }} ${VELERO_POD} -- rm -f ${REMOTE_FILE} >&2
+    mkdir -p ${TMPDIR}/backup
+    tar xzf ${TMPDIR}/backup.tar.gz -C ${TMPDIR}/backup
+    echo ${TMPDIR}
+  register: _backup_download
+  changed_when: false
+
+- name: Extract PVC-to-node mapping from PV nodeAffinity
+  ansible.builtin.shell: |
+    set -o pipefail
+    BACKUP_DIR="{{ _backup_download.stdout }}/backup"
+    PV_DIR="${BACKUP_DIR}/resources/persistentvolumes/cluster"
+    if [ ! -d "${PV_DIR}" ]; then
+      echo "WARNING: No PV resources found in backup" >&2
+      exit 0
+    fi
+    for f in ${PV_DIR}/*.json; do
+      pvc=$(jq -r '.spec.claimRef.name // empty' "$f")
+      ns=$(jq -r '.spec.claimRef.namespace // empty' "$f")
+      node=$(jq -r '
+        .spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[]
+        | select(.key | contains("topolvm")) | .values[0]
+      ' "$f" 2>/dev/null)
+      [ -n "$pvc" ] && [ -n "$node" ] && [ "$ns" = "{{ cifmw_backup_restore_namespace }}" ] && echo "${pvc}:${node}"
+    done
+  register: _pvc_node_mapping
+  changed_when: false
+
+- name: Print PVC-to-node mapping
+  ansible.builtin.debug:
+    msg: "{{ _pvc_node_mapping.stdout_lines }}"
+  when: _pvc_node_mapping.stdout != ""
+
+- name: Create dummy Deployments to pin PVCs to nodes
+  ansible.builtin.shell: |
+    set -o pipefail
+    PVC_NAME="{{ item.split(':')[0] }}"
+    NODE_NAME="{{ item.split(':')[1] }}"
+    cat <<EOF | oc apply -f -
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: pvc-pin-${PVC_NAME}
+      namespace: {{ cifmw_backup_restore_namespace }}
+      labels:
+        app: pvc-pin
+    spec:
+      replicas: 1
+      strategy:
+        type: Recreate
+      selector:
+        matchLabels:
+          app: pvc-pin
+          pvc: ${PVC_NAME}
+      template:
+        metadata:
+          labels:
+            app: pvc-pin
+            pvc: ${PVC_NAME}
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: ${NODE_NAME}
+          containers:
+          - name: pause
+            image: registry.k8s.io/pause:3.9
+            volumeMounts:
+            - name: data
+              mountPath: /data
+          volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: ${PVC_NAME}
+    EOF
+  loop: "{{ _pvc_node_mapping.stdout_lines }}"
+  changed_when: true
+  when: _pvc_node_mapping.stdout != ""
+
+- name: Clean up downloaded backup metadata
+  ansible.builtin.file:
+    path: "{{ _backup_download.stdout }}"
+    state: absent

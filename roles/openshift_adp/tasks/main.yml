@@ -1,0 +1,284 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# OADP Setup
+#
+# Installs and configures OADP (OpenShift API for Data Protection)
+# with an S3-compatible storage backend.
+
+- name: Verify S3 credentials are provided
+  ansible.builtin.fail:
+    msg: >-
+      cifmw_openshift_adp_s3_access_key and cifmw_openshift_adp_s3_secret_key
+      are required. Deploy an S3 backend first (e.g. deploy_minio role).
+  when: >-
+    cifmw_openshift_adp_s3_access_key is not defined or
+    cifmw_openshift_adp_s3_secret_key is not defined
+
+- name: Print setup header
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "OADP Setup"
+      - "========================================"
+      - "OADP Namespace: {{ cifmw_openshift_adp_namespace }}"
+      - "OADP Channel: {{ cifmw_openshift_adp_channel }}"
+      - "S3 Namespace: {{ cifmw_openshift_adp_s3_namespace }}"
+      - "S3 Bucket: {{ cifmw_openshift_adp_s3_bucket }}"
+      - "Node Agent (Kopia): {{ cifmw_openshift_adp_enable_node_agent }}"
+
+- name: Create OADP namespace
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc create namespace {{ cifmw_openshift_adp_namespace }} --dry-run=client -o yaml | oc apply -f -
+  changed_when: true
+
+- name: Create OperatorGroup for OADP
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat <<EOF | oc apply -f -
+    apiVersion: operators.coreos.com/v1
+    kind: OperatorGroup
+    metadata:
+      name: openshift-adp-operator-group
+      namespace: {{ cifmw_openshift_adp_namespace }}
+    spec:
+      targetNamespaces:
+      - {{ cifmw_openshift_adp_namespace }}
+    EOF
+  changed_when: true
+
+- name: Create Subscription for OADP operator
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat <<EOF | oc apply -f -
+    apiVersion: operators.coreos.com/v1alpha1
+    kind: Subscription
+    metadata:
+      name: redhat-oadp-operator
+      namespace: {{ cifmw_openshift_adp_namespace }}
+    spec:
+      channel: {{ cifmw_openshift_adp_channel }}
+      installPlanApproval: Automatic
+      name: redhat-oadp-operator
+      source: redhat-operators
+      sourceNamespace: openshift-marketplace
+    EOF
+  changed_when: true
+
+- name: Wait for OADP operator to be ready
+  ansible.builtin.shell: |
+    oc wait --for=condition=ready --timeout=300s pod -l control-plane=controller-manager -n {{ cifmw_openshift_adp_namespace }}
+  changed_when: false
+  register: _operator_wait
+  retries: 30
+  delay: 10
+  until: _operator_wait.rc == 0
+
+- name: Create cloud credentials secret
+  ansible.builtin.shell: |
+    set -o pipefail
+    TMPFILE=$(mktemp)
+    cat > ${TMPFILE} <<EOF
+    [default]
+    aws_access_key_id={{ cifmw_openshift_adp_s3_access_key }}
+    aws_secret_access_key={{ cifmw_openshift_adp_s3_secret_key }}
+    EOF
+    oc create secret generic cloud-credentials \
+      --from-file cloud=${TMPFILE} \
+      -n {{ cifmw_openshift_adp_namespace }} \
+      --dry-run=client -o yaml | oc apply -f -
+    rm -f ${TMPFILE}
+  changed_when: true
+
+- name: Get S3 API URL
+  ansible.builtin.shell: |
+    oc get route minio-api -n {{ cifmw_openshift_adp_s3_namespace }} -o jsonpath='{.spec.host}'
+  register: _s3_api_url
+  changed_when: false
+
+- name: Create DataProtectionApplication
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat <<EOF | oc apply -f -
+    apiVersion: oadp.openshift.io/v1alpha1
+    kind: DataProtectionApplication
+    metadata:
+      name: velero
+      namespace: {{ cifmw_openshift_adp_namespace }}
+    spec:
+      configuration:
+        velero:
+          defaultPlugins:
+          - openshift
+          - aws
+          - csi
+        nodeAgent:
+          enable: {{ cifmw_openshift_adp_enable_node_agent | lower }}
+          uploaderType: kopia
+      backupLocations:
+      - velero:
+          provider: aws
+          default: true
+          objectStorage:
+            bucket: {{ cifmw_openshift_adp_s3_bucket }}
+            prefix: {{ cifmw_openshift_adp_s3_prefix }}
+          config:
+            region: {{ cifmw_openshift_adp_s3_region }}
+            s3ForcePathStyle: "{{ cifmw_openshift_adp_s3_force_path_style | lower }}"
+            s3Url: https://{{ _s3_api_url.stdout }}
+            insecureSkipTLSVerify: "{{ cifmw_openshift_adp_s3_insecure_skip_tls | lower }}"
+          credential:
+            name: cloud-credentials
+            key: cloud
+    EOF
+  changed_when: true
+
+- name: Wait for Velero pod to be ready
+  ansible.builtin.shell: |
+    oc wait --for=condition=ready --timeout=300s pod -l app.kubernetes.io/name=velero -n {{ cifmw_openshift_adp_namespace }}
+  changed_when: false
+  register: _velero_wait
+  retries: 30
+  delay: 10
+  until: _velero_wait.rc == 0
+
+- name: Wait for node-agent pods to be ready
+  ansible.builtin.shell: |
+    oc wait --for=condition=ready --timeout=300s pod -l app.kubernetes.io/name=node-agent -n {{ cifmw_openshift_adp_namespace }}
+  changed_when: false
+  failed_when: false
+  when: cifmw_openshift_adp_enable_node_agent | bool
+
+- name: Get OADP pods
+  ansible.builtin.shell: |
+    oc get pods -n {{ cifmw_openshift_adp_namespace }}
+  register: _oadp_pods
+  changed_when: false
+
+- name: Display OADP pods
+  ansible.builtin.debug:
+    msg: "{{ _oadp_pods.stdout_lines }}"
+
+# ========================================
+# VolumeSnapshotClass for CSI snapshots
+# ========================================
+- name: Check for existing VolumeSnapshotClass
+  ansible.builtin.shell: |
+    oc get volumesnapshotclass -o json
+  register: _vsc_list
+  changed_when: false
+  failed_when: false
+
+- name: Create VolumeSnapshotClass for OADP (TopoLVM/LVMS)
+  ansible.builtin.shell: |
+    set -o pipefail
+    cat <<EOF | oc apply -f -
+    apiVersion: snapshot.storage.k8s.io/v1
+    kind: VolumeSnapshotClass
+    metadata:
+      name: lvms-velero
+      labels:
+        velero.io/csi-volumesnapshot-class: "true"
+      annotations:
+        snapshot.storage.kubernetes.io/is-default-class: "false"
+    driver: topolvm.io
+    deletionPolicy: Retain
+    EOF
+  changed_when: true
+  when: _vsc_list.stdout | from_json | json_query('items[?driver==`topolvm.io`]') | length > 0
+
+- name: Print VolumeSnapshotClass status (TopoLVM found)
+  ansible.builtin.debug:
+    msg: "VolumeSnapshotClass 'lvms-velero' created for OADP CSI snapshots"
+  when: _vsc_list.stdout | from_json | json_query('items[?driver==`topolvm.io`]') | length > 0
+
+- name: Print VolumeSnapshotClass status (no TopoLVM)
+  ansible.builtin.debug:
+    msg: "No TopoLVM driver found. If using a different CSI driver, manually create a VolumeSnapshotClass with velero.io/csi-volumesnapshot-class=true label."
+  when: _vsc_list.stdout | from_json | json_query('items[?driver==`topolvm.io`]') | length == 0
+
+# ========================================
+# Verify BackupStorageLocation
+# ========================================
+- name: Wait for BackupStorageLocation to be available
+  ansible.builtin.shell: |
+    for i in {1..30}; do
+      PHASE=$(oc get backupstoragelocation -n {{ cifmw_openshift_adp_namespace }} -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
+      if [ "$PHASE" = "Available" ]; then
+        echo "Available"
+        exit 0
+      fi
+      sleep 10
+    done
+    echo "NotAvailable"
+    exit 1
+  register: _bsl_status
+  changed_when: false
+  failed_when: false
+
+- name: Get BackupStorageLocation status
+  ansible.builtin.shell: |
+    oc get backupstoragelocation -n {{ cifmw_openshift_adp_namespace }}
+  register: _bsl_output
+  changed_when: false
+
+- name: Display BackupStorageLocation status
+  ansible.builtin.debug:
+    msg: "{{ _bsl_output.stdout_lines }}"
+
+- name: Get troubleshooting info if BSL not available
+  ansible.builtin.shell: |
+    echo "=== BackupStorageLocation ==="
+    oc get backupstoragelocation -n {{ cifmw_openshift_adp_namespace }} -o yaml
+    echo ""
+    echo "=== Velero Logs (last 50 lines) ==="
+    oc logs -n {{ cifmw_openshift_adp_namespace }} deployment/velero --tail=50
+  register: _bsl_debug
+  changed_when: false
+  when: _bsl_status.rc != 0
+
+- name: Display troubleshooting info
+  ansible.builtin.debug:
+    msg: "{{ _bsl_debug.stdout_lines }}"
+  when: _bsl_status.rc != 0
+
+- name: Print success summary
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "OADP Setup Complete"
+      - "========================================"
+      - ""
+      - "OADP Namespace: {{ cifmw_openshift_adp_namespace }}"
+      - "S3 API: https://{{ _s3_api_url.stdout }}"
+      - "Bucket: {{ cifmw_openshift_adp_s3_bucket }}"
+      - "BackupStorageLocation: Available"
+  when: _bsl_status.rc == 0
+
+- name: Print warning summary
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "OADP Setup Complete with Warnings"
+      - "========================================"
+      - ""
+      - "BackupStorageLocation is not yet available."
+      - ""
+      - "Troubleshoot:"
+      - "  oc get backupstoragelocation -n {{ cifmw_openshift_adp_namespace }} -o yaml"
+      - "  oc logs -n {{ cifmw_openshift_adp_namespace }} deployment/velero"
+  when: _bsl_status.rc != 0
