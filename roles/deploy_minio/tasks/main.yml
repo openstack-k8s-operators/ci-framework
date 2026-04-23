@@ -1,0 +1,74 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Deploy MinIO
+#
+# Deploys MinIO as an S3-compatible storage backend.
+# Creates namespace, PVC, Deployment, Service, Routes.
+# Bucket is created via mkdir in the container command.
+#
+# Output facts:
+#   cifmw_deploy_minio_access_key: Root user (for OADP credentials)
+#   cifmw_deploy_minio_secret_key: Root password (for OADP credentials)
+
+- name: Create temp directory for rendered templates
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: deploy-minio-
+  register: _deploy_minio_rendered_dir
+
+- name: Render MinIO manifests
+  ansible.builtin.template:
+    src: minio.yaml.j2
+    dest: "{{ _deploy_minio_rendered_dir.path }}/minio.yaml"
+    mode: "0644"
+
+- name: Apply MinIO manifests
+  ansible.builtin.shell: |
+    oc apply -f {{ _deploy_minio_rendered_dir.path }}/minio.yaml
+  changed_when: true
+
+- name: Wait for MinIO deployment to be ready
+  ansible.builtin.shell: |
+    oc wait --for=condition=available --timeout=300s deployment/minio -n {{ cifmw_deploy_minio_namespace }}
+  changed_when: false
+
+- name: Export credentials for downstream roles
+  ansible.builtin.set_fact:
+    cifmw_deploy_minio_access_key: "{{ cifmw_deploy_minio_root_user }}"
+    cifmw_deploy_minio_secret_key: "{{ cifmw_deploy_minio_root_password }}"
+
+- name: Get MinIO routes
+  ansible.builtin.shell: |
+    echo "Console: https://$(oc get route minio-console -n {{ cifmw_deploy_minio_namespace }} -o jsonpath='{.spec.host}')"
+    echo "API: https://$(oc get route minio-api -n {{ cifmw_deploy_minio_namespace }} -o jsonpath='{.spec.host}')"
+  register: _minio_routes
+  changed_when: false
+
+- name: Print setup complete
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "MinIO Setup Complete"
+      - "========================================"
+      - "{{ _minio_routes.stdout_lines[0] }}"
+      - "{{ _minio_routes.stdout_lines[1] }}"
+      - "Buckets: {{ cifmw_deploy_minio_buckets | join(', ') }}"
+
+- name: Cleanup rendered templates
+  ansible.builtin.file:
+    path: "{{ _deploy_minio_rendered_dir.path }}"
+    state: absent

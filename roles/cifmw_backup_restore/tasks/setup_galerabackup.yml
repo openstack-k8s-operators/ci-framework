@@ -1,0 +1,88 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Create GaleraBackup CRs and wait for cronjobs to be ready.
+# This is a prerequisite for backup — the CRs must exist before
+# triggering backup jobs.
+
+- name: Get Galera instance names from OpenStackControlPlane
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc get openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} \
+      -o jsonpath='{.items[0].spec.galera.templates}' | jq -r 'keys[]'
+  register: _galera_instance_names
+  changed_when: false
+
+- name: Set Galera instance list
+  ansible.builtin.set_fact:
+    _galera_instances: "{{ _galera_instance_names.stdout_lines if _galera_instance_names.stdout != '' else [] }}"
+
+- name: Get default StorageClass if not specified
+  ansible.builtin.shell: |
+    oc get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}'
+  register: _default_storage_class
+  changed_when: false
+  when: cifmw_backup_restore_galera_storage_class == ""
+
+- name: Set Galera backup storage class
+  ansible.builtin.set_fact:
+    _galera_storage_class: "{{ cifmw_backup_restore_galera_storage_class if cifmw_backup_restore_galera_storage_class != '' else _default_storage_class.stdout }}"
+
+- name: Create temp directory for rendered templates
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: openstack-galerabackup-
+  register: _galerabackup_rendered_dir
+
+- name: Render GaleraBackup CRs
+  ansible.builtin.template:
+    src: galerabackup.yaml.j2
+    dest: "{{ _galerabackup_rendered_dir.path }}/galerabackup-{{ item }}.yaml"
+    mode: "0644"
+  vars:
+    galera_instance_name: "{{ item }}"
+  loop: "{{ _galera_instances }}"
+
+- name: Create GaleraBackup CRs
+  ansible.builtin.shell: |
+    oc apply -f {{ _galerabackup_rendered_dir.path }}/galerabackup-{{ item }}.yaml
+  loop: "{{ _galera_instances }}"
+  changed_when: true
+
+- name: Wait for GaleraBackup CRs to be ready
+  ansible.builtin.command:
+    cmd: >-
+      oc wait galerabackup --all -n {{ cifmw_backup_restore_namespace }}
+      --for=jsonpath='{.status.conditions[0].status}'=True --timeout=120s
+  changed_when: false
+
+- name: Wait for GaleraBackup cronjobs to be created
+  ansible.builtin.shell: |
+    oc get cronjob -n {{ cifmw_backup_restore_namespace }} -l app=galera -o jsonpath='{.items[*].metadata.name}'
+  register: _galera_backup_cronjobs
+  changed_when: false
+  until: _galera_backup_cronjobs.stdout.split() | length >= _galera_instances | length
+  retries: 30
+  delay: 10
+
+- name: Cleanup rendered templates
+  ansible.builtin.file:
+    path: "{{ _galerabackup_rendered_dir.path }}"
+    state: absent
+
+- name: Display GaleraBackup setup complete
+  ansible.builtin.debug:
+    msg: "GaleraBackup CRs created for: {{ _galera_instances | join(', ') }}"

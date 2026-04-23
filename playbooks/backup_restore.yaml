@@ -1,0 +1,309 @@
+---
+# End-to-end backup/restore test playbook
+#
+# Used standalone or imported by post-deployment.yml (gated by
+# cifmw_run_backup_restore_test).
+#
+# Each step can be enabled/disabled independently for iterative testing.
+#
+# Prerequisites:
+# - OpenStack control plane deployed and healthy
+# - OpenStackBackupConfig CR created (for backup labeling)
+# - For manual testing on a reproducer, run post_deployment.sh first:
+#     ./post_deployment.sh -e zuul_log_collection=true \
+#       -e cifmw_nolog=false -e cifmw_run_tests=false
+#
+# Manual usage (reproducer):
+#   COMMON_ARGS="-i ~/ci-framework-data/artifacts/zuul_inventory.yml \
+#     -e @~/ci-framework-data/parameters/reproducer-variables.yml \
+#     -e @~/ci-framework-data/parameters/openshift-environment.yml"
+#
+#   # Full run (with test workload):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_create_workload=true
+#
+#   # Full run (without workload):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml
+#
+#   # Install deps only:
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_run_restore=false
+#
+#   # Backup only (deps already installed):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_run_restore=false
+#
+#   # Cleanup + restore (backup already done):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_backup_timestamp=20260323-144546
+#
+#   # Restore only (cleanup already done):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_backup_timestamp=20260323-144546
+#
+#   # With PVC pinning (WaitForFirstConsumer storage):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_pin_pvcs=true
+
+- name: Backup and Restore end-to-end test
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+
+  vars:
+    cifmw_backup_restore_install_deps: true
+    cifmw_backup_restore_create_workload: true
+    cifmw_backup_restore_run_backup: true
+    cifmw_backup_restore_run_cleanup: true
+    cifmw_backup_restore_run_restore: true
+    # cifmw_backup_restore_backup_timestamp: set this when running restore without backup step
+
+    # Workload creation defaults (used by the update role)
+    cifmw_update_ping_test: true
+    cifmw_update_control_plane_check: false
+    cifmw_update_artifacts_basedir_suffix: "tests/update"
+    cifmw_update_artifacts_basedir: "{{ ansible_user_dir }}/ci-framework-data/{{ cifmw_update_artifacts_basedir_suffix }}"
+    cifmw_update_workload_launch_script: "{{ cifmw_update_artifacts_basedir }}/workload_launch.sh"
+    cifmw_update_timestamper_cmd: >-
+      | awk '{ print strftime("%Y-%m-%d %H:%M:%S |"), $0; fflush(); }'
+    cifmw_update_ping_start_script: "{{ cifmw_update_artifacts_basedir }}/l3_agent_start_ping.sh"
+    cifmw_update_ping_stop_script: "{{ cifmw_update_artifacts_basedir }}/l3_agent_stop_ping.sh"
+    cifmw_update_namespace: "openstack"
+
+  tasks:
+    - name: Run pre_backup_restore hooks
+      vars:
+        step: pre_backup_restore
+      ansible.builtin.import_role:
+        name: run_hook
+
+    # ========================================
+    # Step 1: Install dependencies
+    # ========================================
+    - name: Setup MinIO
+      ansible.builtin.include_role:
+        name: deploy_minio
+      when: cifmw_backup_restore_install_deps | default(true) | bool
+
+    - name: Setup OADP
+      ansible.builtin.include_role:
+        name: openshift_adp
+      vars:
+        cifmw_openshift_adp_s3_access_key: "{{ cifmw_deploy_minio_access_key }}"
+        cifmw_openshift_adp_s3_secret_key: "{{ cifmw_deploy_minio_secret_key }}"
+      when: cifmw_backup_restore_install_deps | default(true) | bool
+
+    - name: Setup GaleraBackup CRs
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+        tasks_from: setup_galerabackup.yml
+      when: cifmw_backup_restore_install_deps | default(true) | bool
+
+    # ========================================
+    # Step 2: Create test workload
+    # ========================================
+    - name: Create test workload
+      when: cifmw_backup_restore_create_workload | default(true) | bool
+      vars:
+        cifmw_update_ping_test: true
+      block:
+        - name: Ensure update artifacts directory exists
+          ansible.builtin.file:
+            path: "{{ cifmw_update_artifacts_basedir | default(ansible_user_dir ~ '/ci-framework-data/tests/update') }}"
+            state: directory
+            mode: "0755"
+
+        - name: Generate workload launch script
+          ansible.builtin.include_role:
+            name: update
+            tasks_from: create_test_files.yml
+
+        - name: Create local openstackclient container
+          ansible.builtin.include_role:
+            name: update
+            tasks_from: create_local_openstackclient.yml
+
+        - name: Create the workload instance
+          ansible.builtin.include_role:
+            name: update
+            tasks_from: create_instance.yml
+
+    # ========================================
+    # Step 3: Create backup
+    # ========================================
+    - name: Create backup
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+      vars:
+        cifmw_backup_restore_action: backup
+        cifmw_backup_restore_auto_ack: true
+      when: cifmw_backup_restore_run_backup | default(true) | bool
+
+    - name: Print backup timestamp
+      ansible.builtin.debug:
+        msg: "Backup completed with timestamp: {{ cifmw_backup_restore_backup_name_suffix }}"
+      when: cifmw_backup_restore_run_backup | default(true) | bool
+
+    # ========================================
+    # Step 4: Cleanup namespace
+    # ========================================
+    - name: Cleanup
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+      vars:
+        cifmw_backup_restore_action: cleanup
+        cifmw_backup_restore_auto_ack: true
+      when: cifmw_backup_restore_run_cleanup | default(true) | bool
+
+    # ========================================
+    # Step 5: Restore from backup
+    # ========================================
+    - name: Restore
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+      vars:
+        cifmw_backup_restore_action: restore
+        cifmw_backup_restore_backup_timestamp: "{{ cifmw_backup_restore_backup_name_suffix }}"
+        cifmw_backup_restore_auto_ack: true
+      when: cifmw_backup_restore_run_restore | default(true) | bool
+
+    # ========================================
+    # Step 6: Post-restore workload validation
+    # ========================================
+    - name: Validate test workload after restore
+      when:
+        - cifmw_backup_restore_create_workload | default(false) | bool
+        - cifmw_backup_restore_run_restore | default(true) | bool
+      vars:
+        _os_exec: >-
+          oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace | default('openstack') }} --
+      block:
+        - name: Verify compute services are up
+          ansible.builtin.shell: |
+            set -o pipefail
+            {{ _os_exec }} openstack compute service list -f json | \
+              jq -r '.[] | "\(.Binary) \(.Host) \(.State)"'
+          register: _compute_services
+          changed_when: false
+
+        - name: Display compute services
+          ansible.builtin.debug:
+            msg: "{{ _compute_services.stdout_lines }}"
+
+        - name: Verify network agents are up
+          ansible.builtin.shell: |
+            set -o pipefail
+            {{ _os_exec }} openstack network agent list -f json | \
+              jq -r '.[] | "\(.["Agent Type"]) \(.Host) \(.Alive)"'
+          register: _network_agents
+          changed_when: false
+
+        - name: Display network agents
+          ansible.builtin.debug:
+            msg: "{{ _network_agents.stdout_lines }}"
+
+        - name: Get instance info
+          ansible.builtin.shell: |
+            set -o pipefail
+            {{ _os_exec }} openstack server list -f json | \
+              jq -r '.[0] | "\(.Name) \(.Status) \(.Networks)"'
+          register: _instance_info
+          changed_when: false
+
+        - name: Display instance info
+          ansible.builtin.debug:
+            msg: "Instance: {{ _instance_info.stdout }}"
+
+        - name: Get floating IP of test instance
+          ansible.builtin.shell: |
+            set -o pipefail
+            {{ _os_exec }} openstack server list -f json | \
+              jq -r '.[0].Networks' | grep -oP '[\d.]+' | tail -1
+          register: _instance_fip
+          changed_when: false
+
+        - name: Ping floating IP
+          ansible.builtin.shell: |
+            ping -c 3 -W 5 {{ _instance_fip.stdout }}
+          register: _ping_result
+          changed_when: false
+          retries: 6
+          delay: 10
+          until: _ping_result.rc == 0
+
+        - name: Display ping result
+          ansible.builtin.debug:
+            msg: "Ping to {{ _instance_fip.stdout }}: SUCCESS"
+
+        - name: Stop test instance
+          ansible.builtin.shell: |
+            set -o pipefail
+            INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+            {{ _os_exec }} openstack server stop ${INSTANCE}
+          changed_when: true
+
+        - name: Wait for instance to stop
+          ansible.builtin.shell: |
+            set -o pipefail
+            INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+            {{ _os_exec }} openstack server show ${INSTANCE} -f json | jq -r '.status'
+          register: _stop_status
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: _stop_status.stdout == 'SHUTOFF'
+
+        - name: Start test instance
+          ansible.builtin.shell: |
+            set -o pipefail
+            INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+            {{ _os_exec }} openstack server start ${INSTANCE}
+          changed_when: true
+
+        - name: Wait for instance to become active
+          ansible.builtin.shell: |
+            set -o pipefail
+            INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+            {{ _os_exec }} openstack server show ${INSTANCE} -f json | jq -r '.status'
+          register: _start_status
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: _start_status.stdout == 'ACTIVE'
+
+        - name: Ping floating IP after stop/start
+          ansible.builtin.shell: |
+            ping -c 3 -W 5 {{ _instance_fip.stdout }}
+          register: _ping_after_restart
+          changed_when: false
+          retries: 6
+          delay: 10
+          until: _ping_after_restart.rc == 0
+
+        - name: Post-restore workload validation passed
+          ansible.builtin.debug:
+            msg: >-
+              Workload validation passed: instance reachable via FIP {{ _instance_fip.stdout }},
+              stop/start successful, ping after restart OK
+
+    # ========================================
+    # Step 7: Post-restore tempest validation
+    # ========================================
+    - name: Run post-restore tempest validation
+      ansible.builtin.include_role:
+        name: "{{ cifmw_run_test_role | default('test_operator') }}"
+      when: cifmw_backup_restore_run_post_tempest | default(false) | bool
+
+    - name: Run post_backup_restore hooks
+      vars:
+        step: post_backup_restore
+      ansible.builtin.import_role:
+        name: run_hook
