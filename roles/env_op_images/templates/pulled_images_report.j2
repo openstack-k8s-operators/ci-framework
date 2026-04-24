@@ -1,0 +1,40 @@
+{# Produces a YAML list of per-container image entries.
+   Inputs (Ansible facts):
+     _pulled_report_pods            – register from k8s_info pod queries
+     _pulled_report_mirror_mappings – flat list of {source, mirror} dicts
+#}
+{% set entries = [] %}
+{% set all_pods = _pulled_report_pods.results |
+                  map(attribute='resources', default=[]) | flatten %}
+{% for pod in all_pods %}
+{%   set image_statuses = [] %}
+{%   for cs in pod.status.containerStatuses | default([]) %}
+{%     set _ = image_statuses.append({'cs': cs, 'type': 'container'}) %}
+{%   endfor %}
+{%   for cs in pod.status.initContainerStatuses | default([]) %}
+{%     set _ = image_statuses.append({'cs': cs, 'type': 'init_container'}) %}
+{%   endfor %}
+{%   for entry in image_statuses %}
+{%     set cs = entry.cs %}
+{%     set image = cs.image | default('unknown') %}
+{%     set image_id = cs.imageID | default('') %}
+{%     set match = namespace(host=image.split('/')[0], expected_pull_basis='source') %}
+{%     for m in _pulled_report_mirror_mappings if m.source is defined and m.source and image.startswith(m.source) %}
+{%       if loop.first %}
+{%         set match.host = m.mirror.split('/')[0] %}
+{%         set match.expected_pull_basis = 'mirror' %}
+{%       endif %}
+{%     endfor %}
+{%     set _ = entries.append({
+         'namespace': pod.metadata.namespace,
+         'pod': pod.metadata.name,
+         'node': pod.spec.get('nodeName', 'unknown'),
+         'container': cs.name,
+         'image': image,
+         'image_id': image_id,
+         'expected_pull_location': match.host,
+         'expected_pull_basis': match.expected_pull_basis
+       }) %}
+{%   endfor %}
+{% endfor %}
+{{ entries }}

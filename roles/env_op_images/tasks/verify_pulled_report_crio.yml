@@ -1,0 +1,112 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Cross-reference the pulled-images report (from pulled_images_report.yml)
+# with CRI-O journal logs from every cluster node to confirm which images
+# were actually pulled by the container runtime.
+#
+# This file runs during POST-RUN log collection so it must NEVER use
+# ansible.builtin.fail -- a failure here would abort the entire
+# log-collection phase and lose all other diagnostic artifacts.
+
+- name: Verify pulled report against CRI-O node logs
+  when:
+    - cifmw_openshift_kubeconfig is defined
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  block:
+    - name: Check pulled images report exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_env_op_images_pulled_report_path }}"
+      register: _verify_crio_pulled_stat
+
+    - name: Collect CRI-O logs and verify
+      when: _verify_crio_pulled_stat.stat.exists
+      block:
+        - name: Ensure CRI-O logs directory exists
+          ansible.builtin.file:
+            path: "{{ cifmw_env_op_images_crio_logs_dir }}"
+            state: directory
+            mode: "0755"
+
+        - name: List cluster nodes
+          ansible.builtin.command:
+            cmd: oc get nodes -o json
+          register: _verify_crio_nodes_json
+          changed_when: false
+          failed_when: false
+
+        - name: Warn when oc get nodes did not succeed
+          when: _verify_crio_nodes_json.rc != 0
+          ansible.builtin.debug:
+            msg: >-
+              oc get nodes failed (rc={{ _verify_crio_nodes_json.rc }});
+              cannot fetch CRI-O logs. Skipping verification.
+
+        - name: Fetch and verify CRI-O logs
+          when: _verify_crio_nodes_json.rc == 0
+          block:
+            - name: Extract node names
+              ansible.builtin.set_fact:
+                _verify_crio_node_names: >-
+                  {{
+                    (_verify_crio_nodes_json.stdout | from_json).get('items', [])
+                    | map(attribute='metadata.name') | list
+                  }}
+
+            - name: Fetch CRI-O unit logs per node
+              ansible.builtin.command:
+                cmd: >-
+                  oc adm node-logs "{{ item }}" -u crio
+                  --since=-24h
+              loop: "{{ _verify_crio_node_names | default([]) }}"
+              timeout: 120
+              failed_when: false
+              register: _verify_crio_fetch
+
+            # Filename is sanitised to avoid path-traversal with unusual node names.
+            - name: Write CRI-O logs to files per node
+              ansible.builtin.copy:
+                dest: "{{ cifmw_env_op_images_crio_logs_dir }}/{{ item.item | regex_replace('[^A-Za-z0-9._-]+', '_') }}.crio.log"
+                content: "{{ item.stdout }}"
+                mode: "0644"
+              loop: "{{ _verify_crio_fetch.results | default([]) }}"
+              loop_control:
+                label: "{{ item.item | default('') }}"
+              when: item.rc | default(1) == 0
+
+            # Non-fatal: some nodes may be unreachable (e.g. NotReady).
+            - name: Warn when node log fetch failed for a node
+              when: item.rc | default(0) != 0
+              ansible.builtin.debug:
+                msg: "oc adm node-logs failed for node (rc={{ item.rc | default('n/a') }}): {{ item.item | default('unknown') }}"
+              loop: "{{ _verify_crio_fetch.results | default([]) }}"
+              loop_control:
+                label: "{{ item.item | default('') }}"
+
+            - name: Find fetched CRI-O log files
+              ansible.builtin.find:
+                paths: "{{ cifmw_env_op_images_crio_logs_dir }}"
+                patterns: "*.crio.log"
+              register: _verify_crio_log_files
+
+            - name: Enrich pulled report with CRI-O evidence
+              when: _verify_crio_log_files.matched | int > 0
+              verify_pulled_report_crio:
+                report_path: "{{ cifmw_env_op_images_pulled_report_path }}"
+                log_dir: "{{ cifmw_env_op_images_crio_logs_dir }}"
+                output_path: "{{ cifmw_env_op_images_verified_report_path }}"

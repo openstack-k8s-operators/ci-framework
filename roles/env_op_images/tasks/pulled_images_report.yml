@@ -37,28 +37,33 @@
         state: directory
         mode: "0755"
 
-    # Legacy OpenShift mirror CRD; empty or error is OK (parsed as no items).
     - name: Get ICSP mirror rules
       ansible.builtin.command:
         cmd: oc get imagecontentsourcepolicy -o json
       register: _pulled_report_icsp
       failed_when: false
 
-    # Preferred / current mirror CRD alongside ICSP.
     - name: Get IDMS mirror rules
       ansible.builtin.command:
         cmd: oc get imagedigestmirrorset -o json
       register: _pulled_report_idms
       failed_when: false
 
-    # One flat list of rules for templating: each mirror list entry becomes
-    # its own row so prefix matching can use the same loop for all mirrors.
+    # Flatten ICSP repositoryDigestMirrors and IDMS imageDigestMirrors into
+    # a single list of {source, mirror} pairs.  A source with N mirrors
+    # produces N entries so the Jinja template can prefix-match every
+    # mirror in one loop.
+    # Example output (_pulled_report_mirror_mappings):
+    #   - source: registry.redhat.io/openstack-k8s-operators
+    #     mirror: quay.example.com/rh-osbs/openstack-k8s-operators
+    #   - source: registry.redhat.io/openstack-k8s-operators
+    #     mirror: internal-registry.corp.net/openstack-k8s-operators
     - name: Build source-to-mirror mapping from ICSP/IDMS
       vars:
         _icsp_items: >-
-          {{ (_pulled_report_icsp.stdout | default('{}') | from_json).get('items', []) }}
+          {{ (_pulled_report_icsp.stdout | default('{}', true) | from_json).get('items', []) }}
         _idms_items: >-
-          {{ (_pulled_report_idms.stdout | default('{}') | from_json).get('items', []) }}
+          {{ (_pulled_report_idms.stdout | default('{}', true) | from_json).get('items', []) }}
         _mappings: >-
           {% set maps = [] %}
           {# ICSP spec.repositoryDigestMirrors: source repo + mirrors[] #}
@@ -85,15 +90,6 @@
       ansible.builtin.set_fact:
         _pulled_report_mirror_mappings: "{{ _mappings | trim | from_yaml }}"
 
-    - name: Report ICSP/IDMS mirror rules found
-      when: _pulled_report_mirror_mappings | length > 0
-      ansible.builtin.debug:
-        msg: >-
-          {{ item.source }} -> {{ item.mirror }}
-      loop: "{{ _pulled_report_mirror_mappings }}"
-      loop_control:
-        label: "{{ item.source }}"
-
     - name: Warn if no ICSP/IDMS mirror rules found
       when: _pulled_report_mirror_mappings | length == 0
       ansible.builtin.debug:
@@ -115,57 +111,10 @@
         label: "{{ item }}"
       failed_when: false
 
-    # Flatten all loop results, then one report row per container + initContainer.
     - name: Build per-pod pulled images report
-      vars:
-        _report: >-
-          {% set entries = [] %}
-          {% set all_pods = _pulled_report_pods.results |
-                            map(attribute='resources', default=[]) | flatten %}
-          {% for pod in all_pods %}
-          {%   set pod_labels = pod.metadata.labels | default({}) %}
-          {%   set operator_name = pod_labels.get('openstack.org/operator-name', '') %}
-          {%   set app_label = pod_labels.get('app', pod_labels.get('app.kubernetes.io/name', '')) %}
-          {# Build a single list so regular and init containers share one loop #}
-          {%   set image_statuses = [] %}
-          {%   for cs in pod.status.containerStatuses | default([]) %}
-          {%     set _ = image_statuses.append({'cs': cs, 'type': 'container'}) %}
-          {%   endfor %}
-          {%   for cs in pod.status.initContainerStatuses | default([]) %}
-          {%     set _ = image_statuses.append({'cs': cs, 'type': 'init_container'}) %}
-          {%   endfor %}
-          {%   for entry in image_statuses %}
-          {%     set cs = entry.cs %}
-          {%     set image = cs.image | default('unknown') %}
-          {%     set image_id = cs.imageID | default('') %}
-          {%     set image_repo = image.split('@')[0].split(':')[0] %}
-          {%     set image_name = image_repo.split('/')[-1] %}
-          {# Default: host = first path segment of image ref; basis = source #}
-          {%     set match = namespace(host=image.split('/')[0], expected_pull_basis='source') %}
-          {# First mapping where image startswith source: use mirror registry host #}
-          {%     for m in _pulled_report_mirror_mappings if m.source is defined and m.source and image.startswith(m.source) %}
-          {%       if loop.first %}
-          {%         set match.host = m.mirror.split('/')[0] %}
-          {%         set match.expected_pull_basis = 'mirror' %}
-          {%       endif %}
-          {%     endfor %}
-          {%     set _ = entries.append({
-                   'namespace': pod.metadata.namespace,
-                   'pod': pod.metadata.name,
-                   'container': cs.name,
-                   'container_type': entry.type,
-                   'operator': operator_name if operator_name else 'N/A',
-                   'app': app_label if app_label else image_name,
-                   'image': image,
-                   'image_id': image_id,
-                   'expected_pull_location': match.host,
-                   'expected_pull_basis': match.expected_pull_basis
-                 }) %}
-          {%   endfor %}
-          {% endfor %}
-          {{ entries }}
       ansible.builtin.set_fact:
-        _pulled_images_report: "{{ _report | trim | from_yaml }}"
+        _pulled_images_report: >-
+          {{ lookup('template', 'pulled_images_report.j2') | trim | from_yaml }}
 
     # Counts for the YAML artifact summary section.
     - name: Build report summary
@@ -192,39 +141,15 @@
           summary: "{{ _pulled_report_summary }}"
           images: "{{ _pulled_images_report }}"
       ansible.builtin.copy:
-        dest: >-
-          {{
-            (cifmw_env_op_images_dir, 'artifacts',
-             cifmw_env_op_images_pulled_report_file) | path_join
-          }}
+        dest: "{{ cifmw_env_op_images_pulled_report_path }}"
         content: "{{ _full_report | to_nice_yaml }}"
         mode: "0644"
 
-    # Console visibility: split rows by how ICSP/IDMS classification turned out.
-    - name: Images with expected_pull_basis source
+    - name: Pulled images report summary
       ansible.builtin.debug:
         msg: >-
-          [{{ item.app }}] {{ item.image }} ->
-          expected pull location {{ item.expected_pull_location }}
-          ({{ item.container_type }}: {{ item.container }}
-          | operator: {{ item.operator }}
-          | pod: {{ item.namespace }}/{{ item.pod }})
-      loop: >-
-        {{ _pulled_images_report |
-           selectattr('expected_pull_basis', 'equalto', 'source') | list }}
-      loop_control:
-        label: "{{ item.app }}/{{ item.container }}"
-
-    - name: Images with expected_pull_basis mirror
-      ansible.builtin.debug:
-        msg: >-
-          [{{ item.app }}] {{ item.image }} ->
-          expected pull location {{ item.expected_pull_location }}
-          ({{ item.container_type }}: {{ item.container }}
-          | operator: {{ item.operator }}
-          | pod: {{ item.namespace }}/{{ item.pod }})
-      loop: >-
-        {{ _pulled_images_report |
-           selectattr('expected_pull_basis', 'equalto', 'mirror') | list }}
-      loop_control:
-        label: "{{ item.app }}/{{ item.container }}"
+          Pulled images report: {{ _pulled_report_summary.total_containers }} containers
+          ({{ _pulled_report_summary.containers_expected_basis_mirror }} mirror,
+          {{ _pulled_report_summary.containers_expected_basis_source }} source),
+          {{ _pulled_report_summary.mirror_rules_found }} mirror rules.
+          Full report: {{ cifmw_env_op_images_pulled_report_path }}
