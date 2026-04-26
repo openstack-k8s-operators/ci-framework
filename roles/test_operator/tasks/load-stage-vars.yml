@@ -1,0 +1,71 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# Load and merge stage-level variable overrides into stage_vars_dict.
+#
+# Expected input:
+#   _stage_vars: dict with at least .type and optionally
+#                .test_vars_file and .test_vars
+#
+# Output:
+#   stage_vars_dict: merged cifmw_test_operator_* variables for this stage.
+
+- name: Set empty stage vars dict
+  ansible.builtin.set_fact:
+    stage_vars_dict: {}
+
+- name: Include stage var file
+  ansible.builtin.include_vars:
+    file: "{{ _stage_vars.test_vars_file | default('/dev/null') }}"
+    name: _stage_var_file
+
+- name: Merge file vars and test vars
+  vars:
+    file_vars: "{{ _stage_var_file }}"
+    test_vars: "{{ _stage_vars.test_vars | default({}) }}"
+  ansible.builtin.set_fact:
+    _stage_test_vars: "{{ file_vars | combine(test_vars) }}"
+
+- name: Overwrite global_vars with stage_vars
+  ansible.builtin.set_fact:
+    stage_vars_dict: >-
+      {{
+        stage_vars_dict |
+        combine({
+          item.key: _stage_test_vars[item.key] |
+          default(lookup('vars', item.key, default=omit))
+        })
+      }}
+  with_dict: >-
+    {{
+      vars | combine(_stage_test_vars) |
+      dict2items |
+      selectattr('key', 'match', '^cifmw_test_operator_') |
+      items2dict
+    }}
+
+- name: Override specific type config
+  vars:
+    _stage_config: 'cifmw_test_operator_{{ _stage_vars.type }}_config'
+  ansible.builtin.set_fact:
+    stage_vars_dict: >-
+      {{
+        stage_vars_dict |
+        combine({
+          _stage_config: _stage_test_vars[_stage_config] |
+          default(lookup('vars', _stage_config, default=omit))
+        })
+      }}
