@@ -13,32 +13,8 @@
   ansible.builtin.import_role:
     name: run_hook
 
-- name: Set empty stage vars dict
-  ansible.builtin.set_fact:
-    stage_vars_dict: {}
-
-- name: Include stage var file
-  ansible.builtin.include_vars:
-    file: "{{ _stage_vars.test_vars_file | default('/dev/null') }}"
-    name: _stage_var_file
-
-- name: Merge file vars and test vars
-  vars:
-    file_vars: "{{ _stage_var_file }}"
-    test_vars: "{{ _stage_vars.test_vars | default({}) }}"
-  ansible.builtin.set_fact:
-    _stage_test_vars: "{{ file_vars | combine(test_vars) }}"
-
-- name: Overwrite global_vars with stage_vars
-  ansible.builtin.set_fact:
-    stage_vars_dict: "{{ stage_vars_dict | combine({item.key: _stage_test_vars[item.key] | default(lookup('vars', item.key, default=omit)) }) }}"
-  with_dict: "{{ vars | combine(_stage_test_vars) | dict2items | selectattr('key', 'match', '^cifmw_test_operator_') | items2dict }}"
-
-- name: Override specific type config
-  vars:
-    _stage_config: 'cifmw_test_operator_{{ _stage_vars.type }}_config'
-  ansible.builtin.set_fact:
-    stage_vars_dict: "{{ stage_vars_dict | combine({_stage_config: _stage_test_vars[_stage_config] | default(lookup('vars', _stage_config, default=omit)) }) }}"
+- name: Load stage variables
+  ansible.builtin.include_tasks: load-stage-vars.yml
 
 - name: "Call runner {{ _stage_vars.type }}"
   ansible.builtin.include_tasks: "runners/{{ _stage_vars.type }}_runner.yml"
