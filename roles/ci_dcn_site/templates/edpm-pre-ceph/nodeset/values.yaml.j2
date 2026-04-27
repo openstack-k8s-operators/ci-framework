@@ -22,11 +22,16 @@ data:
       ansibleVars:
         timesync_ntp_servers:
           - hostname: clock.redhat.com
-        # CHANGEME -- see https://access.redhat.com/solutions/253273
-        # edpm_bootstrap_command: |
-        #       subscription-manager register --username <subscription_manager_username> \
-        #         --password <subscription_manager_password>
-        #       podman login -u <registry_username> -p <registry_password> registry.redhat.io
+        # configuration needed to test FR5 and workaround known issues
+        # cifmw_registry_token_credentials is defined in parent job integration-uni-base
+        edpm_bootstrap_command: >-
+          dnf -y install conntrack-tools &&
+          mkdir -p /root/.config/containers/ &&
+          echo "{\"default\":[{\"type\":\"insecureAcceptAnything\"}]}" > /root/.config/containers/policy.json
+{% if cifmw_registry_token_credentials is defined %}
+        edpm_container_registry_logins:
+          registry.stage.redhat.io: "{{ '{{' }} cifmw_registry_token_credentials | items2dict {{ '}}' }}"
+{% endif %}
         edpm_network_config_hide_sensitive_logs: false
         edpm_network_config_os_net_config_mappings:
 {% for _host_name in _edpm_hosts.keys() %}
