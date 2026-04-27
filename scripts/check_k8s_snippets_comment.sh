@@ -10,15 +10,15 @@ if [[ $missing_comment != '' ]]; then
     echo
     echo "${missing_comment}"
     echo
-    let "exit_code+=1"
+    ((exit_code+=1))
 fi
 
 set_path=$(grep -r --exclude="OWNERS" '^# source: ' roles/ci_gen_kustomize_values/templates | sed 's!roles/ci_gen_kustomize_values/templates/!!')
-while read match; do
+while read -r match; do
     tmpl=$(echo "${match}" | cut -d ':' -f 1)
     comment=$(echo "${match}" | cut -d ':' -f 3 | tr -d '[:space:]')
     if [[ "${tmpl}" != "${comment}" ]]; then
-        let "exit_code+=1"
+        ((exit_code+=1))
         echo "${tmpl} doesn't have correct 'source': ${comment}"
     fi
 done <<< "${set_path}"

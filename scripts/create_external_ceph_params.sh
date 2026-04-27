@@ -55,9 +55,9 @@ ssh osp-undercloud-0 "cat ~/external_ceph_params.yaml"
 echo "Copying Ceph configuration files from $CEPH_NODE to osp-controller-0..."
 
 echo "Creating directory on controller..."
-ssh osp-controller-0 mkdir -p $HOME/ceph_client
+ssh osp-controller-0 mkdir -p "\$HOME"/ceph_client
 
-ssh "$CEPH_NODE" sudo cat /etc/ceph/ceph.conf | ssh osp-controller-0 "cat > $HOME/ceph_client/ceph.conf"
-ssh "$CEPH_NODE" sudo cat /etc/ceph/ceph.client.admin.keyring | ssh osp-controller-0 "cat > $HOME/ceph_client/ceph.client.admin.keyring"
+ssh "$CEPH_NODE" sudo cat /etc/ceph/ceph.conf | ssh osp-controller-0 "cat > \$HOME/ceph_client/ceph.conf"
+ssh "$CEPH_NODE" sudo cat /etc/ceph/ceph.client.admin.keyring | ssh osp-controller-0 "cat > \$HOME/ceph_client/ceph.client.admin.keyring"
 
-echo " Done! Files copied to osp-controller-0:$HOME/ceph_client/"
+echo " Done! Files copied to osp-controller-0:\$HOME/ceph_client/"

@@ -10,19 +10,19 @@ set -euo pipefail
 BRIDGE_NAME=${1}
 IFACE_NAME=${2}
 
-CONN_NAME=$(nmcli -t -f GENERAL.CONNECTION dev show ${IFACE_NAME} | cut -d ':' -f 2)
+CONN_NAME=$(nmcli -t -f GENERAL.CONNECTION dev show "${IFACE_NAME}" | cut -d ':' -f 2)
 PORT_NAME=${BRIDGE_NAME}-p0
 
-check_port=$(nmcli con show | grep -c ${PORT_NAME}) || true
+check_port=$(nmcli con show | grep -c "${PORT_NAME}") || true
 
-if [ ${check_port} -ne 0 ]; then
+if [ "${check_port}" -ne 0 ]; then
     echo "Bridge port available. Nothing to do"
     exit 0
 fi
 
-check_iface=$(nmcli dev status | grep -c ${IFACE_NAME}) || true
+check_iface=$(nmcli dev status | grep -c "${IFACE_NAME}") || true
 
-if [ ${check_iface} -eq 0 ]; then
+if [ "${check_iface}" -eq 0 ]; then
     echo "Invalid device name"
     exit 1
 fi
@@ -31,9 +31,9 @@ nohup bash -c "
     nmcli con down \"${CONN_NAME}\"
     nmcli con delete \"${CONN_NAME}\"
     nmcli con add connection.type 802-3-ethernet \
-        connection.id ${PORT_NAME} \
-        connection.interface-name ${IFACE_NAME} \
-        connection.master ${BRIDGE_NAME} \
+        connection.id \"${PORT_NAME}\" \
+        connection.interface-name \"${IFACE_NAME}\" \
+        connection.master \"${BRIDGE_NAME}\" \
         connection.slave-type bridge
 "
 
