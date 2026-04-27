@@ -17,9 +17,12 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_cls_create_ee_storage`: (Bool) Param to create ee_storage. Defaults to `false`.
 * `cifmw_cls_namespace`: (String) The namespace where OCP resources will be installed. Defaults to `openstack`.
 * `cifmw_cls_action`: (String) Action to perform, can be `create` or `clean`. Defaults to `create`.
+* `cifmw_cls_oc_debug_fallback`: (Bool) Use `oc debug node/` to create PV directories on k8s nodes that are not reachable via SSH from the Ansible inventory. When enabled, the role computes which k8s nodes have no matching SSH-reachable inventory host and falls back to `oc debug` for those nodes. Applies to both create and cleanup. Defaults to `false`. Use it with an SNO BM setup.
 * `cifmw_cls_storage_manifest`:  (Dict) The storage manifest resource to be used to initiate storage class.
 
 ## Examples
+
+### Standard (CRC / VM-based)
 ```YAML
     - hosts: localhost
       vars:
@@ -28,6 +31,21 @@ If apply, please explain the privilege escalation done in this role.
         cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.crc/machines/crc/kubeconfig"
         ansible_user_dir: "{{ lookup('env', 'HOME') }}"
         cifmw_path: "{{ ansible_user_dir }}/.crc/bin:{{ ansible_user_dir }}/.crc/bin/oc:{{ ansible_user_dir }}/bin:{{ ansible_env.PATH }}"
+      tasks:
+        - ansible.builtin.include_role:
+            name: ci_local_storage
+```
+
+### Baremetal SNO
+On bare-metal Single Node OpenShift the k8s node is typically not present
+in the Ansible inventory for SSH access. Enable `cifmw_cls_oc_debug_fallback`
+so the role uses `oc debug node/` to manage PV directories instead:
+```YAML
+    - hosts: localhost
+      vars:
+        cifmw_openshift_kubeconfig: "{{ ansible_user_dir }}/.kube/kubeconfig"
+        cifmw_cls_pv_count: 20
+        cifmw_cls_oc_debug_fallback: true
       tasks:
         - ansible.builtin.include_role:
             name: ci_local_storage

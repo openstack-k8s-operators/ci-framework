@@ -1,0 +1,43 @@
+---
+- name: Identify k8s nodes not reachable via SSH (SNO BM)
+  vars:
+    _ssh_covered: >-
+      {{
+        _hostnames.results |
+        default([]) |
+        selectattr('stdout', 'defined') |
+        map(attribute='stdout') |
+        list
+      }}
+  ansible.builtin.set_fact:
+    _cls_uncovered_nodes: >-
+      {{
+        cifmw_ci_local_storage_k8s_hostnames |
+        difference(_ssh_covered)
+      }}
+
+- name: Manage PV directories via oc debug for unreachable nodes
+  when:
+    - _cls_uncovered_nodes | length > 0
+  vars:
+    _action_script: >-
+      {% if cifmw_cls_action == 'create' %}
+      for i in $(seq -w 1 {{ cifmw_cls_pv_count | int }});
+      do mkdir -p '{{ cifmw_cls_local_storage_name }}'/pv$i &&
+      chmod 0775 '{{ cifmw_cls_local_storage_name }}'/pv$i; done
+      {% else %}
+      rm -rf '{{ cifmw_cls_local_storage_name }}'
+      {% endif %}
+  ansible.builtin.command:
+    cmd: >-
+      oc debug node/{{ node_name }}
+      --kubeconfig={{ cifmw_openshift_kubeconfig }}
+      -- chroot /host bash -c "{{ _action_script }}"
+  changed_when: false
+  register: _cls_oc_debug
+  retries: 3
+  delay: 10
+  until: _cls_oc_debug.rc == 0
+  loop: "{{ _cls_uncovered_nodes }}"
+  loop_control:
+    loop_var: node_name
