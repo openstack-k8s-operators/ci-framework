@@ -1,0 +1,301 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# OpenStack Full Backup
+#
+# 1. Trigger Galera database dumps (creates fresh DB dumps on PVCs)
+# 2. OADP PVC backup (CSI snapshots of labeled PVCs)
+# 3. OADP resources backup (CRs, Secrets, ConfigMaps, NADs, etc.)
+
+# ========================================
+# Pre-flight checks
+# ========================================
+- name: Verify OADP operator is installed
+  ansible.builtin.shell: |
+    oc get crd backups.velero.io -o name
+  register: oadp_crd_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if OADP is not installed
+  ansible.builtin.fail:
+    msg: |
+      OADP operator is not installed (Velero Backup CRD not found).
+      Install OADP first.
+  when: oadp_crd_check.rc != 0
+
+- name: Verify VolumeSnapshotClass with Velero label exists
+  ansible.builtin.shell: |
+    oc get volumesnapshotclass -l velero.io/csi-volumesnapshot-class=true -o name
+  register: vsc_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if no VolumeSnapshotClass with Velero label
+  ansible.builtin.fail:
+    msg: |
+      No VolumeSnapshotClass found with label velero.io/csi-volumesnapshot-class=true.
+      Label your VolumeSnapshotClass for Velero CSI snapshots.
+  when: vsc_check.rc != 0 or vsc_check.stdout == ""
+
+- name: Verify OpenStackBackupConfig exists
+  ansible.builtin.shell: |
+    oc get openstackbackupconfig -n {{ cifmw_backup_restore_namespace }} -o jsonpath='{.items[0].metadata.name}'
+  register: _backupconfig_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if OpenStackBackupConfig is not deployed
+  ansible.builtin.fail:
+    msg: |
+      No OpenStackBackupConfig CR found in namespace {{ cifmw_backup_restore_namespace }}.
+      The BackupConfig controller labels secrets, configmaps, and other resources
+      for backup/restore. Without it, user-provided resources (e.g. osp-secret)
+      will not be restored.
+      Create an OpenStackBackupConfig CR before running backup.
+  when: _backupconfig_check.rc != 0 or _backupconfig_check.stdout == ""
+
+- name: Verify resources are labeled for restore
+  ansible.builtin.shell: |
+    set -o pipefail
+    SECRET_COUNT=$(oc get secret -n {{ cifmw_backup_restore_namespace }} -l backup.openstack.org/restore=true --no-headers 2>/dev/null | wc -l)
+    CM_COUNT=$(oc get configmap -n {{ cifmw_backup_restore_namespace }} -l backup.openstack.org/restore=true --no-headers 2>/dev/null | wc -l)
+    echo "Labeled secrets: ${SECRET_COUNT}"
+    echo "Labeled configmaps: ${CM_COUNT}"
+    if [ "${SECRET_COUNT}" -eq 0 ]; then
+      echo "WARNING: No secrets labeled for restore" >&2
+      exit 1
+    fi
+  register: _labeled_resources_check
+  changed_when: false
+  failed_when: false
+
+- name: Display labeled resource counts
+  ansible.builtin.debug:
+    msg: "{{ _labeled_resources_check.stdout_lines }}"
+
+- name: Fail if no resources are labeled
+  ansible.builtin.fail:
+    msg: |
+      No secrets are labeled with backup.openstack.org/restore=true.
+      The OpenStackBackupConfig controller may not have reconciled yet.
+      Check: oc get openstackbackupconfig -n {{ cifmw_backup_restore_namespace }} -o yaml
+  when: _labeled_resources_check.rc != 0
+
+- name: Set backup timestamp
+  ansible.builtin.set_fact:
+    cifmw_backup_restore_backup_name_suffix: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
+
+- name: Collect operator version information
+  ansible.builtin.shell: |
+    oc get csv -n openstack-operators \
+      -l operators.coreos.com/openstack-operator.openstack-operators \
+      -o jsonpath='{.items[0].metadata.name}'
+  register: _operator_csv_version
+  changed_when: false
+  failed_when: false
+
+- name: Collect catalog source image
+  ansible.builtin.shell: |
+    oc get catalogsource -n openstack-operators \
+      -o jsonpath='{.items[0].spec.image}'
+  register: _operator_catalog_image
+  changed_when: false
+  failed_when: false
+
+- name: Collect operator image
+  ansible.builtin.shell: |
+    oc get deployment openstack-operator-controller-manager \
+      -n openstack-operators -o jsonpath='{.spec.template.spec.containers[0].image}'
+  register: _operator_image
+  changed_when: false
+  failed_when: false
+
+- name: Set operator version facts
+  ansible.builtin.set_fact:
+    _backup_csv_version: "{{ _operator_csv_version.stdout | default('unknown') }}"
+    _backup_catalog_image: "{{ _operator_catalog_image.stdout | default('unknown') }}"
+    _backup_operator_image: "{{ _operator_image.stdout | default('unknown') }}"
+
+- name: Display operator version information
+  ansible.builtin.debug:
+    msg:
+      - "CSV version:      {{ _backup_csv_version }}"
+      - "Catalog image:    {{ _backup_catalog_image }}"
+      - "Operator image:   {{ _backup_operator_image }}"
+
+- name: Create temp directory for rendered templates
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: openstack-backup-
+  register: _cifmw_backup_restore_rendered_dir
+
+# ========================================
+# Step 1: Trigger Galera Database Dumps
+# ========================================
+# GaleraBackup CRs and cronjobs are created by setup_galerabackup.yml
+# (run as part of install_deps). This step only triggers the dump jobs.
+- name: "Step 1: Trigger Galera database dumps"
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "Step 1: Trigger Galera Database Dumps"
+      - "========================================"
+
+- name: Get Galera backup cronjobs
+  ansible.builtin.shell: |
+    oc get cronjob -n {{ cifmw_backup_restore_namespace }} -l app=galera -o jsonpath='{.items[*].metadata.name}'
+  register: _galera_backup_cronjobs
+  changed_when: false
+
+- name: Fail if no GaleraBackup cronjobs found
+  ansible.builtin.fail:
+    msg: |
+      No GaleraBackup cronjobs found. Run with cifmw_backup_restore_install_deps=true
+      first to create GaleraBackup CRs.
+  when: _galera_backup_cronjobs.stdout == ""
+
+- name: Trigger Galera backup jobs
+  ansible.builtin.shell: |
+    set -o pipefail
+    BACKUP_JOB_NAME="{{ item }}-{{ cifmw_backup_restore_backup_name_suffix }}"
+    oc -n {{ cifmw_backup_restore_namespace }} create job --from=cronjob/{{ item }} ${BACKUP_JOB_NAME} \
+      --dry-run=client -o json | \
+      jq '.spec.template.spec.containers[0].env += [{"name":"BACKUP_TIMESTAMP","value":"{{ cifmw_backup_restore_backup_name_suffix }}"}]' | \
+      oc -n {{ cifmw_backup_restore_namespace }} create -f -
+    echo ${BACKUP_JOB_NAME}
+  loop: "{{ _galera_backup_cronjobs.stdout.split() }}"
+  register: _galera_backup_jobs
+  changed_when: true
+  when: _galera_backup_cronjobs.stdout != ""
+
+- name: Wait for Galera backup jobs to complete
+  ansible.builtin.shell: |
+    oc -n {{ cifmw_backup_restore_namespace }} wait --for=condition=complete job/{{ item.stdout_lines[-1] }} --timeout={{ cifmw_backup_restore_galera_backup_timeout }}
+  loop: "{{ _galera_backup_jobs.results }}"
+  changed_when: false
+  when: _galera_backup_cronjobs.stdout != ""
+
+# ========================================
+# Step 2: OADP PVC Backup (CSI Snapshots)
+# ========================================
+- name: List PVCs marked for backup
+  ansible.builtin.shell: |
+    oc get pvc -n {{ cifmw_backup_restore_namespace }} -l backup.openstack.org/backup=true \
+      -o custom-columns=NAME:.metadata.name,SIZE:.spec.resources.requests.storage --no-headers
+  register: _labeled_pvcs
+  changed_when: false
+  failed_when: false
+
+- name: Print labeled PVCs
+  ansible.builtin.debug:
+    msg: "{{ _labeled_pvcs.stdout_lines }}"
+  when: _labeled_pvcs.stdout_lines | default([]) | length > 0
+
+- name: Render PVC backup CR
+  ansible.builtin.template:
+    src: backup-pvcs.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/backup-pvcs.yaml"
+    mode: "0644"
+
+- name: Pause before PVC backup
+  ansible.builtin.pause:
+    prompt: >-
+      Step 1 complete: Galera DB dumps. Press Enter to create PVC backup, or Ctrl+C then 'A' to abort
+  when: not (cifmw_backup_restore_auto_ack | bool)
+
+- name: Create OADP PVC backup
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/backup-pvcs.yaml
+  changed_when: true
+
+- name: Wait for PVC backup to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc get backup openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}
+      -n {{ cifmw_backup_restore_oadp_namespace }}
+      -o jsonpath='{.status.phase}'
+  register: _pvc_backup_phase
+  changed_when: false
+  until: _pvc_backup_phase.stdout in ["Completed", "Failed", "PartiallyFailed"]
+  retries: "{{ (cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') | int * 60 / 10) | int }}"
+  delay: 10
+
+- name: Fail if PVC backup did not complete
+  ansible.builtin.fail:
+    msg: "PVC backup ended with phase: {{ _pvc_backup_phase.stdout }}"
+  when: _pvc_backup_phase.stdout != "Completed"
+
+# ========================================
+# Step 3: OADP Resources Backup
+# ========================================
+- name: Render resources backup CR
+  ansible.builtin.template:
+    src: backup-resources.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/backup-resources.yaml"
+    mode: "0644"
+
+- name: Pause before resources backup
+  ansible.builtin.pause:
+    prompt: >-
+      Step 2 complete: PVC backup. Press Enter to create resources backup, or Ctrl+C then 'A' to abort
+  when: not (cifmw_backup_restore_auto_ack | bool)
+
+- name: Create OADP resources backup
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/backup-resources.yaml
+  changed_when: true
+
+- name: Wait for resources backup to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc get backup openstack-backup-resources-{{ cifmw_backup_restore_backup_name_suffix }}
+      -n {{ cifmw_backup_restore_oadp_namespace }}
+      -o jsonpath='{.status.phase}'
+  register: _resources_backup_phase
+  changed_when: false
+  until: _resources_backup_phase.stdout in ["Completed", "Failed", "PartiallyFailed"]
+  retries: "{{ (cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') | int * 60 / 10) | int }}"
+  delay: 10
+
+- name: Fail if resources backup did not complete
+  ansible.builtin.fail:
+    msg: "Resources backup ended with phase: {{ _resources_backup_phase.stdout }}"
+  when: _resources_backup_phase.stdout != "Completed"
+
+# ========================================
+# Summary
+# ========================================
+- name: Print backup summary
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "Backup Complete"
+      - "========================================"
+      - ""
+      - "Backup name suffix: {{ cifmw_backup_restore_backup_name_suffix }}"
+      - "PVC backup:       openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}"
+      - "Resources backup: openstack-backup-resources-{{ cifmw_backup_restore_backup_name_suffix }}"
+      - ""
+      - "Operator version recorded on Backup CRs:"
+      - "  CSV:     {{ _backup_csv_version }}"
+      - "  Catalog: {{ _backup_catalog_image }}"
+      - "  Image:   {{ _backup_operator_image }}"
+
+- name: Cleanup rendered templates
+  ansible.builtin.file:
+    path: "{{ _cifmw_backup_restore_rendered_dir.path }}"
+    state: absent

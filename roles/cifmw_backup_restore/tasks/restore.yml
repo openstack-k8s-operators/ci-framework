@@ -1,0 +1,469 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# OpenStack Full Restore
+#
+# Restores an OpenStack control plane from OADP backups using ordered
+# Velero Restore CRs and automated database restore.
+
+- name: Validate backup_timestamp parameter
+  ansible.builtin.fail:
+    msg: "cifmw_backup_restore_backup_timestamp is required for restore."
+  when: cifmw_backup_restore_backup_timestamp is not defined
+
+- name: Derive backup names from timestamp
+  ansible.builtin.set_fact:
+    _pvc_backup_name: "openstack-backup-pvcs-{{ cifmw_backup_restore_backup_timestamp }}"
+    _resources_backup_name: "openstack-backup-resources-{{ cifmw_backup_restore_backup_timestamp }}"
+    _restore_suffix: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
+
+- name: Create temp directory for rendered templates
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: openstack-restore-
+  register: _cifmw_backup_restore_rendered_dir
+
+# ========================================
+# Pre-flight checks
+# ========================================
+- name: Verify OADP operator is installed
+  ansible.builtin.shell: |
+    oc get crd backups.velero.io -o name
+  register: _oadp_crd_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if OADP is not installed
+  ansible.builtin.fail:
+    msg: "OADP operator is not installed (Velero Backup CRD not found)."
+  when: _oadp_crd_check.rc != 0
+
+- name: Ensure target namespace exists
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc create namespace {{ cifmw_backup_restore_namespace }} --dry-run=client -o yaml | oc apply -f -
+  changed_when: true
+
+- name: Verify OADP backups exist
+  ansible.builtin.shell: |
+    oc get backup {{ _pvc_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} -o jsonpath='{.status.phase}'
+  register: _pvc_backup_phase
+  changed_when: false
+
+- name: Verify resources backup exists
+  ansible.builtin.shell: |
+    oc get backup {{ _resources_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} -o jsonpath='{.status.phase}'
+  register: _resources_backup_phase
+  changed_when: false
+
+- name: Fail if backups are not completed
+  ansible.builtin.fail:
+    msg: "Backups must be Completed. PVC: {{ _pvc_backup_phase.stdout }}, Resources: {{ _resources_backup_phase.stdout }}"
+  when: _pvc_backup_phase.stdout != "Completed" or _resources_backup_phase.stdout != "Completed"
+
+# ========================================
+# Operator version validation
+# ========================================
+- name: Get required operator version from backup
+  ansible.builtin.shell: |
+    oc get backup {{ _resources_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} \
+      -o jsonpath='{.metadata.annotations.openstack\.org/csv-version}'
+  register: _backup_csv_version
+  changed_when: false
+  failed_when: false
+
+- name: Get installed operator version
+  ansible.builtin.shell: |
+    oc get csv -n openstack-operators \
+      -l operators.coreos.com/openstack-operator.openstack-operators \
+      -o jsonpath='{.items[0].metadata.name}'
+  register: _installed_csv_version
+  changed_when: false
+  failed_when: false
+
+- name: Display operator version comparison
+  ansible.builtin.debug:
+    msg:
+      - "Backup operator version:    {{ _backup_csv_version.stdout | default('not recorded') }}"
+      - "Installed operator version: {{ _installed_csv_version.stdout | default('not installed') }}"
+
+- name: Warn if operator version does not match backup
+  ansible.builtin.fail:
+    msg: |
+      Operator version mismatch!
+      Backup requires:  {{ _backup_csv_version.stdout }}
+      Installed version: {{ _installed_csv_version.stdout | default('not installed') }}
+      Install the correct operator version before restoring.
+      Catalog source image from backup:
+        oc get backup {{ _resources_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} \
+          -o jsonpath='{.metadata.annotations.openstack\.org/catalog-source-image}'
+  when:
+    - _backup_csv_version.stdout | default('') != ''
+    - _installed_csv_version.stdout | default('') != _backup_csv_version.stdout
+
+# ========================================
+# Resource modifier ConfigMap
+# ========================================
+- name: Render resource modifier ConfigMap
+  ansible.builtin.template:
+    src: 00-resource-modifiers-configmap.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/00-resource-modifiers-configmap.yaml"
+    mode: "0644"
+
+- name: Create resource modifier ConfigMap
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/00-resource-modifiers-configmap.yaml
+  changed_when: true
+
+# ========================================
+# Step 0.5: Pin PVCs to nodes (optional)
+# ========================================
+- name: Pin PVCs to original nodes
+  ansible.builtin.include_tasks: restore_pin_pvcs.yml
+  when: cifmw_backup_restore_pin_pvcs | bool
+
+# ========================================
+# Step 1: Restore PVCs (Order 00)
+# ========================================
+- name: Render PVC restore
+  ansible.builtin.template:
+    src: 01-restore-order-00-pvcs.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/01-restore-order-00-pvcs.yaml"
+    mode: "0644"
+  vars:
+    pvc_backup_name: "{{ _pvc_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Pause before PVC restore
+  ansible.builtin.pause:
+    prompt: "Press Enter to restore PVCs, or Ctrl+C then 'A' to abort"
+  when: not (cifmw_backup_restore_auto_ack | bool)
+
+- name: Create PVC restore
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/01-restore-order-00-pvcs.yaml
+  changed_when: true
+
+- name: Wait for PVC restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-00-pvcs-{{ _restore_suffix }}"
+    _step_name: "Step 1 (PVC restore)"
+
+- name: Delete dummy Deployments after PVC restore
+  ansible.builtin.shell: |
+    oc delete deployment -n {{ cifmw_backup_restore_namespace }} -l app=pvc-pin --ignore-not-found=true
+  changed_when: true
+  when: cifmw_backup_restore_pin_pvcs | bool
+
+# ========================================
+# Step 2: Restore Foundation (Order 10)
+# ========================================
+- name: Render foundation restore
+  ansible.builtin.template:
+    src: 02-restore-order-10-foundation.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/02-restore-order-10-foundation.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Create foundation restore
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/02-restore-order-10-foundation.yaml
+  changed_when: true
+
+- name: Wait for foundation restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-10-foundation-{{ _restore_suffix }}"
+    _step_name: "Step 2 (Foundation restore)"
+
+# ========================================
+# Step 3: Restore Infrastructure (Order 20)
+# ========================================
+- name: Render infrastructure restore
+  ansible.builtin.template:
+    src: 03-restore-order-20-infrastructure.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/03-restore-order-20-infrastructure.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Create infrastructure restore
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/03-restore-order-20-infrastructure.yaml
+  changed_when: true
+
+- name: Wait for infrastructure restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-20-infra-{{ _restore_suffix }}"
+    _step_name: "Step 3 (Infrastructure restore)"
+
+# ========================================
+# Step 4: Restore ControlPlane (Order 30)
+# ========================================
+- name: Render controlplane restore
+  ansible.builtin.template:
+    src: 04-restore-order-30-controlplane.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/04-restore-order-30-controlplane.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Create controlplane restore
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/04-restore-order-30-controlplane.yaml
+  changed_when: true
+
+- name: Wait for controlplane restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-30-ctlplane-{{ _restore_suffix }}"
+    _step_name: "Step 4 (ControlPlane restore)"
+
+# ========================================
+# Step 5: Wait for Infrastructure Ready
+# ========================================
+- name: Wait for OpenStackControlPlane infrastructure ready
+  ansible.builtin.shell: |
+    oc wait openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} --all \
+      --for=condition=OpenStackControlPlaneInfrastructureReady \
+      --timeout={{ cifmw_backup_restore_infra_ready_timeout }}
+  changed_when: false
+
+- name: Get OpenStackControlPlane name
+  ansible.builtin.shell: |
+    oc get openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} -o jsonpath='{.items[0].metadata.name}'
+  register: _ctlplane_name
+  changed_when: false
+
+# ========================================
+# Step 6: Restore GaleraBackup CRs (Order 40)
+# ========================================
+- name: Render backup config restore
+  ansible.builtin.template:
+    src: 05-restore-order-40-backup-config.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/05-restore-order-40-backup-config.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Create backup config restore
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/05-restore-order-40-backup-config.yaml
+  changed_when: true
+
+- name: Wait for backup config restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-40-backup-{{ _restore_suffix }}"
+    _step_name: "Step 6 (GaleraBackup restore)"
+
+# ========================================
+# Step 7: Database Restore
+# ========================================
+- name: Get GaleraBackup names
+  ansible.builtin.shell: |
+    oc get galerabackup -n {{ cifmw_backup_restore_namespace }} -o jsonpath='{.items[*].metadata.name}'
+  register: _galerabackup_names
+  changed_when: false
+
+- name: Set GaleraBackup list
+  ansible.builtin.set_fact:
+    _galerabackup_list: "{{ _galerabackup_names.stdout.split() if _galerabackup_names.stdout != '' else [] }}"
+
+- name: Render GaleraRestore CRs
+  ansible.builtin.template:
+    src: 06a-galerarestore.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/06a-galerarestore.yaml"
+    mode: "0644"
+  vars:
+    galerabackup_list: "{{ _galerabackup_list }}"
+  when: _galerabackup_list | length > 0
+
+- name: Apply GaleraRestore CRs
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/06a-galerarestore.yaml
+  changed_when: true
+  when: _galerabackup_list | length > 0
+
+- name: Wait for GaleraRestore pods to be ready
+  ansible.builtin.shell: |
+    RESTORE_NAME="{{ item }}restore"
+    BACKUP_SOURCE="{{ item }}"
+    POD_NAME="${BACKUP_SOURCE}-restore-${RESTORE_NAME}"
+    oc wait --for=condition=Ready pod/${POD_NAME} -n {{ cifmw_backup_restore_namespace }} --timeout=120s
+  loop: "{{ _galerabackup_list }}"
+  changed_when: false
+  when: _galerabackup_list | length > 0
+
+- name: Execute database restore for each GaleraRestore
+  ansible.builtin.shell: |
+    RESTORE_NAME="{{ item }}restore"
+    BACKUP_SOURCE="{{ item }}"
+    POD_NAME="${BACKUP_SOURCE}-restore-${RESTORE_NAME}"
+    TIMESTAMP="{{ cifmw_backup_restore_backup_timestamp }}"
+    RESTORE_PATTERN="/backup/data/*_${TIMESTAMP}.sql.gz"
+    oc exec -n {{ cifmw_backup_restore_namespace }} ${POD_NAME} -- \
+      /var/lib/backup-scripts/restore_galera --yes --content {{ cifmw_backup_restore_restore_content }} ${RESTORE_PATTERN}
+  loop: "{{ _galerabackup_list }}"
+  changed_when: true
+  when: _galerabackup_list | length > 0
+
+- name: List GaleraRestore CRs kept for validation
+  ansible.builtin.debug:
+    msg: "GaleraRestore CR '{{ item }}restore' kept for post-restore validation (cleaned up by cleanup step)"
+  loop: "{{ _galerabackup_list }}"
+  when: _galerabackup_list | length > 0
+
+# RabbitMQ credentials are restored automatically:
+# The infra-operator's RabbitMQ controller labels the default-user secret
+# for restore. On restore, the secret is restored in order 10, and the
+# controller reuses the existing credentials when creating the new cluster.
+
+# ========================================
+# Step 8: Resume Full Deployment
+# ========================================
+- name: Pause before resuming deployment
+  ansible.builtin.pause:
+    prompt: "Press Enter to resume full deployment, or Ctrl+C then 'A' to abort"
+  when: not (cifmw_backup_restore_auto_ack | bool)
+
+- name: Remove deployment-stage annotation
+  ansible.builtin.shell: |
+    oc annotate openstackcontrolplane {{ _ctlplane_name.stdout }} \
+      -n {{ cifmw_backup_restore_namespace }} core.openstack.org/deployment-stage-
+  changed_when: true
+
+- name: Wait for OpenStackControlPlane to be ready
+  ansible.builtin.shell: |
+    oc wait openstackcontrolplane {{ _ctlplane_name.stdout }} \
+      -n {{ cifmw_backup_restore_namespace }} \
+      --for=condition=Ready \
+      --timeout={{ cifmw_backup_restore_ctlplane_ready_timeout }}
+  changed_when: false
+
+# ========================================
+# Step 9: Restore DataPlane (Order 60)
+# ========================================
+- name: Render dataplane restore
+  ansible.builtin.template:
+    src: 07-restore-order-60-dataplane.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/07-restore-order-60-dataplane.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Create dataplane restore
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/07-restore-order-60-dataplane.yaml
+  changed_when: true
+
+- name: Wait for dataplane restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-60-dataplane-{{ _restore_suffix }}"
+    _step_name: "Step 9 (DataPlane restore)"
+
+# ========================================
+# Step 10: EDPM Deployment
+# ========================================
+- name: Get DataPlaneNodeSet names
+  ansible.builtin.shell: |
+    oc get openstackdataplanenodeset -n {{ cifmw_backup_restore_namespace }} -o jsonpath='{.items[*].metadata.name}'
+  register: _nodeset_names
+  changed_when: false
+
+- name: Set nodeset list
+  ansible.builtin.set_fact:
+    _nodeset_names_list: "{{ _nodeset_names.stdout.split() }}"
+  when: _nodeset_names.stdout != ""
+
+- name: Render EDPM deployment CR
+  ansible.builtin.template:
+    src: 08-edpm-deployment.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/08-edpm-deployment.yaml"
+    mode: "0644"
+  vars:
+    nodeset_names_list: "{{ _nodeset_names_list }}"
+    restore_suffix: "{{ _restore_suffix }}"
+  when: _nodeset_names.stdout != ""
+
+- name: Create EDPM deployment
+  ansible.builtin.shell: |
+    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/08-edpm-deployment.yaml
+  changed_when: true
+  when: _nodeset_names.stdout != ""
+
+- name: Print EDPM deployment status
+  ansible.builtin.debug:
+    msg: "Created EDPM deployment: edpm-deployment-post-restore-{{ _restore_suffix }}"
+  when: _nodeset_names.stdout != ""
+
+- name: Wait for EDPM deployment to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc wait OpenStackDataPlaneDeployment
+      edpm-deployment-post-restore-{{ _restore_suffix }}
+      --namespace={{ cifmw_backup_restore_namespace }}
+      --for=condition=Ready
+      --timeout={{ cifmw_backup_restore_edpm_deploy_timeout }}
+  when: _nodeset_names.stdout != ""
+
+# ========================================
+# Step 11: Sync Neutron state to OVN database
+# ========================================
+# Run after EDPM deployment so all compute nodes' ovn-controller
+# are reconnected to the new OVN SB DB and their chassis are registered.
+# Running the sync before EDPM would cause the gateway chassis to
+# reprogram flows while compute tunnels are not yet established,
+# breaking VM network connectivity.
+- name: Sync Neutron state to OVN database
+  ansible.builtin.shell: |
+    oc exec -n {{ cifmw_backup_restore_namespace }} \
+      $(oc get pod -n {{ cifmw_backup_restore_namespace }} -l service=neutron -o jsonpath='{.items[0].metadata.name}') \
+      -c neutron-api -- neutron-ovn-db-sync-util \
+      --config-file /etc/neutron/neutron.conf \
+      --config-file /etc/neutron/plugins/ml2/ml2_conf.ini \
+      --ovn-neutron_sync_mode repair
+  changed_when: true
+
+# ========================================
+# Cleanup and Summary
+# ========================================
+- name: Clean up rendered templates
+  ansible.builtin.file:
+    path: "{{ _cifmw_backup_restore_rendered_dir.path }}"
+    state: absent
+
+- name: Print restore summary
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "Restore Complete"
+      - "========================================"
+      - ""
+      - "ControlPlane: {{ _ctlplane_name.stdout }}"
+      - "Restore suffix: {{ _restore_suffix }}"
+      - ""
+      - "IMPORTANT: Re-enable InstanceHa after verifying the cloud:"
+      - "  oc patch instanceha <name> -n {{ cifmw_backup_restore_namespace }} --type merge -p '{\"spec\":{\"disabled\":\"False\"}}'"
