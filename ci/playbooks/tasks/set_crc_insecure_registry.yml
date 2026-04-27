@@ -38,6 +38,14 @@
     image.config.openshift.io/cluster
   loop: "{{ cifmw_crc_additional_allowed_registries }}"
 
+- name: Add additional insecure registries
+  when: cifmw_crc_additional_insecure_registries is defined
+  ansible.builtin.shell: |
+    oc patch --type=json \
+    --patch='[{"op": "add", "path": "/spec/registrySources/insecureRegistries/-", "value": "{{ item }}"}]' \
+    image.config.openshift.io/cluster
+  loop: "{{ cifmw_crc_additional_insecure_registries }}"
+
 - name: Ensure registries.conf.d exists
   become: true
   when: cifmw_crc_registry_mirror_content is defined or content_provider_registry_ip is defined
@@ -61,6 +69,24 @@
       mirror-by-digest-only = false
       prefix = ""
 
+- name: Set insecure registry in crio for additional registries
+  become: true
+  when: cifmw_crc_additional_insecure_registries is defined
+  ansible.builtin.blockinfile:
+    state: present
+    insertafter: EOF
+    dest: /etc/containers/registries.conf.d/99-insecure-registry.conf
+    create: true
+    marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item }}"
+    content: |-
+      [[registry]]
+      location = "{{ item }}"
+      insecure = true
+      blocked = false
+      mirror-by-digest-only = false
+      prefix = ""
+  loop: "{{ cifmw_crc_additional_insecure_registries }}"
+
 - name: Set registry mirror override
   when: cifmw_crc_registry_mirror_content is defined
   become: true
@@ -72,7 +98,10 @@
     content: "{{ cifmw_crc_registry_mirror_content }}"
 
 - name: Restart crio
-  when: cifmw_crc_registry_mirror_content is defined or content_provider_registry_ip is defined
+  when: >-
+    cifmw_crc_registry_mirror_content is defined or
+    content_provider_registry_ip is defined or
+    cifmw_crc_additional_insecure_registries is defined
   become: true
   ansible.builtin.service:
     name: crio
