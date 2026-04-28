@@ -166,6 +166,7 @@ Default value: {}
 * `cifmw_test_operator_horizontest_password`: (String) The password for the user running the Horizon tests. Default value: `horizontest`
 * `cifmw_test_operator_horizontest_project_name`: (String) The name of the OpenStack project for Horizon tests. Default value: `horizontest`
 * `cifmw_test_operator_horizontest_project_name_xpath`: (String) The xpath to select project name based on dashboard theme. Default value: `//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
+* `cifmw_test_operator_horizontest_project_text_xpath`: (String) The xpath to element displaying current project based on dashboard theme. Default value: `.//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
 * `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `{{ cifmw_test_operator_default_registry }}`
 * `cifmw_test_operator_horizontest_repo_url`: (String) The Horizon tests repository URL. Default value: `https://review.opendev.org/openstack/horizon`
 * `cifmw_test_operator_horizontest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
