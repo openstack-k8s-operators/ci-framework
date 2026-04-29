@@ -1,0 +1,61 @@
+---
+# Ensure GenericUsbBoot is enabled in BIOS so VirtualMedia can boot.
+# When a change is needed: sets BIOS attribute, creates config job,
+# power-cycles to apply the change, then leaves the host powered off.
+#
+# Requires: _bmc_host, _bmc_creds, _redfish_headers
+
+- name: Check and optionally enable GenericUsbBoot
+  block:
+    - name: Check current GenericUsbBoot state
+      ansible.builtin.include_tasks: bm_check_usb_boot.yml
+
+  rescue:
+    - name: Fail if auto-enable is off
+      when: not cifmw_bm_agent_enable_usb_boot | bool
+      ansible.builtin.fail:
+        msg: >-
+          GenericUsbBoot is Disabled in BIOS. VirtualMedia cannot boot
+          host {{ _bmc_host }}. Set cifmw_bm_agent_enable_usb_boot: true
+          in vars.yaml to allow this playbook to enable it automatically
+          (requires a reboot cycle).
+
+    - name: Set GenericUsbBoot BIOS attribute
+      no_log: true
+      ansible.builtin.uri:
+        url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/Bios/Settings"
+        method: PATCH
+        headers: "{{ _redfish_headers }}"
+        body_format: json
+        body:
+          Attributes:
+            GenericUsbBoot: "Enabled"
+        user: "{{ _bmc_creds.username }}"
+        password: "{{ _bmc_creds.password }}"
+        validate_certs: false
+        force_basic_auth: true
+        status_code: [200, 204]
+
+    - name: Create BIOS config job to schedule the change
+      no_log: true
+      ansible.builtin.uri:
+        url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/Jobs"
+        method: POST
+        headers: "{{ _redfish_headers }}"
+        body_format: json
+        body:
+          TargetSettingsURI: "/redfish/v1/Systems/System.Embedded.1/Bios/Settings"
+        user: "{{ _bmc_creds.username }}"
+        password: "{{ _bmc_creds.password }}"
+        validate_certs: false
+        force_basic_auth: true
+        status_code: [200, 202, 204]
+
+    - name: Power off before applying BIOS change
+      ansible.builtin.include_tasks: bm_power_off.yml
+
+    - name: Power on to apply BIOS config job during POST
+      ansible.builtin.include_tasks: bm_power_on.yml
+
+    - name: Power off after BIOS change applied
+      ansible.builtin.include_tasks: bm_power_off.yml

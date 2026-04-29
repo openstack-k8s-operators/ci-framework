@@ -1,8 +1,16 @@
 # reproducer
-Role to deploy close to CI layout on a hypervisor.
 
-## Privilege escalation
-None
+Role to deploy close to CI layout on a hypervisor. Supports libvirt/KVM
+virtual machine deployments (via dev-scripts) and delegates agent-based
+bare metal SNO deployments to the `bm_sno` role.
+
+## Exposed tags
+
+* `bootstrap`: All reproducer bootstrap tasks.
+* `bootstrap_layout`: Layout-related bootstrap tasks.
+* `devscripts_layout`: Dev-scripts OCP layout tasks (libvirt path).
+* `ocp_layout`: OCP layout tasks (libvirt path).
+* `bm_ocp_layout`: Agent-based bare metal OCP layout tasks.
 
 ## Parameters
 
@@ -25,6 +33,7 @@ None
 * `cifmw_reproducer_supported_hypervisor_os`: (List) List of supported hypervisor operating systems and their minimum version.
 * `cifmw_reproducer_minimum_hardware_requirements`: (Dict) Define minimum hardware requirements for specific scenarios. Example below
 * `cifmw_reproducer_computes_rhos_release_args`: (String) Arguments to use when installing rhos-release repos on compute nodes. Not defined by default, and `cifmw_repo_setup_rhos_release_args` is used instead.
+* `cifmw_bm_sno`: (Bool) Enable agent-based bare metal OCP SNO deployment instead of libvirt/dev-scripts. Defaults to `false`.
 
 ### Advanced parameters
 Those parameters shouldn't be used, unless the user is able to understand potential issues in their environment.
@@ -44,6 +53,20 @@ Those parameters shouldn't be used, unless the user is able to understand potent
 - If a job with content-provider is launched a **first** time with `cifmw_reproducer_run_content_provider: false`,
   it will NOT RUN the content-provider, **leading to a crash of the job run**.
 
+## SNO deployment methods
+
+The reproducer supports two mutually exclusive Single Node OpenShift (SNO)
+deployment paths:
+
+| Flag | Method | Environment |
+| --- | --- | --- |
+| `cifmw_devscripts_sno: true` | dev-scripts (libvirt/KVM) | Virtual machine on the hypervisor; requires `cifmw_reproducer_allow_one_ocp: true` |
+| `cifmw_bm_sno: true` | Agent-based (iDRAC Redfish) | Physical bare metal host managed via the `bm_sno` role |
+
+When `cifmw_bm_sno: true`, the reproducer delegates the agent-based bare
+metal installation to the `bm_sno` role. See
+[roles/bm_sno/README.md](../bm_sno/README.md) for full documentation
+on parameters, network architecture, and the deployment workflow.
 
 ## Warning
 This role isn't intended to be called outside of the `reproducer.yml` playbook.
@@ -92,3 +115,10 @@ cifmw_reproducer_minimum_hardware_requirements:
   memory: "32 GB"
   disk: "200 GB"
 ```
+
+## References
+
+* [ci-framework reproducer documentation](https://ci-framework.readthedocs.io/en/latest/roles/reproducer.html)
+* [dev-scripts](https://github.com/openshift-metal3/dev-scripts)
+* [Redfish API specification](https://www.dmtf.org/standards/redfish)
+* [Dell iDRAC Redfish API Guide](https://developer.dell.com/apis/2978/versions/6.xx/reference)

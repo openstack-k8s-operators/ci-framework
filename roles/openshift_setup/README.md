@@ -26,5 +26,14 @@ effect if `cifmw_openshift_setup_ca_registry_to_add` is set.
             mirrors:
               - mirror.quay.rdoproject.org
         ```
+* `cifmw_openshift_setup_allowed_registries`: (List) List of allowed registries when setting up insecure registry configuration. Used in conjunction with `cifmw_update_containers_registry`. Defaults to common registries.
+    * Example:
+        ```yaml
+        cifmw_openshift_setup_allowed_registries:
+          - "quay.io"
+          - "registry.redhat.io"
+          - "my-internal-registry.example.com"
+        ```
+* `cifmw_openshift_setup_allowed_extra_registries`: (List) List of extra registries we want to allow. Intended to be by CI jobs using the framework.
 * `cifmw_openshift_setup_apply_marketplace_fix`: (Boolean) Apply openshift-marketplace workaround which is recreating all pods in the namespace. NOTE: same step is done in `base` job.
 * `cifmw_openshift_setup_samples_registry`: (String) Registry sample

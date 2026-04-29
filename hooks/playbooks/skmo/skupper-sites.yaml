@@ -1,0 +1,189 @@
+---
+# Create Skupper Sites in the central and leaf namespaces and link them.
+#
+# The central site is created with link access enabled so that it can issue
+# tokens.  The leaf site connects to the central site using an AccessToken
+# derived from an AccessGrant, which avoids a dependency on the skupper CLI.
+#
+# Variables:
+#   cifmw_skupper_central_namespace   (default: openstack)
+#   cifmw_skupper_leaf_namespace      (default: openstack2)
+#   cifmw_skupper_central_site_name   (default: openstack)
+#   cifmw_skupper_leaf_site_name      (default: openstack2)
+#   cifmw_skupper_link_access_type    (default: route)
+#     route        - OpenShift Route (default; works on OpenShift without
+#                    MetalLB / external LB)
+#     loadbalancer - LoadBalancer Service (multi-cluster with MetalLB or
+#                    cloud LB)
+#     nodeport     - NodePort Service
+- name: Create and link Skupper sites
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_skupper_central_namespace: openstack
+    cifmw_skupper_leaf_namespace: openstack2
+    cifmw_skupper_central_site_name: openstack
+    cifmw_skupper_leaf_site_name: openstack2
+    cifmw_skupper_link_access_type: route
+  tasks:
+    - name: Create Skupper Site in central namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: skupper.io/v2alpha1
+          kind: Site
+          metadata:
+            name: "{{ cifmw_skupper_central_site_name }}"
+            namespace: "{{ cifmw_skupper_central_namespace }}"
+          spec:
+            linkAccess: "{{ cifmw_skupper_link_access_type }}"
+
+    - name: Create Skupper Site in leaf namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: skupper.io/v2alpha1
+          kind: Site
+          metadata:
+            name: "{{ cifmw_skupper_leaf_site_name }}"
+            namespace: "{{ cifmw_skupper_leaf_namespace }}"
+          spec:
+            linkAccess: none
+
+    - name: Wait for central Skupper Site to be ready
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Site
+        name: "{{ cifmw_skupper_central_site_name }}"
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+      register: _central_site
+      retries: 30
+      delay: 10
+      until:
+        - _central_site.resources | length > 0
+        - _central_site.resources[0].status is defined
+        - _central_site.resources[0].status.conditions is defined
+        - _central_site.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Wait for leaf Skupper Site to be ready
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Site
+        name: "{{ cifmw_skupper_leaf_site_name }}"
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _leaf_site
+      retries: 30
+      delay: 10
+      until:
+        - _leaf_site.resources | length > 0
+        - _leaf_site.resources[0].status is defined
+        - _leaf_site.resources[0].status.conditions is defined
+        - _leaf_site.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Check if AccessGrant for leaf already exists
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: AccessGrant
+        name: "link-to-{{ cifmw_skupper_leaf_site_name }}"
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+      register: _existing_grant
+
+    - name: Create AccessGrant in central namespace for leaf to redeem
+      when: _existing_grant.resources | length == 0
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: skupper.io/v2alpha1
+          kind: AccessGrant
+          metadata:
+            name: "link-to-{{ cifmw_skupper_leaf_site_name }}"
+            namespace: "{{ cifmw_skupper_central_namespace }}"
+          spec:
+            redemptionsAllowed: 1
+            expirationWindow: 15m
+
+    - name: Wait for AccessGrant to be ready
+      # In Skupper v2 the grant url/ca/code are stored in the AccessGrant status,
+      # not in a separate Kubernetes Secret.
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: AccessGrant
+        name: "link-to-{{ cifmw_skupper_leaf_site_name }}"
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+      register: _access_grant
+      retries: 30
+      delay: 10
+      until:
+        - _access_grant.resources | length > 0
+        - _access_grant.resources[0].status is defined
+        - _access_grant.resources[0].status.url is defined
+        - _access_grant.resources[0].status.ca is defined
+        - _access_grant.resources[0].status.code is defined
+        - _access_grant.resources[0].status.conditions is defined
+        - _access_grant.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Check if Link from leaf to central already exists
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Link
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _existing_links
+
+    - name: Check if a previous AccessToken exists in leaf namespace
+      when: _existing_links.resources | length == 0
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: AccessToken
+        name: "link-to-{{ cifmw_skupper_central_site_name }}"
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _existing_token
+
+    - name: Delete stale AccessToken so the new grant can be redeemed
+      # An already-redeemed AccessToken cannot be redeemed again.  Delete it so
+      # the fresh AccessGrant credentials can establish a new Link.
+      when:
+        - _existing_links.resources | length == 0
+        - _existing_token.resources | length > 0
+      kubernetes.core.k8s:
+        state: absent
+        api_version: skupper.io/v2alpha1
+        kind: AccessToken
+        name: "link-to-{{ cifmw_skupper_central_site_name }}"
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+
+    - name: Create AccessToken in leaf namespace to establish link to central
+      when: _existing_links.resources | length == 0
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: skupper.io/v2alpha1
+          kind: AccessToken
+          metadata:
+            name: "link-to-{{ cifmw_skupper_central_site_name }}"
+            namespace: "{{ cifmw_skupper_leaf_namespace }}"
+          spec:
+            url: "{{ _access_grant.resources[0].status.url }}"
+            ca: "{{ _access_grant.resources[0].status.ca }}"
+            code: "{{ _access_grant.resources[0].status.code }}"
+
+    - name: Wait for Link in leaf namespace to be ready
+      kubernetes.core.k8s_info:
+        api_version: skupper.io/v2alpha1
+        kind: Link
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _leaf_link
+      retries: 30
+      delay: 10
+      until:
+        - _leaf_link.resources | length > 0
+        - _leaf_link.resources[0].status is defined
+        - _leaf_link.resources[0].status.conditions is defined
+        - _leaf_link.resources[0].status.conditions |
+          selectattr('type', 'equalto', 'Ready') |
+          selectattr('status', 'equalto', 'True') | list | length > 0

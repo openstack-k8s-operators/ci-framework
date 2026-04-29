@@ -1,0 +1,191 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# Post-deploy hook for the architecture / integration / SKMO pipeline.
+#
+# Called after kustomize_deploy has already brought up the
+# OpenStackControlPlane.  Reads the live OSCP to determine the existing
+# CA bundle secret name, preserves any keys already in that secret, merges
+# in the Keycloak CA, and patches the OSCP to reference the secret when it
+# is not already set.
+#
+#
+# For the pre-deploy (component / CRC) pipeline where the OSCP does not
+# yet exist, use hook_controlplane_config.yml instead.
+
+# ---------------------------------------------------------------------------
+# Step 1 - read the Keycloak CA cert written by federation-pre-deploy
+# ---------------------------------------------------------------------------
+- name: Get ingress operator CA cert
+  ansible.builtin.slurp:
+    src: "{{ [ansible_user_dir, 'ci-framework-data', 'tmp', 'ingress-operator-ca.crt'] | path_join }}"
+  register: cifmw_federation_sso_ca
+
+# ---------------------------------------------------------------------------
+# Step 2 - read the live OSCP to determine where the CA bundle lives.
+#
+# Priority for the secret name:
+#   1. spec.tls.caBundleSecretName already set on the OSCP  (use it as-is).
+#   2. cifmw_custom_ca_certs_secret_name variable (if set by caller).
+#   3. Hard default: "custom-ca-certs".
+# ---------------------------------------------------------------------------
+- name: Read current OpenStackControlPlane state
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: core.openstack.org/v1beta1
+    kind: OpenStackControlPlane
+    name: controlplane
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: cifmw_federation_oscp_info
+
+- name: Resolve CA bundle secret name and check if OSCP already references one
+  ansible.builtin.set_fact:
+    cifmw_federation_ca_bundle_secret_name: >-
+      {{
+        (cifmw_federation_oscp_info.resources[0].spec.tls | default({})).caBundleSecretName
+        | default(cifmw_custom_ca_certs_secret_name | default('', true), true)
+        | default('custom-ca-certs', true)
+      }}
+    cifmw_federation_oscp_has_ca_bundle: >-
+      {{
+        ((cifmw_federation_oscp_info.resources[0].spec.tls | default({})).caBundleSecretName
+         | default('')) | length > 0
+      }}
+
+# ---------------------------------------------------------------------------
+# Step 3 - preserve any keys already in the target secret
+# ---------------------------------------------------------------------------
+- name: Look up existing CA bundle secret
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: v1
+    kind: Secret
+    name: "{{ cifmw_federation_ca_bundle_secret_name }}"
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: cifmw_federation_existing_ca_bundle
+
+- name: Capture existing CA bundle secret data
+  ansible.builtin.set_fact:
+    cifmw_federation_ca_bundle_existing_data: >-
+      {{
+        (cifmw_federation_existing_ca_bundle.resources[0].data | default({}))
+        if cifmw_federation_existing_ca_bundle.resources | length > 0
+        else {}
+      }}
+
+# ---------------------------------------------------------------------------
+# Step 4 - create / update the secret, merging in the Keycloak CA cert
+# ---------------------------------------------------------------------------
+- name: Create or update CA bundle secret with Keycloak CA cert
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ cifmw_federation_ca_bundle_secret_name }}"
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      data: >-
+        {{
+          cifmw_federation_ca_bundle_existing_data |
+          combine({'keycloak-ca.crt': cifmw_federation_sso_ca.content})
+        }}
+
+# ---------------------------------------------------------------------------
+# Step 5 - patch the OSCP to reference the secret when not already set.
+# ---------------------------------------------------------------------------
+- name: Patch OpenStackControlPlane to set caBundleSecretName (when unset)
+  when: not cifmw_federation_oscp_has_ca_bundle | bool
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: patched
+    definition:
+      apiVersion: core.openstack.org/v1beta1
+      kind: OpenStackControlPlane
+      metadata:
+        name: controlplane
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      spec:
+        tls:
+          caBundleSecretName: "{{ cifmw_federation_ca_bundle_secret_name }}"
+
+# ---------------------------------------------------------------------------
+# Step 6 - Keystone httpd override secret (always needed)
+# ---------------------------------------------------------------------------
+- name: Create Keystone httpd override secret for Federation
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: keystone-httpd-override
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      type: Opaque
+      stringData:
+        federation.conf: "{{ lookup('template', 'federation-single.conf.j2') }}"
+
+# ---------------------------------------------------------------------------
+# Step 7 - wire the httpd override secret and federation customServiceConfig
+#          into the live OSCP keystone section.
+# ---------------------------------------------------------------------------
+- name: Patch OpenStackControlPlane to enable keystone federation httpd config and auth methods
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: patched
+    definition:
+      apiVersion: core.openstack.org/v1beta1
+      kind: OpenStackControlPlane
+      metadata:
+        name: controlplane
+        namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+      spec:
+        keystone:
+          template:
+            httpdCustomization:
+              customConfigSecret: keystone-httpd-override
+            customServiceConfig: |
+              [DEFAULT]
+              insecure_debug=true
+              debug=true
+              [federation]
+              trusted_dashboard={{ cifmw_federation_horizon_url }}/dashboard/auth/websso/
+              [openid]
+              remote_id_attribute=HTTP_OIDC_ISS
+              [auth]
+              methods = password,token,oauth1,mapped,application_credential,openid
+
+# ---------------------------------------------------------------------------
+# Step 8 - wait for Keystone to reconcile with the new federation config
+# ---------------------------------------------------------------------------
+- name: Wait for Keystone to be Ready with federation config applied
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: keystone.openstack.org/v1beta1
+    kind: KeystoneAPI
+    name: keystone
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: _keystone_fed_wait
+  until:
+    - _keystone_fed_wait.resources | length > 0
+    - (_keystone_fed_wait.resources[0].status.conditions | default([]) |
+       selectattr('type', 'equalto', 'Ready') |
+       selectattr('status', 'equalto', 'True') | list | length) > 0
+  retries: 30
+  delay: 10

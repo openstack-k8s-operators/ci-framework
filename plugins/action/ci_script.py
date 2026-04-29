@@ -192,9 +192,7 @@ class ActionModule(ActionBase):
         # truncate the length of the name to 20 chars at max
         # while trying to preserve entire words
         t_name = (
-            re.sub(r"[^A-Za-z0-9_]+", "_", self._task.name)
-            .lower()[:30]
-            .rsplit("_", 1)[0]
+            re.sub(r"[^A-Za-z0-9_]+", "_", self._task.name).lower()[:30].rstrip("_")
         )
         chdir_path = task_args.get("chdir", None)
         log_path = output_dir.parent.joinpath(

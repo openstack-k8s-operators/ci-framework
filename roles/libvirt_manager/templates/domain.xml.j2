@@ -16,7 +16,20 @@
     <boot dev='hd'/>
     <bootmenu enable='{{ vm_data.bootmenu_enable | default('no') }}'/>
   </os>
-  <cpu mode='host-passthrough' check='none'/>
+  <cpu mode='host-passthrough' check='none'>
+{% if vm_data.numa is defined and vm_data.numa|int > 1 %}
+    <numa>
+      {% set cores_per_node = (vm_data.cpus|int // vm_data.numa|int) %}
+      {% set mem_per_node = (vm_data.memory|int // vm_data.numa|int) %}
+      {% set cpu_ns = namespace(cpu_start=0) %}
+        {% for i in range(vm_data.numa|int) %}
+          {% set cpu_end = cpu_ns.cpu_start + cores_per_node - 1 %}
+          <cell id='{{ i }}' cpus='{{ cpu_ns.cpu_start }}-{{ cpu_end }}' memory='{{ mem_per_node }}' unit='GB'/>
+          {% set cpu_ns.cpu_start = cpu_end + 1 %}
+        {% endfor %}
+    </numa>
+{% endif %}
+  </cpu>
   <clock offset='utc'>
     <timer name='rtc' tickpolicy='catchup'/>
     <timer name='pit' tickpolicy='delay'/>

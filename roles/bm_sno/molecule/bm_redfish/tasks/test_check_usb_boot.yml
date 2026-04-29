@@ -1,0 +1,52 @@
+---
+# Test bm_check_usb_boot.yml: succeeds when enabled, fails when disabled.
+
+- name: "Check_usb_boot case 1: GenericUsbBoot Enabled -- succeeds"
+  block:
+    - name: Reset mock with usb_boot Enabled
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          usb_boot: "Enabled"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_check_usb_boot
+      ansible.builtin.include_role:
+        name: bm_sno
+        tasks_from: bm_check_usb_boot.yml
+
+    - name: Assert _usb_boot_enabled is true
+      ansible.builtin.assert:
+        that:
+          - _usb_boot_enabled | bool
+        fail_msg: "_usb_boot_enabled should be true when GenericUsbBoot is Enabled"
+
+- name: "Check_usb_boot case 2: GenericUsbBoot Disabled -- fails"
+  block:
+    - name: Reset mock with usb_boot Disabled
+      ansible.builtin.uri:
+        url: "{{ _mock_reset_url }}"
+        method: POST
+        body_format: json
+        body:
+          usb_boot: "Disabled"
+        validate_certs: false
+        status_code: [200]
+
+    - name: Include bm_check_usb_boot (expect failure)
+      ansible.builtin.include_role:
+        name: bm_sno
+        tasks_from: bm_check_usb_boot.yml
+
+    - name: Should not reach here
+      ansible.builtin.fail:
+        msg: "bm_check_usb_boot should have failed when GenericUsbBoot is Disabled"
+  rescue:
+    - name: Assert failure was about GenericUsbBoot
+      ansible.builtin.assert:
+        that:
+          - "'GenericUsbBoot' in ansible_failed_result.msg"
+        fail_msg: "Unexpected failure: {{ ansible_failed_result.msg }}"
