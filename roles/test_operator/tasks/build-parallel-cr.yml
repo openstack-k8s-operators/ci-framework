@@ -1,0 +1,99 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# Build a single Tempest CR for a parallel stage.
+#
+# This reuses the standard tempest-tests.yml logic (include/exclude lists,
+# SSH key secret, controller IP injection, workflow overrides, etc.) to
+# construct the CR, then applies parallel-specific modifications.
+#
+# Expected input:
+#   _pstage:              stage dict (name, type, test_vars, etc.)
+#   ansible_loop.index0:  position in the parallel group (0-based)
+#
+# Side effect:
+#   Appends the built CR to _parallel_cr_list fact.
+
+- name: "Build parallel CR for stage: {{ _pstage.name }}"
+  ansible.builtin.debug:
+    msg: "Building CR {{ ansible_loop.index0 + 1 }}/{{ ansible_loop.length }}: {{ _pstage.name }}"
+
+- name: "Load stage variables for {{ _pstage.name }}"
+  vars:
+    _stage_vars: "{{ _pstage }}"
+  ansible.builtin.include_tasks: load-stage-vars.yml
+
+- name: "Set CR base from tempest config template for {{ _pstage.name }}"
+  vars:
+    _stage_vars: "{{ _pstage }}"
+  ansible.builtin.set_fact:
+    test_operator_cr: "{{ stage_vars_dict.cifmw_test_operator_tempest_config }}"
+
+- name: "Clear inherited workflow for parallel stage {{ _pstage.name }}"
+  ansible.builtin.set_fact:
+    stage_vars_dict: >-
+      {{
+        stage_vars_dict | combine({
+          'cifmw_test_operator_tempest_workflow': []
+        })
+      }}
+
+- name: "Apply tempest-specific configuration for {{ _pstage.name }}"
+  vars:
+    _stage_vars: "{{ _pstage }}"
+    run_test_fw: tempest
+    test_operator_instance_name: >-
+      {{ stage_vars_dict.cifmw_test_operator_tempest_name }}-{{ _pstage.name }}
+    test_operator_workflow: []
+  ansible.builtin.include_tasks: tempest-tests.yml
+
+- name: "Apply parallel-specific overrides for {{ _pstage.name }}"
+  ansible.builtin.set_fact:
+    test_operator_cr: >-
+      {{
+        test_operator_cr | combine({
+          'spec': {
+            'parallel': true,
+            'workflow': [],
+            'resources': cifmw_test_operator_parallel_resources |
+                         default(test_operator_cr.spec.resources | default({})),
+            'tempestconfRun':
+              test_operator_cr.spec.tempestconfRun | default({}) | combine({
+                'create': (ansible_loop.index0 == 0)
+              }),
+            'tempestRun':
+              test_operator_cr.spec.tempestRun | default({}) | combine({
+                'extraImages': (
+                  test_operator_cr.spec.tempestRun.extraImages | default([])
+                  if ansible_loop.index0 == 0
+                  else [])
+              }),
+            'rerunFailedTests':
+              _pstage.rerunFailedTests | default(
+                stage_vars_dict.cifmw_test_operator_tempest_rerun_failed_tests |
+                default(false)) | bool,
+            'rerunOverrideStatus':
+              _pstage.rerunOverrideStatus | default(
+                stage_vars_dict.cifmw_test_operator_tempest_rerun_override_status |
+                default(false)) | bool,
+          }
+        }, recursive=true)
+      }}
+
+- name: "Append CR to parallel list: {{ _pstage.name }}"
+  ansible.builtin.set_fact:
+    _parallel_cr_list: >-
+      {{ _parallel_cr_list | default([]) + [test_operator_cr] }}
