@@ -1,0 +1,294 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# OpenStack Cleanup for Restore
+#
+# Cleans up OpenStack control plane and data plane resources to prepare
+# for a restore from OADP backup.
+
+- name: Print cleanup header
+  ansible.builtin.debug:
+    msg:
+      - "========================================"
+      - "OpenStack Cleanup for Restore"
+      - "========================================"
+      - "Namespace: {{ cifmw_backup_restore_namespace }}"
+      - "Cleanup ControlPlane: {{ cifmw_backup_restore_cleanup_ctlplane }}"
+      - "Cleanup DataPlane: {{ cifmw_backup_restore_cleanup_dataplane }}"
+      - "Delete labeled PVCs (Data Mover): {{ cifmw_backup_restore_snapshot_move_data }}"
+
+- name: Check if namespace exists
+  ansible.builtin.shell: |
+    oc get namespace {{ cifmw_backup_restore_namespace }}
+  register: _namespace_check
+  changed_when: false
+  failed_when: false
+
+- name: Exit if namespace doesn't exist
+  ansible.builtin.debug:
+    msg: "Namespace {{ cifmw_backup_restore_namespace }} does not exist. Nothing to clean up."
+  when: _namespace_check.rc != 0
+
+- name: End cleanup if namespace doesn't exist
+  ansible.builtin.meta: end_host
+  when: _namespace_check.rc != 0
+
+- name: Gather resource counts
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo "OpenStackControlPlane: $(oc get openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} --no-headers 2>/dev/null | wc -l)"
+    echo "DataPlaneNodeSets: $(oc get openstackdataplanenodeset -n {{ cifmw_backup_restore_namespace }} --no-headers 2>/dev/null | wc -l)"
+    echo "GaleraBackup: $(oc get galerabackup -n {{ cifmw_backup_restore_namespace }} --no-headers 2>/dev/null | wc -l)"
+    echo "Labeled PVCs: $(oc get pvc -n {{ cifmw_backup_restore_namespace }} -l backup.openstack.org/backup=true --no-headers 2>/dev/null | wc -l)"
+  register: _resource_counts
+  changed_when: false
+
+- name: Display found resources
+  ansible.builtin.debug:
+    msg: "{{ _resource_counts.stdout_lines }}"
+
+- name: Confirm deletion
+  ansible.builtin.pause:
+    prompt: "WARNING: This will delete OpenStack resources in {{ cifmw_backup_restore_namespace }}. Continue? (yes/no)"
+  register: _delete_confirm
+  when: not (cifmw_backup_restore_auto_ack | bool)
+
+- name: Fail if not confirmed
+  ansible.builtin.fail:
+    msg: "Cleanup cancelled by user"
+  when: not (cifmw_backup_restore_auto_ack | bool) and _delete_confirm.user_input != "yes"
+
+# ========================================
+# DataPlane Cleanup
+# ========================================
+- name: Delete DataPlaneDeployment CRs
+  ansible.builtin.shell: |
+    oc delete openstackdataplanedeployment --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_dataplane | bool
+
+- name: Delete DataPlaneNodeSet CRs
+  ansible.builtin.shell: |
+    oc delete openstackdataplanenodeset --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_dataplane | bool
+
+- name: Delete DataPlaneService CRs
+  ansible.builtin.shell: |
+    oc delete openstackdataplaneservice --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_dataplane | bool
+
+- name: Delete NetConfig CRs
+  ansible.builtin.shell: |
+    oc delete netconfig --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_dataplane | bool
+
+- name: Wait for dataplane pods to terminate
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc get pods -n {{ cifmw_backup_restore_namespace }} -l app=openstackansibleee --no-headers 2>/dev/null | wc -l
+  register: _dp_pod_count
+  until: _dp_pod_count.stdout|int == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_dataplane | bool
+
+# ========================================
+# ControlPlane Cleanup
+# ========================================
+- name: Delete PVC-pin dummy Deployments
+  ansible.builtin.shell: |
+    oc delete deployment -n {{ cifmw_backup_restore_namespace }} -l app=pvc-pin --ignore-not-found=true
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete openstack-restore-tmp namespace
+  ansible.builtin.shell: |
+    if oc get namespace openstack-restore-tmp &>/dev/null; then
+      for SECRET in $(oc get secret -n openstack-restore-tmp -o name 2>/dev/null); do
+        oc patch ${SECRET} -n openstack-restore-tmp --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+      done
+      oc delete namespace openstack-restore-tmp --wait=true --timeout=60s
+    fi
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete GaleraRestore CRs
+  ansible.builtin.shell: |
+    oc delete galerarestore --all -n {{ cifmw_backup_restore_namespace }} --wait=true
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete GaleraBackup CRs
+  ansible.builtin.shell: |
+    oc delete galerabackup --all -n {{ cifmw_backup_restore_namespace }} --wait=true
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete OpenStackControlPlane CR
+  ansible.builtin.shell: |
+    oc delete openstackcontrolplane --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Wait for pods to terminate
+  ansible.builtin.command:
+    cmd: >-
+      oc get pods -n {{ cifmw_backup_restore_namespace }}
+      --field-selector=status.phase!=Succeeded --no-headers
+  register: _remaining_pods
+  changed_when: false
+  failed_when: false
+  until: _remaining_pods.stdout_lines | length == 0
+  retries: 12
+  delay: 5
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Force delete stuck pods if still remaining
+  when:
+    - cifmw_backup_restore_cleanup_ctlplane | bool
+    - _remaining_pods.stdout_lines | default([]) | length > 0
+  block:
+    - name: Force delete remaining pods
+      ansible.builtin.command:
+        cmd: >-
+          oc delete pods --all -n {{ cifmw_backup_restore_namespace }}
+          --force --grace-period=0
+      changed_when: true
+      failed_when: false
+
+    - name: Wait for pods after force delete
+      ansible.builtin.command:
+        cmd: >-
+          oc get pods -n {{ cifmw_backup_restore_namespace }}
+          --field-selector=status.phase!=Succeeded --no-headers
+      register: _remaining_pods_final
+      changed_when: false
+      failed_when: false
+      until: _remaining_pods_final.stdout_lines | length == 0
+      retries: 48
+      delay: 5
+
+- name: Delete OpenStackBackupConfig CRs
+  ansible.builtin.shell: |
+    oc delete openstackbackupconfig --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete OpenStackVersion CRs
+  ansible.builtin.shell: |
+    oc delete openstackversion --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete RabbitMQUser CRs
+  ansible.builtin.shell: |
+    oc delete rabbitmquser --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete Certificate CRs (cert-manager)
+  ansible.builtin.shell: |
+    oc delete certificate --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete cert secrets
+  ansible.builtin.shell: |
+    set -o pipefail
+    for i in $(oc get secret -n {{ cifmw_backup_restore_namespace }} -o name | grep cert | grep -v edpm | grep -v ceph-conf); do
+      oc delete -n {{ cifmw_backup_restore_namespace }} $i
+    done
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete CA bundle secrets
+  ansible.builtin.shell: |
+    oc delete secret -n {{ cifmw_backup_restore_namespace }} rootca-internal rootca-libvirt rootca-ovn rootca-public combined-ca-bundle 2>/dev/null || true
+  changed_when: true
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete remaining user-provided secrets
+  ansible.builtin.shell: |
+    set -o pipefail
+    for i in $(oc get secret -n {{ cifmw_backup_restore_namespace }} -o name \
+      | grep -v dockercfg \
+      | grep -v service-account-token); do
+      oc delete -n {{ cifmw_backup_restore_namespace }} $i
+    done
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete ConfigMaps
+  ansible.builtin.shell: |
+    oc delete configmap --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Delete DNSData CRs
+  ansible.builtin.shell: |
+    oc delete dnsdata --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+# ========================================
+# Delete all PVCs
+# ========================================
+- name: Delete all PVCs in namespace
+  ansible.builtin.shell: |
+    oc delete pvc --all -n {{ cifmw_backup_restore_namespace }}
+  changed_when: true
+  failed_when: false
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+# ========================================
+# Summary
+# ========================================
+- name: Verify cleanup
+  ansible.builtin.shell: |
+    oc get all,pvc -n {{ cifmw_backup_restore_namespace }}
+  register: _remaining_resources
+  changed_when: false
+  failed_when: false
+
+- name: Display remaining resources
+  ansible.builtin.debug:
+    msg: "{{ _remaining_resources.stdout_lines }}"
+
+- name: Print cleanup complete
+  ansible.builtin.debug:
+    msg: "Namespace {{ cifmw_backup_restore_namespace }} is ready for restore."

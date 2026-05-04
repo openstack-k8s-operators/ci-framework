@@ -1,0 +1,124 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Restore OVN NB/SB databases from timestamped files on the PVCs (user-guide Step 8).
+# Must run after Galera restore and before removing deployment-stage. If no backup
+# files exist for this timestamp, skip (Neutron–OVN sync at the end repopulates OVN).
+
+- name: Check for OVN NB backup file from this backup run
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc exec ovsdbserver-nb-0 -n {{ cifmw_backup_restore_namespace }} -c ovsdbserver-nb -- \
+      test -f /etc/ovn/ovnnb_db.db.{{ cifmw_backup_restore_backup_timestamp }}
+  register: _ovn_nb_backup_file
+  changed_when: false
+  failed_when: false
+  when: cifmw_backup_restore_ovn_db | bool
+
+- name: Set fact — OVN backup files not used (OVN DB steps disabled)
+  ansible.builtin.set_fact:
+    _cifmw_backup_restore_ovn_files_present: false
+  when: not (cifmw_backup_restore_ovn_db | bool)
+
+- name: Set fact — OVN backup files present on PVC
+  ansible.builtin.set_fact:
+    _cifmw_backup_restore_ovn_files_present: "{{ _ovn_nb_backup_file.rc == 0 }}"
+  when: cifmw_backup_restore_ovn_db | bool
+
+- name: Skip OVN database file restore (no per-timestamp backup on PVC)
+  ansible.builtin.debug:
+    msg: >-
+      No OVN backup file ovnnb_db.db.{{ cifmw_backup_restore_backup_timestamp }} on ovsdbserver-nb-0;
+      skipping file restore. OVN will be repopulated via neutron-ovn-db-sync after EDPM.
+  when:
+    - cifmw_backup_restore_ovn_db | bool
+    - not _cifmw_backup_restore_ovn_files_present | bool
+
+- name: "Step 8: Restore OVN databases from PVC backup files"
+  when:
+    - cifmw_backup_restore_ovn_db | bool
+    - _cifmw_backup_restore_ovn_files_present | bool
+  block:
+    - name: Announce OVN database file restore
+      ansible.builtin.debug:
+        msg:
+          - "========================================"
+          - "Step 8: OVN Database Restore (NB/SB)"
+          - "========================================"
+
+    - name: Replace OVN DB files and clear follower replicas
+      ansible.builtin.shell: |
+        set -euo pipefail
+        NS="{{ cifmw_backup_restore_namespace }}"
+        TS="{{ cifmw_backup_restore_backup_timestamp }}"
+        for db in nb sb; do
+          oc exec ovsdbserver-${db}-0 -n "${NS}" -c ovsdbserver-${db} -- bash -c \
+            "rm -f /etc/ovn/ovn${db}_db.db && \
+             cp /etc/ovn/ovn${db}_db.db.${TS} /etc/ovn/ovn${db}_db.db"
+          COUNT=$(oc get pods -n "${NS}" -l service=ovsdbserver-${db} --no-headers 2>/dev/null | wc -l | awk '{print $1}')
+          for ((i=1; i<COUNT; i++)); do
+            if oc get pod "ovsdbserver-${db}-${i}" -n "${NS}" &>/dev/null; then
+              oc exec "ovsdbserver-${db}-${i}" -n "${NS}" -c ovsdbserver-${db} -- \
+                rm -f "/etc/ovn/ovn${db}_db.db"
+            fi
+          done
+        done
+      changed_when: true
+
+    - name: Force delete OVN NB database pods
+      ansible.builtin.command:
+        cmd: >-
+          oc delete pod -n {{ cifmw_backup_restore_namespace }}
+          -l service=ovsdbserver-nb
+          --force
+          --grace-period=0
+      changed_when: true
+
+    - name: Force delete OVN SB database pods
+      ansible.builtin.command:
+        cmd: >-
+          oc delete pod -n {{ cifmw_backup_restore_namespace }}
+          -l service=ovsdbserver-sb
+          --force
+          --grace-period=0
+      changed_when: true
+
+    - name: Wait for OVN NB database pods ready
+      ansible.builtin.command:
+        cmd: >-
+          oc wait pod -n {{ cifmw_backup_restore_namespace }}
+          -l service=ovsdbserver-nb
+          --for=condition=Ready
+          --timeout={{ cifmw_backup_restore_ovn_db_ready_timeout }}
+      changed_when: false
+
+    - name: Wait for OVN SB database pods ready
+      ansible.builtin.command:
+        cmd: >-
+          oc wait pod -n {{ cifmw_backup_restore_namespace }}
+          -l service=ovsdbserver-sb
+          --for=condition=Ready
+          --timeout={{ cifmw_backup_restore_ovn_db_ready_timeout }}
+      changed_when: false
+
+    - name: Restart OVN control plane pods to reconnect to restored databases
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc delete pod -n {{ cifmw_backup_restore_namespace }} -l service=ovn-northd --ignore-not-found=true
+        oc delete pod -n {{ cifmw_backup_restore_namespace }} -l service=ovn-controller --ignore-not-found=true
+        oc delete pod -n {{ cifmw_backup_restore_namespace }} -l service=ovn-controller-ovs --ignore-not-found=true
+        oc delete pod -n {{ cifmw_backup_restore_namespace }} -l service=ovn-controller-metrics --ignore-not-found=true
+      changed_when: true
