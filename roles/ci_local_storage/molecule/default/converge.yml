@@ -137,3 +137,65 @@
           }}
       ansible.builtin.assert:
         that: "cifmw_cls_namespace not in ns_names"
+
+    - name: Test oc-debug fallback path (uncovered_node_dirs.yml)
+      vars:
+        cifmw_cls_pv_count: 3
+        cifmw_cls_local_storage_name: /mnt/openstack-fallback
+        cifmw_cls_oc_debug_fallback: true
+      block:
+        - name: Get k8s node names for fallback test
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            kind: Node
+          register: _fb_k8s_nodes
+
+        - name: Simulate no SSH-reachable hosts matching k8s nodes
+          ansible.builtin.set_fact:
+            cifmw_ci_local_storage_k8s_hostnames:
+              - "{{ _fb_k8s_nodes.resources[0].metadata.name }}"
+            _hostnames:
+              results: []
+
+        - name: Run uncovered_node_dirs.yml (create)
+          vars:
+            cifmw_cls_action: create
+          ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../../tasks/uncovered_node_dirs.yml"
+
+        - name: Assert uncovered nodes were identified
+          ansible.builtin.assert:
+            that:
+              - _cls_uncovered_nodes | length == 1
+
+        - name: Verify directories created on node
+          delegate_to: crc
+          become: true
+          register: _fb_check
+          ansible.builtin.stat:
+            path: "/mnt/openstack-fallback/pv{{ '%02d' | format(item | int) }}"
+          loop: "{{ range(1, 4) }}"
+
+        - name: Assert all fallback directories exist
+          ansible.builtin.assert:
+            that: item.stat.exists
+          loop: "{{ _fb_check.results }}"
+          loop_control:
+            label: "{{ item.stat.path }}"
+
+        - name: Run uncovered_node_dirs.yml (cleanup)
+          vars:
+            cifmw_cls_action: clean
+          ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../../tasks/uncovered_node_dirs.yml"
+
+        - name: Verify fallback directories removed
+          delegate_to: crc
+          become: true
+          register: _fb_removed
+          ansible.builtin.stat:
+            path: "/mnt/openstack-fallback"
+
+        - name: Assert fallback directory tree is gone
+          ansible.builtin.assert:
+            that: not _fb_removed.stat.exists
