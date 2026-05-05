@@ -440,6 +440,11 @@
     leaf_id: "{{ (ansible_hostname.split('-')[-1] | int) % 2 }}"  # always 2 leaves per rack
     rack_id: "{{ (ansible_hostname.split('-')[-1] | int) // 2 }}"  # always 2 leaves per rack
     _ip_version: "{{ ip_version | default(4) | int }}"
+    # ebgp_racks: comma-separated rack IDs that use eBGP (e.g. "1,2")
+    # ebgp_leaf_asn: base ASN for eBGP leaves (default: 64999 - rack_id)
+    _is_ebgp_rack: "{{ (rack_id | int) in (ebgp_racks | default('') | split(',') | select | map('int') | list) }}"
+    downlink_remote_as: "{{ 'external' if _is_ebgp_rack else 'internal' }}"
+    leaf_asn: "{{ ebgp_leaf_asn | default(64999 - (rack_id | int)) if _is_ebgp_rack else 64999 }}"
   tasks:
     - name: Obtain the connection for the eth0 interface
       ansible.builtin.command:
