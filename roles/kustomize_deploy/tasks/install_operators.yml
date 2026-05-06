@@ -325,6 +325,28 @@
       register: _webhook_server_deployment
       until: _webhook_server_deployment is success
 
+    - name: Wait for MetalLB webhook endpoints to have addresses
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: v1
+        kind: Endpoints
+        namespace: metallb-system
+        name: "{{ item }}"
+      retries: 10
+      delay: 15
+      register: _metallb_webhook_endpoints
+      until:
+        - _metallb_webhook_endpoints.resources is defined
+        - _metallb_webhook_endpoints.resources | length == 1
+        - >-
+          (_metallb_webhook_endpoints.resources | first).subsets | default([])
+          | map(attribute='addresses', default=[]) | flatten | length > 0
+      loop:
+        - metallb-operator-controller-manager-service
+        - metallb-operator-webhook-server-service
+        - metallb-operator-webhook-service
+        - webhook-service
+
     - name: Wait until NMstate operator resources are deployed
       kubernetes.core.k8s_info:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -374,6 +396,10 @@
           cifmw_kustomize_deploy_check_mode |
           default(false, true)
         }}
+      retries: 10
+      delay: 15
+      register: _metallb_cr_apply
+      until: _metallb_cr_apply is success
 
     - name: Wait for MetalLB speaker pods
       kubernetes.core.k8s_info:
