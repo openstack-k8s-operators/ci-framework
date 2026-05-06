@@ -1,0 +1,79 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Reusable task to wait for a Velero Restore to complete.
+#
+# Required variables:
+#   _restore_name: Name of the Velero Restore CR
+#   _step_name: Human-readable step name for log messages
+
+- name: "Wait for restore to complete - {{ _step_name }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get restore {{ _restore_name }}
+      -n {{ cifmw_backup_restore_oadp_namespace }}
+      -o jsonpath='{.status.phase}'
+  register: _restore_phase_raw
+  changed_when: false
+  until: _restore_phase_raw.stdout in ["Completed", "PartiallyFailed", "Failed", "FailedValidation"]
+  retries: "{{ (cifmw_backup_restore_restore_timeout | int / 10) | int }}"
+  delay: 10
+
+- name: "Set restore phase fact - {{ _step_name }}"
+  ansible.builtin.set_fact:
+    _restore_phase:
+      stdout: "{{ _restore_phase_raw.stdout }}"
+
+- name: "Get restore details on non-Completed phase - {{ _step_name }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo "=== Restore Status ==="
+    oc get restore {{ _restore_name }} -n {{ cifmw_backup_restore_oadp_namespace }} \
+      -o jsonpath='{.status}' | python3 -m json.tool 2>/dev/null || \
+    oc get restore {{ _restore_name }} -n {{ cifmw_backup_restore_oadp_namespace }} \
+      -o yaml
+    echo ""
+    echo "=== Velero Restore Logs ==="
+    oc -n {{ cifmw_backup_restore_oadp_namespace }} exec deployment/velero -- \
+      ./velero restore logs {{ _restore_name }} 2>/dev/null | tail -50 || true
+  register: _restore_details
+  changed_when: false
+  when: _restore_phase.stdout != "Completed"
+
+- name: "Print restore diagnostics - {{ _step_name }}"
+  ansible.builtin.debug:
+    msg: "{{ _restore_details.stdout_lines }}"
+  when: _restore_phase.stdout != "Completed"
+
+- name: "Fail on Failed restore - {{ _step_name }}"
+  ansible.builtin.fail:
+    msg: "Restore {{ _restore_name }} {{ _restore_phase.stdout }}."
+  when: _restore_phase.stdout in ["Failed", "FailedValidation"]
+
+- name: "Fail on PartiallyFailed restore (strict mode) - {{ _step_name }}"
+  ansible.builtin.fail:
+    msg: "Restore {{ _restore_name }} {{ _restore_phase.stdout }}. Re-run with -e cifmw_backup_restore_strict_restore=false to continue."
+  when: _restore_phase.stdout == "PartiallyFailed" and (cifmw_backup_restore_strict_restore | bool)
+
+- name: "Warn on PartiallyFailed restore (non-strict mode) - {{ _step_name }}"
+  ansible.builtin.debug:
+    msg: "WARNING: Restore {{ _restore_name }} completed with status: {{ _restore_phase.stdout }}"
+  when: _restore_phase.stdout == "PartiallyFailed" and not (cifmw_backup_restore_strict_restore | bool)
+
+- name: "Print success - {{ _step_name }}"
+  ansible.builtin.debug:
+    msg: "Restore {{ _restore_name }} completed successfully"
+  when: _restore_phase.stdout == "Completed"
