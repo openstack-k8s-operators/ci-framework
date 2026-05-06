@@ -1,0 +1,68 @@
+---
+# End-to-end backup/restore test playbook
+#
+# Aligns with the openstack-k8s-operators backup-restore user guide (Galera,
+# optional OVN NB/SB on PVC, OADP, ordered restore, Neutron–OVN sync post-EDPM).
+#
+# Used standalone or from post-deployment.yml (gated by
+# cifmw_run_backup_restore_test). Logic lives in
+# roles/cifmw_backup_restore/tasks/e2e.yml; variables are in the role defaults.
+#
+# Each step can be enabled/disabled independently for iterative testing.
+#
+# Prerequisites:
+# - OpenStack control plane deployed and healthy
+# - OpenStackBackupConfig CR created (for backup labeling)
+# - For manual testing on a reproducer, run post_deployment.sh first:
+#     ./post_deployment.sh -e zuul_log_collection=true \
+#       -e cifmw_nolog=false -e cifmw_run_tests=false
+#
+# Manual usage (reproducer):
+#   COMMON_ARGS="-i ~/ci-framework-data/artifacts/zuul_inventory.yml \
+#     -e @~/ci-framework-data/parameters/reproducer-variables.yml \
+#     -e @~/ci-framework-data/parameters/openshift-environment.yml"
+#
+#   # Full run (with test workload):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_create_workload=true
+#
+#   # Full run (without workload):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml
+#
+#   # Install deps only:
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_run_restore=false
+#
+#   # Backup only (deps already installed):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_run_restore=false
+#
+#   # Cleanup + restore (backup already done):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_backup_timestamp=20260323-144546
+#
+#   # Restore only (cleanup already done):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_backup_timestamp=20260323-144546
+#
+#   # With PVC pinning (WaitForFirstConsumer storage):
+#   ansible-playbook $COMMON_ARGS playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_pin_pvcs=true
+
+- name: Backup and Restore end-to-end test
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: true
+  tasks:
+    - name: Run backup/restore end-to-end orchestration
+      ansible.builtin.import_role:
+        name: cifmw_backup_restore
+        tasks_from: e2e.yml
