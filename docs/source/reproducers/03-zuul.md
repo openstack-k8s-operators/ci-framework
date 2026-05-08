@@ -77,7 +77,7 @@ This is the magic parameter: by setting it, you'll instruct the reproducer to sw
 "reproducer job mode". This URI is the one you can find on a Zuul job output, and usually
 looks like this:
 
-https://logserver.rdoproject.org/74/574/LONG_HASH/github-check/podified-multinode-edpm-e2e-nobuild-tagged-crc/SHORT_HASH/
+https://gateway-cloud-softwarefactory.apps.ocp.cloud.ci.centos.org/logs/74/574/LONG_HASH/github-check/podified-multinode-edpm-e2e-nobuild-tagged-crc/SHORT_HASH/
 
 
 ### Inject your custom code
