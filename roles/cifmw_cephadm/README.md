@@ -117,6 +117,11 @@ that they do not need to be changed for a typical EDPM deployment.
   releases prior to Tentacle, this option is not required, as both `NFSv3`
   and `NFSv4` are enabled by default.
 
+* `cifmw_cephadm_auth_allowed_ciphers`: (String) When set, runs
+  `ceph mon set auth_allowed_ciphers <value>` during cluster configuration.
+   Example values are `"aes,aes256k"` or `"aes256k"` or `"aes"`.
+   Defaults to `""` (unset, no command is run).
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
