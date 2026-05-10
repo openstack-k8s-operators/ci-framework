@@ -14,6 +14,58 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Kill any previous background command
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ namespace }} {{ pod_name }} --
+      bash -c 'if [ -f /tmp/cifmw_cmd_pid ]; then
+      kill $(cat /tmp/cifmw_cmd_pid) 2>/dev/null; fi'
+  changed_when: false
+  failed_when: false
+
+- name: Clear previous run markers
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ namespace }} {{ pod_name }} --
+      bash -c 'rm -f /tmp/cifmw_cmd_rc /tmp/cifmw_cmd_pid
+      /tmp/cifmw_cmd_script.sh /tmp/cifmw_cmd_output.log'
+  changed_when: false
+  failed_when: false
+
+- name: Write the command to a local script file
+  ansible.builtin.copy:
+    content: |
+      #!/bin/bash
+      {{ command }}
+    dest: /tmp/cifmw_cmd_script.sh
+    mode: "0755"
+
+- name: Copy the script into the pod
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.shell:
+    cmd: >-
+      oc exec -i -n {{ namespace }} {{ pod_name }} --
+      tee /tmp/cifmw_cmd_script.sh > /dev/null
+      < /tmp/cifmw_cmd_script.sh
+  changed_when: true
+
+- name: Make the script executable in the pod
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ namespace }} {{ pod_name }} --
+      chmod +x /tmp/cifmw_cmd_script.sh
+
 - name: Command execution block
   block:
     - name: Execute in the pod the command '{{ command }}'
@@ -21,13 +73,42 @@
         PATH: "{{ cifmw_path }}"
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
       ansible.builtin.command:
-        cmd: "oc rsh -n {{ namespace }} {{ pod_name }} bash -c '{{ command }}'"
+        cmd: >-
+          oc exec -n {{ namespace }} {{ pod_name }} --
+          bash -c 'nohup bash -c "/tmp/cifmw_cmd_script.sh; echo \$? > /tmp/cifmw_cmd_rc"
+          > /tmp/cifmw_cmd_output.log 2>&1 &
+          echo $! > /tmp/cifmw_cmd_pid && cat /tmp/cifmw_cmd_pid'
       register: pod_command_result
+
+    - name: Wait for the command to complete in the pod
+      environment:
+        PATH: "{{ cifmw_path }}"
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      ansible.builtin.command:
+        cmd: >-
+          oc exec -n {{ namespace }} {{ pod_name }} --
+          bash -c 'cat /tmp/cifmw_cmd_rc'
+      register: pod_exit_code
+      changed_when: false
+      until: pod_exit_code.rc == 0
+      retries: "{{ cifmw_shiftstack_exec_retries | default(2160) }}"
+      delay: "{{ cifmw_shiftstack_exec_delay | default(5) }}"
+
+    - name: Fail if the command failed inside the pod
+      ansible.builtin.fail:
+        msg: >-
+          "{{ command }}" failed inside the pod with
+          exit code {{ pod_exit_code.stdout | trim }}.
+      when: (pod_exit_code.stdout | trim) != '0'
 
   rescue:
     - name: Fail when the command module fails
       ansible.builtin.fail:
-        msg: '"{{ command }}" command execution failed with exit code "{{ pod_command_result.rc }}" and error: "{{ pod_command_result.stderr }}".'
+        msg: >-
+          "{{ command }}" failed.
+          oc exit code: {{ pod_command_result.rc | default('N/A') }},
+          pod exit code: {{ pod_exit_code.stdout | default('N/A') | trim }},
+          stderr: {{ pod_command_result.stderr | default('') }}{{ pod_exit_code.stderr | default('') }}.
 
   always:
     - name: Command execution log saving block
@@ -45,6 +126,7 @@
               pod_name: "{{ pod_name }}"
               command: "{{ command }}"
               pod_command_result: "{{ pod_command_result }}"
+              pod_exit_code: "{{ pod_exit_code | default('N/A') }}"
           ansible.builtin.copy:
             content: "{{ command_info | to_nice_yaml }}"
             dest: "{{ cifmw_shiftstack_ansible_command_logs_dir }}/{{ current_date.stdout }}.{{ log_file_name }}"
