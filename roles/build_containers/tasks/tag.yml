@@ -16,13 +16,15 @@
 
 - name: Ensure directories are present
   ansible.builtin.file:
-    path: "{{ cifmw_build_containers_basedir }}/{{ item }}"
+    path: "{{ cifmw_build_containers_basedir }}/{{ created_dir }}"
     state: directory
     mode: "0755"
   loop:
     - tmp
     - artifacts
     - logs
+  loop_control:
+    loop_var: created_dir
 
 - name: Make sure authfile exists
   when:
@@ -56,8 +58,7 @@
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail;
-      cat {{ cifmw_build_containers_basedir }}/logs/containers-built.log |
-      grep {{ cifmw_build_containers_container_name_prefix }} |
+      grep {{ cifmw_build_containers_container_name_prefix }} {{ cifmw_build_containers_basedir }}/logs/containers-built.log |
       awk '{ print $1 }'
   register: built_images_from_file
 
@@ -65,8 +66,7 @@
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail;
-      cat {{ cifmw_build_containers_basedir }}/logs/containers-built.log |
-      grep {{ cifmw_build_containers_container_name_prefix }} |
+      grep {{ cifmw_build_containers_container_name_prefix }} {{ cifmw_build_containers_basedir }}/logs/containers-built.log |
       awk '{ print $2 }' |  head -n 1
   register: images_tag_from_file
 
@@ -81,23 +81,28 @@
 
 - name: Pull images returned in built_images
   containers.podman.podman_image:
-    name: "{{ item }}"
+    name: "{{ loop_img_name }}"
     tag: "{{ images_tag }}"
   loop: "{{ built_images }}"
+  loop_control:
+    loop_var: loop_img_name
 
 - name: Retag the images with new tag
   containers.podman.podman_tag:
-    image: "{{ item }}:{{ images_tag }}"
+    image: "{{ loop_img_name }}:{{ images_tag }}"
     target_names:
-      - "{{ item }}:{{ cifmw_build_containers_tag_string }}"
+      - "{{ loop_img_name }}:{{ cifmw_build_containers_tag_string | trim }}"
   loop: "{{ built_images }}"
+  loop_control:
+    loop_var: loop_img_name
 
 - name: Push images to registry with new tag
   containers.podman.podman_image:
-    name: "{{ item }}"
-    push_args:
-      dest: "{{ cifmw_build_containers_push_registry }}/{{ cifmw_build_containers_registry_namespace }}"
-    tag: "{{ cifmw_build_containers_tag_string }}"
-    pull: false
+    name: "{{ loop_img_name }}"
+    tag: "{{ cifmw_build_containers_tag_string | trim }}"
     push: true
+    push_args:
+      dest: "{{ cifmw_build_containers_push_registry }}/{{ cifmw_build_containers_registry_namespace }}/{{ loop_img_name | basename }}:{{ cifmw_build_containers_tag_string | trim }}"
   loop: "{{ built_images }}"
+  loop_control:
+    loop_var: loop_img_name
