@@ -87,21 +87,30 @@
 
 - name: Deploy NFS server on target nodes
   become: true
+  gather_facts: false
   hosts: "{{ groups[cifmw_nfs_target | default('computes')][0] | default([]) }}"
   tasks:
+    - name: End play early for architecture deploys
+      when:
+        - cifmw_architecture_scenario is defined
+      ansible.builtin.meta: end_play
+
+    - name: Gather facts for NFS deployment
+      ansible.builtin.setup:
+
     - name: Run cifmw_nfs role
       vars:
         nftables_path: /etc/nftables
         nftables_conf: /etc/sysconfig/nftables.conf
       when:
         - cifmw_edpm_deploy_nfs | default(false) | bool
-      ansible.builtin.import_role:
+      ansible.builtin.include_role:
         name: cifmw_nfs
 
 - name: Clear ceph target hosts facts to force refreshing in HCI deployments
+  gather_facts: false
   hosts: "{{ cifmw_ceph_target | default('computes')  }}"
   tasks:
-    # end_play will end only current play, not the main edpm-deploy.yml
     - name: Early end if architecture deploy
       when:
         - cifmw_architecture_scenario is defined
