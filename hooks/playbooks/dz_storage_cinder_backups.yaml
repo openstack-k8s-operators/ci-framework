@@ -1,0 +1,201 @@
+---
+# Test Cinder backup and restore capabilities across availability zones in dz-storage DT
+# Tests three scenarios:
+# 1. AZ1 backs up to AZ1 and restores to AZ1
+# 2. AZ1 backs up to AZ2 and restores to AZ1
+# 3. AZ1 backs up to AZ2 and restores to AZ2
+
+- name: Test Cinder backup and restore across availability zones
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  environment:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
+      PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  tasks:
+    # ==================================================================================
+    # Scenario 1: AZ1 backs up to AZ1 and restores to AZ1
+    # ==================================================================================
+    - name: "Scenario 1: Create volume in AZ1"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume create --size 1 vol-az1 --availability-zone az1 -f value -c id
+      register: vol_az1_id
+
+    - name: Wait for volume vol-az1 to become available
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1 -f value -c status
+      register: vol_az1_status
+      until: "'available' in vol_az1_status.stdout"
+      retries: 60
+      delay: 5
+
+    - name: "Scenario 1: Create backup for volume in AZ1"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack --os-volume-api-version 3.51 volume backup create
+        --availability-zone az1
+        --name vol-az1-backup-az1
+        vol-az1
+        -f value -c id
+      register: vol_az1_backup_az1_id
+
+    - name: Wait for backup vol-az1-backup-az1 to become available
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume backup show vol-az1-backup-az1 -f value -c status
+      register: vol_az1_backup_az1_status
+      until: "'available' in vol_az1_backup_az1_status.stdout"
+      retries: 120
+      delay: 10
+
+    - name: Verify backup vol-az1-backup-az1 is in AZ1
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume backup show vol-az1-backup-az1 -f value -c availability_zone
+      register: vol_az1_backup_az1_zone
+      failed_when: "'az1' not in vol_az1_backup_az1_zone.stdout"
+
+    - name: "Scenario 1: Restore volume backup to AZ1"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack --os-volume-api-version 3.47 volume create
+        --backup vol-az1-backup-az1
+        --availability-zone az1
+        vol-az1-restore-az1
+        -f value -c id
+      register: vol_az1_restore_az1_id
+
+    - name: Wait for restored volume vol-az1-restore-az1 to become available
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1-restore-az1 -f value -c status
+      register: vol_az1_restore_az1_status
+      until: "'available' in vol_az1_restore_az1_status.stdout"
+      retries: 120
+      delay: 10
+
+    - name: Verify restored volume vol-az1-restore-az1 is in AZ1
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1-restore-az1 -f value -c availability_zone
+      register: vol_az1_restore_az1_zone
+      failed_when: "'az1' not in vol_az1_restore_az1_zone.stdout"
+
+    # ==================================================================================
+    # Scenario 2: AZ1 backs up to AZ2 and restores to AZ1
+    # ==================================================================================
+    - name: "Scenario 2: Create backup for volume in AZ2"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack --os-volume-api-version 3.51 volume backup create
+        --availability-zone az2
+        --name vol-az1-backup-az2
+        vol-az1
+        -f value -c id
+      register: vol_az1_backup_az2_id
+
+    - name: Wait for backup vol-az1-backup-az2 to become available
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume backup show vol-az1-backup-az2 -f value -c status
+      register: vol_az1_backup_az2_status
+      until: "'available' in vol_az1_backup_az2_status.stdout"
+      retries: 120
+      delay: 10
+
+    - name: Verify backup vol-az1-backup-az2 is in AZ2
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume backup show vol-az1-backup-az2 -f value -c availability_zone
+      register: vol_az1_backup_az2_zone
+      failed_when: "'az2' not in vol_az1_backup_az2_zone.stdout"
+
+    - name: "Scenario 2: Restore backup from AZ2 back to AZ1"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack --os-volume-api-version 3.47 volume create
+        --backup vol-az1-backup-az2
+        --availability-zone az1
+        vol-az1-backup-az2-restore-az1
+        -f value -c id
+      register: vol_az1_backup_az2_restore_az1_id
+
+    - name: Wait for restored volume vol-az1-backup-az2-restore-az1 to become available
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1-backup-az2-restore-az1 -f value -c status
+      register: vol_az1_backup_az2_restore_az1_status
+      until: "'available' in vol_az1_backup_az2_restore_az1_status.stdout"
+      retries: 120
+      delay: 10
+
+    - name: Verify restored volume vol-az1-backup-az2-restore-az1 is in AZ1
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1-backup-az2-restore-az1 -f value -c availability_zone
+      register: vol_az1_backup_az2_restore_az1_zone
+      failed_when: "'az1' not in vol_az1_backup_az2_restore_az1_zone.stdout"
+
+    # ==================================================================================
+    # Scenario 3: AZ1 backs up to AZ2 and restores to AZ2
+    # ==================================================================================
+    # Reusing the volume backup vol-az1-backup-az2 created in previous scenario
+    - name: "Scenario 3: Restore backup from AZ2 to AZ2"
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack --os-volume-api-version 3.47 volume create
+        --backup vol-az1-backup-az2
+        --availability-zone az2
+        vol-az1-restore-az2
+        -f value -c id
+      register: vol_az1_restore_az2_id
+
+    - name: Wait for restored volume vol-az1-restore-az2 to become available
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1-restore-az2 -f value -c status
+      register: vol_az1_restore_az2_status
+      until: "'available' in vol_az1_restore_az2_status.stdout"
+      retries: 120
+      delay: 10
+
+    - name: Verify restored volume vol-az1-restore-az2 is in AZ2
+      ansible.builtin.command: >-
+        oc rsh
+        -n {{ cifmw_openstack_namespace }}
+        openstackclient
+        openstack volume show vol-az1-restore-az2 -f value -c availability_zone
+      register: vol_az1_restore_az2_zone
+      failed_when: "'az2' not in vol_az1_restore_az2_zone.stdout"
