@@ -61,7 +61,7 @@ options:
   log_glob:
     description: Glob under I(log_dir). Used only when I(log_dir) is set.
     required: false
-    default: "*.crio.log"
+    default: "\\*.crio.log"
     type: str
 
 author:
