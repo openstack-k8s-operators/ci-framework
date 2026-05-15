@@ -59,6 +59,7 @@ networks.
 * `cifmw_devscripts_cpu_passthrough` (bool) Enable host-passthrough cpu model
   to virtual machine instead of using QEMU on nested environment. Defaults
   to `false`.
+* `cifmw_devscripts_sno` (bool) Enable Single Node OpenShift. Defaults to `false`.
 
 ### Secrets management
 
