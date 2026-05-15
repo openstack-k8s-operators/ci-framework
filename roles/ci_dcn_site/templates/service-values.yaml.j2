@@ -15,13 +15,28 @@ data:
   cinderAPI:
     replicas: 3
   cinderBackup:
-    replicas: 3
+    replicas: 0
     customServiceConfig: |
       [DEFAULT]
-      backup_driver = cinder.backup.drivers.ceph.CephBackupDriver
-      backup_ceph_conf = /etc/ceph/az0.conf
-      backup_ceph_pool = backups
-      backup_ceph_user = openstack
+      # cinderBackup (singular) is deprecated; use cinderBackups (plural)
+  cinderBackups:
+{% for _ceph in _ceph_vars_list %}
+    {{ _ceph.cifmw_ceph_client_cluster }}:
+      customServiceConfig: |
+        [DEFAULT]
+        storage_availability_zone = {{ _ceph.cifmw_ceph_client_cluster }}
+        backup_driver = cinder.backup.drivers.ceph.CephBackupDriver
+        backup_ceph_conf = /etc/ceph/{{ _ceph.cifmw_ceph_client_cluster }}.conf
+        backup_ceph_pool = backups
+        backup_ceph_user = openstack
+      networkAttachments:
+        - storage
+{% if _ceph.cifmw_ceph_client_cluster == _az_to_scaledown %}
+      replicas: 0
+{% else %}
+      replicas: 2
+{% endif %}
+{% endfor %}
   cinderVolumes:
 {% for _ceph in _ceph_vars_list %}
 {% if _ceph.cifmw_ceph_client_cluster != _az_to_scaledown %}
