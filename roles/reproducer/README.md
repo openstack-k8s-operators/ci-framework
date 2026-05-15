@@ -11,6 +11,7 @@ bare metal SNO deployments to the `bm_sno` role.
 * `devscripts_layout`: Dev-scripts OCP layout tasks (libvirt path).
 * `ocp_layout`: OCP layout tasks (libvirt path).
 * `bm_ocp_layout`: Agent-based bare metal OCP layout tasks.
+* `other_thing`: Example change here.
 
 ## Parameters
 
