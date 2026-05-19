@@ -1,0 +1,158 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# Collect logs from a single parallel Tempest CR's PVCs.
+#
+# Reuses the same PVC-based log collection approach as collect-logs.yaml
+# but scoped to a specific parallel CR instance.
+#
+# Expected input:
+#   _pcr: the Tempest CR definition dict (with .metadata.name, .metadata.namespace)
+
+- name: "Reset volumes for {{ _pcr.metadata.name }}"
+  ansible.builtin.set_fact:
+    _test_operator_volumes: []
+    _test_operator_volume_mounts: []
+
+- name: "Get PVCs for {{ _pcr.metadata.name }}"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ _pcr.metadata.namespace }}"
+    kind: PersistentVolumeClaim
+    label_selectors:
+      - "instanceName={{ _pcr.metadata.name }}"
+  register: _pcr_pvcs
+
+- name: "Set up volume mounts for {{ _pcr.metadata.name }}"
+  ansible.builtin.set_fact:
+    _test_operator_volume_mounts: >-
+      {{
+        (_test_operator_volume_mounts | default([])) + [{
+          'name': 'logs-volume-' ~ index,
+          'mountPath': '/mnt/logs-' + _pcr.metadata.name + '-step-' ~ index
+        }]
+      }}
+    _test_operator_volumes: >-
+      {{
+        (_test_operator_volumes | default([])) + [{
+          'name': 'logs-volume-' ~ index,
+          'persistentVolumeClaim': {
+            'claimName': pvc.metadata.name
+          }
+        }]
+      }}
+  loop: "{{ _pcr_pvcs.resources }}"
+  loop_control:
+    loop_var: pvc
+    index_var: index
+
+- name: "Create log pod definition for {{ _pcr.metadata.name }}"
+  when: _pcr_pvcs.resources | length > 0
+  block:
+    - name: Set log pod fact
+      vars:
+        run_test_fw: tempest
+        test_operator_instance_name: "{{ _pcr.metadata.name }}"
+      ansible.builtin.set_fact:
+        _test_operator_log_pod: "{{ cifmw_test_operator_log_pod_definition }}"
+
+    - name: "Write log pod definition for {{ _pcr.metadata.name }}"
+      ansible.builtin.copy:
+        content: "{{ _test_operator_log_pod | to_nice_yaml }}"
+        dest: "{{ cifmw_test_operator_crs_path }}/{{ _pcr.metadata.name }}-log-pod.yaml"
+        mode: '0644'
+
+    - name: "Start log pod for {{ _pcr.metadata.name }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        wait: true
+        src: "{{ cifmw_test_operator_crs_path }}/{{ _pcr.metadata.name }}-log-pod.yaml"
+
+    - name: "Ensure log pod is Running for {{ _pcr.metadata.name }}"
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ _pcr.metadata.namespace }}"
+        kind: Pod
+        name: "test-operator-logs-pod-tempest-{{ _pcr.metadata.name }}"
+        wait: true
+      register: _pcr_logs_pod
+      until: _pcr_logs_pod.resources[0].status.phase == "Running"
+      delay: 10
+      retries: 20
+
+    - name: "Copy logs from {{ _pcr.metadata.name }}"
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      vars:
+        _pod_path: "mnt/logs-{{ _pcr.metadata.name }}-step-{{ index }}"
+      ansible.builtin.shell: >-
+        oc cp -n {{ _pcr.metadata.namespace }}
+        test-operator-logs-pod-tempest-{{ _pcr.metadata.name }}:{{ _pod_path }}
+        {{ cifmw_test_operator_artifacts_basedir }}
+      loop: "{{ _pcr_pvcs.resources }}"
+      loop_control:
+        index_var: index
+
+    - name: "Find subunit files for {{ _pcr.metadata.name }}"
+      failed_when: false
+      ansible.builtin.find:
+        paths: "{{ cifmw_test_operator_artifacts_basedir }}"
+        patterns: "*.subunit"
+        recurse: true
+      register: _pcr_subunit_files
+
+    - name: Install subunit and stestr packages
+      become: true
+      when: _pcr_subunit_files.files | default([]) | length > 0
+      failed_when: false
+      ansible.builtin.dnf:
+        name:
+          - python3-subunit
+          - python3-stestr
+        state: present
+
+    - name: "Generate HTML reports for {{ _pcr.metadata.name }}"
+      when: _pcr_subunit_files.files | default([]) | length > 0
+      failed_when: false
+      ansible.builtin.command:
+        cmd: >-
+          python3 {{ role_path }}/files/subunit-to-html.py
+          {{ item.path }}
+          {{ item.path | regex_replace('\.subunit$', '-viz.html') }}
+      loop: "{{ _pcr_subunit_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: "Delete log pod for {{ _pcr.metadata.name }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        name: "test-operator-logs-pod-tempest-{{ _pcr.metadata.name }}"
+        namespace: "{{ _pcr.metadata.namespace }}"
+        wait: true
+        wait_timeout: 120
