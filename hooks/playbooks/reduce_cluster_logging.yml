@@ -1,0 +1,76 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Reduce cluster logging to minimum
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  tasks:
+    - name: Get all MachineConfigPools
+      kubernetes.core.k8s_info:
+        api_version: machineconfiguration.openshift.io/v1
+        kind: MachineConfigPool
+      register: _mcp_list
+
+    - name: Apply KubeletConfig per MachineConfigPool
+      vars:
+        _pool_labels: >-
+          {{ {'pools.operator.machineconfiguration.openshift.io/' + item: ''} }}
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: machineconfiguration.openshift.io/v1
+          kind: KubeletConfig
+          metadata:
+            name: "reduce-container-logs-{{ item }}"
+          spec:
+            machineConfigPoolSelector:
+              matchLabels: "{{ _pool_labels }}"
+            kubeletConfig:
+              containerLogMaxSize: "1Mi"
+              containerLogMaxFiles: 2
+      loop: >-
+        {{ _mcp_list.resources | map(attribute='metadata.name') | list }}
+
+    - name: Apply ContainerRuntimeConfig per MachineConfigPool
+      vars:
+        _pool_labels: >-
+          {{ {'pools.operator.machineconfiguration.openshift.io/' + item: ''} }}
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: machineconfiguration.openshift.io/v1
+          kind: ContainerRuntimeConfig
+          metadata:
+            name: "reduce-crio-logs-{{ item }}"
+          spec:
+            machineConfigPoolSelector:
+              matchLabels: "{{ _pool_labels }}"
+            containerRuntimeConfig:
+              logLevel: "error"
+              logSizeMax: "1Mi"
+      loop: >-
+        {{ _mcp_list.resources | map(attribute='metadata.name') | list }}
+
+    - name: Wait for MachineConfigPool rollouts to complete
+      when: cifmw_reduce_cluster_logging_wait | default(true) | bool
+      ansible.builtin.command:
+        cmd: >-
+          oc wait mcp --all
+          --for=condition=Updated
+          --timeout=3600s
+      changed_when: false
