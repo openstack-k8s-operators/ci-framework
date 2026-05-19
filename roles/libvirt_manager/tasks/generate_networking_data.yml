@@ -95,6 +95,13 @@
          cifmw_baremetal_hosts[item.key] is defined) |
         ternary('baremetal', _std_group)
       }}
+    _subtype_group: "{{ _group }}s"
+    _parent_group: "{{ _cifmw_libvirt_manager_layout.vms[_vm_type].parent_group | default('') }}"
+    _inventory_groups: >-
+      {{
+        [_subtype_group] +
+        ([_parent_group] if _parent_group | length > 0 else [])
+      }}
     _ocp_name: >-
       {{
         item.key | replace('_', '-') |
@@ -198,7 +205,6 @@
         selectattr('name', 'match', _match) | first
       }}
     _dataset: |
-      {% set ns = namespace(ip_start=30) %}
       networks:
         {{ _lnet_data.name | replace('cifmw_', '') }}:
       {% if _lnet_data.ranges[0].start_v4 is defined and _lnet_data.ranges[0].start_v4                                  %}
@@ -210,28 +216,43 @@
           network-v6: '{{ net_6 }}'
       {% endif %}
       group-templates:
+      {% set ns = namespace(ip_start=30, rendered=[]) %}
       {% for group in _cifmw_libvirt_manager_layout.vms.keys() if group != 'controller' and
           ((_cifmw_libvirt_manager_layout.vms[group].amount is defined and
             (_cifmw_libvirt_manager_layout.vms[group].amount | int) > 0) or
           _cifmw_libvirt_manager_layout.vms[group].amount is undefined) %}
-      {% set _gr = (group == 'crc') | ternary('ocp', group)                                                             %}
-      {%   if _lnet_data.name | replace('cifmw_', '') in _cifmw_libvirt_manager_layout.vms[group].nets                  %}
-        {{ _gr }}s:
+      {% set _gr = (group == 'crc') | ternary('ocp', group)                                                            %}
+      {% set _effective_group = _cifmw_libvirt_manager_layout.vms[group].parent_group | default(_gr ~ 's')             %}
+      {% set _group_networks = _cifmw_libvirt_manager_layout.vms[group].nets | default([])                             %}
+      {% if _effective_group not in ns.rendered and _lnet_data.name | replace('cifmw_', '') in _group_networks         %}
+      {%   set _shared_length = namespace(total=0) %}
+      {%   for _candidate in _cifmw_libvirt_manager_layout.vms | dict2items
+             if _candidate.key != 'controller' and
+                ((_candidate.value.amount is defined and (_candidate.value.amount | int) > 0) or
+                 _candidate.value.amount is undefined) %}
+      {%     set _candidate_group = _candidate.value.parent_group | default((((_candidate.key == 'crc') | ternary('ocp', _candidate.key)) ~ 's')) %}
+      {%     if _candidate_group == _effective_group and
+                (_lnet_data.name | replace('cifmw_', '') in (_candidate.value.nets | default([]))) %}
+      {%       set _shared_length.total = _shared_length.total + (_candidate.value.amount | default(1) | int) %}
+      {%     endif %}
+      {%   endfor %}
+        {{ _effective_group }}:
           networks:
             {{ _lnet_data.name | replace('cifmw_', '') }}:
-      {%     if cifmw_networking_definition['group-templates'][_gr ~ 's']['network-template'] is undefined %}
+      {%     if cifmw_networking_definition['group-templates'][_effective_group]['network-template'] is undefined %}
       {%       if net_4 is defined %}
               range-v4:
                 start: '{{  net_4 | ansible.utils.nthhost(ns.ip_start | int ) }}'
-                length: {{ _cifmw_libvirt_manager_layout.vms[group].amount | default(1) }}
+                length: {{ _shared_length.total }}
       {%       endif %}
       {%       if net_6 is defined %}
               range-v6:
                 start: '{{  net_6 | ansible.utils.nthhost(ns.ip_start | int) }}'
-                length: {{ _cifmw_libvirt_manager_layout.vms[group].amount | default(1) }}
+                length: {{ _shared_length.total }}
       {%       endif %}
-      {%   set ns.ip_start = ns.ip_start|int + (_cifmw_libvirt_manager_layout.vms[group].amount | default(1) | int ) + 1 %}
+      {%       set ns.ip_start = ns.ip_start|int + (_shared_length.total | int ) + 1 %}
       {%     endif %}
+      {%     set _ = ns.rendered.append(_effective_group) %}
       {%   endif %}
       {% endfor %}
       {% if cifmw_baremetal_hosts is defined and cifmw_baremetal_hosts | length > 0 %}
