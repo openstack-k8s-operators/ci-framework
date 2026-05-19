@@ -13,7 +13,8 @@ debug bgp neighbor-events
 debug bgp updates
 debug bgp update-groups
 
-router bgp 64999
+{% set _downlink_as_mode = downlink_remote_as | default('internal') %}
+router bgp {{ leaf_asn | default(64999) }}
 {% if _router_id %}
   bgp router-id {{_router_id}}
 {% endif %}
@@ -27,7 +28,7 @@ router bgp 64999
   ! bgp long-lived-graceful-restart stale-time 15
 
   neighbor downlink peer-group
-  neighbor downlink remote-as internal
+  neighbor downlink remote-as {{ _downlink_as_mode }}
   neighbor downlink bfd
   neighbor downlink bfd profile tripleo
 {# TODO: remove the next if when RHEL-63205 is fixed #}
@@ -53,9 +54,11 @@ router bgp 64999
 
   address-family ipv4 unicast
     redistribute connected
-    neighbor downlink route-reflector-client
     neighbor downlink default-originate
     neighbor downlink next-hop-self
+{% if _downlink_as_mode == 'internal' %}
+    neighbor downlink route-reflector-client
+{% endif %}
     neighbor downlink prefix-list only-host-prefixes out
     neighbor uplink allowas-in origin
     neighbor uplink prefix-list only-default-host-prefixes in
@@ -64,9 +67,11 @@ router bgp 64999
   address-family ipv6 unicast
     redistribute connected
     neighbor downlink activate
-    neighbor downlink route-reflector-client
     neighbor downlink default-originate
     neighbor downlink next-hop-self
+{% if _downlink_as_mode == 'internal' %}
+    neighbor downlink route-reflector-client
+{% endif %}
     neighbor uplink activate
     neighbor uplink allowas-in origin
     neighbor uplink prefix-list only-default-host-prefixes in
@@ -76,7 +81,9 @@ router bgp 64999
     neighbor uplink activate
     neighbor uplink allowas-in origin
     neighbor downlink activate
+{% if _downlink_as_mode == 'internal' %}
     neighbor downlink route-reflector-client
+{% endif %}
   exit-address-family
 
 ip prefix-list only-default-host-prefixes permit 0.0.0.0/0
