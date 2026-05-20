@@ -1,0 +1,75 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Upload a random test file to Swift before backup.
+# After restore, swift_data_verify.yml downloads the file and checks its
+# checksum to confirm Swift data survived the backup/restore cycle.
+
+- name: Set openstackclient exec prefix
+  ansible.builtin.set_fact:
+    _os_exec: >-
+      oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace }} --
+
+- name: Generate random test file in openstackclient pod
+  ansible.builtin.shell: |
+    {{ _os_exec }} dd if=/dev/urandom of=/tmp/{{ cifmw_backup_restore_swift_test_object }} \
+      bs=1 count={{ cifmw_backup_restore_swift_test_file_size_bytes }} 2>/dev/null
+  changed_when: true
+
+- name: Calculate checksum of test file
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _os_exec }} md5sum /tmp/{{ cifmw_backup_restore_swift_test_object }} | awk '{print $1}'
+  register: _swift_test_checksum_result
+  changed_when: false
+
+- name: Store checksum for post-restore verification
+  ansible.builtin.set_fact:
+    _swift_test_checksum: "{{ _swift_test_checksum_result.stdout }}"
+
+- name: Create Swift container
+  ansible.builtin.shell: |
+    {{ _os_exec }} openstack container create {{ cifmw_backup_restore_swift_test_container }}
+  changed_when: true
+
+- name: Upload test object to Swift
+  ansible.builtin.shell: |
+    {{ _os_exec }} openstack object create {{ cifmw_backup_restore_swift_test_container }} \
+      /tmp/{{ cifmw_backup_restore_swift_test_object }} \
+      --name {{ cifmw_backup_restore_swift_test_object }}
+  changed_when: true
+
+- name: Verify upload succeeded
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _os_exec }} openstack object show \
+      {{ cifmw_backup_restore_swift_test_container }} \
+      {{ cifmw_backup_restore_swift_test_object }} -f json | jq -r '."content-length"'
+  register: _swift_upload_check
+  changed_when: false
+
+- name: Display Swift test data info
+  ansible.builtin.debug:
+    msg: >-
+      Swift test data uploaded: container={{ cifmw_backup_restore_swift_test_container }},
+      object={{ cifmw_backup_restore_swift_test_object }},
+      size={{ _swift_upload_check.stdout }} bytes,
+      md5={{ _swift_test_checksum }}
+
+- name: Remove local temp file from pod
+  ansible.builtin.shell: |
+    {{ _os_exec }} rm -f /tmp/{{ cifmw_backup_restore_swift_test_object }}
+  changed_when: true

@@ -53,6 +53,19 @@ OpenShift cluster.
 * `cifmw_backup_restore_pin_pvcs`: (Boolean) Enable PVC-to-node pinning during restore for WaitForFirstConsumer storage classes. Defaults to `false`.
 * Post-EDPM **Neutron–OVN** steps follow [user guide Step 12](https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-12-verify-and-sync-neutron-to-ovn): run `neutron-ovn-db-sync-util` in `log` mode first (`neutron-dist.conf`, `neutron.conf`, `neutron.conf.d`). **Repair** runs if `cifmw_backup_restore_ovn_db` is `false` (no OVN NB/SB file backup was taken), or if log-mode stdout/stderr contains a `WARNING` line—Neutron reports drift that way while still exiting 0. If OVN file backup/restore was enabled and log output has no `WARNING` lines, repair is skipped as redundant.
 
+### End-to-end orchestration (e2e.yml)
+
+* `cifmw_backup_restore_install_deps`: (Boolean) Install MinIO, OADP, and GaleraBackup CRs. Defaults to `true`.
+* `cifmw_backup_restore_create_workload`: (Boolean) Create a test VM with floating IP before backup. Defaults to `true`.
+* `cifmw_backup_restore_run_backup`: (Boolean) Run the backup step. Defaults to `true`.
+* `cifmw_backup_restore_run_cleanup`: (Boolean) Run the cleanup step. Defaults to `true`.
+* `cifmw_backup_restore_run_restore`: (Boolean) Run the restore step. Defaults to `true`.
+* `cifmw_backup_restore_run_post_tempest`: (Boolean) Run tempest validation after restore. Defaults to `false`.
+* `cifmw_backup_restore_test_swift_data`: (Boolean) Upload a random file to Swift before backup and verify it can be downloaded after restore. Catches Swift data loss caused by xattr issues (OSPRH-29818). Defaults to `true`.
+* `cifmw_backup_restore_swift_test_container`: (String) Swift container name for the test object. Defaults to `backup-test-container`.
+* `cifmw_backup_restore_swift_test_object`: (String) Object name for the test file. Defaults to `backup-test-object`.
+* `cifmw_backup_restore_swift_test_file_size_bytes`: (Integer) Size of the random test file in bytes. Defaults to `1048576` (1 MiB).
+
 ### Cleanup
 
 * `cifmw_backup_restore_cleanup_ctlplane`: (Boolean) Delete control-plane resources during cleanup. Defaults to `true`.

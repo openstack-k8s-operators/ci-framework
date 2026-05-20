@@ -1,0 +1,70 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Verify Swift test data survived the backup/restore cycle.
+# Downloads the object uploaded by swift_data_upload.yml and compares
+# its checksum against the value recorded before backup.
+
+- name: Set openstackclient exec prefix
+  ansible.builtin.set_fact:
+    _os_exec: >-
+      oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace }} --
+
+- name: Verify Swift container exists after restore
+  ansible.builtin.shell: |
+    {{ _os_exec }} openstack container show {{ cifmw_backup_restore_swift_test_container }}
+  changed_when: false
+
+- name: Download test object from Swift
+  ansible.builtin.shell: |
+    {{ _os_exec }} openstack object save \
+      {{ cifmw_backup_restore_swift_test_container }} \
+      {{ cifmw_backup_restore_swift_test_object }} \
+      --file /tmp/{{ cifmw_backup_restore_swift_test_object }}.restored
+  changed_when: true
+
+- name: Calculate checksum of restored file
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ _os_exec }} md5sum /tmp/{{ cifmw_backup_restore_swift_test_object }}.restored | awk '{print $1}'
+  register: _swift_restored_checksum
+  changed_when: false
+
+- name: Verify checksum matches
+  ansible.builtin.assert:
+    that:
+      - _swift_restored_checksum.stdout == _swift_test_checksum
+    fail_msg: >-
+      Swift data verification FAILED: checksum mismatch.
+      Expected {{ _swift_test_checksum }}, got {{ _swift_restored_checksum.stdout }}.
+      This indicates Swift data was lost or corrupted during backup/restore
+      (possibly due to xattr loss — see OSPRH-29818).
+    success_msg: >-
+      Swift data verification PASSED: checksum {{ _swift_test_checksum }} matches.
+
+- name: Clean up Swift test data
+  ansible.builtin.shell: |
+    {{ _os_exec }} openstack object delete \
+      {{ cifmw_backup_restore_swift_test_container }} \
+      {{ cifmw_backup_restore_swift_test_object }}
+    {{ _os_exec }} openstack container delete {{ cifmw_backup_restore_swift_test_container }}
+  changed_when: true
+  failed_when: false
+
+- name: Remove restored temp file from pod
+  ansible.builtin.shell: |
+    {{ _os_exec }} rm -f /tmp/{{ cifmw_backup_restore_swift_test_object }}.restored
+  changed_when: true
