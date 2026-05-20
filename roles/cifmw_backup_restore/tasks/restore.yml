@@ -325,19 +325,28 @@
 
 - name: Wait for GaleraRestore pods to be ready
   ansible.builtin.shell: |
-    RESTORE_NAME="{{ item }}restore"
-    BACKUP_SOURCE="{{ item }}"
-    POD_NAME="${BACKUP_SOURCE}-restore-${RESTORE_NAME}"
-    oc wait --for=condition=Ready pod/${POD_NAME} -n {{ cifmw_backup_restore_namespace }} --timeout=120s
+    POD_NAME=$(oc get pod \
+      -l galerarestore/name={{ item }} \
+      -n {{ cifmw_backup_restore_namespace }} \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "${POD_NAME}" ]; then
+      POD_NAME="{{ item }}-restore-{{ item }}"
+    fi
+    oc wait --for=condition=Ready pod/${POD_NAME} \
+      -n {{ cifmw_backup_restore_namespace }} --timeout=120s
   loop: "{{ _galerabackup_list }}"
   changed_when: false
   when: _galerabackup_list | length > 0
 
 - name: Execute database restore for each GaleraRestore
   ansible.builtin.shell: |
-    RESTORE_NAME="{{ item }}restore"
-    BACKUP_SOURCE="{{ item }}"
-    POD_NAME="${BACKUP_SOURCE}-restore-${RESTORE_NAME}"
+    POD_NAME=$(oc get pod \
+      -l galerarestore/name={{ item }} \
+      -n {{ cifmw_backup_restore_namespace }} \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "${POD_NAME}" ]; then
+      POD_NAME="{{ item }}-restore-{{ item }}"
+    fi
     TIMESTAMP="{{ cifmw_backup_restore_backup_timestamp }}"
     RESTORE_PATTERN="/backup/data/*_${TIMESTAMP}.sql.gz"
     oc exec -n {{ cifmw_backup_restore_namespace }} ${POD_NAME} -- \
@@ -348,7 +357,7 @@
 
 - name: List GaleraRestore CRs kept for validation
   ansible.builtin.debug:
-    msg: "GaleraRestore CR '{{ item }}restore' kept for post-restore validation (cleaned up by cleanup step)"
+    msg: "GaleraRestore CR '{{ item }}' kept for post-restore validation (cleaned up by cleanup step)"
   loop: "{{ _galerabackup_list }}"
   when: _galerabackup_list | length > 0
 

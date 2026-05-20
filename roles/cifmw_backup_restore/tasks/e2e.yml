@@ -131,29 +131,51 @@
     _os_exec: >-
       oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace }} --
   block:
-    - name: Verify compute services are up
+    - name: Wait for compute services to be up
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ _os_exec }} openstack compute service list -f json | \
+          jq -e '[.[] | select(.State != "up")] | length == 0'
+      register: _compute_services
+      changed_when: false
+      retries: "{{ cifmw_backup_restore_service_retry_count }}"
+      delay: "{{ cifmw_backup_restore_service_retry_delay }}"
+      until: _compute_services.rc == 0
+
+    - name: Display compute services
       ansible.builtin.shell: |
         set -o pipefail
         {{ _os_exec }} openstack compute service list -f json | \
           jq -r '.[] | "\(.Binary) \(.Host) \(.State)"'
-      register: _compute_services
+      register: _compute_services_display
       changed_when: false
 
     - name: Display compute services
       ansible.builtin.debug:
-        msg: "{{ _compute_services.stdout_lines }}"
+        msg: "{{ _compute_services_display.stdout_lines }}"
 
-    - name: Verify network agents are up
+    - name: Wait for network agents to be alive
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ _os_exec }} openstack network agent list -f json | \
+          jq -e '[.[] | select(.Alive != true)] | length == 0'
+      register: _network_agents
+      changed_when: false
+      retries: "{{ cifmw_backup_restore_service_retry_count }}"
+      delay: "{{ cifmw_backup_restore_service_retry_delay }}"
+      until: _network_agents.rc == 0
+
+    - name: Display network agents
       ansible.builtin.shell: |
         set -o pipefail
         {{ _os_exec }} openstack network agent list -f json | \
           jq -r '.[] | "\(.["Agent Type"]) \(.Host) \(.Alive)"'
-      register: _network_agents
+      register: _network_agents_display
       changed_when: false
 
     - name: Display network agents
       ansible.builtin.debug:
-        msg: "{{ _network_agents.stdout_lines }}"
+        msg: "{{ _network_agents_display.stdout_lines }}"
 
     - name: Get instance info
       ansible.builtin.shell: |

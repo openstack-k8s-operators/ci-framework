@@ -72,6 +72,38 @@
   when: not (cifmw_backup_restore_auto_ack | bool) and _delete_confirm.user_input != "yes"
 
 # ========================================
+# Test-operator Cleanup (must happen first while controllers and
+# their dependencies are still running, so finalizers get processed)
+# ========================================
+- name: Delete test-operator CRs
+  ansible.builtin.include_tasks: _delete_all_of_kind.yml
+  vars:
+    _resource_api_version: test.openstack.org/v1beta1
+    _resource_kind: "{{ _test_cr_kind }}"
+    _resource_wait: true
+  loop:
+    - Tempest
+    - Tobiko
+    - AnsibleTest
+    - HorizonTest
+  loop_control:
+    loop_var: _test_cr_kind
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Wait for test-operator pods to terminate
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ cifmw_backup_restore_namespace }}"
+    label_selectors:
+      - operator=test-operator
+  register: _test_pods
+  until: _test_pods.resources | length == 0
+  retries: 12
+  delay: 5
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+# ========================================
 # DataPlane Cleanup
 # ========================================
 - name: Delete DataPlaneDeployment CRs
