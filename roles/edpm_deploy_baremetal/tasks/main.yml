@@ -250,6 +250,56 @@
           --for condition=Available
           --timeout={{ cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins }}m
 
+    - name: Get OpenStack Provision Server status
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: baremetal.openstack.org/v1beta1
+        kind: OpenStackProvisionServer
+        name: openstack-edpm-ipam-provisionserver
+        namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
+      register: cifmw_edpm_deploy_baremetal_provisionserver
+      failed_when: cifmw_edpm_deploy_baremetal_provisionserver.resources | length == 0
+      changed_when: false
+
+    - name: Set OpenStack Provision Server local image checksum URL fallback
+      ansible.builtin.set_fact:
+        cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective: >-
+          {{
+            cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
+            if (
+              cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
+              | default('', true)
+              | trim | length
+            ) > 0
+            else
+            (
+              cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl
+              ~ '.sha256'
+            )
+          }}
+
+    - name: Verify OpenStack Provision Server image is reachable
+      ansible.builtin.uri:
+        url: "{{ cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl }}"
+        method: HEAD
+        status_code: 200
+      register: cifmw_edpm_deploy_baremetal_provisionserver_image_head
+      retries: 12
+      delay: 5
+      until: cifmw_edpm_deploy_baremetal_provisionserver_image_head.status == 200
+
+    - name: Verify OpenStack Provision Server image checksum is reachable
+      ansible.builtin.uri:
+        url: "{{ cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective }}"
+        method: HEAD
+        status_code: 200
+      register: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head
+      retries: 12
+      delay: 5
+      until: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head.status == 200
+
     - name: Wait for baremetal nodes to reach 'provisioned' state
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"

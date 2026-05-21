@@ -1,10 +1,10 @@
 # edpm_build_images
-This role will build EDPM hardened uefi and ironic-python-agent image.
+This role will build EDPM hardened uefi, ironic-python-agent, and bootc images.
 This role also call the `discover_latest_image` and download the latest image,
 set proper exports for element and build images.
-It will package the images inside a container image for distribution based on
-the variables "cifmw_edpm_build_images_ironic_python_agent_package" and
-"cifmw_edpm_build_images_hardened_uefi_package".
+It will package the images inside a container image based on
+the variables `cifmw_edpm_build_images_ironic_python_agent_package` and
+`cifmw_edpm_build_images_hardened_uefi_package`.
 
 ## Privilege escalation
 None
@@ -17,8 +17,17 @@ None
 * `cifmw_edpm_build_images_all`: (Boolean) Build both the `edpm-hardened-uefi` and `ironic-python-agent` images when it true. Default to false.
 * `cifmw_edpm_build_images_hardened_uefi`: (Boolean) Build `edpm-hardened-uefi` image when it true. Default to false.
 * `cifmw_edpm_build_images_ironic_python_agent`: (Boolean) Build `ironic-python-agent-builder` image when it true. Default to false.
+* `cifmw_edpm_build_images_bootc`: (Boolean) Build the bootc image workflow. Default to false.
 * `cifmw_edpm_build_images_hardened_uefi_package`: (Boolean) Packaged `edpm-hardened-uefi` image inside a container image for distribution. Default to false.
 * `cifmw_edpm_build_images_ironic_python_agent_package`: (Boolean) Packaged  `ironic-python-agent-builder` image inside a container image for distribution. Default to false.
+* `cifmw_edpm_build_images_bootc_repo`: (String) Repository used to push the bootc container image. Default: `{{ cifmw_edpm_build_images_push_registry }}/edpm-bootc`.
+* `cifmw_edpm_build_images_bootc_repo_path`: (String) Path to the bootc content within `edpm-image-builder`.
+* `cifmw_edpm_build_images_bootc_base_image`: (String) Base bootc image used for the build. Default: `quay.io/centos-bootc/centos-bootc:stream9`.
+* `cifmw_edpm_build_images_bootc_builder_image`: (String) Bootc builder image used to produce the qcow2 artifact. Default: `quay.io/centos-bootc/bootc-image-builder:latest`.
+* `cifmw_edpm_build_images_bootc_qcow2_name`: (String) Output qcow2 file name for the bootc image. Default: `edpm-bootc.qcow2`.
+* `cifmw_edpm_build_images_bootc_rhsm_script`: (String) Script name copied into the bootc build context to handle RHSM registration. Default: `empty.sh`.
+* `cifmw_edpm_build_images_bootc_fips`: (String) Whether to enable FIPS in the bootc image build. Default: `1`.
+* `cifmw_edpm_build_images_bootc_user_packages`: (String) Additional packages appended to the bootc image build. Default: empty string.
 * `cifmw_edpm_build_images_dib_yum_repo_conf_centos`:  (List) List of yum repos to be used on centos node.
 * `cifmw_edpm_build_images_dib_yum_repo_conf_rhel`: (List) List of yum repos to be used on rhel node.
 * `cifmw_edpm_build_images_dib_yum_repo_conf`: (List) List of yum repos to be used, By default we select i.e. `cifmw_edpm_build_images_dib_yum_repo_conf_centos` var or `cifmw_edpm_build_images_dib_yum_repo_conf_rhel` based on distro var.

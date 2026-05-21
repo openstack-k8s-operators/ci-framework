@@ -1,45 +1,262 @@
 ---
-- name: "Push images to registry with tag {{ cifmw_edpm_build_images_tag }}"
+- name: Set push destination base
+  ansible.builtin.set_fact:
+    cifmw_edpm_build_images_push_destination_base: >-
+      {{
+        cifmw_edpm_build_images_push_registry ~
+        (
+          '/' ~ cifmw_edpm_build_images_push_registry_namespace
+          if cifmw_edpm_build_images_push_registry_namespace | length > 0
+          else ''
+        )
+      }}
+
+- name: Set content provider registry host and prefix
+  ansible.builtin.set_fact:
+    _cifmw_edpm_build_images_push_registry_host: >-
+      {{ cifmw_edpm_build_images_push_destination_base | split('/', 1) | first }}
+    _cifmw_edpm_build_images_push_repository_prefix: >-
+      {{
+        (cifmw_edpm_build_images_push_destination_base | split('/', 1))[1]
+        if (cifmw_edpm_build_images_push_destination_base | split('/', 1) | length) > 1
+        else ''
+      }}
+
+- name: Set content provider image repository names
+  ansible.builtin.set_fact:
+    _cifmw_edpm_build_images_uefi_repository: >-
+      {{
+        _cifmw_edpm_build_images_push_repository_prefix ~ '/edpm-hardened-uefi'
+        if _cifmw_edpm_build_images_push_repository_prefix | length > 0
+        else 'edpm-hardened-uefi'
+      }}
+    _cifmw_edpm_build_images_ipa_repository: >-
+      {{
+        _cifmw_edpm_build_images_push_repository_prefix ~ '/ironic-python-agent'
+        if _cifmw_edpm_build_images_push_repository_prefix | length > 0
+        else 'ironic-python-agent'
+      }}
+
+- name: Push edpm-hardened-uefi image to registry with tag {{ cifmw_edpm_build_images_tag }}
+  when:
+    - (cifmw_edpm_build_images_hardened_uefi | bool) or (cifmw_edpm_build_images_all | bool)
+    - cifmw_edpm_build_images_hardened_uefi_package | bool
   containers.podman.podman_image:
-    name: "{{ item }}"
-    push_args:
-      dest: "{{ cifmw_edpm_build_images_push_registry }}/{{ cifmw_edpm_build_images_push_registry_namespace }}"
+    name: edpm-hardened-uefi
     tag: "{{ cifmw_edpm_build_images_tag }}"
     pull: false
     push: true
-  loop:
-    - edpm-hardened-uefi
-    - ironic-python-agent
+    push_args:
+      dest: >-
+        {{ cifmw_edpm_build_images_push_destination_base }}/edpm-hardened-uefi:{{
+        cifmw_edpm_build_images_tag }}
+
+- name: Verify edpm-hardened-uefi image manifest is available in registry
+  when:
+    - (cifmw_edpm_build_images_hardened_uefi | bool) or (cifmw_edpm_build_images_all | bool)
+    - cifmw_edpm_build_images_hardened_uefi_package | bool
+  ansible.builtin.uri:
+    url: >-
+      http://{{ _cifmw_edpm_build_images_push_registry_host }}/v2/{{
+      _cifmw_edpm_build_images_uefi_repository
+      }}/manifests/{{ cifmw_edpm_build_images_tag }}
+    method: GET
+    headers:
+      Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
+    status_code: 200
+  register: _cifmw_edpm_build_images_uefi_manifest_check
+  retries: 12
+  delay: 5
+  until: _cifmw_edpm_build_images_uefi_manifest_check.status == 200
+
+- name: Push ironic-python-agent image to registry with tag {{ cifmw_edpm_build_images_tag }}
+  when:
+    - (cifmw_edpm_build_images_ironic_python_agent | bool) or (cifmw_edpm_build_images_all | bool)
+    - cifmw_edpm_build_images_ironic_python_agent_package | bool
+  containers.podman.podman_image:
+    name: ironic-python-agent
+    tag: "{{ cifmw_edpm_build_images_tag }}"
+    pull: false
+    push: true
+    push_args:
+      dest: >-
+        {{ cifmw_edpm_build_images_push_destination_base }}/ironic-python-agent:{{
+        cifmw_edpm_build_images_tag }}
+
+- name: Verify ironic-python-agent image manifest is available in registry
+  when:
+    - (cifmw_edpm_build_images_ironic_python_agent | bool) or (cifmw_edpm_build_images_all | bool)
+    - cifmw_edpm_build_images_ironic_python_agent_package | bool
+  ansible.builtin.uri:
+    url: >-
+      http://{{ _cifmw_edpm_build_images_push_registry_host }}/v2/{{
+      _cifmw_edpm_build_images_ipa_repository
+      }}/manifests/{{ cifmw_edpm_build_images_tag }}
+    method: GET
+    headers:
+      Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
+    status_code: 200
+  register: _cifmw_edpm_build_images_ipa_manifest_check
+  retries: 12
+  delay: 5
+  until: _cifmw_edpm_build_images_ipa_manifest_check.status == 200
+
+- name: Push bootc qcow2 image to registry with tag {{ cifmw_edpm_build_images_tag }}
+  when: cifmw_edpm_build_images_bootc | bool
+  become: true
+  containers.podman.podman_image:
+    name: edpm-bootc
+    tag: "{{ cifmw_edpm_build_images_tag }}-qcow2"
+    pull: false
+    push: true
+    push_args:
+      dest: >-
+        {{ cifmw_edpm_build_images_bootc_repo }}:{{ cifmw_edpm_build_images_tag }}-qcow2
+
+- name: Set bootc registry verification facts
+  when: cifmw_edpm_build_images_bootc | bool
+  ansible.builtin.set_fact:
+    _cifmw_edpm_build_images_bootc_registry: >-
+      {{ cifmw_edpm_build_images_bootc_repo | split('/', 1) | first }}
+    _cifmw_edpm_build_images_bootc_repository: >-
+      {{ cifmw_edpm_build_images_bootc_repo | split('/', 1) | last }}
+
+- name: Verify bootc qcow2 image manifest is available in registry
+  when: cifmw_edpm_build_images_bootc | bool
+  ansible.builtin.uri:
+    url: >-
+      http://{{ _cifmw_edpm_build_images_bootc_registry }}/v2/{{
+      _cifmw_edpm_build_images_bootc_repository
+      }}/manifests/{{ cifmw_edpm_build_images_tag }}-qcow2
+    method: GET
+    headers:
+      Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
+    status_code: 200
+  register: _cifmw_edpm_build_images_bootc_manifest_check
+  retries: 12
+  delay: 5
+  until: _cifmw_edpm_build_images_bootc_manifest_check.status == 200
+
+- name: Smoke test bootc qcow2 image extraction
+  when: cifmw_edpm_build_images_bootc | bool
+  block:
+    - name: Create temporary directory for bootc qcow2 extraction test
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: bootc-qcow2-smoke-
+      register: _cifmw_edpm_build_images_bootc_smoke_dir
+
+    - name: Extract bootc qcow2 image into temporary directory
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          podman run --rm
+          --volume {{ _cifmw_edpm_build_images_bootc_smoke_dir.path }}:/target:Z
+          localhost/edpm-bootc:{{ cifmw_edpm_build_images_tag }}-qcow2
+
+    - name: Check for extracted bootc qcow2 image file
+      ansible.builtin.stat:
+        path: >-
+          {{ _cifmw_edpm_build_images_bootc_smoke_dir.path }}/{{
+          cifmw_edpm_build_images_bootc_qcow2_name }}
+      register: _cifmw_edpm_build_images_bootc_smoke_qcow2
+
+    - name: Check for extracted bootc qcow2 checksum file
+      ansible.builtin.stat:
+        path: >-
+          {{ _cifmw_edpm_build_images_bootc_smoke_dir.path }}/{{
+          cifmw_edpm_build_images_bootc_qcow2_name }}.sha256
+      register: _cifmw_edpm_build_images_bootc_smoke_checksum
+
+    - name: Assert bootc qcow2 image extraction produced expected files
+      ansible.builtin.assert:
+        that:
+          - _cifmw_edpm_build_images_bootc_smoke_qcow2.stat.exists
+          - _cifmw_edpm_build_images_bootc_smoke_checksum.stat.exists
+        fail_msg: >-
+          Bootc qcow2 image extraction did not produce both
+          {{ cifmw_edpm_build_images_bootc_qcow2_name }} and its checksum file.
+  always:
+    - name: Remove temporary directory for bootc qcow2 extraction test
+      ansible.builtin.file:
+        path: "{{ _cifmw_edpm_build_images_bootc_smoke_dir.path }}"
+        state: absent
+      when:
+        - _cifmw_edpm_build_images_bootc_smoke_dir is defined
+        - _cifmw_edpm_build_images_bootc_smoke_dir.path is defined
 
 - name: Retag and push the images with podified-ci-testing tag
   when: cifmw_repo_setup_promotion
         in ("podified-ci-testing", "podified-ci-testing-tcib")
   block:
-    - name: Retag the images with podified-ci-testing tag
+    - name: Retag the edpm-hardened-uefi image with podified-ci-testing tag
+      when:
+        - (cifmw_edpm_build_images_hardened_uefi | bool) or (cifmw_edpm_build_images_all | bool)
+        - cifmw_edpm_build_images_hardened_uefi_package | bool
       containers.podman.podman_tag:
-        image: "{{ item }}:{{ cifmw_edpm_build_images_tag }}"
+        image: "edpm-hardened-uefi:{{ cifmw_edpm_build_images_tag }}"
         target_names:
-          - "{{ item }}:podified-ci-testing"
-      loop:
-        - edpm-hardened-uefi
-        - ironic-python-agent
+          - "edpm-hardened-uefi:podified-ci-testing"
 
-    - name: Push images to registry with podified-ci-testing tag
+    - name: Retag the ironic-python-agent image with podified-ci-testing tag
+      when:
+        - (cifmw_edpm_build_images_ironic_python_agent | bool) or (cifmw_edpm_build_images_all | bool)
+        - cifmw_edpm_build_images_ironic_python_agent_package | bool
+      containers.podman.podman_tag:
+        image: "ironic-python-agent:{{ cifmw_edpm_build_images_tag }}"
+        target_names:
+          - "ironic-python-agent:podified-ci-testing"
+
+    - name: Retag the bootc qcow2 image with podified-ci-testing tag
+      when: cifmw_edpm_build_images_bootc | bool
+      become: true
+      containers.podman.podman_tag:
+        image: "edpm-bootc:{{ cifmw_edpm_build_images_tag }}-qcow2"
+        target_names:
+          - "edpm-bootc:podified-ci-testing-qcow2"
+
+    - name: Push edpm-hardened-uefi image to registry with podified-ci-testing tag
+      when:
+        - (cifmw_edpm_build_images_hardened_uefi | bool) or (cifmw_edpm_build_images_all | bool)
+        - cifmw_edpm_build_images_hardened_uefi_package | bool
       containers.podman.podman_image:
-        name: "{{ item }}"
-        push_args:
-          dest: "{{ cifmw_edpm_build_images_push_registry }}/{{ cifmw_edpm_build_images_push_registry_namespace }}"
+        name: edpm-hardened-uefi
         tag: podified-ci-testing
         pull: false
         push: true
-      loop:
-        - edpm-hardened-uefi
-        - ironic-python-agent
+        push_args:
+          dest: >-
+            {{ cifmw_edpm_build_images_push_destination_base }}/edpm-hardened-uefi:podified-ci-testing
+
+    - name: Push ironic-python-agent image to registry with podified-ci-testing tag
+      when:
+        - (cifmw_edpm_build_images_ironic_python_agent | bool) or (cifmw_edpm_build_images_all | bool)
+        - cifmw_edpm_build_images_ironic_python_agent_package | bool
+      containers.podman.podman_image:
+        name: ironic-python-agent
+        tag: podified-ci-testing
+        pull: false
+        push: true
+        push_args:
+          dest: >-
+            {{ cifmw_edpm_build_images_push_destination_base }}/ironic-python-agent:podified-ci-testing
+
+    - name: Push bootc qcow2 image to registry with podified-ci-testing tag
+      when: cifmw_edpm_build_images_bootc | bool
+      become: true
+      containers.podman.podman_image:
+        name: edpm-bootc
+        tag: podified-ci-testing-qcow2
+        pull: false
+        push: true
+        push_args:
+          dest: >-
+            {{ cifmw_edpm_build_images_bootc_repo }}:podified-ci-testing-qcow2
 
 - name: Dump edpm container images in the file  # noqa: risky-shell-pipe
   args:
     chdir: "{{ cifmw_edpm_image_builder_repo_path }}"
   ansible.builtin.shell: >-
     buildah images |
-    grep -E '(edpm-hardened-uefi|ironic-python-agent)' |
+    grep -E '(edpm-hardened-uefi|ironic-python-agent|edpm-bootc)' |
     tee -a {{ cifmw_edpm_build_images_basedir }}/logs/containers-built.log
