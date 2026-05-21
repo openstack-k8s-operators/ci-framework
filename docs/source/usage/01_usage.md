@@ -53,7 +53,7 @@ are shared among multiple roles:
 - `cifmw_ceph_target`: (String) The Ansible inventory group where ceph is deployed. Defaults to `computes`.
 - `cifmw_run_tests`: (Bool) Specifies whether tests should be executed.
   Defaults to false.
-- `cifmw_run_test_role`: (String) Specifies which ci-framework role will be used to run tests. Allowed options are `test_operator`, `tempest` and `shiftstack`. Defaults to `tempest`.
+- `cifmw_run_test_role`: (String) Specifies which ci-framework role will be used to run tests. Allowed options are `test_operator` and `shiftstack`. Defaults to `test_operator`.
 - `cifmw_edpm_deploy_nfs`: (Bool) Specifies whether an nfs server should be deployed.
 - `cifmw_nfs_target`: (String) The Ansible inventory group where the nfs server is deployed. Defaults to `computes`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_nfs_network`: (String) The network the deployed nfs server will be accessible from. Defaults to `storage`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
