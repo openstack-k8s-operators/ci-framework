@@ -209,13 +209,54 @@
     - operator
     - edpm_bootstrap
 
-- name: Update containers in deployed OSP operators
-  vars:
-    cifmw_update_containers_metadata: controlplane
-  ansible.builtin.include_role:
-    name: update_containers
+- name: Set containers for deployed OSP operators
+  cifmw.general.set_containers:
+    dest_path: >-
+      {{
+        cifmw_set_containers_dest_path | default(
+          (cifmw_basedir, 'artifacts', 'manifests', 'set_containers.yml') |
+          ansible.builtin.path_join
+        )
+      }}
+    # TODO: remove the default() fallbacks below once all callers in ci-framework-jobs
+    # are migrated from cifmw_update_containers_* to cifmw_set_containers_*.
+    # Scenario-specific variables that also require explicit per-scenario migration:
+    #   cifmw_update_containers_cindervolumes  -> cifmw_set_containers_images (backends)
+    #   cifmw_update_containers_manilashares   -> cifmw_set_containers_images (backends)
+    #   cifmw_update_containers_watcher        -> cifmw_set_containers_extra_images
+    #   cifmw_update_containers_edpm_image_url -> cifmw_set_containers_images (name_prefix: "")
+    #   cifmw_update_containers_ipa_image_url  -> cifmw_set_containers_images (name_prefix: "")
+    registry: "{{ cifmw_set_containers_registry | default(cifmw_update_containers_registry) | default(omit) }}"
+    org: "{{ cifmw_set_containers_org | default(cifmw_update_containers_org) | default(omit) }}"
+    tag: "{{ cifmw_set_containers_tag | default(cifmw_update_containers_tag) | default(omit) }}"
+    include_openstack: >-
+      {{
+        cifmw_set_containers_include_openstack |
+        default(cifmw_update_containers_openstack | default(false)) | bool
+      }}
+    apply: >-
+      {{
+        cifmw_set_containers_apply |
+        default(cifmw_update_containers | default(false)) | bool
+      }}
+    images: >-
+      {{
+        (cifmw_set_containers_images | default([])) +
+        (cifmw_set_containers_extra_images | default([])) +
+        (
+          [{'name': 'osContainerImage', 'full_registry': cifmw_update_containers_edpm_image_url}]
+          if cifmw_update_containers_edpm_image_url is defined else []
+        ) +
+        (
+          [{'name': 'ironicPythonAgentImage', 'full_registry': cifmw_update_containers_ipa_image_url}]
+          if cifmw_update_containers_ipa_image_url is defined else []
+        )
+        # TODO: remove the edpm_image_url and ipa_image_url fallbacks above once all
+        # callers are migrated to cifmw_set_containers_images with name_prefix: "".
+      }}
   tags:
-    - update_containers
+    - set_containers
+    - update_containers  # kept during transition so --skip-tags=update_containers still works
     - edpm_bootstrap
   when: cifmw_ci_gen_kustomize_values_deployment_version is not defined
 
