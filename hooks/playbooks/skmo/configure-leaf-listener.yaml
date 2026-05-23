@@ -3,8 +3,9 @@
 # application network for cross-region RabbitMQ access.
 #
 # In the leaf region:
-#   - Read the RabbitMQ credentials from the dedicated user credentials secret
-#     created by the RabbitMQ operator when the TransportURL CR is reconciled.
+#   - Look up the TransportURL CR to find the RabbitMQUser CR reference.
+#   - Look up the RabbitMQUser CR to find the credentials secret name.
+#   - Read the credentials from that secret.
 #   - Patch barbicanKeystoneListener to connect to the central RabbitMQ via the
 #     Skupper Listener endpoint using those credentials and its own pool_name.
 #
@@ -15,11 +16,7 @@
 #     Must match the host set in skupper-listener.yaml.
 #   cifmw_skupper_rabbitmq_port           (default: 5671)
 #   cifmw_skupper_transport_url_name      (default: barbican-keystone-listener-regiontwo)
-#     Name of the TransportURL CR created in prepare-leaf.yaml.  The operator
-#     creates a user credentials secret named:
-#     rabbitmq-user-<name>-<username>-user
-#   cifmw_skupper_transport_url_username  (default: barbican-keystone-listener-regiontwo)
-#     Must match the username field set on the TransportURL CR in prepare-leaf.yaml.
+#     Name of the TransportURL CR created in prepare-leaf.yaml.
 - name: Configure barbican-keystone-listener to use Skupper for cross-region RabbitMQ
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
@@ -29,18 +26,45 @@
     cifmw_skupper_listener_host: rabbitmq-regionone
     cifmw_skupper_rabbitmq_port: 5671
     cifmw_skupper_transport_url_name: barbican-keystone-listener-regiontwo
-    cifmw_skupper_transport_url_username: barbican-keystone-listener-regiontwo
   tasks:
-    - name: Get RabbitMQ user credentials secret for leaf listener
-      # The RabbitMQ operator creates a secret named
-      # rabbitmq-user-<transport-url-name>-<username>-user that contains
-      # the username and password fields for the dedicated RabbitMQ user.
+    - name: Get TransportURL CR to find the RabbitMQUser reference
+      kubernetes.core.k8s_info:
+        api_version: rabbitmq.openstack.org/v1beta1
+        kind: TransportURL
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+        name: "{{ cifmw_skupper_transport_url_name }}"
+      register: _transport_url
+
+    - name: Fail if TransportURL not found
+      ansible.builtin.fail:
+        msg: "TransportURL {{ cifmw_skupper_transport_url_name }} not found in namespace {{ cifmw_skupper_central_namespace }}"
+      when: _transport_url.resources | length == 0
+
+    - name: Get RabbitMQUser CR to find the credentials secret name
+      kubernetes.core.k8s_info:
+        api_version: rabbitmq.openstack.org/v1beta1
+        kind: RabbitMQUser
+        namespace: "{{ cifmw_skupper_central_namespace }}"
+        name: "{{ _transport_url.resources[0].status.rabbitmqUserRef }}"
+      register: _rabbitmq_user
+
+    - name: Fail if RabbitMQUser not found
+      ansible.builtin.fail:
+        msg: "RabbitMQUser {{ _transport_url.resources[0].status.rabbitmqUserRef }} not found in namespace {{ cifmw_skupper_central_namespace }}"
+      when: _rabbitmq_user.resources | length == 0
+
+    - name: Get RabbitMQ user credentials secret
       kubernetes.core.k8s_info:
         api_version: v1
         kind: Secret
         namespace: "{{ cifmw_skupper_central_namespace }}"
-        name: "rabbitmq-user-{{ cifmw_skupper_transport_url_name }}-{{ cifmw_skupper_transport_url_username }}-user"
+        name: "{{ _rabbitmq_user.resources[0].status.secretName }}"
       register: _rabbitmq_user_secret
+
+    - name: Fail if credentials secret not found
+      ansible.builtin.fail:
+        msg: "Secret {{ _rabbitmq_user.resources[0].status.secretName }} not found in namespace {{ cifmw_skupper_central_namespace }}"
+      when: _rabbitmq_user_secret.resources | length == 0
 
     - name: Patch leaf barbicanKeystoneListener to use Skupper RabbitMQ endpoint
       vars:
