@@ -62,6 +62,7 @@ provision IP via `/etc/hosts` entries managed by the role.
 | `cifmw_bm_agent_core_password` | str | — | Set a `core` user password post-install via MachineConfig |
 | `cifmw_bm_agent_live_debug` | bool | `false` | Patch the agent ISO with password, autologin, and systemd debug shell on `tty6` for discovery-phase console access (requires `cifmw_bm_agent_core_password`) |
 | `cifmw_bm_agent_disabled_ifaces` | list | `[]` | Extra NIC names to disable IPv4/IPv6 on during agent-based install. Prevents overlapping-subnet validation failures when multiple NICs share a native VLAN (e.g. `[eno2]`). The interfaces stay link-up but get no IP address; post-install NNCP configures them. |
+| `cifmw_bm_agent_lvms_partition` | dict | `{}` | When set, creates an Ignition partition at install time to cap CoreOS rootfs growth and leave unallocated space for the LVMS StorageClass. Keys: `device` (required, e.g. `/dev/nvme0n1`), `rootfs_mib` (default `150000`), `size_mib` (default `0` = rest of disk), `label` (default `lvmstorage`). See [LVMS partition](#lvms-partition). |
 
 ## Secrets management
 
@@ -119,17 +120,18 @@ If the binary already exists in the working directory it is reused.
 2. Ensure `GenericUsbBoot` is enabled in BIOS (auto-enable with power cycle if allowed)
 3. Power off the host
 4. Generate SSH keys, template `install-config.yaml` and `agent-config.yaml`
-5. Acquire `openshift-install` binary (see above) and run `openshift-install agent create image` to build the agent ISO
-6. Optionally patch the ISO for discovery-phase console access
-7. Serve the ISO via a root podman httpd container (rootless podman cannot use privileged ports)
-8. Eject any existing VirtualMedia, then insert the agent ISO
-9. Discover the Virtual Optical Drive UEFI path and set a one-time boot override
-10. Power on the host
-11. Verify BIOS `GenericUsbBoot` is enabled after POST
-12. Add `/etc/hosts` entries for `api`/`api-int` and `*.apps` domains
-13. Wait for bootstrap and install to complete
-14. Copy kubeconfig and kubeadmin-password to the dev-scripts-compatible auth directory
-15. Eject VirtualMedia and stop the HTTP server
+5. Optionally generate an LVMS partition MachineConfig into `openshift/` manifests
+6. Acquire `openshift-install` binary (see above) and run `openshift-install agent create image` to build the agent ISO
+7. Optionally patch the ISO for discovery-phase console access
+8. Serve the ISO via a root podman httpd container (rootless podman cannot use privileged ports)
+9. Eject any existing VirtualMedia, then insert the agent ISO
+10. Discover the Virtual Optical Drive UEFI path and set a one-time boot override
+11. Power on the host
+12. Verify BIOS `GenericUsbBoot` is enabled after POST
+13. Add `/etc/hosts` entries for `api`/`api-int` and `*.apps` domains
+14. Wait for bootstrap and install to complete
+15. Copy kubeconfig and kubeadmin-password to the dev-scripts-compatible auth directory
+16. Eject VirtualMedia and stop the HTTP server
 
 ## Molecule tests
 
@@ -265,6 +267,46 @@ You can also get autologin and debug shell on tty6 of the agent with:
 ```bash
 cifmw_bm_agent_core_password: changeme
 cifmw_bm_agent_live_debug: true
+```
+
+## LVMS partition
+
+By default CoreOS expands its rootfs partition to fill the entire disk
+at first boot. To reserve space for the LVMS (Logical Volume Manager
+Storage) StorageClass, set `cifmw_bm_agent_lvms_partition` with at
+least the `device` key. The role injects a MachineConfig manifest into
+the agent ISO that creates a labeled partition via Ignition — before
+`growfs` runs — so CoreOS rootfs stops at `rootfs_mib` and the
+remainder is available for LVMS.
+
+```yaml
+cifmw_bm_agent_lvms_partition:
+  device: /dev/disk/by-path/pci-0000:65:00.0-scsi-0:3:111:0
+  rootfs_mib: 150000   # ~150 GB for CoreOS (minimum 25000)
+  size_mib: 0          # 0 = rest of disk
+  label: lvmstorage    # partition label
+```
+
+After OCP is installed, create an `LVMCluster` CR that targets the
+partition by label:
+
+```yaml
+apiVersion: lvm.topolvm.io/v1alpha1
+kind: LVMCluster
+metadata:
+  name: lvmcluster
+  namespace: openshift-storage
+spec:
+  storage:
+    deviceClasses:
+      - name: lvmstorage
+        deviceSelector:
+          paths:
+            - /dev/disk/by-partlabel/lvmstorage
+        thinPoolConfig:
+          name: thin-pool
+          overprovisionRatio: 10
+          sizePercent: 90
 ```
 
 ## References

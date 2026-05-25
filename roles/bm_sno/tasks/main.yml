@@ -219,6 +219,34 @@
     regexp: '^pullSecret:'
     line: "pullSecret: '<REDACTED>'"
 
+- name: Create LVMS partition MachineConfig manifest
+  when: cifmw_bm_agent_lvms_partition | default({}) | length > 0
+  block:
+    - name: Validate LVMS partition device is set
+      ansible.builtin.assert:
+        that:
+          - cifmw_bm_agent_lvms_partition.device is defined
+          - cifmw_bm_agent_lvms_partition.device | length > 0
+          - (cifmw_bm_agent_lvms_partition.rootfs_mib | default(150000) | int) >= 25000
+        fail_msg: >-
+          cifmw_bm_agent_lvms_partition.device must be set
+          (e.g. /dev/nvme0n1, /dev/disk/by-path/...), and
+          its size must be at least 25000 MB.
+
+    - name: Create openshift manifests directory
+      ansible.builtin.file:
+        path: "{{ _work_dir }}/openshift"
+        state: directory
+        mode: "0755"
+
+    - name: Template LVMS partition MachineConfig
+      vars:
+        _lvms: "{{ cifmw_bm_agent_lvms_partition }}"
+      ansible.builtin.template:
+        src: lvms_partition_machineconfig.yaml.j2
+        dest: "{{ _work_dir }}/openshift/98-lvms-partition.yaml"
+        mode: "0644"
+
 - name: Ensure nmstatectl is available for agent-config networkConfig validation
   become: true
   ansible.builtin.package:
