@@ -13,6 +13,11 @@
     path: "{{ ansible_user_dir }}/configs/zuul_vars.yaml"
   register: _current_zuul_vars
 
+- name: Check if run-playbook-vars.yaml is available
+  ansible.builtin.stat:
+    path: "{{ ansible_user_dir }}/configs/run-playbook-vars.yaml"
+  register: _current_run_playbook_vars
+
 - name: Overwrite reproducer-variables.yml when PreMetal used
   when: _current_zuul_vars.stat.exists
   vars:
@@ -40,11 +45,20 @@
         dest: /usr/local/bin/merge_yaml_override
         mode: "0755"
 
-    - name: Execute merge script
+    - name: Execute merge script with zuul_vars.yaml
       ansible.builtin.shell: >
         python3 /usr/local/bin/merge_yaml_override
         {{ temp_reproducer_var_path }}
         {{ ansible_user_dir }}/configs/zuul_vars.yaml >
+        {{ temp_merged_reproducer_var_path }}
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Execute merge script with run-playbook-vars.yaml
+      when: _current_run_playbook_vars.stat.exists
+      ansible.builtin.shell: >
+        python3 /usr/local/bin/merge_yaml_override
+        {{ temp_merged_reproducer_var_path }}
+        {{ ansible_user_dir }}/configs/run-playbook-vars.yaml >
         {{ temp_merged_reproducer_var_path }}
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
