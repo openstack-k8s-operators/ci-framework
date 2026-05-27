@@ -163,6 +163,9 @@
             hostvars[_target]['ansible_ssh_private_key_file'] |
             default(lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY'))
           }}
+        cifmw_block_device_thin_pool: "{{ cifmw_ceph_thin_pool | default('') }}"
+        cifmw_block_device_thin_lv_size: "{{ cifmw_ceph_thin_lv_size | default('50G') }}"
+        cifmw_block_device_thin_lv_name: "ceph_osd_{{ i }}"
         cifmw_block_device_image_file: /var/lib/ceph-osd-{{ i }}.img
         cifmw_block_device_loop: /dev/loop{{ i + 3 }}
         cifmw_block_lv_name: ceph_lv{{ i }}
@@ -173,6 +176,17 @@
       loop_control:
         loop_var: i
       loop: "{{ range(0, cifmw_num_osds_perhost|int) }}"
+
+    - name: Build data_devices for ceph spec from cifmw_block_device outputs
+      ansible.builtin.set_fact:
+        cifmw_ceph_spec_data_devices: |
+          data_devices:
+            paths:
+          {% for p in cifmw_block_device_paths %}
+              - {{ p }}
+          {% endfor %}
+      delegate_to: localhost
+      delegate_facts: true
 
 - name: Build Ceph spec and conf from gathered IPs of the target inventory group
   tags: spec
