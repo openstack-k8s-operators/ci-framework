@@ -64,15 +64,33 @@
   retries: 30
   delay: 40
 
+- name: Get rhsso install plan name
+  ansible.builtin.set_fact:
+    _rhsso_ip_name: "{{ item.metadata.name }}"
+    _rhsso_ip_namespace: "{{ item.metadata.namespace }}"
+  loop: >-
+    {{
+      ip_list.resources |
+      selectattr('metadata.labels', 'defined') |
+      list
+    }}
+  when: >-
+    item.metadata.labels | dict2items |
+    selectattr('key', 'match', '.*rhsso-operator.*') |
+    list | length > 0
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
 - name: Approve rhsso operator install plan
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.shell: >-
-    oc patch installplan
-    $(oc get ip
-    -o=jsonpath='{.items[].metadata.name}')
-    --type merge --patch '{"spec":{"approved":true}}'
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: operators.coreos.com/v1alpha1
+    kind: InstallPlan
+    name: "{{ _rhsso_ip_name }}"
+    namespace: "{{ _rhsso_ip_namespace }}"
+    definition:
+      spec:
+        approved: true
 
 - name: Add sso admin user secret
   kubernetes.core.k8s:
