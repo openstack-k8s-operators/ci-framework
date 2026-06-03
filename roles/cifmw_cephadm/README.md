@@ -87,9 +87,18 @@ that they do not need to be changed for a typical EDPM deployment.
    `cifmw_cephadm_bootstrap_conf` file, which represents the initial Ceph
    configuration file passed at bootstrap time.
 
-* `cifmw_cephadm_rgw_vip`: the ingress daemon deployed along with `radosgw`
-   requires a `VIP` that will be owned by `keepalived`. This IP address will
-   be used as entry point to reach the `radosgw backends` through `haproxy`.
+* `cifmw_cephadm_rgw_vip`: an entry point to reach the
+   `radosgw` service. On multi-node deployments with ingress (haproxy +
+   keepalived) it holds the value for VIP owned by keepalived that
+   fronts the RGW backends via haproxy on port 8080. On SNO deployments where
+   ingress is not deployed, set this to the host's storage network IP so
+   the Swift endpoint points directly at the RGW daemon (port 8082).
+   If not set, it defaults to `cifmw_cephadm_vip` (the ingress VIP).
+
+* `cifmw_cephadm_rgw_port`: the port used in Swift/object-store Keystone
+   endpoints. Defaults to `8080` (the ingress/haproxy frontend port). For
+   single-node deployments without ingress, set to `8082` (the RGW daemon's
+   native `rgw_frontend_port`) so clients reach RGW directly.
 
 * `cifmw_cephadm_nfs_vip`: the ingress daemon deployed along with the `nfs`
    cluster requires a `VIP` that will be owned by `keepalived`. This IP
