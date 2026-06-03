@@ -1,5 +1,16 @@
 all:
   children:
+{% set _parent_map = {} -%}
+{% for vm in _cifmw_libvirt_manager_layout.vms.keys() if
+    (_cifmw_libvirt_manager_layout.vms[vm].manage | default(true) and
+     _cifmw_libvirt_manager_layout.vms[vm].amount | default(1) | int > 0 and
+     _cifmw_libvirt_manager_layout.vms[vm].parent_ansible_group is defined) -%}
+{%   set _pg = _cifmw_libvirt_manager_layout.vms[vm].parent_ansible_group -%}
+{%   if _pg not in _parent_map -%}
+{%     set _ = _parent_map.update({_pg: []}) -%}
+{%   endif -%}
+{%   set _ = _parent_map[_pg].append(vm) -%}
+{% endfor -%}
 {% for vm in _cifmw_libvirt_manager_layout.vms.keys() if
     (_cifmw_libvirt_manager_layout.vms[vm].manage | default(true) and
      _cifmw_libvirt_manager_layout.vms[vm].amount | default(1) | int > 0) %}
@@ -19,6 +30,13 @@ virtual machines.
         ansible_ssh_private_key_file: "~/.ssh/ssh_{{ _hostname }}"
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -J {{ ansible_user | default(ansible_user_id) }}@{{ _hostname }}"
 {% endif %}
+{% endfor %}
+{% for pg, children in _parent_map.items() %}
+    {{ pg }}:
+      children:
+{%   for vm in children %}
+        {{ (vm == 'crc') | ternary('ocp', vm) }}s: {}
+{%   endfor %}
 {% endfor %}
 hypervisors:
   hosts:
