@@ -1,0 +1,97 @@
+---
+# Workaround: fix Swift (RGW) endpoint IP and port in Keystone.
+#
+# The cifmw_cephadm configure_object.yml registers the endpoint using
+# cifmw_cephadm_rgw_vip:8080, which assumes the ceph ingress service
+# (haproxy+keepalived) is deployed.  On single-host HCI (no ingress),
+# the VIP is never bound and port 8080 never listens — RGW is directly
+# reachable on the host's storage IP at port 8082.
+#
+# This hook discovers the actual RGW address and port from the running
+# ceph cluster and updates the Keystone endpoints to match.
+#
+# FIXME(ci-framework): The proper fix belongs in
+# cifmw_cephadm/tasks/configure_object.yml — it should detect whether
+# ingress is deployed and choose VIP:8080 vs host_ip:8082 accordingly.
+- name: Fix Swift endpoint to match actual RGW address
+  hosts: "{{ groups[cifmw_ceph_target | default('computes')] | first }}"
+  gather_facts: false
+  vars:
+    _target_group: "{{ cifmw_ceph_target | default('computes') }}"
+    _target: "{{ groups[_target_group] | default([]) | first }}"
+    ansible_ssh_private_key_file: >-
+      {{
+        hostvars[_target]['ansible_ssh_private_key_file'] |
+        default(lookup('env', 'ANSIBLE_SSH_PRIVATE_KEY'))
+      }}
+  tasks:
+    - name: Get RGW daemon endpoint from ceph
+      become: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cephadm shell -- ceph orch ps --daemon-type rgw --format json 2>/dev/null
+      register: _rgw_ps
+
+    - name: Get ingress service status
+      become: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cephadm shell -- ceph orch ls --service-type ingress --format json 2>/dev/null
+      register: _ingress_ls
+      failed_when: false
+
+    - name: Set RGW endpoint facts
+      vars:
+        _rgw_daemons: "{{ _rgw_ps.stdout | from_json }}"
+        _ingress_raw: "{{ _ingress_ls.stdout | default('') }}"
+        _ingress_services: >-
+          {{ (_ingress_raw | from_json)
+             if (_ingress_raw | regex_search('^\s*\['))
+             else [] }}
+        _has_ingress: >-
+          {{ _ingress_services | length > 0 and
+             (_ingress_services | first).status.running | default(0) | int > 0 }}
+      block:
+        - name: Determine endpoint from ingress VIP
+          when: _has_ingress | bool
+          ansible.builtin.set_fact:
+            _rgw_port: "{{ (_ingress_services | first).spec.frontend_port | default(8080) }}"
+            _rgw_ip: >-
+              {{ (_ingress_services | first).status.virtual_ip |
+                 regex_replace('/.*$', '') }}
+
+        - name: Determine endpoint from RGW daemon
+          when: not (_has_ingress | bool)
+          ansible.builtin.set_fact:
+            _rgw_port: "{{ (_rgw_daemons | first).ports | first }}"
+            _rgw_ip: "{{ (_rgw_daemons | first).ip | default(ansible_host) }}"
+
+    - name: Update Swift endpoints in Keystone
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      delegate_to: localhost
+      block:
+        - name: Get current Swift endpoints
+          ansible.builtin.shell: |
+            set -euo pipefail
+            oc -n {{ cifmw_cephadm_ns | default('openstack') }} \
+              exec -t openstackclient -- \
+              openstack endpoint list --service object-store -f json
+          register: _swift_eps
+
+        - name: Update each Swift endpoint URL
+          vars:
+            _eps: "{{ _swift_eps.stdout | from_json }}"
+            _url_prefix: "http://{{ _rgw_ip }}:{{ _rgw_port }}"
+          ansible.builtin.shell: |
+            set -euo pipefail
+            oc -n {{ cifmw_cephadm_ns | default('openstack') }} \
+              exec -t openstackclient -- \
+              openstack endpoint set \
+              --url '{{ _url_prefix }}/swift/v1/AUTH_%(tenant_id)s' \
+              {{ item.ID }}
+          loop: "{{ _eps }}"
+          loop_control:
+            label: "{{ item.Interface }}"
+          when: >-
+            _url_prefix not in (item.URL | default(''))
