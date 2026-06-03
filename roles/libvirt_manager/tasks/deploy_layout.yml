@@ -4,6 +4,34 @@
     - _cifmw_libvirt_manager_layout is not defined
   ansible.builtin.include_tasks: generate_layout.yml
 
+- name: Validate no VM group name collides with a parent_ansible_group
+  vars:
+    _vm_group_names: >-
+      {% set _names = [] -%}
+      {% for _k in _cifmw_libvirt_manager_layout.vms.keys() -%}
+      {%   set _ = _names.append(((_k == 'crc') | ternary('ocp', _k)) ~ 's') -%}
+      {% endfor -%}
+      {{ _names }}
+    _reserved_groups:
+      - hypervisors
+      - localhosts
+    _parent_groups: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms.values() |
+        selectattr('parent_ansible_group', 'defined') |
+        map(attribute='parent_ansible_group') |
+        unique | list
+      }}
+    _disallowed_groups: "{{ _vm_group_names + _reserved_groups }}"
+    _collisions: "{{ _disallowed_groups | intersect(_parent_groups) }}"
+  when: _collisions | length > 0
+  ansible.builtin.fail:
+    msg: >-
+      A VM type's own inventory group cannot match a parent_ansible_group value.
+      Collisions: {{ _collisions | join(', ') }}.
+      Set parent_ansible_group to an abstract name not used by any VM type
+      (e.g. computes, not compute1s).
+
 # TODO(hjensas): We should have a dedicated role for firewall
 - name: Enable forwarding in the libvirt zone
   when: cifmw_libvirt_manager_firewalld_zone_libvirt_forward | default(true) | bool

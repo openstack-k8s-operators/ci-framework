@@ -1,0 +1,144 @@
+---
+- name: Parent group inventory test
+  hosts: instance
+  gather_facts: true
+  vars:
+    cifmw_basedir: "/opt/basedir"
+    _cifmw_libvirt_manager_layout:
+      vms:
+        compute1:
+          parent_ansible_group: computes
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 5
+          memory: 1
+          cpus: 1
+          nets: []
+        compute2:
+          parent_ansible_group: computes
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 5
+          memory: 1
+          cpus: 1
+          nets: []
+        controller:
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 5
+          memory: 1
+          cpus: 1
+          nets: []
+  tasks:
+    - name: Create reproducer-inventory directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/reproducer-inventory"
+        state: directory
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: "0755"
+
+    - name: Set all_vms fact
+      ansible.builtin.set_fact:
+        cifmw_libvirt_manager_all_vms:
+          compute1-0: compute1
+          compute2-0: compute2
+          controller-0: controller
+
+    - name: Add VMs to inventory
+      vars:
+        _full_host_name: "{{ item.key }}"
+        _group: "{{ item.value }}"
+        _parent_group: >-
+          {{
+            _cifmw_libvirt_manager_layout.vms[item.value].parent_ansible_group |
+            default('')
+          }}
+        _ssh_user: "zuul"
+        _add_ansible_host: false
+        _ansible_host: ""
+        _ini_line: "{{ item.key }} ansible_user=zuul vm_type={{ item.value }}"
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: add_vm_to_inventory.yml
+      loop: "{{ cifmw_libvirt_manager_all_vms | dict2items }}"
+
+    - name: Create all group inventory
+      ansible.builtin.include_role:
+        name: libvirt_manager
+        tasks_from: create_all_group_inventory.yml
+
+    # --- Assertions ---
+
+    - name: Assert runtime inventory has child and parent groups
+      ansible.builtin.assert:
+        that:
+          - "'compute1-0' in groups['compute1s']"
+          - "'compute2-0' in groups['compute2s']"
+          - "'compute1-0' in groups['computes']"
+          - "'compute2-0' in groups['computes']"
+          - "'controller-0' in groups['controllers']"
+          - "'controller-0' not in groups.get('computes', [])"
+
+    - name: Slurp all-group.yml
+      ansible.builtin.slurp:
+        path: "{{ cifmw_basedir }}/reproducer-inventory/all-group.yml"
+      register: _all_group_content
+
+    - name: Assert all-group.yml has parent and child groups
+      vars:
+        _ag: "{{ _all_group_content.content | b64decode | from_yaml }}"
+      ansible.builtin.assert:
+        that:
+          - "'compute1s' in _ag.all.children"
+          - "'compute2s' in _ag.all.children"
+          - "'controllers' in _ag.all.children"
+          - "'computes' in _ag.all.children"
+          - "'compute1s' in _ag.all.children.computes.children"
+          - "'compute2s' in _ag.all.children.computes.children"
+          - "'controllers' not in _ag.all.children.computes.children"
+
+- name: Parent group collision validation test
+  hosts: instance
+  gather_facts: false
+  vars:
+    _cifmw_libvirt_manager_layout:
+      vms:
+        compute:
+          parent_ansible_group: computes
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 5
+          memory: 1
+          cpus: 1
+          nets: []
+        computes:
+          parent_ansible_group: bigcomputes
+          amount: 1
+          disk_file_name: "blank"
+          disksize: 5
+          memory: 1
+          cpus: 1
+          nets: []
+  tasks:
+    - name: Verify collision detection rejects overlapping names
+      block:
+        - name: Run deploy_layout validation with colliding layout
+          ansible.builtin.include_role:
+            name: libvirt_manager
+            tasks_from: deploy_layout.yml
+
+        - name: Fail if validation did not catch collision
+          ansible.builtin.fail:
+            msg: >-
+              deploy_layout.yml should have failed due to
+              'computes' colliding with compute's parent_ansible_group
+
+      rescue:
+        - name: Assert failure message mentions collision
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_result.msg is defined and
+                'Collisions' in ansible_failed_result.msg
