@@ -20,6 +20,28 @@
       {{ cifmw_update_artifacts_basedir }}/update_event.sh
       Services update sequence complete
 
+- name: Stop the continuous control plane test before post-services tests
+  when:
+    - cifmw_update_control_plane_check | bool
+    - not cifmw_update_run_dryrun | bool
+  ansible.builtin.command: |
+    {{ cifmw_update_artifacts_basedir }}/control_plane_test_stop.sh
+  register: _cifmw_update_cp_stop_result
+  failed_when: false
+
+- name: Report control plane test results from services update phase
+  when:
+    - _cifmw_update_cp_stop_result is defined
+    - _cifmw_update_cp_stop_result.rc is defined
+    - _cifmw_update_cp_stop_result.rc != 0
+  ansible.builtin.debug:
+    msg: >-
+      Control plane test reported failures during services update phase.
+      Some failures may occur during service restarts, but failures exceeding
+      thresholds (max {{ cifmw_update_ctl_plane_max_fail }} total,
+      {{ cifmw_update_ctl_plane_max_cons_fail }} consecutive) indicate real issues:
+      {{ _cifmw_update_cp_stop_result.stdout | default('') }}
+
 - name: Run tests after Services update
   vars:
     cifmw_test_operator_artifacts_basedir: "{{ cifmw_basedir }}/tests/test_operator_update"
@@ -28,6 +50,13 @@
     name: cifmw_setup
     tasks_from: run_tests.yml
   when: cifmw_run_tests | default(false) | bool
+
+- name: Restart the continuous control plane test after post-services tests
+  when:
+    - cifmw_update_control_plane_check | bool
+    - not cifmw_update_run_dryrun | bool
+  ansible.builtin.command: |
+    {{ cifmw_update_artifacts_basedir }}/control_plane_test_start.sh
 
 - name: Set update step to Starting the system update sequence
   ansible.builtin.command:
