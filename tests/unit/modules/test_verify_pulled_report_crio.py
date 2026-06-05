@@ -27,11 +27,13 @@ class TestVerifyPulledReportCrio(ModuleBaseTestCase):
     def test_enriches_report_and_counts_cross_node(self):
         """
         GIVEN a pulled-images report with two digest entries across two nodes
-              and CRI-O logs showing each image pulled on its own node
+              and CRI-O logs with "Trying to access" + "Pulled image" lines
         WHEN  the module processes the report against the logs
-        THEN  it enriches every image with log evidence, identifies trusted
-              mirrors, and reports zero cross-node entries
+        THEN  it uses the "Trying to access" URI for origin verification,
+              identifies trusted mirrors, and reports zero cross-node entries
         """
+        _sha_a = "a" * 64
+        _sha_b = "b" * 64
         report_data = {
             "summary": {
                 "mirror_rules": [
@@ -41,17 +43,11 @@ class TestVerifyPulledReportCrio(ModuleBaseTestCase):
             },
             "images": [
                 {
-                    "image_id": (
-                        "quay.io/demo/app@sha256:"
-                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    ),
+                    "image_id": "quay.io/demo/app@sha256:" + _sha_a,
                     "node": "node-a",
                 },
                 {
-                    "image_id": (
-                        "quay.io/demo/other@sha256:"
-                        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                    ),
+                    "image_id": "quay.io/demo/other@sha256:" + _sha_b,
                     "node": "node-b",
                 },
                 {"image_id": "no-digest-here", "node": "node-a"},
@@ -71,18 +67,19 @@ class TestVerifyPulledReportCrio(ModuleBaseTestCase):
 
             with open(log_a, "w") as f:
                 f.write(
+                    'level=info msg="Trying to access \\"'
+                    "mirror.registry.example:5000/ns/app@sha256:" + _sha_a
+                    + '\\""\n'
                     'level=info msg="Pulled image: '
-                    "mirror.registry.example:5000/ns/app@sha256:"
-                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    '"\n'
+                    "quay.io/demo/app@sha256:" + _sha_a
+                    + '"\n'
                 )
 
             with open(log_b, "w") as f:
                 f.write(
                     'level=info msg="Pulled image: '
-                    "quay.io/demo/other@sha256:"
-                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                    '"\n'
+                    "quay.io/demo/other@sha256:" + _sha_b
+                    + '"\n'
                 )
 
             set_module_args(
@@ -111,14 +108,19 @@ class TestVerifyPulledReportCrio(ModuleBaseTestCase):
             img0 = enriched["images"][0]
             self.assertEqual(img0["log_evidence_node"], "node-a")
             self.assertEqual(
-                img0["log_evidence_uri"],
+                img0["image_fetched_from"],
                 "mirror.registry.example:5000/ns/app",
+            )
+            self.assertEqual(
+                img0["image_canonical_name"],
+                "quay.io/demo/app",
             )
             self.assertEqual(img0["node_verified_image_origin"], "mirror")
 
             img1 = enriched["images"][1]
             self.assertEqual(img1["log_evidence_node"], "node-b")
-            self.assertEqual(img1["log_evidence_uri"], "quay.io/demo/other")
+            self.assertIsNone(img1["image_fetched_from"])
+            self.assertEqual(img1["image_canonical_name"], "quay.io/demo/other")
             self.assertEqual(img1["node_verified_image_origin"], "source")
 
     def test_cross_node_match_increments_counter(self):
@@ -129,14 +131,12 @@ class TestVerifyPulledReportCrio(ModuleBaseTestCase):
         THEN  the cross_node_entries counter is incremented and the
               evidence node is set to the log's node (node-b)
         """
+        _sha_c = "c" * 64
         report_data = {
             "summary": {"mirror_rules": [{"mirror": "mirror.example/ns"}]},
             "images": [
                 {
-                    "image_id": (
-                        "quay.io/demo/app@sha256:"
-                        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                    ),
+                    "image_id": "quay.io/demo/app@sha256:" + _sha_c,
                     "node": "node-a",
                 }
             ],
@@ -154,10 +154,12 @@ class TestVerifyPulledReportCrio(ModuleBaseTestCase):
 
             with open(log_b, "w") as f:
                 f.write(
+                    'level=info msg="Trying to access \\"'
+                    "mirror.example/ns/app@sha256:" + _sha_c
+                    + '\\""\n'
                     'level=info msg="Pulled image: '
-                    "mirror.example/ns/app@sha256:"
-                    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                    '"\n'
+                    "quay.io/demo/app@sha256:" + _sha_c
+                    + '"\n'
                 )
 
             set_module_args(
