@@ -155,18 +155,38 @@ def _apply_evidence(img, evidence, evidence_node, trusted_mirrors):
     ``pulled_uri`` (from "Pulled image").  The tried URI is authoritative for
     determining origin because CRI-O always reports the canonical source name
     in "Pulled image" even when it fetched from a mirror.
+
+    When only ``tried_uri`` exists without a ``pulled_uri``, the pull was
+    attempted but never confirmed successful -- origin is ``pull_failed``.
     """
     tried_uri = evidence.get("tried_uri")
     pulled_uri = evidence.get("pulled_uri")
+
+    if tried_uri and not pulled_uri:
+        img["node_verified_image_origin"] = "pull_failed"
+        img["verification_reason"] = "CRI-O tried registries but pull never succeeded"
+        img["image_fetched_from"] = None
+        img["image_canonical_name"] = None
+        img["log_evidence_node"] = evidence_node
+        return None
+
     authoritative_uri = tried_uri or pulled_uri
     actual_domain = _domain_from_uri(authoritative_uri)
-    img["node_verified_image_origin"] = (
-        "mirror" if actual_domain in trusted_mirrors else "source"
-    )
+    origin = "mirror" if actual_domain in trusted_mirrors else "source"
+    img["node_verified_image_origin"] = origin
+
+    if tried_uri:
+        img["verification_reason"] = "CRI-O contacted {0} and pull succeeded".format(
+            origin
+        )
+    else:
+        img["verification_reason"] = (
+            "Pull confirmed, no Trying to access evidence (fallback to Pulled image)"
+        )
+
     img["image_fetched_from"] = tried_uri
     img["image_canonical_name"] = pulled_uri
     img["log_evidence_node"] = evidence_node
-    return actual_domain
 
 
 def _collect_log_evidence(paths, module):
@@ -191,30 +211,30 @@ def _collect_log_evidence(paths, module):
                     trying = TRYING_PATTERN.search(line)
                     if trying:
                         digest = trying.group("id")
-                        ev = node_ev.setdefault(
+                        node_entry = node_ev.setdefault(
                             digest, {"tried_uri": None, "pulled_uri": None}
                         )
-                        ev["tried_uri"] = trying.group("tried_uri")
-                        gev = global_evidence.setdefault(
+                        node_entry["tried_uri"] = trying.group("tried_uri")
+                        global_entry = global_evidence.setdefault(
                             digest, [{"tried_uri": None, "pulled_uri": None}, node]
                         )
-                        gev[0]["tried_uri"] = trying.group("tried_uri")
-                        gev[1] = node
+                        global_entry[0]["tried_uri"] = trying.group("tried_uri")
+                        global_entry[1] = node
                         continue
 
                     pulled = PULLED_PATTERN.search(line)
                     if pulled:
                         digest = pulled.group("id")
-                        ev = node_ev.setdefault(
+                        node_entry = node_ev.setdefault(
                             digest, {"tried_uri": None, "pulled_uri": None}
                         )
-                        ev["pulled_uri"] = pulled.group("pulled_uri")
-                        gev = global_evidence.setdefault(
+                        node_entry["pulled_uri"] = pulled.group("pulled_uri")
+                        global_entry = global_evidence.setdefault(
                             digest, [{"tried_uri": None, "pulled_uri": None}, node]
                         )
-                        gev[0]["pulled_uri"] = pulled.group("pulled_uri")
-                        if gev[1] is None:
-                            gev[1] = node
+                        global_entry[0]["pulled_uri"] = pulled.group("pulled_uri")
+                        if global_entry[1] is None:
+                            global_entry[1] = node
         except IOError as exc:
             module.fail_json(
                 msg="Cannot read CRI-O log file {0}: {1}".format(path, str(exc))
@@ -304,6 +324,7 @@ def run_module():
                 cross_node_entries += 1
         else:
             img["node_verified_image_origin"] = "cached/unknown"
+            img["verification_reason"] = "No CRI-O log evidence found for this digest"
             img["image_fetched_from"] = None
             img["image_canonical_name"] = None
             img["log_evidence_node"] = None
