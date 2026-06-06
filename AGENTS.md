@@ -200,7 +200,8 @@ and the generated Zuul files (`zuul.d/projects.yaml`, `zuul.d/molecule.yaml`).
   If changes span multiple roles, use `[multiple]` or `(multiple)`.
   For cross-cutting changes use a category: `[ci]`, `[docs]`, `[Feature]`.
 - **Body**: Must be longer than 10 characters and describe **why** the change
-  was made.
+  was made. Use GitHub-flavored Markdown (e.g., backtick-wrap code references
+  like \`variable_name\`, \`path/to/file\`, \`function()\`).
 - **Sign-off**: Required (`git commit --signoff`). The sign-off certifies a
   [DCO](https://developercertificate.org/). AI agents cannot sign off on behalf
   of a human -- the committer must add it themselves or amend the commit.
