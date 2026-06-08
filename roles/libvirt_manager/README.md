@@ -46,6 +46,7 @@ Used for checking if:
 * `cifmw_libvirt_manager_vm_users`: (List[Dict]) Used to override the default list of users enabled in the vm. For its format, refers to cloud-init [documentation](https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups) about `users`. Defaults to `[]`.
 * `cifmw_libvirt_manager_extra_network_configuration`: (Dict) Extra network configuration in nmstate format for the hypervisor. This configuration is applied after creating the libvirt networks, so it can be used to create VLAN interfaces on the libvirt bridges. In addition to nmstate, it also supports a `cifmw_firewall_zone` hint in nmstate interfaces.  Defaults to: `{}`.
 * `cifmw_libvirt_manager_radvd_networks`: (List[Dict]) List of networks to configure with radvd for IPv6 router advertisements. When defined, the `radvd` role will be included after network creation. Each network definition follows the format documented in the `radvd` role. Defaults to `[]`.
+* `cifmw_libvirt_manager_ocp_vm_fstrim`: (Boolean) Add `discard='unmap'` to the libvirt disk driver for OCP VMs, allowing guest TRIM/discard operations to reclaim space on the host qcow2 files. Derives from the master variable `cifmw_ocp_vm_fstrim`. Defaults to `false`.
 
 ### `cifmw_libvirt_manager_default_gw_nets` parameter usage
 
