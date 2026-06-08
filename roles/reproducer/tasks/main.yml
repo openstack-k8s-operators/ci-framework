@@ -451,85 +451,85 @@
             name: openshift_setup
             tasks_from: patch_network_operator.yml
 
-# Run from the hypervisor
-- name: Ensure OCP cluster is stable
-  when:
-    - _wait_ocp_cluster is defined
-    - _wait_ocp_cluster | bool
-  tags:
-    - bootstrap
-    - bootstrap_layout
-  vars:
-    _auth_path: >-
-      {{
-        (
-          cifmw_devscripts_repo_dir | default(
-            ansible_user_dir ~ '/src/github.com/openshift-metal3/dev-scripts'),
-          'ocp',
-          cifmw_bm_agent_cluster_name |
-            default(cifmw_devscripts_config.cluster_name | default('ocp')),
-          'auth'
-        ) | ansible.builtin.path_join
-      }}
-    cifmw_openshift_adm_op: "stable"
-    cifmw_openshift_kubeconfig: >-
-      {{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}
-  ansible.builtin.include_role:
-    name: openshift_adm
+# # Run from the hypervisor
+# - name: Ensure OCP cluster is stable
+#   when:
+#     - _wait_ocp_cluster is defined
+#     - _wait_ocp_cluster | bool
+#   tags:
+#     - bootstrap
+#     - bootstrap_layout
+#   vars:
+#     _auth_path: >-
+#       {{
+#         (
+#           cifmw_devscripts_repo_dir | default(
+#             ansible_user_dir ~ '/src/github.com/openshift-metal3/dev-scripts'),
+#           'ocp',
+#           cifmw_bm_agent_cluster_name |
+#             default(cifmw_devscripts_config.cluster_name | default('ocp')),
+#           'auth'
+#         ) | ansible.builtin.path_join
+#       }}
+#     cifmw_openshift_adm_op: "stable"
+#     cifmw_openshift_kubeconfig: >-
+#       {{ (_auth_path, 'kubeconfig') | ansible.builtin.path_join }}
+#   ansible.builtin.include_role:
+#     name: openshift_adm
 
-- name: Run from controller-0
-  when:
-    - _has_openshift
-    - (
-        _cifmw_libvirt_manager_layout.vms.controller.target is defined and
-        _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
-      ) or
-      _cifmw_libvirt_manager_layout.vms.controller.target is undefined
-  delegate_to: controller-0
-  block:
-    - name: Emulate CI job
-      when:
-        - cifmw_job_uri is defined
-      ansible.builtin.include_tasks: ci_job.yml
+# - name: Run from controller-0
+#   when:
+#     - _has_openshift
+#     - (
+#         _cifmw_libvirt_manager_layout.vms.controller.target is defined and
+#         _cifmw_libvirt_manager_layout.vms.controller.target == inventory_hostname
+#       ) or
+#       _cifmw_libvirt_manager_layout.vms.controller.target is undefined
+#   delegate_to: controller-0
+#   block:
+#     - name: Emulate CI job
+#       when:
+#         - cifmw_job_uri is defined
+#       ansible.builtin.include_tasks: ci_job.yml
 
-    - name: Prepare architecture-based deployment
-      when:
-        - cifmw_architecture_scenario is defined
-        - cifmw_job_uri is undefined
-      tags:
-        - deploy_architecture
-      ansible.builtin.include_tasks:
-        file: configure_architecture.yml
-        apply:
-          tags:
-            - deploy_architecture
+#     - name: Prepare architecture-based deployment
+#       when:
+#         - cifmw_architecture_scenario is defined
+#         - cifmw_job_uri is undefined
+#       tags:
+#         - deploy_architecture
+#       ansible.builtin.include_tasks:
+#         file: configure_architecture.yml
+#         apply:
+#           tags:
+#             - deploy_architecture
 
-    - name: Prepare architecture-based post deployment
-      when:
-        - cifmw_architecture_scenario is defined
-        - cifmw_job_uri is undefined
-      tags:
-        - deploy_architecture
-      ansible.builtin.include_tasks:
-        file: configure_post_deployment.yml
+#     - name: Prepare architecture-based post deployment
+#       when:
+#         - cifmw_architecture_scenario is defined
+#         - cifmw_job_uri is undefined
+#       tags:
+#         - deploy_architecture
+#       ansible.builtin.include_tasks:
+#         file: configure_post_deployment.yml
 
-    - name: Prepare ci-like EDPM deploy
-      when:
-        - cifmw_job_uri is undefined
-      delegate_to: controller-0
-      vars:
-        run_directory: "{{ _cifmw_reproducer_framework_location }}"
-        exports:
-          ANSIBLE_LOG_PATH: "~/ansible-deploy-edpm.log"
-        default_extravars:
-          - "@scenarios/centos-9/base.yml"
-          - "@scenarios/centos-9/edpm_ci.yml"
-          - "cifmw_openshift_password='{{ cifmw_openshift_password }}'"
-        extravars: "{{ cifmw_reproducer_play_extravars }}"
-        playbook: "deploy-edpm.yml"
-      ansible.builtin.template:
-        dest: "{{ cifmw_reproducer_controller_user_dir }}/deploy-edpm.sh"
-        src: "script.sh.j2"
-        mode: "0755"
-        owner: "{{ cifmw_reproducer_controller_user }}"
-        group: "{{ cifmw_reproducer_controller_user }}"
+#     - name: Prepare ci-like EDPM deploy
+#       when:
+#         - cifmw_job_uri is undefined
+#       delegate_to: controller-0
+#       vars:
+#         run_directory: "{{ _cifmw_reproducer_framework_location }}"
+#         exports:
+#           ANSIBLE_LOG_PATH: "~/ansible-deploy-edpm.log"
+#         default_extravars:
+#           - "@scenarios/centos-9/base.yml"
+#           - "@scenarios/centos-9/edpm_ci.yml"
+#           - "cifmw_openshift_password='{{ cifmw_openshift_password }}'"
+#         extravars: "{{ cifmw_reproducer_play_extravars }}"
+#         playbook: "deploy-edpm.yml"
+#       ansible.builtin.template:
+#         dest: "{{ cifmw_reproducer_controller_user_dir }}/deploy-edpm.sh"
+#         src: "script.sh.j2"
+#         mode: "0755"
+#         owner: "{{ cifmw_reproducer_controller_user }}"
+#         group: "{{ cifmw_reproducer_controller_user }}"
