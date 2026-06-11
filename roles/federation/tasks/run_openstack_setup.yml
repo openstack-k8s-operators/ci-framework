@@ -73,26 +73,6 @@
     remote_path: "/home/cloud-admin/{{ cifmw_federation_rules_file }}"
     local_path: "{{ [ ansible_user_dir, 'ci-framework-data', 'tmp', cifmw_federation_rules_file ] | path_join }}"
 
-- name: Check if federation mapping already exists
-  environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-    PATH: "{{ cifmw_path }}"
-  ansible.builtin.command:
-    cmd: >-
-      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
-      openstack mapping show {{ cifmw_federation_mapping_name }} -f value -c id
-  register: _federation_mapping_check
-  failed_when: false
-  changed_when: false
-
-- name: Run federation mapping create
-  when: _federation_mapping_check.rc != 0
-  vars:
-    _osp_cmd: "openstack mapping create
-      --rules {{ cifmw_federation_rules_file }}
-      {{ cifmw_federation_mapping_name }}"
-  ansible.builtin.include_tasks: run_osp_cmd.yml
-
 - name: Check if federation group already exists
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
@@ -133,6 +113,26 @@
     _osp_cmd: "openstack project create
       --domain {{ cifmw_federation_keystone_domain }}
       {{ cifmw_federation_project_name }}"
+  ansible.builtin.include_tasks: run_osp_cmd.yml
+
+- name: Check if federation mapping already exists
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc exec -n {{ cifmw_federation_run_osp_cmd_namespace }} -t openstackclient --
+      openstack mapping show {{ cifmw_federation_mapping_name }} -f value -c id
+  register: _federation_mapping_check
+  failed_when: false
+  changed_when: false
+
+- name: Run federation mapping create
+  when: _federation_mapping_check.rc != 0
+  vars:
+    _osp_cmd: "openstack mapping create
+      --rules {{ cifmw_federation_rules_file }}
+      {{ cifmw_federation_mapping_name }}"
   ansible.builtin.include_tasks: run_osp_cmd.yml
 
 - name: Run federation role add (safe to repeat - role add is idempotent)

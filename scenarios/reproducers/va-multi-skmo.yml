@@ -319,8 +319,25 @@ cifmw_networking_definition:
           ranges:
             - start: 100
               end: 250
-      vlan: 32
+      # No vlan: existing leaf NetConfig external subnet was created without VLAN;
+      # NetConfig webhook rejects adding vlan to an established subnet.
       mtu: 1500
+    octavia:
+      network: "172.23.0.0/24"
+      vlan: 23
+      mtu: 1500
+      tools:
+        multus:
+          ranges:
+            - start: 30
+              end: 70
+          routes:
+            - destination: "172.24.0.0/16"
+              gateway: "172.23.0.150"
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
 
   group-templates:
     ocps:
@@ -362,6 +379,8 @@ cifmw_networking_definition:
           trunk-parent: ctlplane
         storage:
           trunk-parent: ctlplane
+        octavia:
+          trunk-parent: ctlplane
     compute2s:
       network-template:
         range:
@@ -374,6 +393,8 @@ cifmw_networking_definition:
         tenant2:
           trunk-parent: ctlplane2
         storage2:
+          trunk-parent: ctlplane2
+        octavia:
           trunk-parent: ctlplane2
   instances:
     controller-0:
@@ -403,10 +424,7 @@ pre_admin_setup:
       cifmw_os_net_setup_public_end: "192.168.133.250"
       cifmw_os_net_setup_public_gateway: "192.168.133.1"
 
-post_tests:
-  - name: Run tempest against openstack2 namespace
-    type: playbook
-    source: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/playbooks/multi-namespace/ns2_validation.yaml"
-    extra_vars:
-      cifmw_test_operator_tempest_name: tempest-tests2
-      cifmw_test_operator_namespace: openstack2
+# Tempest runs via ci-framework-jobs scenario vars (05-tests.yaml), not post_tests hooks.
+# Zuul: integration-uni-base variable_files_dirs loads scenarios/uni/va-multi-namespace-skmo/.
+# Local reproducer: pass -e @.../ci-framework-jobs/scenarios/uni/va-multi-namespace-skmo/05-tests.yaml
+post_tests: []

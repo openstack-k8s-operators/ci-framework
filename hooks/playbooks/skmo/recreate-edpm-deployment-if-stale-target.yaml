@@ -1,0 +1,24 @@
+---
+- name: Read NodeSet status
+  kubernetes.core.k8s_info:
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ skmo_edpm_target.nodeset }}"
+    namespace: "{{ skmo_edpm_target.namespace }}"
+  register: _osdpns
+
+- name: Delete stale OpenStackDataPlaneDeployment
+  kubernetes.core.k8s:
+    state: absent
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneDeployment
+    name: "{{ skmo_edpm_target.deployment }}"
+    namespace: "{{ skmo_edpm_target.namespace }}"
+    wait: true
+    wait_timeout: 600
+  when:
+    - _osdpns.resources | length > 0
+    - _osdpns.resources[0].status.configHash is defined
+    - _osdpns.resources[0].status.configHash | length > 0
+    - _osdpns.resources[0].status.deployedConfigHash is not defined or
+      _osdpns.resources[0].status.configHash != _osdpns.resources[0].status.deployedConfigHash
