@@ -1,0 +1,23 @@
+---
+# Delete OpenStackDataPlaneDeployment when NodeSet config drifted.
+# After status.deployed=true the deployment controller does not re-run ansible
+# until the CR is recreated, even if osdpns configHash changed.
+- name: Recreate stale EDPM deployments when NodeSet config changed
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    skmo_edpm_targets:
+      - namespace: openstack
+        nodeset: openstack-edpm
+        deployment: edpm-deployment
+      - namespace: openstack2
+        nodeset: openstack-edpm
+        deployment: edpm-deployment
+  tasks:
+    - name: Recreate stale EDPM deployment in {{ skmo_edpm_target.namespace }}
+      ansible.builtin.include_tasks: recreate-edpm-deployment-if-stale-target.yaml
+      loop: "{{ skmo_edpm_targets }}"
+      loop_control:
+        label: "{{ item.namespace }}"
+      vars:
+        skmo_edpm_target: "{{ item }}"
