@@ -14,31 +14,47 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Ensure ceph-osd-losetup is not running and disabled
-  tags: systemd
+- name: Clean up thin-provisioned LV
+  when: cifmw_block_device_thin_pool | length > 0
   become: true
-  ansible.builtin.systemd:
-    state: stopped
-    enabled: false
-    name: "{{ cifmw_block_systemd_unit_file | basename }}"
+  ansible.builtin.command:
+    cmd: >-
+      lvremove --force
+      /dev/{{ cifmw_block_device_thin_pool.split('/')[0] }}/{{ cifmw_block_device_thin_lv_name }}
+  register: _thin_cleanup
+  failed_when:
+    - _thin_cleanup.rc != 0
+    - "'not found' not in (_thin_cleanup.stderr | default(''))"
 
-- name: Remove unit file
-  become: true
-  ansible.builtin.file:
-    path: "{{ cifmw_block_systemd_unit_file }}"
-    state: absent
+- name: Clean up loop-backed block device
+  when: cifmw_block_device_thin_pool | default('') | length == 0
+  block:
+    - name: Ensure ceph-osd-losetup is not running and disabled
+      tags: systemd
+      become: true
+      ansible.builtin.systemd:
+        state: stopped
+        enabled: false
+        name: "{{ cifmw_block_systemd_unit_file | basename }}"
 
-- name: Use {pv,vg,lv}remove to remove logical volume on loop device
-  become: true
-  ansible.builtin.shell:
-    cmd: |-
-      lvremove --force /dev/{{ cifmw_block_vg_name }}/{{ cifmw_block_lv_name }}
-      vgremove --force {{ cifmw_block_vg_name }}
-      pvremove --force {{ cifmw_block_device_loop }}
-      lvs
+    - name: Remove unit file
+      become: true
+      ansible.builtin.file:
+        path: "{{ cifmw_block_systemd_unit_file }}"
+        state: absent
 
-- name: Use losetup and rm to cremove the loop device and backing image file
+    - name: Use {pv,vg,lv}remove to remove logical volume on loop device
+      become: true
+      ansible.builtin.shell:
+        cmd: |-
+          lvremove --force /dev/{{ cifmw_block_vg_name }}/{{ cifmw_block_lv_name }}
+          vgremove --force {{ cifmw_block_vg_name }}
+          pvremove --force {{ cifmw_block_device_loop }}
+          lvs
+
+- name: Use losetup and rm to remove the loop device and backing image file
   become: true
+  when: cifmw_block_device_thin_pool | length > 0
   ansible.builtin.shell:
     cmd: |-
       losetup -d {{ cifmw_block_device_loop }}
