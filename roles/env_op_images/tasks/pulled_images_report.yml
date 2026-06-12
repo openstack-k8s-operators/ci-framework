@@ -113,12 +113,42 @@
         label: "{{ item }}"
       failed_when: false
 
+    - name: Get CatalogSource image reference
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: CatalogSource
+        api_version: operators.coreos.com/v1alpha1
+        name: "{{ cifmw_env_op_images_catalog_source_name }}"
+        namespace: "{{ cifmw_env_op_images_catalog_source_namespace }}"
+      register: _pulled_report_catalog
+      failed_when: false
+
+    - name: Extract catalog version
+      vars:
+        _cat_resources: "{{ _pulled_report_catalog.resources | default([]) }}"
+        _cat_image: >-
+          {{ (_cat_resources | first).spec.image | default('')
+             if _cat_resources | length > 0
+             else '' }}
+      ansible.builtin.set_fact:
+        _pulled_report_catalog_version: >-
+          {%- set img = _cat_image | trim -%}
+          {%- if '@sha256:' in img and '/' in img -%}
+          {{ img.split('@')[0].split('/')[-2] }}
+          {%- elif '/' in img and ':' in img.split('/')[-1] -%}
+          {{ img.split('/')[-2] ~ ':' ~ img.split('/')[-1].split(':')[-1] }}
+          {%- elif '/' in img -%}
+          {{ img.split('/')[-2] }}
+          {%- else -%}
+          {%- endif -%}
+
     - name: Build per-pod pulled images report
       ansible.builtin.set_fact:
         _pulled_images_report: >-
           {{ lookup('template', 'pulled_images_report.j2') | trim | from_yaml }}
 
-    # Counts for the YAML artifact summary section.
     - name: Build report summary
       vars:
         _total: "{{ _pulled_images_report | length }}"
@@ -131,6 +161,7 @@
         _mirror_rules: "{{ _pulled_report_mirror_mappings | length }}"
       ansible.builtin.set_fact:
         _pulled_report_summary:
+          catalog_version: "{{ _pulled_report_catalog_version | trim }}"
           mirror_rules_found: "{{ _mirror_rules | int }}"
           mirror_rules: "{{ _pulled_report_mirror_mappings }}"
           total_containers: "{{ _total | int }}"
@@ -153,5 +184,6 @@
           Pulled images report: {{ _pulled_report_summary.total_containers }} containers
           ({{ _pulled_report_summary.containers_expected_basis_mirror }} mirror,
           {{ _pulled_report_summary.containers_expected_basis_source }} source),
-          {{ _pulled_report_summary.mirror_rules_found }} mirror rules.
+          {{ _pulled_report_summary.mirror_rules_found }} mirror rules,
+          catalog_version={{ _pulled_report_summary.catalog_version | default('unknown') }}.
           Full report: {{ cifmw_env_op_images_pulled_report_path }}
