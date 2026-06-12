@@ -48,49 +48,86 @@
   ansible.builtin.command:
     cmd: "oc apply -f {{ [ ansible_user_dir, 'ci-framework-data', 'tmp', 'rhsso-operator-olm.yaml' ] | path_join }}"
 
-- name: Wait for the rhsso install plan to be present
+- name: Check rhsso operator CSV status
   kubernetes.core.k8s_info:
-    api_version: operators.coreos.com/v1alpha1
-    kind: InstallPlan
-  register: ip_list
-  until: >-
-    ip_list.resources |
-    selectattr('metadata.labels', 'defined') |
-    map(attribute='metadata.labels') |
-    map('dict2items') |
-    flatten |
-    selectattr('key', 'match', '.*rhsso-operator.*') |
-    list | length > 0
-  retries: 30
-  delay: 40
-
-- name: Get rhsso install plan name
-  ansible.builtin.set_fact:
-    _rhsso_ip_name: "{{ item.metadata.name }}"
-    _rhsso_ip_namespace: "{{ item.metadata.namespace }}"
-  loop: >-
-    {{
-      ip_list.resources |
-      selectattr('metadata.labels', 'defined') |
-      list
-    }}
-  when: >-
-    item.metadata.labels | dict2items |
-    selectattr('key', 'match', '.*rhsso-operator.*') |
-    list | length > 0
-  loop_control:
-    label: "{{ item.metadata.name }}"
-
-- name: Approve rhsso operator install plan
-  kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_version: operators.coreos.com/v1alpha1
-    kind: InstallPlan
-    name: "{{ _rhsso_ip_name }}"
-    namespace: "{{ _rhsso_ip_namespace }}"
-    definition:
-      spec:
-        approved: true
+    kind: ClusterServiceVersion
+    namespace: "{{ item }}"
+    label_selectors:
+      - operators.coreos.com/rhsso-operator.default=true
+  register: _rhsso_csv_checks
+  loop:
+    - default
+    - "{{ cifmw_federation_keycloak_namespace }}"
+  failed_when: false
+
+- name: Set rhsso operator already installed fact
+  ansible.builtin.set_fact:
+    _rhsso_operator_installed: >-
+      {{
+        (
+          _rhsso_csv_checks.results |
+          default([]) |
+          map(attribute='resources') |
+          flatten |
+          selectattr('status.phase', 'defined') |
+          selectattr('status.phase', 'equalto', 'Succeeded') |
+          list | length
+        ) > 0
+      }}
+
+- name: Install and approve rhsso operator when not already installed
+  when: not _rhsso_operator_installed
+  block:
+    - name: Wait for the rhsso install plan to be present
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: InstallPlan
+        namespace: default
+      register: ip_list
+      until: >-
+        ip_list.resources |
+        selectattr('metadata.labels', 'defined') |
+        map(attribute='metadata.labels') |
+        map('dict2items') |
+        flatten |
+        selectattr('key', 'match', '.*rhsso-operator.*') |
+        list | length > 0
+      retries: 30
+      delay: 40
+
+    - name: Get unapproved rhsso install plan name
+      ansible.builtin.set_fact:
+        _rhsso_ip_name: "{{ item.metadata.name }}"
+        _rhsso_ip_namespace: "{{ item.metadata.namespace }}"
+      loop: >-
+        {{
+          ip_list.resources |
+          selectattr('metadata.labels', 'defined') |
+          list
+        }}
+      when:
+        - >-
+          item.metadata.labels | dict2items |
+          selectattr('key', 'match', '.*rhsso-operator.*') |
+          list | length > 0
+        - not (item.spec.approved | default(false) | bool)
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Approve rhsso operator install plan
+      when: _rhsso_ip_name is defined
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: operators.coreos.com/v1alpha1
+        kind: InstallPlan
+        name: "{{ _rhsso_ip_name }}"
+        namespace: "{{ _rhsso_ip_namespace }}"
+        definition:
+          spec:
+            approved: true
 
 - name: Add sso admin user secret
   kubernetes.core.k8s:
