@@ -15,7 +15,7 @@
 # under the License.
 
 # Pulled-images report (policy view, not node-verified pulls):
-# - Load cluster ImageContentSourcePolicy + ImageDigestMirrorSet objects via oc.
+# - Load cluster ImageDigestMirrorSet + ImageTagMirrorSet objects via oc.
 # - Flatten them into {source, mirror} pairs (repository prefix -> mirror ref).
 # - For each container/initContainer in selected namespaces, compare the pod
 #   status image string to those prefixes: first matching source rule yields
@@ -39,46 +39,35 @@
         state: directory
         mode: "0755"
 
-    - name: Get ICSP mirror rules
-      ansible.builtin.command:
-        cmd: oc get imagecontentsourcepolicy -o json
-      register: _pulled_report_icsp
-      failed_when: false
-
     - name: Get IDMS mirror rules
       ansible.builtin.command:
         cmd: oc get imagedigestmirrorset -o json
       register: _pulled_report_idms
       failed_when: false
 
-    # Flatten ICSP repositoryDigestMirrors and IDMS imageDigestMirrors into
-    # a single list of {source, mirror} pairs.  A source with N mirrors
-    # produces N entries so the Jinja template can prefix-match every
-    # mirror in one loop.
+    - name: Get ITMS mirror rules
+      ansible.builtin.command:
+        cmd: oc get imagetagmirrorset -o json
+      register: _pulled_report_itms
+      failed_when: false
+
+    # Flatten IDMS imageDigestMirrors and ITMS imageTagMirrors into a single
+    # list of {source, mirror} pairs.  A source with N mirrors produces N
+    # entries so the Jinja template can prefix-match every mirror in one loop.
     # Example output (_pulled_report_mirror_mappings):
     #   - source: registry.redhat.io/openstack-k8s-operators
     #     mirror: quay.example.com/rh-osbs/openstack-k8s-operators
     #   - source: registry.redhat.io/openstack-k8s-operators
     #     mirror: internal-registry.corp.net/openstack-k8s-operators
-    - name: Build source-to-mirror mapping from ICSP/IDMS
+    - name: Build source-to-mirror mapping from IDMS/ITMS
       vars:
-        _icsp_items: >-
-          {{ (_pulled_report_icsp.stdout | default('{}', true) | from_json).get('items', []) }}
         _idms_items: >-
           {{ (_pulled_report_idms.stdout | default('{}', true) | from_json).get('items', []) }}
+        _itms_items: >-
+          {{ (_pulled_report_itms.stdout | default('{}', true) | from_json).get('items', []) }}
         _mappings: >-
           {% set maps = [] %}
-          {# ICSP spec.repositoryDigestMirrors: source repo + mirrors[] #}
-          {% for icsp in _icsp_items %}
-          {%   for rdm in icsp.spec.get('repositoryDigestMirrors', []) %}
-          {%     if rdm.source is defined and rdm.source %}
-          {%       for m in rdm.get('mirrors', []) %}
-          {%         set _ = maps.append({'source': rdm.source, 'mirror': m}) %}
-          {%       endfor %}
-          {%     endif %}
-          {%   endfor %}
-          {% endfor %}
-          {# IDMS spec.imageDigestMirrors: same shape for matching purposes #}
+          {# IDMS spec.imageDigestMirrors: digest-based mirror rules #}
           {% for idms in _idms_items %}
           {%   for rdm in idms.spec.get('imageDigestMirrors', []) %}
           {%     if rdm.source is defined and rdm.source %}
@@ -88,15 +77,25 @@
           {%     endif %}
           {%   endfor %}
           {% endfor %}
+          {# ITMS spec.imageTagMirrors: tag-based mirror rules #}
+          {% for itms in _itms_items %}
+          {%   for rtm in itms.spec.get('imageTagMirrors', []) %}
+          {%     if rtm.source is defined and rtm.source %}
+          {%       for m in rtm.get('mirrors', []) %}
+          {%         set _ = maps.append({'source': rtm.source, 'mirror': m}) %}
+          {%       endfor %}
+          {%     endif %}
+          {%   endfor %}
+          {% endfor %}
           {{ maps }}
       ansible.builtin.set_fact:
         _pulled_report_mirror_mappings: "{{ _mappings | trim | from_yaml }}"
 
-    - name: Warn if no ICSP/IDMS mirror rules found
+    - name: Warn if no IDMS/ITMS mirror rules found
       when: _pulled_report_mirror_mappings | length == 0
       ansible.builtin.debug:
         msg: >-
-          No ICSP or IDMS mirror rules found on the cluster.
+          No IDMS or ITMS mirror rules found on the cluster.
           All rows will have expected_pull_basis: source and expected_pull_location from the image ref.
 
     # Namespaces come from role default / caller; failed namespaces skip via failed_when: false.
