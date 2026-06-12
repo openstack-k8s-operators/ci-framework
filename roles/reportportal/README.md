@@ -7,7 +7,7 @@ The `reportportal` role uses Data Router tool for uploading XML test results to 
 * `cifmw_reportportal_droute_client_url`: (String) URL of Data router client repository (mandatory).
 * `cifmw_reportportal_datarouter_username`: (String) username for Data router client (mandatory).
 * `cifmw_reportportal_datarouter_password`: (String) password for Data router client (mandatory).
-* `cifmw_reportportal_datarouter_result_dir`: (String) Test results directory. Based on `cifmw_run_test_role` defaults to `~/ci-framework-data/tests/tempest/` or `~/ci-framework-data/tests/test_operator/`. One or more properly formatted xml results files are expected to be found in this directory.
+* `cifmw_reportportal_datarouter_result_dir`: (String) Test results directory. Based on `cifmw_run_test_role` defaults to `~/ci-framework-data/tests/test_operator/`. One or more properly formatted xml results files are expected to be found in this directory.
 * `cifmw_reportportal_project`: (String) Report portal project for uploading results (mandatory).
 * `cifmw_reportportal_launch_name`: (String) Name of the Report portal launch defaults to `Dummy launch`.
 * `cifmw_reportportal_launch_description`: (String) Description of the Report portal launch defaults to `Test results sent via Data router`.
