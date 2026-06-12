@@ -123,17 +123,6 @@ MARIADB_KUTTL_CONF      ?= ${OPERATOR_BASE_DIR}/mariadb-operator/kuttl-test.yaml
 MARIADB_KUTTL_DIR       ?= ${OPERATOR_BASE_DIR}/mariadb-operator/tests/kuttl/tests
 MARIADB_KUTTL_NAMESPACE ?= mariadb-kuttl-tests
 
-# Placement
-PLACEMENT_IMG             ?= quay.io/openstack-k8s-operators/placement-operator-index:latest
-PLACEMENT_REPO            ?= https://github.com/openstack-k8s-operators/placement-operator.git
-PLACEMENT_BRANCH          ?= main
-PLACEMENTAPI              ?= config/samples/placement_v1beta1_placementapi.yaml
-PLACEMENTAPI_CR           ?= ${OPERATOR_BASE_DIR}/placement-operator/${PLACEMENTAPI}
-PLACEMENTAPI_DEPL_IMG     ?= unused
-PLACEMENT_KUTTL_CONF      ?= ${OPERATOR_BASE_DIR}/placement-operator/kuttl-test.yaml
-PLACEMENT_KUTTL_DIR       ?= ${OPERATOR_BASE_DIR}/placement-operator/tests/kuttl/tests
-PLACEMENT_KUTTL_NAMESPACE ?= placement-kuttl-tests
-
 # Sir Glancealot
 GLANCE_IMG              ?= quay.io/openstack-k8s-operators/glance-operator-index:latest
 GLANCE_REPO             ?= https://github.com/openstack-k8s-operators/glance-operator.git
