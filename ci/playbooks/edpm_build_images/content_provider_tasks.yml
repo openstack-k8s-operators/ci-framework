@@ -1,0 +1,106 @@
+---
+- name: Construct project change list
+  ansible.builtin.set_fact:
+    zuul_change_list: "{{ zuul_change_list | default([]) + [item.project.short_name] }}"
+    cacheable: true
+  loop: "{{ zuul['items'] }}"
+  when:
+    - zuul is defined
+    - "'items' in zuul"
+    - "'change_url' in item"
+
+- name: Build EDPM content provider images
+  when:
+    - (cifmw_edpm_build_images_force | default(false) | bool) or
+      ('edpm-image-builder' in (zuul_change_list | default([])))
+  block:
+    - name: Call repo setup
+      ansible.builtin.import_role:
+        name: repo_setup
+      vars:
+        cifmw_repo_setup_output: "/etc/yum.repos.d/"
+
+    - name: Get latest commit when no PR is provided
+      ansible.builtin.command:  # noqa: command-instead-of-module
+        cmd: git show-ref --head --hash head
+      args:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-image-builder"
+      register: git_head_out
+
+    - name: Set pr_sha to be used as image tag
+      ansible.builtin.set_fact:
+        pr_sha: "{{ git_head_out.stdout | trim }}"
+        cacheable: true
+
+    - name: Build edpm and ipa images
+      ansible.builtin.include_role:
+        name: edpm_build_images
+      vars:
+        cifmw_edpm_build_images_via_rpm: false
+        cifmw_edpm_build_images_tag: "{{ pr_sha }}"
+        cifmw_edpm_build_images_push_container_images: true
+        cifmw_edpm_build_images_push_registry: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001"
+        cifmw_edpm_build_images_push_registry_namespace: ""
+        cifmw_edpm_build_images_bootc_repo: "{{ cifmw_rp_registry_ip | default('localhost') }}:5001/edpm-bootc"
+
+    - name: Set build images output
+      ansible.builtin.set_fact:
+        cifmw_build_images_output: >-
+          {{
+            {
+              'images': {}
+            }
+            |
+            combine(
+              {
+                'images': {
+                  'edpm-hardened-uefi': {
+                    'image': (cifmw_rp_registry_ip | default('localhost')) ~ ':5001/edpm-hardened-uefi:' ~ pr_sha
+                  }
+                }
+              }
+              if (
+                (
+                  cifmw_edpm_build_images_hardened_uefi | default(false) | bool
+                ) or (
+                  cifmw_edpm_build_images_all | default(true) | bool
+                )
+              ) and (
+                cifmw_edpm_build_images_hardened_uefi_package | default(true) | bool
+              )
+              else {},
+              recursive=true
+            )
+            |
+            combine(
+              {
+                'images': {
+                  'ironic-python-agent': {
+                    'image': (cifmw_rp_registry_ip | default('localhost')) ~ ':5001/ironic-python-agent:' ~ pr_sha
+                  }
+                }
+              }
+              if (
+                (
+                  cifmw_edpm_build_images_ironic_python_agent | default(false) | bool
+                ) or (
+                  cifmw_edpm_build_images_all | default(true) | bool
+                )
+              ) and (
+                cifmw_edpm_build_images_ironic_python_agent_package | default(true) | bool
+              )
+              else {},
+              recursive=true
+            )
+            |
+            combine(cifmw_edpm_build_images_bootc_output | default({}), recursive=true)
+          }}
+        cacheable: true
+
+- name: Set build images output when EDPM image is not built
+  when:
+    - not (cifmw_edpm_build_images_force | default(false) | bool)
+    - "'edpm-image-builder' not in (zuul_change_list | default([]))"
+  ansible.builtin.set_fact:
+    cifmw_build_images_output: {}
+    cacheable: true
