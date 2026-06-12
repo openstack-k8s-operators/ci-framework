@@ -1,24 +1,51 @@
 ---
-- name: Add host to runtime inventory
-  ansible.builtin.add_host:
-    name: "{{ _full_host_name }}"
-    groups: "{{ _group }}s"
-    ansible_ssh_user: "{{ _ssh_user }}"
-    ansible_host: "{{ _add_ansible_host | ternary(_ansible_host, omit) }}"
-    vm_type: "{{ _group }}"
+- name: Build group list for host
+  vars:
+    _has_parent: "{{ _parent_group | default('') | length > 0 }}"
+    _groups_list: >-
+      {{
+        [_group ~ 's'] +
+        (_has_parent | ternary([_parent_group], []))
+      }}
+  block:
+    - name: Add host to runtime inventory
+      ansible.builtin.add_host:
+        name: "{{ _full_host_name }}"
+        groups: "{{ _groups_list }}"
+        ansible_ssh_user: "{{ _ssh_user }}"
+        ansible_host: "{{ _add_ansible_host | ternary(_ansible_host, omit) }}"
+        vm_type: "{{ _group }}"
 
-- name: Ensure group section exists
-  ansible.builtin.lineinfile:
-    path: "{{ cifmw_libvirt_manager_tmp_inv_file }}"
-    create: true
-    line: "[{{ _group }}s]"
-    regexp: "^\\[{{ _group }}s\\]$"
-    state: present
-    mode: "0644"
+    - name: Ensure group section exists in INI inventory
+      ansible.builtin.lineinfile:
+        path: "{{ cifmw_libvirt_manager_tmp_inv_file }}"
+        create: true
+        line: "[{{ _group }}s]"
+        regexp: "^\\[{{ _group }}s\\]$"
+        state: present
+        mode: "0644"
 
-- name: Append host under proper group
-  ansible.builtin.lineinfile:
-    path: "{{ cifmw_libvirt_manager_tmp_inv_file }}"
-    insertafter: "^\\[{{ _group }}s\\]$"
-    line: "{{ _ini_line }}"
-    regexp: "^{{ _full_host_name | regex_escape() }} "
+    - name: Append host under its group in INI inventory
+      ansible.builtin.lineinfile:
+        path: "{{ cifmw_libvirt_manager_tmp_inv_file }}"
+        insertafter: "^\\[{{ _group }}s\\]$"
+        line: "{{ _ini_line }}"
+        regexp: "^{{ _full_host_name | regex_escape() }} "
+
+    - name: Ensure parent group children section exists in INI inventory
+      when: _has_parent
+      ansible.builtin.lineinfile:
+        path: "{{ cifmw_libvirt_manager_tmp_inv_file }}"
+        create: true
+        line: "[{{ _parent_group }}:children]"
+        regexp: "^\\[{{ _parent_group }}:children\\]$"
+        state: present
+        mode: "0644"
+
+    - name: Add child group to parent in INI inventory
+      when: _has_parent
+      ansible.builtin.lineinfile:
+        path: "{{ cifmw_libvirt_manager_tmp_inv_file }}"
+        insertafter: "^\\[{{ _parent_group }}:children\\]$"
+        line: "{{ _group }}s"
+        regexp: "^{{ _group }}s$"

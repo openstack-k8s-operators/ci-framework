@@ -100,6 +100,7 @@ cifmw_libvirt_manager_configuration:
       networkconfig: (dict or list[dict], [network-config](https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html#network-config-v2) v2 config, needed if a static ip address should be defined at boot time in absence of a dhcp server in special scenarios. Optional)
       devices: (dict, optional, defaults to {}. The keys are the VMs of that type that needs devices to be attached, and the values are lists of strings, where each string must contain a valid <hostdev/> libvirt XML element that will be passed to virsh attach-device)
       dhcp_options: (list, optional, defaults to []. List of DHCP options to apply to all VMs of this type. Format: ["option_number,value", ...])
+      parent_ansible_group: (string, optional. The full Ansible inventory group name to use as a parent for this VM type's group. Multiple VM types sharing the same parent_ansible_group are addressable both individually and via the parent group. The value must be the complete group name including any suffix (e.g. "computes", not "compute"). Example: two types "compute1" and "compute2" with parent_ansible_group "computes" creates groups "compute1s", "compute2s", and "computes" containing both. The parent group should be considered abstract and must not match any VM type's own group name. The role will fail if a collision is detected.)
   networks:
     net_name: <XML definition of the network to create>
 ```
