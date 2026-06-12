@@ -1,0 +1,209 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# Execute a group of Tempest stages in parallel.
+#
+# Applies multiple independent Tempest CRs simultaneously, leveraging
+# the test-operator's inter-CR parallelism (spec.parallel: true).
+# The first CR creates shared resources (images, flavors) while the
+# remaining CRs wait before starting, avoiding race conditions.
+#
+# Expected input:
+#   _parallel_stages: list of stage dicts sharing the same parallel_group.
+#                     Each must have .name and .type == 'tempest'.
+#
+# The task:
+#   1. Runs pre_test_stage_hooks for the first stage (if defined)
+#   2. Builds a Tempest CR for each stage (reusing tempest-tests.yml)
+#   3. Applies the first CR, pauses, then applies the rest
+#   4. Waits for all pods to reach Succeeded or Failed
+#   5. Collects logs from all pods
+#   6. Records per-stage pass/fail results
+#   7. Runs post_test_stage_hooks for the last stage (if defined)
+
+- name: "Run parallel group: {{ _parallel_stages | map(attribute='name') | join(', ') }}"
+  ansible.builtin.debug:
+    msg: >-
+      Running {{ _parallel_stages | length }} stages in parallel:
+      {{ _parallel_stages | map(attribute='name') | list | join(', ') }}
+
+- name: "Call pre stage hooks for parallel group"
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _parallel_stages[0].pre_test_stage_hooks is defined
+  vars:
+    step: pre_test_hooks
+    hooks: "{{ _parallel_stages[0].pre_test_stage_hooks }}"
+  ansible.builtin.import_role:
+    name: run_hook
+
+- name: Initialize parallel CR list
+  ansible.builtin.set_fact:
+    _parallel_cr_list: []
+
+- name: Build Tempest CRs for parallel group
+  ansible.builtin.include_tasks: build-parallel-cr.yml
+  loop: "{{ _parallel_stages }}"
+  loop_control:
+    loop_var: _pstage
+    extended: true
+
+- name: Log parallel CR names
+  ansible.builtin.debug:
+    msg: >-
+      Built {{ _parallel_cr_list | length }} CRs:
+      {{ _parallel_cr_list | map(attribute='metadata.name') | list | join(', ') }}
+
+- name: Parallel apply and wait block
+  when: not cifmw_test_operator_dry_run | bool
+  block:
+    - name: Make sure test-operator CR directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_test_operator_crs_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Write all parallel CRs to disk
+      ansible.builtin.copy:
+        content: "{{ item | to_nice_yaml }}"
+        dest: "{{ cifmw_test_operator_crs_path }}/{{ item.metadata.name }}.yaml"
+        mode: '0644'
+      loop: "{{ _parallel_cr_list }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: "Apply first Tempest CR (creates shared images/flavors)"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        definition: "{{ _parallel_cr_list[0] }}"
+
+    - name: >-
+        Wait {{ cifmw_test_operator_parallel_resource_wait }}s
+        for first pod to create shared resources
+      ansible.builtin.pause:
+        seconds: "{{ cifmw_test_operator_parallel_resource_wait | int }}"
+
+    - name: Apply remaining Tempest CRs
+      when: _parallel_cr_list | length > 1
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        definition: "{{ item }}"
+      loop: "{{ _parallel_cr_list[1:] }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: "Wait for all {{ _parallel_cr_list | length }} Tempest pods to complete"
+      vars:
+        _parallel_timeout: >-
+          {{ cifmw_test_operator_parallel_timeout | default(cifmw_test_operator_timeout) }}
+        _parallel_prefix: >-
+          {{ _parallel_cr_list[0].metadata.name | regex_replace('-[^-]+$', '') }}
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        namespace: "{{ _parallel_cr_list[0].metadata.namespace }}"
+        kind: Pod
+        label_selectors:
+          - "service=tempest"
+      register: _parallel_pods
+      retries: "{{ ((_parallel_timeout | int) / 30) | int }}"
+      delay: 30
+      until: >-
+        _parallel_pods.resources is defined and
+        (_parallel_pods.resources |
+         selectattr('metadata.labels.instanceName', 'defined') |
+         selectattr('metadata.labels.instanceName', 'in',
+           _parallel_cr_list | map(attribute='metadata.name') | list) |
+         selectattr('status.phase', 'defined') |
+         selectattr('status.phase', 'in', ['Succeeded', 'Failed']) |
+         list | length) >= (_parallel_cr_list | length)
+      ignore_errors: true
+
+    - name: Check whether timed out
+      ansible.builtin.set_fact:
+        _parallel_timed_out: >-
+          {{
+            _parallel_pods.attempts | default(0) >=
+            ((cifmw_test_operator_parallel_timeout |
+              default(cifmw_test_operator_timeout)) | int / 30) | int
+          }}
+
+    - name: Collect logs for each parallel stage
+      when: not _parallel_timed_out
+      ansible.builtin.include_tasks: collect-parallel-logs.yml
+      loop: "{{ _parallel_cr_list }}"
+      loop_control:
+        loop_var: _pcr
+        label: "{{ _pcr.metadata.name }}"
+
+    - name: Get results from all parallel test pods
+      vars:
+        _completed_pods: >-
+          {{ (_parallel_pods.resources | default([])) |
+             selectattr('metadata.labels.instanceName', 'defined') |
+             selectattr('metadata.labels.instanceName', 'in',
+               _parallel_cr_list | map(attribute='metadata.name') | list) |
+             list }}
+        _succeeded_pods: >-
+          {{ _completed_pods |
+             selectattr('status.phase', 'equalto', 'Succeeded') | list }}
+        _failed_pods: >-
+          {{ _completed_pods |
+             selectattr('status.phase', 'equalto', 'Failed') | list }}
+      block:
+        - name: Print parallel results summary
+          ansible.builtin.debug:
+            msg: |
+              === Parallel Tempest Results ===
+              Total pods:   {{ _completed_pods | length }}
+              Succeeded:    {{ _succeeded_pods | length }}
+              Failed:       {{ _failed_pods | length }}
+              Failed names: {{ _failed_pods | map(attribute='metadata.name') | list | join(', ') }}
+
+        - name: Save per-stage results
+          ansible.builtin.set_fact:
+            test_operator_results: >-
+              {{
+                test_operator_results | default({}) |
+                combine({
+                  'tempest-' + item.metadata.labels.instanceName:
+                    (item.status.phase == 'Succeeded')
+                })
+              }}
+          loop: "{{ _completed_pods }}"
+          loop_control:
+            label: "{{ item.metadata.labels.instanceName }}"
+
+    - name: Delete test resources
+      when: cifmw_test_operator_cleanup | bool
+      ansible.builtin.include_tasks: cleanup-parallel.yml
+
+- name: "Call post stage hooks for parallel group"
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _parallel_stages[-1].post_test_stage_hooks is defined
+  vars:
+    step: post_test_hooks
+    hooks: "{{ _parallel_stages[-1].post_test_stage_hooks }}"
+  ansible.builtin.import_role:
+    name: run_hook
