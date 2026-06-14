@@ -1,0 +1,150 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure podman is installed
+  become: true
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Create rally directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ cifmw_rally_artifacts_basedir }}", mode: "0755"}
+    - {path: "{{ cifmw_rally_artifacts_basedir }}/tasks", mode: "0755"}
+    - {path: "{{ cifmw_rally_artifacts_basedir }}/reports", mode: "0777"}
+
+- name: Copy default task file to rally tasks directory
+  ansible.builtin.copy:
+    src: "{{ cifmw_rally_task_file }}"
+    dest: "{{ cifmw_rally_artifacts_basedir }}/tasks/{{ cifmw_rally_task_file }}"
+    mode: "0644"
+
+- name: Create rally deployment configuration
+  ansible.builtin.include_tasks: create-deployment.yml
+  when: not cifmw_rally_dry_run | bool
+
+- name: Copy CA bundle to rally artifacts basedir
+  ansible.builtin.copy:
+    src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    dest: "{{ cifmw_rally_artifacts_basedir }}/tls-ca-bundle.pem"
+    mode: "0644"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    remote_src: true
+    force: true
+  when: not cifmw_rally_dry_run | bool
+
+- name: Create rally run script
+  ansible.builtin.template:
+    src: rally-run.sh.j2
+    dest: "{{ cifmw_rally_artifacts_basedir }}/tasks/rally-run.sh"
+    mode: "0755"
+  when: not cifmw_rally_dry_run | bool
+
+- name: Get OpenStack public CA secret
+  ansible.builtin.command:
+    cmd: >-
+      oc get secret rootca-public
+      -n {{ cifmw_openstack_namespace }}
+      -o json
+  register: _cifmw_rally_rootca_secret
+  failed_when: false
+  when: not cifmw_rally_dry_run | bool
+
+- name: Append OpenStack public CA to tls-ca-bundle
+  when:
+    - not cifmw_rally_dry_run | bool
+    - _cifmw_rally_rootca_secret.rc is defined
+    - _cifmw_rally_rootca_secret.rc == 0
+  vars:
+    _rootca_pem: >-
+      {{ (_cifmw_rally_rootca_secret.stdout | from_json).data['ca.crt'] | b64decode }}
+  ansible.builtin.shell:
+    cmd: >-
+      cat >> {{ cifmw_rally_artifacts_basedir }}/tls-ca-bundle.pem
+    stdin: "{{ _rootca_pem }}"
+
+- name: Ensure we have rally container image
+  register: _cifmw_rally_fetch_img
+  containers.podman.podman_image:
+    name: "{{ cifmw_rally_image }}:{{ cifmw_rally_image_tag }}"
+  retries: 5
+  delay: 5
+  until: _cifmw_rally_fetch_img is success
+
+- name: Run rally
+  ignore_errors: true
+  containers.podman.podman_container:
+    name: rally
+    image: "{{ cifmw_rally_image }}:{{ cifmw_rally_image_tag }}"
+    state: started
+    auto_remove: "{{ cifmw_rally_remove_container }}"
+    network: host
+    dns: "{{ cifmw_rally_dns_servers }}"
+    volume:
+      - "{{ cifmw_rally_artifacts_basedir }}/tasks:{{ _cifmw_rally_container_tasks_dir }}:Z"
+      - "{{ cifmw_rally_artifacts_basedir }}/reports:{{ _cifmw_rally_container_reports_dir }}:Z"
+      - "{{ cifmw_rally_artifacts_basedir }}/tls-ca-bundle.pem:\
+         /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
+    detach: false
+    entrypoint: "/bin/bash"
+    command: "{{ _cifmw_rally_container_tasks_dir }}/rally-run.sh"
+    env:
+      OS_AUTH_URL: "{{ cifmw_rally_os_auth_url | default('') }}"
+      OS_USERNAME: "{{ cifmw_rally_os_username | default('admin') }}"
+      OS_PASSWORD: "{{ cifmw_rally_os_password | default('') }}"
+      OS_PROJECT_NAME: "{{ cifmw_rally_os_project_name | default('admin') }}"
+      OS_USER_DOMAIN_NAME: "{{ cifmw_rally_os_user_domain_name | default('Default') }}"
+      OS_PROJECT_DOMAIN_NAME: "{{ cifmw_rally_os_project_domain_name | default('Default') }}"
+      OS_REGION_NAME: "{{ cifmw_rally_os_region_name | default('regionOne') }}"
+      OS_IDENTITY_API_VERSION: "3"
+      OS_CACERT: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+  when: not cifmw_rally_dry_run | bool
+  register: _cifmw_rally_run_output
+
+- name: Change rally directory permission back to original
+  become: true
+  ansible.builtin.file:
+    path: "{{ cifmw_rally_artifacts_basedir }}"
+    state: directory
+    recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+  when: not cifmw_rally_dry_run | bool
+
+- name: Save logs from podman
+  when: not cifmw_rally_dry_run | bool
+  ansible.builtin.copy:
+    mode: "0644"
+    dest: "{{ cifmw_rally_artifacts_basedir }}/podman_rally.log"
+    content: |
+      "{{ _cifmw_rally_run_output.stdout }}"
+
+- name: Fail if podman container did not succeed
+  when:
+    - not cifmw_rally_dry_run | bool
+    - cifmw_rally_fail_on_task_failure | bool
+  ansible.builtin.assert:
+    that:
+      - "_cifmw_rally_run_output.failed == false"
+    fail_msg: >-
+      Rally task execution failed.
+      Check logs at {{ cifmw_rally_artifacts_basedir }}/podman_rally.log
+      and reports at {{ cifmw_rally_artifacts_basedir }}/reports/
