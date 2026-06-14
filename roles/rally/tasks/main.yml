@@ -1,0 +1,64 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure podman is installed
+  become: true
+  ansible.builtin.package:
+    name: podman
+    state: present
+
+- name: Create rally base artifacts directory
+  ansible.builtin.file:
+    path: "{{ cifmw_rally_artifacts_basedir }}"
+    state: directory
+    mode: "0755"
+
+- name: Prepare Rally OpenStack credentials
+  ansible.builtin.include_tasks: prepare-rally-credentials.yaml
+  when: not cifmw_rally_dry_run | bool
+
+- name: Get OpenStack public CA secret
+  kubernetes.core.k8s_info:
+    kind: Secret
+    name: rootca-public
+    namespace: "{{ cifmw_openstack_namespace }}"
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+  register: _cifmw_rally_rootca_secret
+  failed_when: false
+  when: not cifmw_rally_dry_run | bool
+
+- name: Ensure we have rally container image
+  register: _cifmw_rally_fetch_img
+  containers.podman.podman_image:
+    name: "{{ cifmw_rally_image }}:{{ cifmw_rally_image_tag }}"
+  retries: 5
+  delay: 5
+  until: _cifmw_rally_fetch_img is success
+
+- name: Run rally (single run)
+  when: cifmw_rally_runs | length == 0
+  ansible.builtin.include_tasks: run_once.yml
+  vars:
+    _cifmw_rally_run_name: ""
+    _cifmw_rally_run_vars: {}
+
+- name: Run rally (multiple runs)
+  when: cifmw_rally_runs | length > 0
+  ansible.builtin.include_tasks: run_once.yml
+  vars:
+    _cifmw_rally_run_name: "{{ item.name }}"
+    _cifmw_rally_run_vars: "{{ item }}"
+  loop: "{{ cifmw_rally_runs }}"
