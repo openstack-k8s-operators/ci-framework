@@ -71,3 +71,71 @@
         name: registry-tag-mirrors
       spec:
         imageTagMirrors: "{{ cifmw_openshift_setup_tag_mirrors }}"
+
+- name: Pre-pull RBAC proxy images on all master nodes
+  when:
+    - cifmw_openshift_setup_digest_mirrors is defined
+    - cifmw_openshift_setup_digest_mirrors | length > 0
+    - cifmw_openshift_setup_prepull_rbac_images | default(true) | bool
+  block:
+    - name: Extract RBAC proxy images from digest mirrors
+      ansible.builtin.set_fact:
+        _rbac_proxy_images: >-
+          {{
+            cifmw_openshift_setup_digest_mirrors
+            | map(attribute='mirrors')
+            | flatten
+            | select('match', '^image-rbac.*\\.com/.*')
+            | list
+          }}
+
+    - name: Extract RBAC proxy images from digest mirrors
+      ansible.builtin.set_fact:
+        _rbac_proxy_images: >-
+          {{
+            cifmw_openshift_setup_digest_mirrors
+            | map(attribute='mirrors')
+            | flatten
+            | select('match', '^image-rbac.*\\.com/.*')
+            | list
+          }}
+
+    - name: Debug all flattened mirrors and matched result
+      ansible.builtin.debug:
+        msg:
+          - "All mirrors: {{ cifmw_openshift_setup_digest_mirrors | map(attribute='mirrors') | flatten | list }}"
+          - "Matched RBAC: {{ _rbac_proxy_images }}"
+
+    - name: Get list of master nodes
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        kind: Node
+        label_selectors:
+          - node-role.kubernetes.io/master
+      register: _master_nodes_info
+
+    - name: Set master node names list
+      ansible.builtin.set_fact:
+        _master_node_names: "{{ _master_nodes_info.resources | map(attribute='metadata.name') | list }}"
+
+    - name: Pre-pull RBAC proxy images on each master node
+      ansible.builtin.shell: |
+        oc debug node/{{ item.0 }} -- \
+          chroot /host podman pull --authfile /var/lib/kubelet/config.json {{ item.1 }}
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      loop: "{{ _master_node_names | product(_rbac_proxy_images) | list }}"
+      loop_control:
+        label: "{{ item.0 }}: {{ item.1 | basename }}"
+      failed_when: false
+      changed_when: true
+      register: _prepull_results
+
+    - name: Display pre-pull summary
+      ansible.builtin.debug:
+        msg: >-
+          Pre-pulled {{ _prepull_results.results | selectattr('rc', 'equalto', 0) | list | length }}
+          / {{ _prepull_results.results | length }} RBAC proxy images
+          ({{ _master_node_names | length }} masters × {{ _rbac_proxy_images | length }} images)
