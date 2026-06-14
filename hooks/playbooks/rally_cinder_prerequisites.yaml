@@ -1,0 +1,83 @@
+---
+- name: Ensure Cinder Rally prerequisites exist
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    _openstackclient_pod: openstackclient
+  tasks:
+    - name: Check m1.tiny flavor
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack flavor show m1.tiny
+      register: _flavor_show
+      failed_when: false
+      changed_when: false
+
+    - name: Create m1.tiny flavor if missing
+      when: _flavor_show.rc != 0
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: >-
+          openstack flavor create m1.tiny
+          --ram 512 --disk 1 --vcpus 1 --public
+
+    - name: Check lvmdriver-1 volume type
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack volume type show lvmdriver-1
+      register: _volume_type_show
+      failed_when: false
+      changed_when: false
+
+    - name: Create lvmdriver-1 volume type if missing
+      when: _volume_type_show.rc != 0
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack volume type create lvmdriver-1 --public
+
+    - name: Check if cirros image already exists
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack image show cirros-0.6.2-x86_64-disk
+      register: _cirros_image_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Download cirros image to hypervisor
+      when: _cirros_image_exists.rc != 0
+      ansible.builtin.get_url:
+        url: "https://github.com/cirros-dev/cirros/releases/download/0.6.2/cirros-0.6.2-x86_64-disk.img"
+        dest: "/tmp/cirros-0.6.2-x86_64-disk.img"
+        mode: "0644"
+
+    - name: Copy cirros image to openstackclient pod
+      when: _cirros_image_exists.rc != 0
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: >-
+        oc cp /tmp/cirros-0.6.2-x86_64-disk.img
+        {{ namespace }}/openstackclient:/home/cloud-admin/cirros-0.6.2-x86_64-disk.img
+
+    - name: Upload cirros image for Rally if missing
+      when: _cirros_image_exists.rc != 0
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: >-
+          openstack image create cirros-0.6.2-x86_64-disk
+          --disk-format qcow2
+          --container-format bare
+          --file /home/cloud-admin/cirros-0.6.2-x86_64-disk.img
+          --public
