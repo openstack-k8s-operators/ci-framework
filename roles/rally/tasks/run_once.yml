@@ -1,0 +1,171 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set effective variables for this run
+  ansible.builtin.set_fact:
+    _cifmw_rally_effective_basedir: >-
+      {{ (cifmw_rally_artifacts_basedir ~ '/' ~ _cifmw_rally_run_name)
+         if _cifmw_rally_run_name | length > 0
+         else cifmw_rally_artifacts_basedir }}
+    _cifmw_rally_effective_openstack_tests: >-
+      {{ _cifmw_rally_run_vars.cifmw_rally_openstack_tests
+         | default(cifmw_rally_openstack_tests) }}
+    _cifmw_rally_effective_task_file: >-
+      {{ _cifmw_rally_run_vars.cifmw_rally_task_file
+         | default(cifmw_rally_task_file) }}
+    _cifmw_rally_effective_concurrency: >-
+      {{ _cifmw_rally_run_vars.cifmw_rally_concurrency
+         | default(cifmw_rally_concurrency) }}
+    _cifmw_rally_effective_fail_on_task_failure: >-
+      {{ _cifmw_rally_run_vars.cifmw_rally_fail_on_task_failure
+         | default(cifmw_rally_fail_on_task_failure) }}
+    _cifmw_rally_effective_task_extra_args: >-
+      {{ _cifmw_rally_run_vars.cifmw_rally_task_extra_args
+         | default(cifmw_rally_task_extra_args) }}
+    _cifmw_rally_effective_container_name: >-
+      {{ 'rally-' ~ _cifmw_rally_run_name
+         if _cifmw_rally_run_name | length > 0
+         else 'rally' }}
+
+- name: Assert that a workload source is specified for this run
+  ansible.builtin.assert:
+    that:
+      - >-
+        _cifmw_rally_effective_task_file | length > 0 or
+        _cifmw_rally_effective_openstack_tests | length > 0
+    fail_msg: >-
+      Either cifmw_rally_task_file (absolute path to a custom YAML on the host)
+      or cifmw_rally_openstack_tests (name of a bundled workload, e.g. 'cinder',
+      'nova') must be set for run
+      '{{ _cifmw_rally_run_name | default("default") }}'.
+
+- name: Create per-run directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ _cifmw_rally_effective_basedir }}", mode: "0755"}
+    - {path: "{{ _cifmw_rally_effective_basedir }}/tasks", mode: "0755"}
+    - {path: "{{ _cifmw_rally_effective_basedir }}/reports", mode: "0777"}
+
+- name: Copy custom task file to run tasks directory
+  when: _cifmw_rally_effective_task_file | length > 0
+  ansible.builtin.copy:
+    src: "{{ _cifmw_rally_effective_task_file }}"
+    dest: >-
+      {{ _cifmw_rally_effective_basedir }}/tasks/{{
+         _cifmw_rally_effective_task_file | basename }}
+    mode: "0644"
+    remote_src: true
+
+- name: Copy CA bundle to run artifacts directory
+  ansible.builtin.copy:
+    src: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    dest: "{{ _cifmw_rally_effective_basedir }}/tls-ca-bundle.pem"
+    mode: "0644"
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    remote_src: true
+    force: true
+  when: not cifmw_rally_dry_run | bool
+
+- name: Append OpenStack public CA to tls-ca-bundle
+  when:
+    - not cifmw_rally_dry_run | bool
+    - _cifmw_rally_rootca_secret.rc is defined
+    - _cifmw_rally_rootca_secret.rc == 0
+  vars:
+    _rootca_pem: >-
+      {{ (_cifmw_rally_rootca_secret.stdout | from_json).data['ca.crt'] | b64decode }}
+  ansible.builtin.shell:
+    cmd: >-
+      cat >> {{ _cifmw_rally_effective_basedir }}/tls-ca-bundle.pem
+    stdin: "{{ _rootca_pem }}"
+
+- name: Create rally run script
+  ansible.builtin.template:
+    src: rally-run.sh.j2
+    dest: "{{ _cifmw_rally_effective_basedir }}/tasks/rally-run.sh"
+    mode: "0755"
+  vars:
+    cifmw_rally_task_file: "{{ _cifmw_rally_effective_task_file }}"
+    cifmw_rally_openstack_tests: "{{ _cifmw_rally_effective_openstack_tests }}"
+    cifmw_rally_concurrency: "{{ _cifmw_rally_effective_concurrency }}"
+    cifmw_rally_task_extra_args: "{{ _cifmw_rally_effective_task_extra_args }}"
+  when: not cifmw_rally_dry_run | bool
+
+- name: Run rally
+  ignore_errors: true
+  containers.podman.podman_container:
+    name: "{{ _cifmw_rally_effective_container_name }}"
+    image: "{{ cifmw_rally_image }}:{{ cifmw_rally_image_tag }}"
+    state: started
+    auto_remove: "{{ cifmw_rally_remove_container }}"
+    network: host
+    dns: "{{ cifmw_rally_dns_servers }}"
+    volume:
+      - "{{ _cifmw_rally_effective_basedir }}/tasks:{{ _cifmw_rally_container_tasks_dir }}:Z"
+      - "{{ _cifmw_rally_effective_basedir }}/reports:{{ _cifmw_rally_container_reports_dir }}:Z"
+      - "{{ _cifmw_rally_effective_basedir }}/tls-ca-bundle.pem:\
+         /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem:Z"
+    detach: false
+    entrypoint: "/bin/bash"
+    command: "{{ _cifmw_rally_container_tasks_dir }}/rally-run.sh"
+    env:
+      OS_AUTH_URL: "{{ cifmw_rally_os_auth_url | default('') }}"
+      OS_USERNAME: "{{ cifmw_rally_os_username | default('admin') }}"
+      OS_PASSWORD: "{{ cifmw_rally_os_password | default('') }}"
+      OS_PROJECT_NAME: "{{ cifmw_rally_os_project_name | default('admin') }}"
+      OS_USER_DOMAIN_NAME: "{{ cifmw_rally_os_user_domain_name | default('Default') }}"
+      OS_PROJECT_DOMAIN_NAME: "{{ cifmw_rally_os_project_domain_name | default('Default') }}"
+      OS_REGION_NAME: "{{ cifmw_rally_os_region_name | default('regionOne') }}"
+      OS_IDENTITY_API_VERSION: "3"
+      OS_CACERT: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+      REQUESTS_CA_BUNDLE: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+  when: not cifmw_rally_dry_run | bool
+  register: _cifmw_rally_run_output
+
+- name: Restore ownership of run artifacts directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ _cifmw_rally_effective_basedir }}"
+    state: directory
+    recurse: true
+    owner: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+    group: "{{ ansible_user | default(lookup('env', 'USER')) }}"
+  when: not cifmw_rally_dry_run | bool
+
+- name: Save logs from podman
+  when: not cifmw_rally_dry_run | bool
+  ansible.builtin.copy:
+    mode: "0644"
+    dest: "{{ _cifmw_rally_effective_basedir }}/podman_rally.log"
+    content: |
+      "{{ _cifmw_rally_run_output.stdout }}"
+
+- name: Fail if podman container did not succeed
+  when:
+    - not cifmw_rally_dry_run | bool
+    - _cifmw_rally_effective_fail_on_task_failure | bool
+  ansible.builtin.assert:
+    that:
+      - "_cifmw_rally_run_output.failed == false"
+    fail_msg: >-
+      Rally task execution failed for run
+      '{{ _cifmw_rally_run_name | default("default") }}'.
+      Check logs at {{ _cifmw_rally_effective_basedir }}/podman_rally.log
+      and reports at {{ _cifmw_rally_effective_basedir }}/reports/
