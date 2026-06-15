@@ -1,0 +1,112 @@
+---
+# Discover the correct VirtualMedia member URI for CD/DVD on this iDRAC.
+# The member name varies across firmware versions (CD, RemovableDisk, 1, 2, …).
+# On iDRAC 10+ the Managers VirtualMedia path requires NumericDynamicSegmentsEnable;
+# the Systems path works without it and is tried as a fallback.
+# You can manually set it with racadm set Redfish.1.NumericDynamicSegmentsEnable Enabled.
+# Sets _vmedia_member_uri, _vmedia_insert_action, _vmedia_eject_action.
+# Requires: _bmc_host, _bmc_creds, _redfish_headers
+
+- name: Fetch VirtualMedia collection (Managers path)
+  no_log: false
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+    status_code: [200, 404]
+  register: _vmedia_collection_mgr
+
+- name: Fetch VirtualMedia collection (Systems path fallback)
+  when: _vmedia_collection_mgr.status == 404
+  no_log: false
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/VirtualMedia"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+    status_code: [200]
+  register: _vmedia_collection_sys
+
+- name: Set active VirtualMedia collection result
+  ansible.builtin.set_fact:
+    _vmedia_collection: >-
+      {{ _vmedia_collection_sys
+         if (_vmedia_collection_mgr.status == 404)
+         else _vmedia_collection_mgr }}
+
+- name: Show VirtualMedia collection source
+  ansible.builtin.debug:
+    msg: >-
+      VirtualMedia collection from
+      {{ '/redfish/v1/Systems/System.Embedded.1/VirtualMedia'
+         if (_vmedia_collection_mgr.status == 404)
+         else '/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia' }}
+      ({{ _vmedia_collection.json.Members | length }} members)
+
+- name: Fetch each VirtualMedia member detail
+  no_log: false
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}{{ item['@odata.id'] }}"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+    status_code: [200]
+  register: _vmedia_members
+  loop: "{{ _vmedia_collection.json.Members }}"
+  loop_control:
+    label: "{{ item['@odata.id'] | basename }}"
+
+- name: Pick the first member that supports CD or DVD media types
+  ansible.builtin.set_fact:
+    _vmedia_member_uri: "{{ item.json['@odata.id'] }}"
+    _vmedia_insert_action: >-
+      {{ item.json.Actions['#VirtualMedia.InsertMedia'].target }}
+    _vmedia_eject_action: >-
+      {{ item.json.Actions['#VirtualMedia.EjectMedia'].target }}
+  when:
+    - _vmedia_member_uri is not defined
+    - item.json.MediaTypes is defined
+    - item.json.MediaTypes | intersect(['CD', 'DVD']) | length > 0
+  loop: "{{ _vmedia_members.results }}"
+  loop_control:
+    label: "{{ item.json['@odata.id'] | basename }}"
+
+- name: Fall back to first member with an InsertMedia action
+  ansible.builtin.set_fact:
+    _vmedia_member_uri: "{{ item.json['@odata.id'] }}"
+    _vmedia_insert_action: >-
+      {{ item.json.Actions['#VirtualMedia.InsertMedia'].target }}
+    _vmedia_eject_action: >-
+      {{ item.json.Actions['#VirtualMedia.EjectMedia'].target }}
+  when:
+    - _vmedia_member_uri is not defined
+    - item.json.Actions is defined
+    - "'#VirtualMedia.InsertMedia' in item.json.Actions"
+  loop: "{{ _vmedia_members.results }}"
+  loop_control:
+    label: "{{ item.json['@odata.id'] | basename }}"
+
+- name: Fail if no usable VirtualMedia member found
+  when: _vmedia_member_uri is not defined
+  ansible.builtin.fail:
+    msg: >-
+      No VirtualMedia member with InsertMedia support found.
+      Members: {{ _vmedia_members.results |
+        map(attribute='json') | map(attribute='@odata.id') | list | join(', ') }}
+
+- name: Show discovered VirtualMedia member
+  ansible.builtin.debug:
+    msg: "VirtualMedia member: {{ _vmedia_member_uri }} — insert: {{ _vmedia_insert_action }}"

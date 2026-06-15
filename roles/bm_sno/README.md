@@ -63,6 +63,7 @@ provision IP via `/etc/hosts` entries managed by the role.
 | `cifmw_bm_agent_live_debug` | bool | `false` | Patch the agent ISO with password, autologin, and systemd debug shell on `tty6` for discovery-phase console access (requires `cifmw_bm_agent_core_password`) |
 | `cifmw_bm_agent_disabled_ifaces` | list | `[]` | Extra NIC names to disable IPv4/IPv6 on during agent-based install. Prevents overlapping-subnet validation failures when multiple NICs share a native VLAN (e.g. `[eno2]`). The interfaces stay link-up but get no IP address; post-install NNCP configures them. |
 | `cifmw_bm_agent_lvms_partition` | dict | `{}` | When set, creates an Ignition partition at install time to cap CoreOS rootfs growth and leave unallocated space for the LVMS StorageClass. Keys: `device` (required, e.g. `/dev/nvme0n1`), `rootfs_mib` (default `150000`), `size_mib` (default `0` = rest of disk), `label` (default `lvmstorage`). See [LVMS partition](#lvms-partition). |
+| `cifmw_bm_agent_iso_server_ip` | str | `""` | IP address the iDRAC uses to fetch the agent ISO. When empty, the role auto-detects the controller's IP from nodepool metadata or `ansible_default_ipv4.address`. Set this when the auto-detected IP is not reachable by the iDRAC — for example, when running over VPN where the VPN interface IP must be used instead of the default-route IP. |
 
 ## Secrets management
 

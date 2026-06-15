@@ -265,9 +265,11 @@
 - name: Set controller IP fact
   ansible.builtin.set_fact:
     _controller_ip: >-
-      {{ hostvars[inventory_hostname]['nodepool']['interface_ip'] |
-        default(ansible_default_ipv4.address |
-        default(ansible_host)) }}
+      {{ cifmw_bm_agent_iso_server_ip
+         if cifmw_bm_agent_iso_server_ip | length > 0
+         else (hostvars[inventory_hostname]['nodepool']['interface_ip'] |
+           default(ansible_default_ipv4.address |
+           default(ansible_host))) }}
 
 - name: Show ISO URL that iDRAC will fetch
   ansible.builtin.debug:
@@ -310,13 +312,16 @@
   delay: 3
   until: _http_check.status == 200
 
+- name: Discover VirtualMedia member URI
+  ansible.builtin.include_tasks: bm_discover_vmedia_member.yml
+
 - name: Eject any existing VirtualMedia before insert
   ansible.builtin.include_tasks: bm_eject_vmedia.yml
 
 - name: Insert agent ISO via VirtualMedia
   no_log: true
   ansible.builtin.uri:
-    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
+    url: "https://{{ _bmc_host }}{{ _vmedia_insert_action }}"
     method: POST
     headers: "{{ _redfish_headers }}"
     body_format: json
