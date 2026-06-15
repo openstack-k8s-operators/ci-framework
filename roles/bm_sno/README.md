@@ -63,6 +63,7 @@ provision IP via `/etc/hosts` entries managed by the role.
 | `cifmw_bm_agent_live_debug` | bool | `false` | Patch the agent ISO with password, autologin, and systemd debug shell on `tty6` for discovery-phase console access (requires `cifmw_bm_agent_core_password`) |
 | `cifmw_bm_agent_disabled_ifaces` | list | `[]` | Extra NIC names to disable IPv4/IPv6 on during agent-based install. Prevents overlapping-subnet validation failures when multiple NICs share a native VLAN (e.g. `[eno2]`). The interfaces stay link-up but get no IP address; post-install NNCP configures them. |
 | `cifmw_bm_agent_lvms_partition` | dict | `{}` | When set, creates an Ignition partition at install time to cap CoreOS rootfs growth and leave unallocated space for the LVMS StorageClass. Keys: `device` (required, e.g. `/dev/nvme0n1`), `rootfs_mib` (default `150000`), `size_mib` (default `0` = rest of disk), `label` (default `lvmstorage`). See [LVMS partition](#lvms-partition). |
+| `cifmw_bm_agent_reuse_vmedia` | bool | `false` | Skip ISO generation, HTTP server start/stop, and VirtualMedia eject/insert when the agent ISO is already mounted in the iDRAC (e.g. via the iDRAC web UI using a local file). When `true` the role goes straight to setting the one-time boot override and waiting for install. The `openshift-install` binary and working directory from the previous run must still be present on disk. |
 | `cifmw_bm_agent_iso_server_ip` | str | `""` | IP address the iDRAC uses to fetch the agent ISO. When empty, the role auto-detects the controller's IP from nodepool metadata or `ansible_default_ipv4.address`. Set this when the auto-detected IP is not reachable by the iDRAC — for example, when running over VPN where the VPN interface IP must be used instead of the default-route IP. |
 
 ## Secrets management
@@ -100,6 +101,81 @@ The agent-based deployment is composed of reusable task files under
 | `bm_discover_vmedia_target.yml` | Discovers or validates the UEFI device path for VirtualMedia, clears pending iDRAC config jobs, and sets a one-time boot override |
 | `bm_patch_agent_iso.yml` | Patches the agent ISO ignition with core password, autologin, and debug shell on tty6 (used when `cifmw_bm_agent_live_debug` is true) |
 | `bm_core_password_machineconfig.yml` | Generates a MachineConfig manifest to set the core user password hash post-install |
+
+## Pre-mounted ISO (reuse VirtualMedia mode)
+
+Use this when the agent ISO cannot be served over HTTP from the Ansible
+controller to the iDRAC (for example: the iDRAC is on a network segment
+unreachable from the controller, or VirtualMedia HTTP insertion fails
+persistently). In this case mount the ISO manually in the iDRAC web UI via
+*Virtual Media → Connect Virtual Media → Local File*, then set
+`cifmw_bm_agent_reuse_vmedia: true` in your `vars.yaml` (or pass it as an
+extra-var) and re-run the playbook.
+
+### Two-playbook workflow
+
+**Run 1 — generate the agent ISO** (`cifmw_bm_agent_reuse_vmedia: false`,
+the default). Let the playbook run until the ISO is written to disk — you
+do not need the VirtualMedia insert to succeed. Abort after the ISO
+generation step if needed:
+
+```yaml
+# vars.yaml
+cifmw_bm_agent_reuse_vmedia: false   # default — explicit for clarity
+```
+
+After Run 1, the following artifacts exist in
+`<cifmw_reproducer_basedir>/artifacts/agent-install/`:
+
+- `openshift-install` — binary used for `wait-for` in Run 2
+- `agent.x86_64.iso` — copy this to your local machine and upload via
+  the iDRAC web UI (`Virtual Media → Connect Virtual Media → Local File`)
+- `agent_ssh_key` — cluster SSH key used by the installer
+
+Confirm the iDRAC shows the drive as *Connected* before proceeding.
+
+**Run 2 — boot from the pre-mounted ISO**:
+
+```yaml
+# vars.yaml (or -e on the ansible-playbook command line)
+cifmw_bm_agent_reuse_vmedia: true
+```
+
+```bash
+ansible-playbook -i inventory.yaml playbook.yaml \
+  -e cifmw_bm_agent_reuse_vmedia=true
+```
+
+This run skips ISO generation, the podman HTTP server, and all VirtualMedia
+eject/insert steps. It powers the host off, sets the UEFI one-time boot
+override to the Virtual Optical Drive, powers the host back on, and waits
+for `openshift-install agent wait-for install-complete`.
+
+### What is skipped with `cifmw_bm_agent_reuse_vmedia: true`
+
+- Removing stale agent state from the previous run
+- ISO generation (`openshift-install agent create image`)
+- ISO patching for live debug
+- HTTP server start and stop (podman)
+- VirtualMedia eject before insert
+- VirtualMedia ISO insert
+- VirtualMedia eject after install
+
+### What still runs
+
+- USB boot BIOS check / enable
+- Power-off (so the host boots cleanly from the mounted ISO)
+- SSH key generation (idempotent, reuses existing key)
+- `openshift-install` binary acquisition (skipped when binary already present)
+- Config template generation (idempotent)
+- LVMS MachineConfig generation (idempotent)
+- UEFI VirtualMedia target discovery and one-time boot override
+- Power-on and install wait
+- kubeconfig copy
+
+**Prerequisite**: the `openshift-install` binary and the working directory
+(`<cifmw_reproducer_basedir>/artifacts/agent-install/`) from Run 1 must
+still be present on disk.
 
 ## openshift-install acquisition
 
