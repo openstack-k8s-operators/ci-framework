@@ -27,7 +27,13 @@ short_description: Enrich pulled_images_report with CRI-O pull evidence
 
 description:
   - Reads the YAML produced by the env_op_images pulled-images report role task.
-  - "Parses CRI-O journal lines for C(msg=\"Pulled image: ...@sha256:...\")."
+  - "Parses CRI-O journal lines for both C(msg=\"Trying to access\") and
+    C(msg=\"Pulled image: ...@sha256:...\") entries."
+  - "CRI-O always reports the canonical source registry in C(Pulled image)
+    lines even when the image was fetched from a mirror.  The
+    C(Trying to access) lines show which registries CRI-O actually
+    contacted.  This module uses the last C(Trying to access) URI for
+    a given digest as the authoritative pull-source evidence."
   - Adds per-row verification fields using trusted mirror domains from
     C(summary.mirror_rules).
   - When images carry a C(node) field, evidence is matched against the
@@ -105,7 +111,8 @@ cross_node_entries:
   returned: always
 nodes_with_evidence:
   description: >-
-    Node names that had at least one C(Pulled image) log entry.
+    Node names that had at least one C(Trying to access) or
+    C(Pulled image) log entry.
   type: list
   elements: str
   returned: always
@@ -118,8 +125,11 @@ import re
 import yaml
 from ansible.module_utils.basic import AnsibleModule
 
-LOG_PATTERN = re.compile(
-    r'msg="Pulled image: (?P<actual_uri>[^@\s]+)@(?P<id>sha256:[a-f0-9]+)"'
+PULLED_PATTERN = re.compile(
+    r'msg="Pulled image: (?P<pulled_uri>[^@\s]+)@(?P<id>sha256:[a-f0-9]+)"'
+)
+TRYING_PATTERN = re.compile(
+    r'msg="Trying to access \\"(?P<tried_uri>[^@\s]+)@(?P<id>sha256:[a-f0-9]+)\\"'
 )
 SHA256_PATTERN = re.compile(r"sha256:[a-f0-9]+")
 
@@ -138,24 +148,58 @@ def _domain_from_uri(uri):
     return uri.split("/")[0].strip()
 
 
-def _apply_evidence(img, actual_uri, evidence_node, trusted_mirrors):
-    """Set common verification fields on an image row that has log evidence."""
-    actual_domain = _domain_from_uri(actual_uri)
-    img["node_verified_image_origin"] = (
-        "mirror" if actual_domain in trusted_mirrors else "source"
-    )
-    img["log_evidence_uri"] = actual_uri
+def _apply_evidence(img, evidence, evidence_node, trusted_mirrors):
+    """Set verification fields on an image row that has log evidence.
+
+    The *evidence* dict carries ``tried_uri`` (from "Trying to access") and/or
+    ``pulled_uri`` (from "Pulled image").  The tried URI is authoritative for
+    determining origin because CRI-O always reports the canonical source name
+    in "Pulled image" even when it fetched from a mirror.
+
+    When only ``tried_uri`` exists without a ``pulled_uri``, the pull was
+    attempted but never confirmed successful -- origin is ``pull_failed``.
+    """
+    tried_uri = evidence.get("tried_uri")
+    pulled_uri = evidence.get("pulled_uri")
+
+    if tried_uri and not pulled_uri:
+        img["node_verified_image_origin"] = "pull_failed"
+        img["verification_reason"] = "CRI-O tried registries but pull never succeeded"
+        img["image_fetched_from"] = None
+        img["image_canonical_name"] = None
+        img["log_evidence_node"] = evidence_node
+        return None
+
+    authoritative_uri = tried_uri or pulled_uri
+    actual_domain = _domain_from_uri(authoritative_uri)
+    origin = "mirror" if actual_domain in trusted_mirrors else "source"
+    img["node_verified_image_origin"] = origin
+
+    if tried_uri:
+        img["verification_reason"] = "CRI-O contacted {0} and pull succeeded".format(
+            origin
+        )
+    else:
+        img["verification_reason"] = (
+            "Pull confirmed via Pulled image log only"
+            " (no registry contact attempt logged)"
+        )
+
+    img["image_fetched_from"] = tried_uri
+    img["image_canonical_name"] = pulled_uri
     img["log_evidence_node"] = evidence_node
-    return actual_domain
 
 
 def _collect_log_evidence(paths, module):
     """Parse CRI-O logs into per-node and global evidence dicts.
 
+    Each digest maps to ``{"tried_uri": ..., "pulled_uri": ...}``.
+    "Trying to access" is the authoritative source for which registry was
+    contacted; "Pulled image" always carries the canonical name.
+
     Returns:
-        per_node: ``{node_name: {sha256_digest: pull_uri}}``
-        global_evidence: ``{sha256_digest: (pull_uri, node_name)}``
-            (last writer wins across nodes for the global dict)
+        per_node: ``{node_name: {digest: {"tried_uri": str|None, "pulled_uri": str|None}}}``
+        global_evidence: ``{digest: (evidence_dict, node_name)}``
     """
     per_node = {}
     global_evidence = {}
@@ -165,12 +209,33 @@ def _collect_log_evidence(paths, module):
         try:
             with open(path, "r") as f:
                 for line in f:
-                    match = LOG_PATTERN.search(line)
-                    if match:
-                        digest = match.group("id")
-                        uri = match.group("actual_uri")
-                        node_ev[digest] = uri
-                        global_evidence[digest] = (uri, node)
+                    trying = TRYING_PATTERN.search(line)
+                    if trying:
+                        digest = trying.group("id")
+                        node_entry = node_ev.setdefault(
+                            digest, {"tried_uri": None, "pulled_uri": None}
+                        )
+                        node_entry["tried_uri"] = trying.group("tried_uri")
+                        global_entry = global_evidence.setdefault(
+                            digest, [{"tried_uri": None, "pulled_uri": None}, node]
+                        )
+                        global_entry[0]["tried_uri"] = trying.group("tried_uri")
+                        global_entry[1] = node
+                        continue
+
+                    pulled = PULLED_PATTERN.search(line)
+                    if pulled:
+                        digest = pulled.group("id")
+                        node_entry = node_ev.setdefault(
+                            digest, {"tried_uri": None, "pulled_uri": None}
+                        )
+                        node_entry["pulled_uri"] = pulled.group("pulled_uri")
+                        global_entry = global_evidence.setdefault(
+                            digest, [{"tried_uri": None, "pulled_uri": None}, node]
+                        )
+                        global_entry[0]["pulled_uri"] = pulled.group("pulled_uri")
+                        if global_entry[1] is None:
+                            global_entry[1] = node
         except IOError as exc:
             module.fail_json(
                 msg="Cannot read CRI-O log file {0}: {1}".format(path, str(exc))
@@ -251,16 +316,18 @@ def run_module():
         )
 
         if node_local_hit:
-            actual_uri = per_node_evidence[img_node][img_sha]
-            _apply_evidence(img, actual_uri, img_node, trusted_mirrors)
+            evidence = per_node_evidence[img_node][img_sha]
+            _apply_evidence(img, evidence, img_node, trusted_mirrors)
         elif img_sha in global_evidence:
-            actual_uri, evidence_node = global_evidence[img_sha]
-            _apply_evidence(img, actual_uri, evidence_node, trusted_mirrors)
+            evidence, evidence_node = global_evidence[img_sha]
+            _apply_evidence(img, evidence, evidence_node, trusted_mirrors)
             if img_node:
                 cross_node_entries += 1
         else:
             img["node_verified_image_origin"] = "cached/unknown"
-            img["log_evidence_uri"] = None
+            img["verification_reason"] = "No CRI-O log evidence found for this digest"
+            img["image_fetched_from"] = None
+            img["image_canonical_name"] = None
             img["log_evidence_node"] = None
 
     nodes_with_evidence = sorted(n for n, ev in per_node_evidence.items() if ev)
