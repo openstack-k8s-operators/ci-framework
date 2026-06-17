@@ -266,6 +266,28 @@
   loop_control:
     loop_var: _vm
 
+- name: Configure fstrim on VMs where enabled
+  ansible.builtin.include_tasks: configure_fstrim_vm.yml
+  vars:
+    _fstrim_enabled_types: >-
+      {{
+        _cifmw_libvirt_manager_layout.vms | dict2items |
+        selectattr('value.fstrim_enabled', 'defined') |
+        selectattr('value.fstrim_enabled', 'equalto', true) |
+        map(attribute='key') | list
+      }}
+    _fstrim_enabled_vms: >-
+      {{
+        cifmw_libvirt_manager_all_vms | dict2items |
+        selectattr('value', 'in', _fstrim_enabled_types) | list
+      }}
+    _fstrim_target: "{{ (_vm.key | replace('ocp-', '')) }}.{{ inventory_hostname }}"
+    _fstrim_user: "{{ 'core' if _vm.key is match('^(crc|ocp).*') else 'zuul' }}"
+  loop: "{{ _fstrim_enabled_vms }}"
+  loop_control:
+    loop_var: _vm
+    label: "{{ _vm.key }}"
+
 - name: Create VBMC entity
   when:
     - _vbmc_available is defined
