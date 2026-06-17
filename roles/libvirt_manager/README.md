@@ -91,6 +91,7 @@ cifmw_libvirt_manager_configuration:
       extra_disks_num: (integer, optional. Number of extra disks to be configured.)
       extra_disks_size: (string, optional. Storage capacity to be allocated. Example 1G, 512M)
       extra_disks_bus: (string, optional. Bus type for extra disks. It can be virtio or scsi. Defaults to `virtio`)
+      fstrim_enabled: (boolean, optional. When true, sets discard='unmap' on the primary disk libvirt driver and enables fstrim.timer on a daily schedule in the guest. Defaults to false.)
       user: (string, optional. Username to create on the vm which can becomes root. Defaults to `zuul`)
       password: (string, optional, defaults to fooBar. Root password for console access)
       target: (Hypervisor hostname you want to deploy the family on. Optional)

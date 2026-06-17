@@ -59,6 +59,7 @@
           disksize: 20
           memory: 1
           cpus: 1
+          fstrim_enabled: true
           nets:
             - public
             - osp_trunk
@@ -266,6 +267,31 @@
             that:
               - expected_count == found_count
           loop: "{{ volume_count.results }}"
+
+    - name: Test discard='unmap' on primary disk for fstrim_enabled VMs
+      block:
+        - name: Get compute-0 XML
+          register: _compute_xml
+          community.libvirt.virt:
+            command: get_xml
+            name: cifmw-compute-0
+            uri: qemu:///system
+
+        - name: Assert discard=unmap on primary disk driver
+          community.general.xml:
+            count: true
+            xmlstring: "{{ _compute_xml.get_xml }}"
+            xpath: "/domain/devices/disk/driver[@discard='unmap']"
+          register: _discard_count
+
+        - name: Verify discard attribute present
+          ansible.builtin.assert:
+            that:
+              - _discard_count.count == 1
+            msg: >-
+              Primary disk driver for cifmw-compute-0 does not have
+              discard='unmap' -- fstrim_enabled may not be wired into
+              domain.xml.j2 correctly
 
     # Redeploying the exact same layout will ensure we
     # are able to run the role multiple time over the
