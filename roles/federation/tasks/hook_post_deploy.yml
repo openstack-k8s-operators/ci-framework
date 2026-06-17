@@ -30,6 +30,22 @@
   retries: 30
   delay: 20
 
+- name: Wait for openstackclient pod to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: v1
+    kind: Pod
+    name: openstackclient
+    namespace: "{{ cifmw_federation_run_osp_cmd_namespace }}"
+  register: _openstackclient_pod
+  until: >-
+    _openstackclient_pod.resources | length > 0 and
+    (_openstackclient_pod.resources[0].status.phase | default('') == 'Running') and
+    (_openstackclient_pod.resources[0].status.containerStatuses | default([]) |
+    selectattr('ready', 'equalto', true) | list | length > 0)
+  retries: 30
+  delay: 10
+
 - name: Build realm configurations for single realm OpenStack setup
   ansible.builtin.set_fact:
     _federation_openstack_realms_to_process:
