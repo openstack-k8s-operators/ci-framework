@@ -1,0 +1,88 @@
+---
+# One-time boot via BIOS pending-settings for iDRAC 10+.
+#
+# iDRAC 10 (firmware 1.30.x+) rejects PATCH /Systems/System.Embedded.1 for
+# boot override with "Invalid System id: System.Embedded.1".
+# The working approach patches BIOS pending-settings instead:
+#   OneTimeBootMode:    OneTimeUefiBootSeq  (applied on next reboot)
+#   OneTimeUefiBootSeqDev: <FQDD>          (e.g. GenericUSB.Placeholder.1-1)
+#
+# Idempotency: SYS011 ("Pending configuration values are already committed")
+# is treated as success — values from a prior run are already pending and will
+# apply on the next reboot, which is exactly the desired state.
+#
+# Triggered by: cifmw_bm_agent_bios_onetimeboot_fqdd != ''
+# Requires: _bmc_host, _bmc_creds, _redfish_headers
+- name: Set one-time boot — BIOS pending settings (iDRAC 10+)
+  no_log: true
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/Bios/Settings"
+    method: PATCH
+    headers: "{{ _redfish_headers }}"
+    body_format: json
+    body:
+      Attributes:
+        OneTimeBootMode: OneTimeUefiBootSeq
+        OneTimeUefiBootSeqDev: "{{ cifmw_bm_agent_bios_onetimeboot_fqdd }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 204, 400]
+  register: _bios_settings_patch
+  # SYS011: values already committed from a prior run, pending reboot — idempotent.
+  failed_when:
+    - _bios_settings_patch.status == 400
+    - >-
+      _bios_settings_patch.json.error['@Message.ExtendedInfo']
+      | selectattr('MessageId', 'equalto', 'IDRAC.2.16.SYS011')
+      | list | length == 0
+
+- name: Report BIOS pending settings already committed (idempotent)
+  when:
+    - _bios_settings_patch.status == 400
+    - >-
+      _bios_settings_patch.json.error['@Message.ExtendedInfo']
+      | selectattr('MessageId', 'equalto', 'IDRAC.2.16.SYS011')
+      | list | length > 0
+  ansible.builtin.debug:
+    msg: >-
+      BIOS one-time boot already pending (SYS011 — values committed from a
+      previous run, awaiting reboot).
+      OneTimeUefiBootSeqDev={{ cifmw_bm_agent_bios_onetimeboot_fqdd }}
+
+# When SYS011 was returned the values are already in a committed job — iDRAC
+# removes them from the Bios/Settings pending view, so GET would return an
+# empty Attributes dict.  Trust the prior run; skip verify/assert.
+- name: Verify boot override — BIOS pending settings (iDRAC 10+)
+  when: _bios_settings_patch.status in [200, 204]
+  no_log: true
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1/Bios/Settings"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    return_content: true
+    status_code: [200]
+  register: _boot_verify_idrac10
+
+- name: Assert boot override is set — BIOS pending settings (iDRAC 10+)
+  when: _bios_settings_patch.status in [200, 204]
+  ansible.builtin.assert:
+    that:
+      - _boot_verify_idrac10.json.Attributes.OneTimeBootMode == 'OneTimeUefiBootSeq'
+      - _boot_verify_idrac10.json.Attributes.OneTimeUefiBootSeqDev == cifmw_bm_agent_bios_onetimeboot_fqdd
+    fail_msg: >-
+      BIOS pending boot override not applied.
+      OneTimeBootMode: {{ _boot_verify_idrac10.json.Attributes.OneTimeBootMode | default('empty') }},
+      OneTimeUefiBootSeqDev: {{ _boot_verify_idrac10.json.Attributes.OneTimeUefiBootSeqDev | default('empty') }}
+
+- name: Show resolved boot path — BIOS pending settings (iDRAC 10+)
+  ansible.builtin.debug:
+    msg: >-
+      One-time boot set via BIOS pending settings:
+      OneTimeUefiBootSeqDev={{ cifmw_bm_agent_bios_onetimeboot_fqdd }}
+      (applies on next reboot)
