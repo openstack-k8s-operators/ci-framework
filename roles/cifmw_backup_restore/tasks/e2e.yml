@@ -78,9 +78,34 @@
 # ========================================
 # Step 2.5: Upload Swift test data
 # ========================================
-- name: Upload Swift test data before backup
-  ansible.builtin.include_tasks: swift_data_upload.yml
+- name: Detect Swift and upload test data
   when: cifmw_backup_restore_test_swift_data | bool
+  block:
+    - name: Check if Swift is enabled in the control plane
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} \
+          -o jsonpath='{.items[0].spec.swift.enabled}'
+      register: _swift_enabled_result
+      changed_when: false
+      failed_when: false
+
+    - name: Set Swift availability fact
+      ansible.builtin.set_fact:
+        _cifmw_backup_restore_swift_available: >-
+          {{ (_swift_enabled_result.rc == 0) and
+             (_swift_enabled_result.stdout | default('false') | bool) }}
+
+    - name: Skip Swift tests — Swift is not enabled
+      ansible.builtin.debug:
+        msg: >-
+          Swift is not enabled in the OpenStackControlPlane CR.
+          Skipping Swift data upload/verify steps.
+      when: not (_cifmw_backup_restore_swift_available | bool)
+
+    - name: Upload Swift test data before backup
+      ansible.builtin.include_tasks: swift_data_upload.yml
+      when: _cifmw_backup_restore_swift_available | bool
 
 # ========================================
 # Step 3: Create backup
@@ -275,6 +300,7 @@
   ansible.builtin.include_tasks: swift_data_verify.yml
   when:
     - cifmw_backup_restore_test_swift_data | bool
+    - _cifmw_backup_restore_swift_available | default(false) | bool
     - cifmw_backup_restore_run_restore | bool
 
 # ========================================
