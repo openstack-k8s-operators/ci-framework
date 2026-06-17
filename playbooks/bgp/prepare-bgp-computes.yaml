@@ -59,3 +59,51 @@
           iptables -t filter -I LIBVIRT_FWI -s 100.64.10.0/24 -i ocpbm -j ACCEPT &&
           iptables -t filter -I LIBVIRT_FWI -d 100.64.10.0/24 -o ocpbm -j ACCEPT
       changed_when: false
+
+# Workaround for OSPRH-30900 - should be removed when the bug is fixed
+- name: Restart neutron pods due to OSPRH-30900
+  hosts: controller-0
+  tasks:
+    - name: Get current neutron pod names
+      ansible.builtin.command:
+        cmd: >-
+          oc get pod -n openstack -l service=neutron
+          -o jsonpath='{.items[*].metadata.name}'
+      register: _neutron_pod_names
+      changed_when: false
+
+    - name: Delete all neutron pods
+      ansible.builtin.command:
+        cmd: >-
+          oc delete pod -n openstack -l service=neutron
+      changed_when: true
+
+    - name: Wait for old neutron pods to terminate
+      ansible.builtin.command:
+        cmd: >-
+          oc wait pod -n openstack {{ item }}
+          --for=delete --timeout=120s
+      changed_when: false
+      failed_when: false
+      loop: "{{ _neutron_pod_names.stdout.split() }}"
+
+    - name: Wait for new neutron pods to be ready
+      ansible.builtin.command:
+        cmd: >-
+          oc wait pod -n openstack
+          -l service=neutron
+          --for=condition=Ready
+          --timeout=300s
+      changed_when: false
+      retries: 4
+      delay: 10
+      register: _neutron_pods_ready
+      until: _neutron_pods_ready.rc == 0
+
+    - name: Wait for OpenStackControlPlane to reconcile
+      ansible.builtin.command:
+        cmd: >-
+          oc wait --for=condition=Ready
+          openstackcontrolplane/controlplane
+          -n openstack --timeout=1200s
+      changed_when: false
