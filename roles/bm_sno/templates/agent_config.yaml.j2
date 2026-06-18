@@ -2,6 +2,12 @@ apiVersion: v1alpha1
 metadata:
   name: {{ _cluster_name }}
 rendezvousIP: {{ _node_ip }}
+{% if cifmw_bm_agent_additional_ntp_sources | default([]) | length > 0 %}
+additionalNTPSources:
+{% for src in cifmw_bm_agent_additional_ntp_sources %}
+  - {{ src }}
+{% endfor %}
+{% endif %}
 hosts:
   - hostname: {{ _cluster_name }}-master-0
     role: master
@@ -14,10 +20,23 @@ hosts:
           type: ethernet
           state: up
           ipv4:
+            enabled: {{ 'false' if _node_vlan | int > 0 else 'true' }}
+            dhcp: {{ 'false' if _node_vlan | int > 0 else 'true' }}
+          ipv6:
+            enabled: false
+{% if _node_vlan | int > 0 %}
+        - name: {{ _node_iface }}.{{ _node_vlan }}
+          type: vlan
+          state: up
+          vlan:
+            base-iface: {{ _node_iface }}
+            id: {{ _node_vlan }}
+          ipv4:
             enabled: true
             dhcp: true
           ipv6:
             enabled: false
+{% endif %}
 {% for iface in cifmw_bm_agent_disabled_ifaces | default([]) %}
         - name: {{ iface }}
           type: ethernet

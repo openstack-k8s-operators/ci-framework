@@ -65,6 +65,8 @@ provision IP via `/etc/hosts` entries managed by the role.
 | `cifmw_bm_agent_lvms_partition` | dict | `{}` | When set, creates an Ignition partition at install time to cap CoreOS rootfs growth and leave unallocated space for the LVMS StorageClass. Keys: `device` (required, e.g. `/dev/nvme0n1`), `rootfs_mib` (default `150000`), `size_mib` (default `0` = rest of disk), `label` (default `lvmstorage`). See [LVMS partition](#lvms-partition). |
 | `cifmw_bm_agent_reuse_vmedia` | bool | `false` | Skip ISO generation, HTTP server start/stop, and VirtualMedia eject/insert when the agent ISO is already mounted in the iDRAC (e.g. via the iDRAC web UI using a local file). When `true` the role goes straight to setting the one-time boot override and waiting for install. The `openshift-install` binary and working directory from the previous run must still be present on disk. |
 | `cifmw_bm_agent_iso_server_ip` | str | `""` | IP address the iDRAC uses to fetch the agent ISO. When empty, the role auto-detects the controller's IP from nodepool metadata or `ansible_default_ipv4.address`. Set this when the auto-detected IP is not reachable by the iDRAC — for example, when running over VPN where the VPN interface IP must be used instead of the default-route IP. |
+| `cifmw_bm_agent_node_vlan` | int | `0` | 802.1Q VLAN ID for the machine network. When non-zero, the generated `agent-config.yaml` creates a VLAN sub-interface (`<iface>.<vlan>`) on top of `cifmw_bm_agent_node_iface` and assigns the node IP there instead of the bare physical NIC. Set to `0` (default) when the machine-network VLAN arrives untagged (native) at the NIC. |
+| `cifmw_bm_agent_additional_ntp_sources` | list | `[]` | NTP server hostnames or IPs added to `additionalNTPSources` in `agent-config.yaml`. These are baked into the agent ISO so `chronyd` can synchronize on first boot even in restricted networks. Without this, the Assisted Installer validation may reject the host with *"Host couldn't synchronize with any NTP server"* (see [KCS 7020898](https://access.redhat.com/solutions/7020898)). Example: `["clock.redhat.com"]`. |
 
 ## Secrets management
 
@@ -242,7 +244,7 @@ Test coverage:
 
 Minimal vars.yaml for a bare metal SNO deployment:
 
-```YAML
+```yaml
 cifmw_bm_sno: true
 cifmw_bm_agent_cluster_name: ocp
 cifmw_bm_agent_base_domain: example.com
@@ -256,6 +258,26 @@ cifmw_bm_agent_enable_usb_boot: true
 cifmw_bm_nodes:
   - mac: "b0:7b:25:xx:yy:zz"
     root_device: /dev/sda
+```
+
+With a tagged machine-network VLAN and NTP sources (restricted network):
+
+```yaml
+cifmw_bm_sno: true
+cifmw_bm_agent_cluster_name: sno
+cifmw_bm_agent_base_domain: lab.example.local
+cifmw_bm_agent_machine_network: "x.x.x.0/24"
+cifmw_bm_agent_node_ip: "x.x.x.101"
+cifmw_bm_agent_node_iface: eno17395np0   # physical NIC; VLAN sub-iface created automatically
+cifmw_bm_agent_node_vlan: 1073           # machine network arrives 802.1Q-tagged
+cifmw_bm_agent_additional_ntp_sources:
+  - clock.redhat.com
+cifmw_bm_agent_bmc_host: x.x.x.151
+cifmw_bm_agent_openshift_version: "4.18.3"
+
+cifmw_bm_nodes:
+  - mac: "D4:04:E6:F8:41:50"
+    root_device: /dev/nvme1n1
 ```
 
 ## Local debugging on an autoheld Zuul node
