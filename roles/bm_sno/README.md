@@ -354,9 +354,14 @@ oc get nodes
 
 For ssh access into SNO host:
 ```bash
-ssh -i ~/ci-framework-data/artifacts/agent-install/agent_ssh_key \
+ssh -o IdentitiesOnly=yes \
+  -i ~/ci-framework-data/artifacts/agent-install/agent_ssh_key \
   core@<cluster>.<cifmw_bm_agent_base_domain>
 ```
+
+`-o IdentitiesOnly=yes` is required when the local ssh-agent holds many keys —
+the server's `MaxAuthTries` limit (default 6) is hit before the explicit key is
+tried, resulting in *"Too many authentication failures"*.
 
 Replace `<cluster>` with the value of `cifmw_bm_agent_cluster_name` (e.g.
 `sno`).
