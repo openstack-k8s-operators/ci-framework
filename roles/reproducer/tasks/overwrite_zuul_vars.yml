@@ -19,18 +19,12 @@
     temp_reproducer_var_path: /tmp/reproducer-variables.yml
     temp_merged_reproducer_var_path: /tmp/merged-reproducer-variables.yml
   block:
-    - name: Slurp reproducer-variables.yml to hypervisor
-      ansible.builtin.slurp:
+    - name: Fetch reproducer-variables.yml from controller-0
+      ansible.builtin.fetch:
         src: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
-      register: reproducer_original
-      delegate_to: controller-0
-      no_log: "{{ cifmw_nolog | default(true) | bool }}"
-
-    - name: Create temp file reproducer-variables.yml on hypervisor
-      ansible.builtin.copy:
-        content: "{{ reproducer_original.content | b64decode }}"
         dest: "{{ temp_reproducer_var_path }}"
-        mode: "0664"
+        flat: true
+      delegate_to: controller-0
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     - name: Copy merge yamls script
@@ -48,15 +42,24 @@
         {{ temp_merged_reproducer_var_path }}
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
-    - name: Slurp merged reproducer-variables.yml from hypervisor
-      ansible.builtin.slurp:
-        src: "{{ temp_merged_reproducer_var_path }}"
-      register: merged_reproducer_slurp
+    - name: Merge extra variable files into reproducer-variables.yml
+      when: extra_variable_files is defined
+      ansible.builtin.shell: >
+        python3 /usr/local/bin/merge_yaml_override
+        {{ temp_merged_reproducer_var_path }}
+        {{ extra_variable_file }} >
+        {{ temp_merged_reproducer_var_path }}.tmp &&
+        mv {{ temp_merged_reproducer_var_path }}.tmp
+        {{ temp_merged_reproducer_var_path }}
+      loop: "{{ extra_variable_files }}"
+      loop_control:
+        loop_var: extra_variable_file
+        label: "{{ extra_variable_file | basename }}"
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     - name: Write back merged reproducer-variables.yml
       ansible.builtin.copy:
-        content: "{{ merged_reproducer_slurp.content | b64decode }}"
+        src: "{{ temp_merged_reproducer_var_path }}"
         dest: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
         mode: "0664"
         backup: true
@@ -65,7 +68,7 @@
 
     - name: Overwrite custom-params.yml
       ansible.builtin.copy:
-        content: "{{ merged_reproducer_slurp.content | b64decode }}"
+        src: "{{ temp_merged_reproducer_var_path }}"
         dest: "{{ cifmw_basedir }}/artifacts/parameters/custom-params.yml"
         mode: "0664"
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
