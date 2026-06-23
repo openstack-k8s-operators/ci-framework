@@ -76,6 +76,25 @@
     msg: "Backups must be Completed. PVC: {{ _pvc_backup_phase.stdout }}, Resources: {{ _resources_backup_phase.stdout }}"
   when: _pvc_backup_phase.stdout != "Completed" or _resources_backup_phase.stdout != "Completed"
 
+- name: Verify BMH backup exists (separate namespace)
+  ansible.builtin.command:
+    cmd: >-
+      oc get backup openstack-backup-bmh-{{ cifmw_backup_restore_backup_timestamp }}
+      -n {{ cifmw_backup_restore_oadp_namespace }} -o jsonpath='{.status.phase}'
+  register: _bmh_backup_phase
+  changed_when: false
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - cifmw_backup_restore_bmh_namespace != cifmw_backup_restore_namespace
+
+- name: Fail if BMH backup is not completed
+  ansible.builtin.fail:
+    msg: "BMH backup must be Completed. Phase: {{ _bmh_backup_phase.stdout }}"
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - cifmw_backup_restore_bmh_namespace != cifmw_backup_restore_namespace
+    - _bmh_backup_phase.stdout != "Completed"
+
 # ========================================
 # Operator version validation
 # ========================================
@@ -393,6 +412,127 @@
       --for=condition=Ready \
       --timeout={{ cifmw_backup_restore_ctlplane_ready_timeout }}
   changed_when: false
+
+# ========================================
+# Step 9a: Restore BaremetalHosts (optional — baremetal-provisioned only)
+# ========================================
+- name: Derive BMH backup name
+  ansible.builtin.set_fact:
+    _bmh_backup_name: "openstack-backup-bmh-{{ cifmw_backup_restore_backup_timestamp }}"
+    _bmh_separate_namespace: "{{ cifmw_backup_restore_bmh_namespace != cifmw_backup_restore_namespace }}"
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Render BMH secrets restore (separate namespace)
+  ansible.builtin.template:
+    src: restore-bmh-secrets.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/restore-bmh-secrets.yaml"
+    mode: "0644"
+  vars:
+    bmh_backup_name: "{{ _bmh_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | bool
+
+- name: Create BMH secrets restore (separate namespace)
+  kubernetes.core.k8s:
+    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/restore-bmh-secrets.yaml"
+    state: present
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | bool
+
+- name: Wait for BMH secrets restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-bmh-secrets-{{ _restore_suffix }}"
+    _step_name: "Step 9a (BMH secrets restore)"
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | bool
+
+- name: Render BMH restore
+  ansible.builtin.template:
+    src: restore-bmh.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/restore-bmh.yaml"
+    mode: "0644"
+  vars:
+    bmh_backup_name: >-
+      {{ _bmh_backup_name if (_bmh_separate_namespace | bool) else _resources_backup_name }}
+    restore_suffix: "{{ _restore_suffix }}"
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Create BMH restore
+  kubernetes.core.k8s:
+    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/restore-bmh.yaml"
+    state: present
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Wait for BMH restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-bmh-{{ _restore_suffix }}"
+    _step_name: "Step 9a (BMH restore)"
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Remove BMH pause annotations
+  ansible.builtin.command:
+    cmd: >-
+      oc annotate bmh --all
+      -n {{ cifmw_backup_restore_bmh_namespace }}
+      baremetalhost.metal3.io/paused-
+  changed_when: true
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Verify BMH state
+  ansible.builtin.command:
+    cmd: >-
+      oc get bmh -n {{ cifmw_backup_restore_bmh_namespace }}
+      -o custom-columns=NAME:.metadata.name,STATE:.status.provisioning.state,ONLINE:.spec.online --no-headers
+  register: _bmh_state
+  changed_when: false
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Display BMH state
+  ansible.builtin.debug:
+    msg: "{{ _bmh_state.stdout_lines }}"
+  when: cifmw_backup_restore_baremetal | bool
+
+# ========================================
+# Step 9b: Restore OpenStackBaremetalSets (optional — baremetal-provisioned only)
+# ========================================
+- name: Render OSBMS restore
+  ansible.builtin.template:
+    src: restore-bmset.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/restore-bmset.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Create OSBMS restore
+  kubernetes.core.k8s:
+    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/restore-bmset.yaml"
+    state: present
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Wait for OSBMS restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-55-bmset-{{ _restore_suffix }}"
+    _step_name: "Step 9b (OpenStackBaremetalSet restore)"
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Remove OSBMS webhook-skip and pause annotations
+  ansible.builtin.command:
+    cmd: >-
+      oc annotate openstackbaremetalset --all
+      -n {{ cifmw_backup_restore_namespace }}
+      openstack.org/skip-webhook-validation-
+      openstack.org/paused-
+  changed_when: true
+  when: cifmw_backup_restore_baremetal | bool
 
 # ========================================
 # Step 10: Restore DataPlane (Order 60)
