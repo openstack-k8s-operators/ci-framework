@@ -22,14 +22,28 @@
     name: centos-release-ceph-{{ cifmw_cephadm_version }}
     state: present
 
-- name: Install cephadm package
+- name: Install cephadm package from repository
   become: true
   when:
+    - cifmw_cephadm_rpm_url | length == 0
     - cifmw_cephadm_predeployed | bool or
       cifmw_cephadm_repository_override | bool
   ansible.builtin.dnf:
     name: cephadm
     state: present
+  register: task_result
+  retries: "{{ cifmw_cephadm_wait_install_retries }}"
+  delay: "{{ cifmw_cephadm_wait_install_delay }}"
+  until: task_result is success
+
+- name: Install cephadm package from URL
+  become: true
+  when:
+    - cifmw_cephadm_rpm_url | length > 0
+  ansible.builtin.dnf:
+    name: "{{ cifmw_cephadm_rpm_url }}"
+    state: present
+    disable_gpg_check: true
   register: task_result
   retries: "{{ cifmw_cephadm_wait_install_retries }}"
   delay: "{{ cifmw_cephadm_wait_install_delay }}"
