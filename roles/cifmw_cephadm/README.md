@@ -122,6 +122,30 @@ that they do not need to be changed for a typical EDPM deployment.
    Example values are `"aes,aes256k"` or `"aes256k"` or `"aes"`.
    Defaults to `""` (unset, no command is run).
 
+* `cifmw_cephadm_server_version`: (String) Optional override for Ceph server
+  version during cephadm installation. Both this and `cifmw_cephadm_client_version`
+  must be set (and different) to activate version override logic. When activated,
+  temporarily switches repos to install cephadm at this version, then restores
+  to client version. Example: `"7.1"` or `"9.1"`. Defaults to `""` (empty),
+  which uses `cifmw_repo_setup_rhos_release_args` for everything.
+
+* `cifmw_cephadm_client_version`: (String) Optional client package version,
+  used with `cifmw_cephadm_server_version`. Both must be set (and different)
+  to activate version override logic. Example: `"9.1"`. Defaults to `""` (empty),
+  which uses `cifmw_repo_setup_rhos_release_args` for everything.
+
+The `cifmw_cephadm_server_version` and `cifmw_cephadm_client_version` are
+only used for testing a corner case where the ceph clients and ceph server
+are of different versions. Usually the `repo_setup` role's parameter
+`cifmw_repo_setup_rhos_release_args` determines which ceph repository is
+enabled and the same repository is enabled for both clients and servers.
+If the server version and client version differ, then the repository
+from the server version is temporarily enabled, when cephadm is installed
+(so that cephadm will install that version of the ceph server), and then
+the repository from `cifmw_repo_setup_rhos_release_args` is enabled again.
+If `cifmw_repo_setup_rhos_release_args` is not the same as the client
+version, a warning is printed.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```

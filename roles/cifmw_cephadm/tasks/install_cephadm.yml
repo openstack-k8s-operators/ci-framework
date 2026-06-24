@@ -14,6 +14,45 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+- name: Check if server/client version override is configured
+  ansible.builtin.set_fact:
+    _cifmw_cephadm_version_override: >-
+      {{
+        (cifmw_cephadm_server_version | length > 0) and
+        (cifmw_cephadm_client_version | length > 0) and
+        (cifmw_cephadm_server_version != cifmw_cephadm_client_version)
+      }}
+
+- name: Handle version override for cephadm installation
+  when: _cifmw_cephadm_version_override | bool
+  become: true
+  block:
+    - name: Parse version from cifmw_repo_setup_rhos_release_args
+      ansible.builtin.set_fact:
+        _cifmw_cephadm_default_version: "{{ cifmw_repo_setup_rhos_release_args | regex_search('ceph-([0-9.]+)') | regex_replace('^ceph-', '') }}"
+
+    - name: Display version configuration
+      ansible.builtin.debug:
+        msg:
+          - "Default: {{ _cifmw_cephadm_default_version }}"
+          - "Server: {{ cifmw_cephadm_server_version }}"
+          - "Client: {{ cifmw_cephadm_client_version }}"
+          - "{{ 'WARNING: Client version differs from default rhos-release version' if (_cifmw_cephadm_default_version | trim) != (cifmw_cephadm_client_version | trim) else 'Client version matches default' }}"
+
+    - name: Disable default ceph repository
+      when: cifmw_cephadm_server_version != _cifmw_cephadm_default_version
+      ansible.builtin.replace:
+        path: "/etc/yum.repos.d/rhos-release-ceph-{{ _cifmw_cephadm_default_version }}.repo"
+        regexp: '^enabled=1'
+        replace: 'enabled=0'
+
+    - name: Switch to server version repository
+      when: cifmw_cephadm_server_version != _cifmw_cephadm_default_version
+      ansible.builtin.command:
+        cmd: "rhos-release {{ cifmw_repo_setup_rhos_release_args | regex_replace('ceph-[0-9.]+', 'ceph-' + cifmw_cephadm_server_version) }}"
+      register: _cifmw_cephadm_server_repo
+      changed_when: "'Installed' in _cifmw_cephadm_server_repo.stdout"
+
 - name: Enabled ceph Tools Repository
   when:
     - cifmw_cephadm_repository_override | bool
@@ -34,6 +73,22 @@
   retries: "{{ cifmw_cephadm_wait_install_retries }}"
   delay: "{{ cifmw_cephadm_wait_install_delay }}"
   until: task_result is success
+
+- name: Disable server ceph repository before restore
+  when: _cifmw_cephadm_version_override | bool
+  become: true
+  ansible.builtin.replace:
+    path: "/etc/yum.repos.d/rhos-release-ceph-{{ cifmw_cephadm_server_version }}.repo"
+    regexp: '^enabled=1'
+    replace: 'enabled=0'
+
+- name: Restore cifmw_repo_setup_rhos_release_args
+  when: _cifmw_cephadm_version_override | bool
+  become: true
+  ansible.builtin.command:
+    cmd: "rhos-release {{ cifmw_repo_setup_rhos_release_args }}"
+  register: _cifmw_cephadm_restore_repo
+  changed_when: "'Installed' in _cifmw_cephadm_restore_repo.stdout"
 
 - name: Stat cephadm file
   ansible.builtin.stat:
