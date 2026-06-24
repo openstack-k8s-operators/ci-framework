@@ -99,7 +99,7 @@ It is used in edpm-ansible job to update the `ANSIBLEEE_IMAGE_URL_DEFAULT`.
 
 ### Update an image which doesn't have openstack- in its name
 
-For instance `RELATED_IMAGE_IRONIC_PYTHON_AGENT_IMAGE_URL_DEFAULT` has this kind of url `registry-proxy.engineering.redhat.com/rh-osbs/rhoso18-ironic-python-agent:18.0` where the usual `openstack-` prefix is absent.
+For instance `RELATED_IMAGE_IRONIC_PYTHON_AGENT_IMAGE_URL_DEFAULT` has this kind of url `example.registry.com/rh-osbs/rhoso18-ironic-python-agent:18.0` where the usual `openstack-` prefix is absent.
 
 Setting `cifmw_set_openstack_containers_overrides_transform` will enable the transformation to happen.
 
@@ -118,7 +118,7 @@ Setting `cifmw_set_openstack_containers_overrides_transform` will enable the tra
         name: set_openstack_containers
 ```
 
-Will transform `registry-proxy.engineering.redhat.com/rh-osbs/rhoso18-ironic-python-agent:18.0` into `quay.io/test-namespace/ironic-python-agent:test-tag`
+Will transform `example.registry.com/rh-osbs/rhoso18-ironic-python-agent:18.0` into `quay.io/test-namespace/ironic-python-agent:test-tag`
 
 ### Update all openstack services containers env vars in meta operator with tag from delorean and set OPENSTACK_RELEASE_VERSION env
 
