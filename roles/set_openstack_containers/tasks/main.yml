@@ -119,6 +119,33 @@
     - operator_name != 'openstack'
     - not cifmw_architecture_scenario is defined
 
+# Wait for 4 minutes so openstack-operator can be restarted in consecuence
+# of reinstalating the meta operator
+# It will get the current value of rabbitmq image and wait until it's updated
+# with the value set by the update_env_vars.sh script
+- name: Wait for openstack-operator to contain the new image values
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+
+      # 1. Fetch the exact name of the target openstack-operator pod
+      POD_NAME=$(oc get pod --namespace={{ operator_namespace }} -l app.kubernetes.io/name=openstack-operator --no-headers -o name)
+
+      # 2. Extract the RabbitMQ image variable and check for the target container tag
+      oc get --namespace={{ operator_namespace }} "$POD_NAME" -o json | \
+        jq -r '.spec.containers[].env[] | select(.name == "RELATED_IMAGE_RABBITMQ_IMAGE_URL_DEFAULT") | .value' | \
+        grep -q "{{ cifmw_set_openstack_containers_tag }}"
+  register: rabbitmq_image
+  until: rabbitmq_image.rc == 0
+  retries: 24
+  delay: 10
+  when:
+    - operator_name == 'openstack'
+    - not cifmw_architecture_scenario is defined
+
 - name: Retrieve operator pods
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
