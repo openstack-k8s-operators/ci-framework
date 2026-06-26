@@ -296,6 +296,51 @@
         group: frr
         mode: '640'
 
+    - name: Create EVPN VXLAN and bridge on the router
+      become: true
+      when: enable_evpn | default(false) | bool
+      block:
+        - name: Load VRF kernel module
+          ansible.builtin.shell: |
+            modprobe vrf
+
+        - name: Persist VRF module load on boot
+          ansible.builtin.copy:
+            dest: /etc/modules-load.d/vrf.conf
+            content: |
+              vrf
+            mode: "0644"
+
+        - name: Create VRF for EVPN
+          ansible.builtin.shell: |
+            ip link add evpnvrf-{{ evpn_vni | default(1) }} type vrf table {{ evpn_vni | default(1) }}
+            ip link set evpnvrf-{{ evpn_vni | default(1) }} up
+
+        - name: Create VXLAN interface for EVPN
+          ansible.builtin.shell: |
+            ip link add vxlan-{{ evpn_vni | default(1) }} type vxlan id {{ evpn_vni | default(1) }} local 192.168.133.1 dstport {{ evpn_vxlan_port | default(4789) }} nolearning
+
+        - name: Create bridge for EVPN
+          ansible.builtin.shell: |
+            ip link add br-evpn type bridge
+
+        - name: Attach VXLAN to bridge
+          ansible.builtin.shell: |
+            ip link set vxlan-{{ evpn_vni | default(1) }} master br-evpn
+
+        - name: Enable ARP/ND suppression on the VXLAN port
+          ansible.builtin.shell: |
+            bridge link set dev vxlan-{{ evpn_vni | default(1) }} neigh_suppress on
+
+        - name: Master bridge to VRF
+          ansible.builtin.shell: |
+            ip link set br-evpn master evpnvrf-{{ evpn_vni | default(1) }}
+
+        - name: Bring up EVPN interfaces
+          ansible.builtin.shell: |
+            ip link set br-evpn up
+            ip link set vxlan-{{ evpn_vni | default(1) }} up
+
     - name: Enable and start FRR
       become: true
       ansible.builtin.service:
