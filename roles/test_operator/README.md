@@ -55,6 +55,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_tempest_container`: (String) Name of the tempest container. Default value: `openstack-tempest-all`
 * `cifmw_test_operator_tempest_debug`: (Bool) Run Tempest in debug mode, it keeps the operator pod sleeping infinity (it must only set to `true`only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_tempest_exclude_list`: (String) List of tests to be skipped. Setting this will not use the `list_skipped` plugin. Default value: `''`
+* `cifmw_test_operator_tempest_exclude_list_merge`: (Bool) When set to true, merges tests from both `list_skipped.yml` and `cifmw_test_operator_tempest_exclude_list` into a single combined exclusion list. Default value: `false`
 * `cifmw_test_operator_tempest_expected_failures_list`: (String) List of tests for which failures will be ignored. Default value: `''`
 * `cifmw_test_operator_tempest_external_plugin`: (List) List of dicts describing any external plugin to be installed. The dictionary contains a repository, changeRepository (optional) and changeRefspec (optional). Default value: `[]`
 * `cifmw_test_operator_tempest_extra_configmaps_mounts`: WARNING: This parameter will be deprecated! Please use `cifmw_test_operator_tempest_extra_mounts` parameter instead. (List) A list of configmaps that should be mounted into the tempest test pods. Default value: `[]`

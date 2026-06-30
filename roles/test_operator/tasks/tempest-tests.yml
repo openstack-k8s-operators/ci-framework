@@ -51,6 +51,7 @@
 - name: Configuring tests to be skipped via skiplist
   when: >
     stage_vars_dict.cifmw_test_operator_tempest_exclude_list is not defined or
+    stage_vars_dict.cifmw_test_operator_tempest_exclude_list_merge | bool or
     stage_vars_dict.cifmw_test_operator_tempest_tests_exclude_override_scenario | bool
   block:
     - name: Copy list_skipped to artifacts dir
@@ -66,10 +67,19 @@
       register:
         list_skipped
 
-    - name: Set variable
+    - name: Merge tests from exclude list when merge is enabled
+      when:
+        - stage_vars_dict.cifmw_test_operator_tempest_exclude_list_merge | bool
+        - stage_vars_dict.cifmw_test_operator_tempest_exclude_list is defined
+        - stage_vars_dict.cifmw_test_operator_tempest_exclude_list | trim | length > 0
+      ansible.builtin.set_fact:
+        test_names: "{{ test_names | default(list_skipped.skipped_tests) + [item] }}"
+      loop: "{{ stage_vars_dict.cifmw_test_operator_tempest_exclude_list | trim | split('\n') }}"
+
+    - name: Convert list of tests to string to pass to test-operator
       vars:
         skipped_tests: |
-          {% for item in list_skipped.skipped_tests %}
+          {% for item in test_names | default(list_skipped.skipped_tests) %}
           {{ item }}
           {% endfor %}
       ansible.builtin.set_fact:
