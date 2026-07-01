@@ -1,0 +1,56 @@
+---
+- name: Ensure Cinder Rally prerequisites exist
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  tasks:
+    - name: Create m1.tiny flavor if missing
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc -n {{ namespace }} rsh openstackclient \
+            openstack flavor show m1.tiny &>/dev/null || \
+            oc -n {{ namespace }} rsh openstackclient \
+            openstack flavor create m1.tiny \
+              --ram 512 --disk 1 --vcpus 1 --public
+
+    - name: Create lvmdriver-1 volume type if missing
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc -n {{ namespace }} rsh openstackclient \
+            openstack volume type show lvmdriver-1 &>/dev/null || \
+            oc -n {{ namespace }} rsh openstackclient \
+            openstack volume type create lvmdriver-1 --public
+
+    - name: Check if cirros image already exists
+      ansible.builtin.shell: |
+        set -e -o pipefail
+        oc -n {{ namespace }} rsh openstackclient \
+            openstack image list -f value -c Name | grep -q '^cirros'
+      register: _cirros_image_exists
+      failed_when: false
+
+    - name: Download cirros image to hypervisor
+      when: _cirros_image_exists.rc != 0
+      ansible.builtin.get_url:
+        url: "https://github.com/cirros-dev/cirros/releases/download/0.6.2/cirros-0.6.2-x86_64-disk.img"
+        dest: "/tmp/cirros-0.6.2-x86_64-disk.img"
+        mode: "0644"
+
+    - name: Copy cirros image to openstackclient pod
+      when: _cirros_image_exists.rc != 0
+      ansible.builtin.command: >-
+        oc cp /tmp/cirros-0.6.2-x86_64-disk.img
+        {{ namespace }}/openstackclient:/home/cloud-admin/cirros-0.6.2-x86_64-disk.img
+
+    - name: Upload cirros image for Rally if missing
+      when: _cirros_image_exists.rc != 0
+      ansible.builtin.shell: |
+        set -xe -o pipefail
+        oc -n {{ namespace }} rsh openstackclient \
+            openstack image create cirros-0.6.2-x86_64-disk \
+              --disk-format qcow2 \
+              --container-format bare \
+              --file /home/cloud-admin/cirros-0.6.2-x86_64-disk.img \
+              --public
