@@ -5,10 +5,49 @@
 # Neither Redfish PATCH (405), vmdisconnect (vConsole-only), nor
 # remoteimage -d reliably release it. A racreset is the only way to
 # guarantee the stale RFS is fully torn down.
+# On iDRAC 10, stale Redfish sessions holding a VirtualMedia device cause
+# VRM0021 ("already in use") on the next InsertMedia call. Delete all
+# sessions created by prior runs before ejecting.
 # Requires: _bmc_host, _bmc_creds, _redfish_headers
+
+- name: Fetch active iDRAC sessions
+  no_log: true
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}/redfish/v1/SessionService/Sessions"
+    method: GET
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 404]
+  register: _idrac_sessions
+  failed_when: false
+
+- name: Delete stale iDRAC sessions
+  no_log: true
+  ansible.builtin.uri:
+    url: "https://{{ _bmc_host }}{{ item['@odata.id'] }}"
+    method: DELETE
+    headers: "{{ _redfish_headers }}"
+    user: "{{ _bmc_creds.username }}"
+    password: "{{ _bmc_creds.password }}"
+    validate_certs: false
+    force_basic_auth: true
+    status_code: [200, 204, 404]
+  loop: "{{ _idrac_sessions.json.Members | default([]) }}"
+  loop_control:
+    label: "{{ item['@odata.id'] | basename }}"
+  failed_when: false
+  when: _idrac_sessions.status == 200
+
+- name: Discover VirtualMedia member URI (if not already known)
+  when: _vmedia_eject_action is not defined
+  ansible.builtin.include_tasks: bm_discover_vmedia_member.yml
+
 - name: Eject VirtualMedia
   ansible.builtin.uri:
-    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.EjectMedia"
+    url: "https://{{ _bmc_host }}{{ _vmedia_eject_action }}"
     method: POST
     headers: "{{ _redfish_headers }}"
     body_format: json

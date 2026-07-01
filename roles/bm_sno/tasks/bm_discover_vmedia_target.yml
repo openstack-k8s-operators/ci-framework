@@ -2,6 +2,11 @@
 # Discover or validate the UEFI device path for the iDRAC Virtual Optical Drive,
 # clear any pending iDRAC config jobs, and set a one-time boot override.
 # Requires: _bmc_host, _bmc_creds, _redfish_headers
+#
+# Boot override strategy (selected by cifmw_bm_agent_bios_onetimeboot_fqdd):
+#   unset / empty — standard Redfish PATCH /Systems/System.Embedded.1 (iDRAC ≤ 9)
+#   set to FQDD   — BIOS pending-settings PATCH /Bios/Settings (iDRAC 10+)
+#                   see bm_discover_vmedia_target_idrac10.yml
 - name: Fetch UEFI boot option IDs
   no_log: true
   ansible.builtin.uri:
@@ -45,8 +50,12 @@
         map(attribute='DisplayName', default='?') | zip(_known_uefi_paths) |
         map('join', ' -> ') | list }}
 
+# Skip UefiDevicePath validation when using the BIOS pending-settings approach
+# (cifmw_bm_agent_bios_onetimeboot_fqdd set) — FQDD is validated by iDRAC itself.
 - name: Validate user-provided VirtualMedia UEFI path
-  when: cifmw_bm_agent_vmedia_uefi_path | length > 0
+  when:
+    - cifmw_bm_agent_vmedia_uefi_path | length > 0
+    - cifmw_bm_agent_bios_onetimeboot_fqdd | default('') | length == 0
   ansible.builtin.assert:
     that:
       - cifmw_bm_agent_vmedia_uefi_path in _known_uefi_paths
@@ -123,7 +132,9 @@
   ansible.builtin.pause:
     seconds: 10
 
-- name: Set one-time boot from Virtual Optical Drive
+# ── Standard one-time boot (iDRAC ≤ 9): PATCH Systems Boot property ──────────
+- name: Set one-time boot — standard Redfish PATCH (iDRAC ≤ 9)
+  when: cifmw_bm_agent_bios_onetimeboot_fqdd | default('') | length == 0
   no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1"
@@ -141,7 +152,9 @@
     force_basic_auth: true
     status_code: [200, 204]
 
-- name: Verify boot override was applied
+- name: Verify boot override — standard (iDRAC ≤ 9)
+  when: cifmw_bm_agent_bios_onetimeboot_fqdd | default('') | length == 0
+  no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Systems/System.Embedded.1"
     method: GET
@@ -152,30 +165,37 @@
     force_basic_auth: true
     return_content: true
     status_code: [200]
-  register: _boot_verify
+  register: _boot_verify_standard
 
-- name: Assert boot override is set
+- name: Assert boot override is set — standard (iDRAC ≤ 9)
+  when: cifmw_bm_agent_bios_onetimeboot_fqdd | default('') | length == 0
   ansible.builtin.assert:
     that:
-      - _boot_verify.json.Boot.BootSourceOverrideTarget == 'UefiTarget'
-      - _boot_verify.json.Boot.BootSourceOverrideEnabled == 'Once'
-      - _boot_verify.json.Boot.UefiTargetBootSourceOverride | default('') | length > 0
+      - _boot_verify_standard.json.Boot.BootSourceOverrideTarget == 'UefiTarget'
+      - _boot_verify_standard.json.Boot.BootSourceOverrideEnabled == 'Once'
+      - _boot_verify_standard.json.Boot.UefiTargetBootSourceOverride | default('') | length > 0
     fail_msg: >-
       Boot override not applied.
-      Target: {{ _boot_verify.json.Boot.BootSourceOverrideTarget }},
-      Enabled: {{ _boot_verify.json.Boot.BootSourceOverrideEnabled }},
-      UefiPath: {{ _boot_verify.json.Boot.UefiTargetBootSourceOverride | default('empty') }}
+      Target: {{ _boot_verify_standard.json.Boot.BootSourceOverrideTarget }},
+      Enabled: {{ _boot_verify_standard.json.Boot.BootSourceOverrideEnabled }},
+      UefiPath: {{ _boot_verify_standard.json.Boot.UefiTargetBootSourceOverride | default('empty') }}
 
-- name: Show resolved boot path
+- name: Show resolved boot path — standard (iDRAC ≤ 9)
+  when: cifmw_bm_agent_bios_onetimeboot_fqdd | default('') | length == 0
   ansible.builtin.debug:
-    msg: >-
-      Resolved boot path:
-      {{ _boot_verify.json.Boot.UefiTargetBootSourceOverride }}
+    msg: "Resolved boot path: {{ _boot_verify_standard.json.Boot.UefiTargetBootSourceOverride }}"
+
+# ── iDRAC 10+ one-time boot: BIOS pending-settings ───────────────────────────
+- name: Set one-time boot via BIOS pending settings (iDRAC 10+)
+  when: cifmw_bm_agent_bios_onetimeboot_fqdd | default('') | length > 0
+  ansible.builtin.include_tasks:
+    file: bm_discover_vmedia_target_idrac10.yml
 
 - name: Verify VirtualMedia is still inserted
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   no_log: true
   ansible.builtin.uri:
-    url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD"
+    url: "https://{{ _bmc_host }}{{ _vmedia_member_uri }}"
     method: GET
     headers: "{{ _redfish_headers }}"
     user: "{{ _bmc_creds.username }}"
@@ -187,6 +207,7 @@
   register: _vmedia_check
 
 - name: Assert VirtualMedia ISO is mounted
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.assert:
     that:
       - _vmedia_check.json.Inserted | bool
