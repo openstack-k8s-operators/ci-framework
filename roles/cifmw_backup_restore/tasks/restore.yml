@@ -18,7 +18,7 @@
 #
 # Restores an OpenStack control plane from OADP backups using ordered
 # Velero Restore CRs, Galera restore, optional OVN NB/SB file restore,
-# then staged ControlPlane resume, dataplane, EDPM, and Neutron–OVN sync.
+# then staged ControlPlane resume, Neutron–OVN sync, dataplane, and EDPM.
 
 - name: Validate backup_timestamp parameter
   ansible.builtin.fail:
@@ -395,80 +395,14 @@
   changed_when: false
 
 # ========================================
-# Step 10: Restore DataPlane (Order 60)
+# Step 10: Verify and sync Neutron to OVN
 # ========================================
-- name: Render dataplane restore
-  ansible.builtin.template:
-    src: 07-restore-order-60-dataplane.yaml.j2
-    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/07-restore-order-60-dataplane.yaml"
-    mode: "0644"
-  vars:
-    resources_backup_name: "{{ _resources_backup_name }}"
-    restore_suffix: "{{ _restore_suffix }}"
-
-- name: Create dataplane restore
-  kubernetes.core.k8s:
-    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/07-restore-order-60-dataplane.yaml"
-    state: present
-
-- name: Wait for dataplane restore
-  ansible.builtin.include_tasks: wait_for_restore.yml
-  vars:
-    _restore_name: "openstack-restore-60-dataplane-{{ _restore_suffix }}"
-    _step_name: "Step 10 (DataPlane restore)"
-
-# ========================================
-# Step 11: EDPM Deployment
-# ========================================
-- name: Get DataPlaneNodeSet names
-  ansible.builtin.shell: |
-    oc get openstackdataplanenodeset -n {{ cifmw_backup_restore_namespace }} -o jsonpath='{.items[*].metadata.name}'
-  register: _nodeset_names
-  changed_when: false
-
-- name: Set nodeset list
-  ansible.builtin.set_fact:
-    _nodeset_names_list: "{{ _nodeset_names.stdout.split() }}"
-  when: _nodeset_names.stdout != ""
-
-- name: Render EDPM deployment CR
-  ansible.builtin.template:
-    src: 08-edpm-deployment.yaml.j2
-    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/08-edpm-deployment.yaml"
-    mode: "0644"
-  vars:
-    nodeset_names_list: "{{ _nodeset_names_list }}"
-    restore_suffix: "{{ _restore_suffix }}"
-  when: _nodeset_names.stdout != ""
-
-- name: Create EDPM deployment
-  kubernetes.core.k8s:
-    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/08-edpm-deployment.yaml"
-    state: present
-  when: _nodeset_names.stdout != ""
-
-- name: Print EDPM deployment status
-  ansible.builtin.debug:
-    msg: "Created EDPM deployment: edpm-deployment-post-restore-{{ _restore_suffix }}"
-  when: _nodeset_names.stdout != ""
-
-- name: Wait for EDPM deployment to complete
-  ansible.builtin.command:
-    cmd: >-
-      oc wait OpenStackDataPlaneDeployment
-      edpm-deployment-post-restore-{{ _restore_suffix }}
-      --namespace={{ cifmw_backup_restore_namespace }}
-      --for=condition=Ready
-      --timeout={{ cifmw_backup_restore_edpm_deploy_timeout }}
-  when: _nodeset_names.stdout != ""
-
-# ========================================
-# Step 12: Verify and sync Neutron to OVN (user-guide backup-restore Step 12)
-# ========================================
-# Run after EDPM so compute ovn-controller agents reconnect to the SB DB first.
+# Run after neutron is ready but before EDPM deployment so that
+# ovn-controller on dataplane nodes reconnects to populated OVN DBs,
+# preventing data plane outage from stale/empty databases.
 # Log mode does not change exit code for drift (Neutron logs drift as WARNING lines).
 # Repair runs if OVN file backup was skipped, or if log output contains WARNING drift.
-# Ref: https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-12-verify-and-sync-neutron-to-ovn
+# Ref: https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-10-verify-and-sync-neutron-to-ovn
 - name: Verify Neutron vs OVN (neutron-ovn-db-sync-util log mode)
   ansible.builtin.shell: |
     set -o pipefail
@@ -521,6 +455,74 @@
       --debug
   when: _neutron_ovn_needs_repair | bool
   changed_when: true
+
+# ========================================
+# Step 11: Restore DataPlane (Order 60)
+# ========================================
+- name: Render dataplane restore
+  ansible.builtin.template:
+    src: 07-restore-order-60-dataplane.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/07-restore-order-60-dataplane.yaml"
+    mode: "0644"
+  vars:
+    resources_backup_name: "{{ _resources_backup_name }}"
+    restore_suffix: "{{ _restore_suffix }}"
+
+- name: Create dataplane restore
+  kubernetes.core.k8s:
+    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/07-restore-order-60-dataplane.yaml"
+    state: present
+
+- name: Wait for dataplane restore
+  ansible.builtin.include_tasks: wait_for_restore.yml
+  vars:
+    _restore_name: "openstack-restore-60-dataplane-{{ _restore_suffix }}"
+    _step_name: "Step 11 (DataPlane restore)"
+
+# ========================================
+# Step 12: EDPM Deployment
+# ========================================
+- name: Get DataPlaneNodeSet names
+  ansible.builtin.shell: |
+    oc get openstackdataplanenodeset -n {{ cifmw_backup_restore_namespace }} -o jsonpath='{.items[*].metadata.name}'
+  register: _nodeset_names
+  changed_when: false
+
+- name: Set nodeset list
+  ansible.builtin.set_fact:
+    _nodeset_names_list: "{{ _nodeset_names.stdout.split() }}"
+  when: _nodeset_names.stdout != ""
+
+- name: Render EDPM deployment CR
+  ansible.builtin.template:
+    src: 08-edpm-deployment.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/08-edpm-deployment.yaml"
+    mode: "0644"
+  vars:
+    nodeset_names_list: "{{ _nodeset_names_list }}"
+    restore_suffix: "{{ _restore_suffix }}"
+  when: _nodeset_names.stdout != ""
+
+- name: Create EDPM deployment
+  kubernetes.core.k8s:
+    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/08-edpm-deployment.yaml"
+    state: present
+  when: _nodeset_names.stdout != ""
+
+- name: Print EDPM deployment status
+  ansible.builtin.debug:
+    msg: "Created EDPM deployment: edpm-deployment-post-restore-{{ _restore_suffix }}"
+  when: _nodeset_names.stdout != ""
+
+- name: Wait for EDPM deployment to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc wait OpenStackDataPlaneDeployment
+      edpm-deployment-post-restore-{{ _restore_suffix }}
+      --namespace={{ cifmw_backup_restore_namespace }}
+      --for=condition=Ready
+      --timeout={{ cifmw_backup_restore_edpm_deploy_timeout }}
+  when: _nodeset_names.stdout != ""
 
 # ========================================
 # Cleanup and Summary
