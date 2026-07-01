@@ -190,6 +190,7 @@
     mode: "0644"
 
 - name: Remove stale agent state from previous runs
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -255,25 +256,30 @@
   when: cifmw_bm_agent_disabled_ifaces | default([]) | length > 0
 
 - name: Generate agent ISO
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.command:
     cmd: "{{ _work_dir }}/openshift-install agent create image --dir {{ _work_dir }}"
 
 - name: Patch agent ISO ignition for discovery-phase console access
-  when: cifmw_bm_agent_live_debug | bool
+  when:
+    - not cifmw_bm_agent_reuse_vmedia | bool
+    - cifmw_bm_agent_live_debug | bool
   ansible.builtin.include_tasks: bm_patch_agent_iso.yml
 
 - name: Set controller IP fact
   ansible.builtin.set_fact:
     _controller_ip: >-
       {{ hostvars[inventory_hostname]['nodepool']['interface_ip'] |
-        default(ansible_default_ipv4.address |
+           default(ansible_default_ipv4.address |
         default(ansible_host)) }}
 
 - name: Show ISO URL that iDRAC will fetch
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.debug:
     msg: "ISO URL for iDRAC: http://{{ _controller_ip }}:{{ _iso_http_port }}/agent.x86_64.iso"
 
 - name: Stop any existing agent-iso-server container
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   become: true
   ansible.builtin.command:
     cmd: podman rm -f agent-iso-server
@@ -281,6 +287,7 @@
   changed_when: false
 
 - name: Serve agent ISO via podman httpd
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   become: true
   ansible.builtin.command:
     cmd: >-
@@ -291,6 +298,7 @@
   register: _httpd_start
 
 - name: Check agent-iso-server container is running
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   become: true
   ansible.builtin.command:
     cmd: podman ps --filter name=agent-iso-server --format '{{ '{{' }}.Status{{ '}}' }}'
@@ -298,10 +306,12 @@
   changed_when: false
 
 - name: Show container status
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.debug:
     msg: "agent-iso-server status: {{ _httpd_status.stdout }}"
 
 - name: Wait for HTTP server to respond
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.uri:
     url: "http://{{ _controller_ip }}:{{ _iso_http_port }}/agent.x86_64.iso"
     method: HEAD
@@ -311,9 +321,11 @@
   until: _http_check.status == 200
 
 - name: Eject any existing VirtualMedia before insert
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.include_tasks: bm_eject_vmedia.yml
 
 - name: Insert agent ISO via VirtualMedia
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   no_log: true
   ansible.builtin.uri:
     url: "https://{{ _bmc_host }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
@@ -403,9 +415,11 @@
     mode: "0600"
 
 - name: Eject VirtualMedia after install
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   ansible.builtin.include_tasks: bm_eject_vmedia.yml
 
 - name: Stop HTTP ISO server
+  when: not cifmw_bm_agent_reuse_vmedia | bool
   become: true
   ansible.builtin.command:
     cmd: podman rm -f agent-iso-server
