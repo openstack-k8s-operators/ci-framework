@@ -28,6 +28,7 @@ This role supports testing all OIDC authentication methods available in keystone
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `cifmw_federation_operator_namespace` | `keycloak-operators` | Kubernetes namespace for the RHSSO operator |
 | `cifmw_federation_keycloak_namespace` | `openstack` | Kubernetes namespace for Keycloak |
 | `cifmw_federation_run_osp_cmd_namespace` | `openstack` | Kubernetes namespace for openstackclient |
 | `cifmw_federation_domain` | - | Base domain for service URLs |
