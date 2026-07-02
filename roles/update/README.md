@@ -23,5 +23,6 @@ Role to run update
 * `cifmw_update_resources_monitoring_interval`: (Integer) Interval, in seconds, between two resources monitor during update. Default to 10 seconds.
 * `cifmw_update_wait_controplane_status_change_sec`: (Integer) Time, in seconds, to wait before checking openstack control plane deployment status. Used when need to wait to allow the control plane's ready condition to transition from its initial state, preventing premature completion while the control plane is still reconciling the operator changes. Defaults to `60`.
 * `cifmw_update_openstack_update_kpatch`: (Boolean) Activate `kpatch` during update. Default to false.
+* `cifmw_update_dont_cleanup`: (Bool) By default we cleanup the resources created on OpenStack during testing. Setting this parameter to `true` prevents it. Useful for debugging. Default to `false`.
 
 ## Examples
