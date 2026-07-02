@@ -4,7 +4,7 @@ Role to setup jump tool and upload XML test results to Polarion.
 ## Parameters
 * `cifmw_polarion_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
 * `cifmw_polarion_jump_repo_dir`: (String) Jump repo directory. Defaults to `~/ci-framework-data/polarion-jump`.
-* `cifmw_polarion_jump_result_dir`: (String) Test results directory. Based on `cifmw_run_test_role` defaults to `~/ci-framework-data/tests/tempest/` or `~/ci-framework-data/tests/test_operator/`.
+* `cifmw_polarion_jump_result_dir`: (String) Test results directory. Based on `cifmw_run_test_role` defaults to `~/ci-framework-data/tests/test_operator/`.
 * `cifmw_polarion_jump_repo_url`: (String) URL of jump repository.
 * `cifmw_polarion_testrun_title`: (String) A name of the test run under which the test results will be uploaded to polarion. The role appends an index number to the name to distinguish multiple test runs apart.
 * `cifmw_polarion_testrun_id`: (String) A test run identification provided by Polarion test case or `create-new-test-run` if polarion should generate a random test run ID. A value other than `create-new-test-run` will force this role to upload all test results found in all directories under `cifmw_polarion_jump_repo_url` to one test run identified by the given ID. The default behavior of this role is to treat the directories in `cifmw_polarion_jump_repo_url` as separate test runs.
