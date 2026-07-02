@@ -296,6 +296,54 @@
   when: _resources_backup_phase.stdout != "Completed"
 
 # ========================================
+# Step 5: OADP Baremetal Backup (optional — separate namespace only)
+# ========================================
+- name: Check if BMH namespace differs from OpenStack namespace
+  ansible.builtin.set_fact:
+    _bmh_separate_namespace: "{{ cifmw_backup_restore_bmh_namespace != cifmw_backup_restore_namespace }}"
+  when: cifmw_backup_restore_baremetal | bool
+
+- name: Render BMH backup CR
+  ansible.builtin.template:
+    src: backup-bmh.yaml.j2
+    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/backup-bmh.yaml"
+    mode: "0644"
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | default(false) | bool
+
+- name: Create OADP BMH backup
+  kubernetes.core.k8s:
+    src: "{{ _cifmw_backup_restore_rendered_dir.path }}/backup-bmh.yaml"
+    state: present
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | default(false) | bool
+
+- name: Wait for BMH backup to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc get backup openstack-backup-bmh-{{ cifmw_backup_restore_backup_name_suffix }}
+      -n {{ cifmw_backup_restore_oadp_namespace }}
+      -o jsonpath='{.status.phase}'
+  register: _bmh_backup_phase
+  changed_when: false
+  until: _bmh_backup_phase.stdout in ["Completed", "Failed", "PartiallyFailed"]
+  retries: "{{ (cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') | int * 60 / 10) | int }}"
+  delay: 10
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | default(false) | bool
+
+- name: Fail if BMH backup did not complete
+  ansible.builtin.fail:
+    msg: "BMH backup ended with phase: {{ _bmh_backup_phase.stdout }}"
+  when:
+    - cifmw_backup_restore_baremetal | bool
+    - _bmh_separate_namespace | default(false) | bool
+    - _bmh_backup_phase.stdout != "Completed"
+
+# ========================================
 # Summary
 # ========================================
 - name: Print backup summary
@@ -308,6 +356,7 @@
       - "Backup name suffix: {{ cifmw_backup_restore_backup_name_suffix }}"
       - "PVC backup:       openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}"
       - "Resources backup: openstack-backup-resources-{{ cifmw_backup_restore_backup_name_suffix }}"
+      - "{% if (cifmw_backup_restore_baremetal | bool) and (_bmh_separate_namespace | default(false) | bool) %}BMH backup:       openstack-backup-bmh-{{ cifmw_backup_restore_backup_name_suffix }}{% else %}BMH backup:       n/a (baremetal disabled or BMHs in openstack namespace){% endif %}"
       - ""
       - "Operator version recorded on Backup CRs:"
       - "  CSV:     {{ _backup_csv_version }}"
