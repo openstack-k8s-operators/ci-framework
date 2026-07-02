@@ -37,17 +37,22 @@
   until: task_result is success
 
 - name: Install cephadm package from URL
-  become: true
   when:
     - cifmw_cephadm_rpm_url | length > 0
-  ansible.builtin.dnf:
-    name: "{{ cifmw_cephadm_rpm_url }}"
-    state: present
-    disable_gpg_check: true
-  register: task_result
-  retries: "{{ cifmw_cephadm_wait_install_retries }}"
-  delay: "{{ cifmw_cephadm_wait_install_delay }}"
-  until: task_result is success
+  block:
+    - name: Ensure cifmw_cephadm_rpm_url is valid
+      ansible.builtin.include_tasks: ensure_cifmw_cephadm_rpm_url.yml
+
+    - name: Install cephadm from URL
+      become: true
+      ansible.builtin.dnf:
+        name: "{{ cifmw_cephadm_rpm_url }}"
+        state: present
+        disable_gpg_check: true
+      register: task_result
+      retries: "{{ cifmw_cephadm_wait_install_retries }}"
+      delay: "{{ cifmw_cephadm_wait_install_delay }}"
+      until: task_result is success
 
 - name: Stat cephadm file
   ansible.builtin.stat:
