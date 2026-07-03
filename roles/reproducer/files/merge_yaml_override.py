@@ -56,11 +56,14 @@ DoubleQuoteDumper.add_representer(str, _str_representer)
 
 def deep_merge(base: object, override: object) -> object:
     """Take two parsed values;
-    return merge where both are dicts (recursive), else override wins."""
+    return merge where both are dicts (recursive), else override wins.
+    Empty dict in override replaces base value entirely."""
     if base is None:
         return override
     if override is None:
         return base
+    if isinstance(override, dict) and len(override) == 0:
+        return {}
     if isinstance(base, dict) and isinstance(override, dict):
         out = dict(base)
         for key, val in override.items():
