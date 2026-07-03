@@ -185,7 +185,7 @@ or `--skip-tags`:
 - `control-plane`: Deploys the control-plane on OpenShift by creating `OpenStackControlPlane` CRs when deploy-edpm.yml playbook is run.
 - `edpm`: Deploys the data-plane (External Data Plane Management) on RHEL nodes by creating `OpenStackDataPlane` CRs when deploy-edpm.yml playbook is run.
 - `admin-setup`: Denotes tasks to call the role [os_net_setup](../roles/os_net_setup.md) when deploy-edpm.yml playbook is run.
-- `run-tests`: Denotes tasks to call the roles [tempest](../roles/tempest.md) and/or [tobiko](../roles/tobiko.md) when deploy-edpm.yml playbook is run.
+- `run-tests`: Denotes tasks to call the role [test_operator](../roles/test_operator.md) when deploy-edpm.yml playbook is run.
 - `logs`: Denotes tasks which generate artifacts via the role [artifacts](../roles/artifacts.md) and when collect logs when deploy-edpm.yml playbook is run.
 
 For instance, if you want to bootstrap a hypervisor, and reuse it over and
