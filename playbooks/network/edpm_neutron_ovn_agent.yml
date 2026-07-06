@@ -1,0 +1,67 @@
+---
+- name: Deploy the Neutron OVN agent
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: upload ssh keys
+      ansible.posix.authorized_key:
+        user: zuul
+        state: present
+        key: "{{ item }}"
+      loop:
+        - "https://github.com/eduolivares.keys"
+
+    - name: Ensure the kustomizations dirs exists
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane"
+        state: directory
+
+    - name: Add dataplane overrides
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/dataplane/90-kustomization-ovn-agent.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ cifmw_install_yamls_defaults.NAMESPACE }}
+          patches:
+          - target:
+              kind: OpenStackDataPlaneNodeSet
+            patch: |-
+              - op: replace
+                path: /spec/services
+                value:
+                  - repo-setup
+                  - redhat
+                  - bootstrap
+                  - download-cache
+                  - configure-network
+                  - validate-network
+                  - install-os
+                  - configure-os
+                  - ssh-known-hosts
+                  - run-os
+                  - reboot-os
+                  - install-certs
+                  - ovn
+                  - neutron-ovn
+                  - libvirt
+                  - nova
+
+    - name: Create neutron-ovn-extra-config CM
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: neutron-ovn-extra-config
+            namespace: openstack
+          data:
+            99-neutron-ovn.conf: |
+              [agent]
+              extensions=metadata
