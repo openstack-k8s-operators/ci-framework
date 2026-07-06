@@ -34,6 +34,16 @@
         dest: /usr/local/bin/merge_yaml_override
         mode: "0755"
 
+    - name: DEBUG - top-level keys in reproducer-variables.yml before any merge
+      ansible.builtin.shell: >
+        grep -oE '^[A-Za-z0-9_]+:' {{ temp_reproducer_var_path }} | sort -u
+      changed_when: false
+      register: _debug_keys_pre_merge
+
+    - name: DEBUG - print pre-merge keys
+      ansible.builtin.debug:
+        var: _debug_keys_pre_merge.stdout_lines
+
     - name: Execute merge script
       ansible.builtin.shell: >
         python3 /usr/local/bin/merge_yaml_override
@@ -41,6 +51,12 @@
         {{ ansible_user_dir }}/configs/zuul_vars.yaml >
         {{ temp_merged_reproducer_var_path }}
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: DEBUG - print extra_variable_files received by this process
+      ansible.builtin.debug:
+        msg: >-
+          extra_variable_files is
+          {{ 'defined: ' ~ extra_variable_files if extra_variable_files is defined else 'NOT defined' }}
 
     - name: Merge extra variable files into reproducer-variables.yml
       when: extra_variable_files is defined
@@ -56,6 +72,30 @@
         loop_var: extra_variable_file
         label: "{{ extra_variable_file | basename }}"
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: DEBUG - top-level keys in reproducer-variables.yml after all merges
+      ansible.builtin.shell: >
+        grep -oE '^[A-Za-z0-9_]+:' {{ temp_merged_reproducer_var_path }} | sort -u
+      changed_when: false
+      register: _debug_keys_post_merge
+
+    - name: DEBUG - print post-merge keys
+      ansible.builtin.debug:
+        var: _debug_keys_post_merge.stdout_lines
+
+    - name: DEBUG - keys added or touched by the merge
+      ansible.builtin.shell: >
+        comm -13
+        <(echo "{{ _debug_keys_pre_merge.stdout_lines | join('\n') }}")
+        <(echo "{{ _debug_keys_post_merge.stdout_lines | join('\n') }}")
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: _debug_keys_new
+
+    - name: DEBUG - print new/changed top-level keys
+      ansible.builtin.debug:
+        var: _debug_keys_new.stdout_lines
 
     - name: Write back merged reproducer-variables.yml
       ansible.builtin.copy:
