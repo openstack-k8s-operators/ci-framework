@@ -597,7 +597,36 @@
   changed_when: true
 
 # ========================================
-# Step 11: Restore DataPlane (Order 60)
+# Step 11: Sync Octavia to OVN (optional)
+# ========================================
+# Only when Octavia with OVN provider is deployed. Repopulates OVN NB DB
+# with load balancer entries from Octavia's database.
+# Ref: https://docs.openstack.org/ovn-octavia-provider/latest/admin/driver.html#octavia-db-to-ovn-database-population
+- name: Check if Octavia is enabled
+  ansible.builtin.shell: |
+    oc get openstackcontrolplane {{ _ctlplane_name.stdout }} \
+      -n {{ cifmw_backup_restore_namespace }} \
+      -o jsonpath='{.spec.octavia.enabled}'
+  register: _octavia_enabled
+  changed_when: false
+
+- name: Sync Octavia load balancers to OVN
+  ansible.builtin.shell: |
+    oc exec -n {{ cifmw_backup_restore_namespace }} \
+      -c octavia-api deploy/octavia-api -- \
+      octavia-ovn-db-sync-util
+  register: _octavia_ovn_sync
+  when: _octavia_enabled.stdout == 'true'
+  changed_when: true
+
+- name: Report Octavia OVN sync result
+  ansible.builtin.debug:
+    msg: >-
+      Octavia OVN sync:
+      {{ 'completed' if _octavia_enabled.stdout == 'true' else 'skipped (Octavia not enabled)' }}.
+
+# ========================================
+# Step 12: Restore DataPlane (Order 60)
 # ========================================
 - name: Render dataplane restore
   ansible.builtin.template:
@@ -617,10 +646,10 @@
   ansible.builtin.include_tasks: wait_for_restore.yml
   vars:
     _restore_name: "openstack-restore-60-dataplane-{{ _restore_suffix }}"
-    _step_name: "Step 11 (DataPlane restore)"
+    _step_name: "Step 12 (DataPlane restore)"
 
 # ========================================
-# Step 12: EDPM Deployment
+# Step 13: EDPM Deployment
 # ========================================
 - name: Get DataPlaneNodeSet names
   ansible.builtin.shell: |
