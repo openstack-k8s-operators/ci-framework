@@ -1,75 +1,115 @@
 ---
-# NOTE(dpawlik): Earlier, our idea was to dump vars as
-# it is roles/cifmw_setup/tasks/bootstrap.yml and read it,
-# then dump it and replace reproducer-variables.yml.
-# Normally it make sense, but since we dump zuul_vars in
-# run.yml, we don't need to make such combination, which is
-# more safe - on making host variable dump, some variables
-# might not be defined, so later we can have an issue like:
-#     'cifmw_discovered_image_url' is undefined.
+# Merge current job variables into the stale reproducer-variables.yml
+# that was written during PreMetal Phase 1 (bootstrap).
+#
+#
+# The _filtered_vars filter MUST stay in sync with the one in
+# configure_controller.yml.  If they diverge, vars could be
+# included/excluded inconsistently between Phase 1 and Phase 2.
 
 - name: Check if zuul_vars.yaml file is available
   ansible.builtin.stat:
     path: "{{ ansible_user_dir }}/configs/zuul_vars.yaml"
   register: _current_zuul_vars
 
-- name: Overwrite reproducer-variables.yml when PreMetal used
+- name: Merge current vars into reproducer-variables.yml
   when: _current_zuul_vars.stat.exists
   vars:
-    temp_reproducer_var_path: /tmp/reproducer-variables.yml
-    temp_merged_reproducer_var_path: /tmp/merged-reproducer-variables.yml
+    _temp_dir: /tmp/premetal-var-merge
+    _temp_stale: "{{ _temp_dir }}/reproducer-variables-stale.yml"
+    _temp_current: "{{ _temp_dir }}/current-vars-dump.yml"
+    _temp_merged: "{{ _temp_dir }}/reproducer-variables-merged.yml"
+    # Same filter as configure_controller.yml -- keep in sync.
+    _filtered_vars: >-
+      {{
+        hostvars[inventory_hostname] | default({}) |
+        dict2items |
+        selectattr('key', 'match',
+                   '^(pre|post|cifmw)_(?!install_yamls|devscripts).*') |
+        rejectattr('key', 'equalto', 'cifmw_target_host') |
+        rejectattr('key', 'equalto', 'cifmw_basedir') |
+        rejectattr('key', 'equalto', 'cifmw_path') |
+        rejectattr('key', 'equalto', 'cifmw_extras') |
+        rejectattr('key', 'equalto', 'cifmw_openshift_kubeconfig') |
+        rejectattr('key', 'equalto', 'cifmw_openshift_token') |
+        rejectattr('key', 'equalto', 'cifmw_networking_env_definition') |
+        rejectattr('key', 'match', '^cifmw_use_(?!lvms).*') |
+        rejectattr('key', 'match', '^cifmw_reproducer.*') |
+        rejectattr('key', 'match', '^cifmw_rhol.*') |
+        rejectattr('key', 'match', '^cifmw_libvirt_manager.*') |
+        rejectattr('key', 'match', '^cifmw_manage_secrets_(pullsecret|citoken).*') |
+        items2dict
+      }}
   block:
-    - name: Fetch reproducer-variables.yml from controller-0
+    - name: Create temp directory for merge workspace
+      ansible.builtin.file:
+        path: "{{ _temp_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Fetch stale reproducer-variables.yml from controller-0
       ansible.builtin.fetch:
         src: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
-        dest: "{{ temp_reproducer_var_path }}"
+        dest: "{{ _temp_stale }}"
         flat: true
       delegate_to: controller-0
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
-    - name: Copy merge yamls script
+    - name: Dump current hostvars through reproducer-variables filter
+      ansible.builtin.copy:
+        content: "{{ _filtered_vars | to_nice_yaml }}"
+        dest: "{{ _temp_current }}"
+        mode: "0644"
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Copy merge script
       become: true
       ansible.builtin.copy:
         src: merge_yaml_override.py
         dest: /usr/local/bin/merge_yaml_override
         mode: "0755"
 
-    - name: Execute merge script
-      ansible.builtin.shell: >
-        python3 /usr/local/bin/merge_yaml_override
-        {{ temp_reproducer_var_path }}
-        {{ ansible_user_dir }}/configs/zuul_vars.yaml >
-        {{ temp_merged_reproducer_var_path }}
+    - name: Deep-merge current vars over stale reproducer-variables.yml
+      ansible.builtin.command:
+        cmd: >-
+          python3 /usr/local/bin/merge_yaml_override
+          {{ _temp_stale }}
+          {{ _temp_current }}
+          {{ _temp_merged }}
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     - name: Merge extra variable files into reproducer-variables.yml
       when: extra_variable_files is defined
-      ansible.builtin.shell: >
-        python3 /usr/local/bin/merge_yaml_override
-        {{ temp_merged_reproducer_var_path }}
-        {{ extra_variable_file }} >
-        {{ temp_merged_reproducer_var_path }}.tmp &&
-        mv {{ temp_merged_reproducer_var_path }}.tmp
-        {{ temp_merged_reproducer_var_path }}
+      ansible.builtin.command:
+        cmd: >-
+          python3 /usr/local/bin/merge_yaml_override
+          {{ _temp_merged }}
+          {{ extra_variable_file }}
+          {{ _temp_merged }}
       loop: "{{ extra_variable_files }}"
       loop_control:
         loop_var: extra_variable_file
         label: "{{ extra_variable_file | basename }}"
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
-    - name: Write back merged reproducer-variables.yml
+    - name: Write merged reproducer-variables.yml back to controller-0
       ansible.builtin.copy:
-        src: "{{ temp_merged_reproducer_var_path }}"
+        src: "{{ _temp_merged }}"
         dest: "{{ cifmw_basedir }}/parameters/reproducer-variables.yml"
         mode: "0664"
         backup: true
-      no_log: "{{ cifmw_nolog | default(true) | bool }}"
       delegate_to: controller-0
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
-    - name: Overwrite custom-params.yml
+    - name: Update custom-params.yml on controller-0
       ansible.builtin.copy:
-        src: "{{ temp_merged_reproducer_var_path }}"
+        src: "{{ _temp_merged }}"
         dest: "{{ cifmw_basedir }}/artifacts/parameters/custom-params.yml"
         mode: "0664"
-      no_log: "{{ cifmw_nolog | default(true) | bool }}"
       delegate_to: controller-0
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+
+    - name: Clean up temp merge workspace
+      ansible.builtin.file:
+        path: "{{ _temp_dir }}"
+        state: absent
