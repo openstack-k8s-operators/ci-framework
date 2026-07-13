@@ -69,25 +69,19 @@
                   }}
 
             - name: Fetch CRI-O unit logs per node
-              ansible.builtin.command:
-                cmd: >-
-                  oc adm node-logs "{{ item }}" -u crio
-                  --since=-24h
+              ansible.builtin.shell: |
+                set -o pipefail
+                oc adm node-logs "{{ item }}" -u crio --since=-24h \
+                  > {{ cifmw_env_op_images_crio_logs_dir }}/{{ item | regex_replace('[^A-Za-z0-9._-]+', '_') }}.crio.log
               loop: "{{ _verify_crio_node_names | default([]) }}"
+              loop_control:
+                label: "{{ item }}"
               timeout: 120
               failed_when: false
               register: _verify_crio_fetch
-
-            # Filename is sanitised to avoid path-traversal with unusual node names.
-            - name: Write CRI-O logs to files per node
-              ansible.builtin.copy:
-                dest: "{{ cifmw_env_op_images_crio_logs_dir }}/{{ item.item | regex_replace('[^A-Za-z0-9._-]+', '_') }}.crio.log"
-                content: "{{ item.stdout }}"
-                mode: "0644"
-              loop: "{{ _verify_crio_fetch.results | default([]) }}"
-              loop_control:
-                label: "{{ item.item | default('') }}"
-              when: item.rc | default(1) == 0
+              changed_when: false
+              args:
+                executable: /bin/bash
 
             # Non-fatal: some nodes may be unreachable (e.g. NotReady).
             - name: Warn when node log fetch failed for a node

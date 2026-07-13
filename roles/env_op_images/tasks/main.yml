@@ -44,23 +44,16 @@
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
+  vars:
+    _related_images_cache: "{{ (cifmw_env_op_images_dir, 'artifacts', '.related_images.json') | path_join }}"
   block:
-    - name: Get images from the CSV
-      ansible.builtin.command:
-        cmd: >-
-          oc get ClusterServiceVersion
-          -l operators.coreos.com/openstack-operator.openstack-operators
-          --all-namespaces
-          -o yaml
-      register: _csvs_out
-
     - name: Get the images name
-      ansible.builtin.shell: >
-        set -o pipefail;
-        oc get ClusterServiceVersion
-        -l operators.coreos.com/openstack-operator.openstack-operators
-        --all-namespaces
-        -o json |
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get ClusterServiceVersion \
+          -l operators.coreos.com/openstack-operator.openstack-operators \
+          --all-namespaces \
+          -o json |
         jq -r '
         [.items[]? |
         .spec.install.spec.deployments[]? |
@@ -68,14 +61,19 @@
         .env[]? |
         select(.name? | test("^RELATED_IMAGE")) |
         select(.name | contains("MANAGER")) |
-        {(.name): .value} ]'
-      register: _sa_images_content
+        {(.name): .value} ]' > {{ _related_images_cache }}
+      changed_when: false
       args:
         executable: /bin/bash
 
+    - name: Load related images from cache
+      ansible.builtin.slurp:
+        path: "{{ _related_images_cache }}"
+      register: _related_images_slurp
+
     - name: Extract env variable name and images
       ansible.builtin.set_fact:
-        cifmw_openstack_service_images_content: "{{ _sa_images_content.stdout | from_json }}"
+        cifmw_openstack_service_images_content: "{{ _related_images_slurp.content | b64decode | from_json }}"
 
     - name: Get all pods from all namespaces to find openstack-operator-index
       kubernetes.core.k8s_info:
@@ -95,15 +93,25 @@
         cifmw_install_yamls_vars_content:
           OPENSTACK_IMG: "{{ selected_pod.status.containerStatuses[0].imageID }}"
 
+    - name: Get operator namespace from CSV
+      ansible.builtin.command:
+        cmd: >-
+          oc get ClusterServiceVersion
+          -l operators.coreos.com/openstack-operator.openstack-operators
+          --all-namespaces
+          -o jsonpath='{.items[0].metadata.namespace}'
+      register: _operator_csv_namespace
+      changed_when: false
+      failed_when: false
+
     - name: Get all the pods in openstack-operator namespace
-      vars:
-        csv_items: "{{ (_csvs_out.stdout | from_yaml)['items'] }}"
       kubernetes.core.k8s_info:
         kind: Pod
         namespace: >-
           {{
-            ((csv_items | first).metadata.namespace)
-            if csv_items | length > 0 else omit
+            _operator_csv_namespace.stdout
+            if (_operator_csv_namespace.stdout | default('') | length) > 0
+            else omit
           }}
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
         api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -129,21 +137,22 @@
                            rejectattr('metadata.generateName', 'contains', 'watcher-operator-index-')
                         }}"
 
+    - name: Build operator images dictionary
+      when: not cifmw_env_op_images_dryrun | bool
+      ansible.builtin.set_fact:
+        _operator_images_dict: >-
+          {%- set d = {} -%}
+          {%- for p in selected_pods -%}
+          {%-   set _ = d.update({ (p.metadata.labels['openstack.org/operator-name'] | upper ~ '_OP_IMG'): ((p.status.containerStatuses | last).imageID) }) -%}
+          {%- endfor -%}
+          {{ d }}
+      no_log: true
+
     - name: Add operator images to the dictionary
       when: not cifmw_env_op_images_dryrun | bool
       ansible.builtin.set_fact:
-        cifmw_openstack_operator_images_content: >-
-          {{
-            cifmw_openstack_operator_images_content |
-            combine(
-              {
-                item.metadata.labels['openstack.org/operator-name'] | upper ~ '_OP_IMG': (item.status.containerStatuses | last).imageID
-              }
-            )
-          }}
-      loop: "{{ selected_pods }}"
-      loop_control:
-        label: "{{ item.metadata.name }}"
+        cifmw_openstack_operator_images_content: "{{ cifmw_openstack_operator_images_content | combine(_operator_images_dict | default({})) }}"
+      no_log: true
 
     - name: Write images to file
       vars:
