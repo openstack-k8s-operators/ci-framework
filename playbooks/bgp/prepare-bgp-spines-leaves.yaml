@@ -272,9 +272,25 @@
         state: present
       when: _ip_version == 6
 
+    - name: Assign loopback IPv4 on router loopback interface
+      when:
+        - _ip_version == 4
+        - (router_loopback_ip | default('') | length) > 0
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          ip address replace {{ router_loopback_ip }}/32 dev lo
+      changed_when: true
+
     - name: Configure FRR
       vars:
-        _router_id: "{{ '' if _ip_version == 4 else '1.1.1.1' }}"
+        # Prefer loopback IP as BGP router-id when set; else 1.1.1.1 (IPv4 and IPv6).
+        _router_id: >-
+          {{
+            router_loopback_ip
+            if (router_loopback_ip | default('') | length) > 0
+            else '1.1.1.1'
+          }}
       become: true
       ansible.builtin.template:
         src: templates/router-frr.conf.j2
