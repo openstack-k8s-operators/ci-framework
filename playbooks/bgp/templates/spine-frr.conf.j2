@@ -13,7 +13,8 @@ debug bgp neighbor-events
 debug bgp updates
 debug bgp update-groups
 
-router bgp 65000
+{% set _downlink_as_mode = spine_downlink_remote_as | default('external') %}
+router bgp {{ spine_asn | default(65000) }}
 {% if _router_id %}
   bgp router-id {{_router_id}}
 {% endif %}
@@ -21,7 +22,7 @@ router bgp 65000
   bgp graceful-shutdown
 
   neighbor downlink peer-group
-  neighbor downlink remote-as external
+  neighbor downlink remote-as {{ _downlink_as_mode }}
   neighbor downlink bfd
   neighbor downlink bfd profile tripleo
   ! neighbor downlink capability extended-nexthop
@@ -31,7 +32,7 @@ router bgp 65000
 
 {% if router_bool | default(false) %}
   neighbor uplink peer-group
-  neighbor uplink remote-as internal
+  neighbor uplink remote-as {{ spine_uplink_remote_as | default('internal') }}
   neighbor uplink bfd
   neighbor uplink bfd profile tripleo
   ! neighbor uplink capability extended-nexthop
@@ -42,6 +43,9 @@ router bgp 65000
     redistribute connected
     neighbor downlink default-originate
     neighbor downlink prefix-list only-host-prefixes in
+{% if _downlink_as_mode == 'internal' %}
+    neighbor downlink route-reflector-client
+{% endif %}
 {% if router_bool | default(false) %}
     neighbor uplink prefix-list only-default-host-prefixes in
     neighbor uplink next-hop-self
@@ -53,6 +57,9 @@ router bgp 65000
     neighbor downlink activate
     neighbor downlink default-originate
     neighbor downlink prefix-list only-host-prefixes in
+{% if _downlink_as_mode == 'internal' %}
+    neighbor downlink route-reflector-client
+{% endif %}
 {% if router_bool | default(false) %}
     neighbor uplink activate
     neighbor uplink prefix-list only-default-host-prefixes in
