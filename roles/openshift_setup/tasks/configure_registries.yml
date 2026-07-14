@@ -37,6 +37,20 @@
             - "{{ cifmw_update_containers_registry }}"
           allowedRegistries: "{{ all_registries }}"
 
+- name: Print cifmw_openshift_setup_digest_mirrors value
+  ansible.builtin.debug:
+    msg:
+      - "Defined: {{ cifmw_openshift_setup_digest_mirrors is defined }}"
+      - "Type: {{ cifmw_openshift_setup_digest_mirrors | type_debug }}"
+      - "Value: {{ cifmw_openshift_setup_digest_mirrors | default('UNDEFINED') }}"
+
+- name: Print cifmw_catalog_manifect value
+  ansible.builtin.debug:
+    msg:
+      - "Defined: {{ cifmw_catalog_manifect is defined }}"
+      - "Type: {{ cifmw_catalog_manifect | type_debug }}"
+      - "Value: {{ cifmw_catalog_manifect | default('UNDEFINED') }}"
+
 - name: Create ImageDigestMirrorSet repository digest mirrors
   when:
     - cifmw_openshift_setup_digest_mirrors is defined
@@ -52,6 +66,16 @@
         name: registry-digest-mirrors
       spec:
         imageDigestMirrors: "{{ cifmw_openshift_setup_digest_mirrors }}"
+
+- name: Create CatalogSource for OpenStack operators
+  when:
+    - cifmw_catalog_manifect is defined
+    - cifmw_catalog_manifect | length > 0
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    definition: "{{ cifmw_catalog_manifect }}"
 
 #  If both ImageDigestMirrorSet and ImageTagMirrorSet are applied to the registries,
 # ITMS acts as a fallback for tag-based pulls, while IDMS provides the primary
