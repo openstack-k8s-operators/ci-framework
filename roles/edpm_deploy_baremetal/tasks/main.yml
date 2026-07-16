@@ -226,83 +226,83 @@
           oc wait pod -l name=ironic -n baremetal-operator-system --for=condition=Ready
           --timeout={{ cifmw_edpm_deploy_baremetal_wait_ironic_timeout_mins }}m
 
-    - name: Wait for OpenStack Provision Server pod to be created
+    - name: Wait for OpenStack Provision Server to be ready
       when:
         - (cifmw_install_yamls_environment.BAREMETAL_OS_IMG_TYPE | default('') | lower) != 'passthrough'
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc get po -l osp-provisionserver/name=openstack-edpm-ipam-provisionserver
-          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} -o name
-      register: cifmw_edpm_deploy_baremetal_provisionserver_pod_output
-      retries: "{{ cifmw_edpm_deploy_baremetal_wait_provisionserver_retries }}"
-      delay: 10
-      until: cifmw_edpm_deploy_baremetal_provisionserver_pod_output.stdout != ''
+      block:
+        - name: Wait for OpenStack Provision Server pod to be created
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command:
+            cmd: >-
+              oc get po -l osp-provisionserver/name=openstack-edpm-ipam-provisionserver
+              -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }} -o name
+          register: cifmw_edpm_deploy_baremetal_provisionserver_pod_output
+          retries: "{{ cifmw_edpm_deploy_baremetal_wait_provisionserver_retries }}"
+          delay: 10
+          until: cifmw_edpm_deploy_baremetal_provisionserver_pod_output.stdout != ''
 
-    - name: Wait for OpenStack Provision Server deployment to be available
-      when:
-        - (cifmw_install_yamls_environment.BAREMETAL_OS_IMG_TYPE | default('') | lower) != 'passthrough'
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc wait deployment openstack-edpm-ipam-provisionserver-openstackprovisionserver
-          -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-          --for condition=Available
-          --timeout={{ cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins }}m
+        - name: Wait for OpenStack Provision Server deployment to be available
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command:
+            cmd: >-
+              oc wait deployment openstack-edpm-ipam-provisionserver-openstackprovisionserver
+              -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
+              --for condition=Available
+              --timeout={{ cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins }}m
 
-    - name: Get OpenStack Provision Server status
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        api_key: "{{ cifmw_openshift_token | default(omit) }}"
-        context: "{{ cifmw_openshift_context | default(omit) }}"
-        api_version: baremetal.openstack.org/v1beta1
-        kind: OpenStackProvisionServer
-        name: openstack-edpm-ipam-provisionserver
-        namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
-      register: cifmw_edpm_deploy_baremetal_provisionserver
-      failed_when: cifmw_edpm_deploy_baremetal_provisionserver.resources | length == 0
-      changed_when: false
+        - name: Get OpenStack Provision Server status
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            api_key: "{{ cifmw_openshift_token | default(omit) }}"
+            context: "{{ cifmw_openshift_context | default(omit) }}"
+            api_version: baremetal.openstack.org/v1beta1
+            kind: OpenStackProvisionServer
+            name: openstack-edpm-ipam-provisionserver
+            namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
+          register: cifmw_edpm_deploy_baremetal_provisionserver
+          failed_when: cifmw_edpm_deploy_baremetal_provisionserver.resources | length == 0
+          changed_when: false
 
-    - name: Set OpenStack Provision Server local image checksum URL fallback
-      ansible.builtin.set_fact:
-        cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective: >-
-          {{
-            cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
-            if (
-              cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
-              | default('', true)
-              | trim | length
-            ) > 0
-            else
-            (
-              cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl
-              ~ '.sha256'
-            )
-          }}
+        - name: Set OpenStack Provision Server local image checksum URL fallback
+          ansible.builtin.set_fact:
+            cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective: >-
+              {{
+                cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
+                if (
+                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
+                  | default('', true)
+                  | trim | length
+                ) > 0
+                else
+                (
+                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl
+                  ~ '.sha256'
+                )
+              }}
 
-    - name: Verify OpenStack Provision Server image is reachable
-      ansible.builtin.uri:
-        url: "{{ cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl }}"
-        method: HEAD
-        status_code: 200
-      register: cifmw_edpm_deploy_baremetal_provisionserver_image_head
-      retries: 12
-      delay: 5
-      until: cifmw_edpm_deploy_baremetal_provisionserver_image_head.status == 200
+        - name: Verify OpenStack Provision Server image is reachable
+          ansible.builtin.uri:
+            url: "{{ cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl }}"
+            method: HEAD
+            status_code: 200
+          register: cifmw_edpm_deploy_baremetal_provisionserver_image_head
+          retries: 12
+          delay: 5
+          until: cifmw_edpm_deploy_baremetal_provisionserver_image_head.status == 200
 
-    - name: Verify OpenStack Provision Server image checksum is reachable
-      ansible.builtin.uri:
-        url: "{{ cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective }}"
-        method: HEAD
-        status_code: 200
-      register: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head
-      retries: 12
-      delay: 5
-      until: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head.status == 200
+        - name: Verify OpenStack Provision Server image checksum is reachable
+          ansible.builtin.uri:
+            url: "{{ cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective }}"
+            method: HEAD
+            status_code: 200
+          register: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head
+          retries: 12
+          delay: 5
+          until: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head.status == 200
 
     - name: Wait for baremetal nodes to reach 'provisioned' state
       environment:
