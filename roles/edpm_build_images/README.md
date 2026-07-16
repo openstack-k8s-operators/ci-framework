@@ -20,7 +20,7 @@ None
 * `cifmw_edpm_build_images_bootc`: (Boolean) Build the bootc image workflow. Default to false.
 * `cifmw_edpm_build_images_hardened_uefi_package`: (Boolean) Packaged `edpm-hardened-uefi` image inside a container image for distribution. Default to false.
 * `cifmw_edpm_build_images_ironic_python_agent_package`: (Boolean) Packaged  `ironic-python-agent-builder` image inside a container image for distribution. Default to false.
-* `cifmw_edpm_build_images_bootc_repo`: (String) Repository used to push the bootc container image. Default: `{{ cifmw_edpm_build_images_push_registry }}/edpm-bootc`.
+* `cifmw_edpm_build_images_bootc_repo`: (String) Repository used to push the bootc container image. Default: `{{ cifmw_edpm_build_images_push_registry }}/[{{ cifmw_edpm_build_images_push_registry_namespace }}/]edpm-bootc`.
 * `cifmw_edpm_build_images_bootc_repo_path`: (String) Path to the bootc content within `edpm-image-builder`.
 * `cifmw_edpm_build_images_bootc_base_image`: (String) Base bootc image used for the build. Default: `quay.io/centos-bootc/centos-bootc:stream9`.
 * `cifmw_edpm_build_images_bootc_builder_image`: (String) Bootc builder image used to produce the qcow2 artifact. Default: `quay.io/centos-bootc/bootc-image-builder:latest`.
