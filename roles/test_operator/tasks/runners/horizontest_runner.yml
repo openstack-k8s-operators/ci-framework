@@ -1,4 +1,29 @@
 ---
+- name: Fetch admin password from osp-secret
+  no_log: true
+  ansible.builtin.command:
+    cmd: >-
+      oc get secret osp-secret
+      -n {{ cifmw_test_operator_namespace }}
+      -o jsonpath='{.data.AdminPassword}'
+  register: _horizontest_admin_password_b64
+  failed_when: false
+  changed_when: false
+
+- name: Override admin password from osp-secret
+  no_log: true
+  when:
+    - _horizontest_admin_password_b64.rc == 0
+    - _horizontest_admin_password_b64.stdout | length > 0
+  ansible.builtin.set_fact:
+    stage_vars_dict: >-
+      {{
+        stage_vars_dict | combine({
+          'cifmw_test_operator_horizontest_admin_password':
+            _horizontest_admin_password_b64.stdout | b64decode
+        })
+      }}
+
 - name: Run horizontest job
   vars:
     run_test_fw: horizontest
