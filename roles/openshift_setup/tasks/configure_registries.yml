@@ -53,6 +53,115 @@
       spec:
         imageDigestMirrors: "{{ cifmw_openshift_setup_digest_mirrors }}"
 
+- name: Add catalog registry credentials to cluster pull-secret
+  when:
+    - cifmw_openshift_setup_catalog_registry_credentials is defined
+    - cifmw_openshift_setup_catalog_registry_credentials | length > 0
+  no_log: true
+  block:
+    - name: Get current cluster pull-secret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Secret
+        name: pull-secret
+        namespace: openshift-config
+      register: _cluster_pull_secret
+
+    - name: Merge catalog registry auth into cluster pull-secret
+      vars:
+        _current_auths: >-
+          {{
+            (_cluster_pull_secret.resources[0].data['.dockerconfigjson']
+             | b64decode | from_json).auths
+          }}
+        _catalog_auth: >-
+          {{
+            {
+              cifmw_openshift_setup_catalog_registry_credentials.registry: {
+                'auth': (
+                  cifmw_openshift_setup_catalog_registry_credentials.username ~ ':'
+                  ~ cifmw_openshift_setup_catalog_registry_credentials.password
+                ) | b64encode
+              }
+            }
+          }}
+        _merged:
+          auths: "{{ _current_auths | combine(_catalog_auth) }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: pull-secret
+            namespace: openshift-config
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: "{{ _merged | to_json | b64encode }}"
+
+- name: Add catalog registry to insecure and allowed registries
+  when:
+    - cifmw_openshift_setup_catalog_registry_credentials is defined
+    - cifmw_openshift_setup_catalog_registry_credentials.registry is defined
+  vars:
+    _catalog_reg: "{{ cifmw_openshift_setup_catalog_registry_credentials.registry }}"
+    all_registries: >-
+      {{
+        ([_catalog_reg] +
+         cifmw_openshift_setup_allowed_registries +
+         cifmw_openshift_setup_allowed_extra_registries) | unique
+      }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    merge_type: "merge"
+    definition:
+      apiVersion: config.openshift.io/v1
+      kind: Image
+      metadata:
+        name: cluster
+      spec:
+        registrySources:
+          insecureRegistries:
+            - "{{ _catalog_reg }}"
+          allowedRegistries: "{{ all_registries }}"
+
+- name: Wait for MachineConfigPools to settle after registry changes
+  when:
+    - cifmw_openshift_setup_digest_mirrors is defined
+    - cifmw_openshift_setup_digest_mirrors | length > 0
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -eo pipefail
+      MCP_JSON=$(oc get mcp -o json)
+      UPDATING=$(echo "$MCP_JSON" | jq -r '
+        .items[] |
+        select(
+          .status.conditions // [] |
+          map(select(.type == "Updating" and .status == "True")) |
+          length > 0
+        ) | .metadata.name')
+      if [ -z "$UPDATING" ]; then
+        echo "All MCPs settled."
+        exit 0
+      fi
+      echo "MCPs still updating: $UPDATING"
+      exit 1
+  register: _mcp_settle
+  until: _mcp_settle.rc == 0
+  retries: 60
+  delay: 30
+  changed_when: false
+
 #  If both ImageDigestMirrorSet and ImageTagMirrorSet are applied to the registries,
 # ITMS acts as a fallback for tag-based pulls, while IDMS provides the primary
 # secure source for digests
