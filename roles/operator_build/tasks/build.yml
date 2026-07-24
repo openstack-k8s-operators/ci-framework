@@ -38,14 +38,30 @@
       ansible.builtin.set_fact:
         operator_api_path: "github.com/{{ cifmw_operator_build_org }}/{{ operator.name }}/{{ operator_base_module_name }}"
 
+- name: "{{ operator.name }} - Build pseudo-version from commit metadata"  # noqa: name[template]
+  ansible.builtin.shell: |
+    set -e
+    commit_date=$(TZ=UTC git log -1 --format='%cd' --date=format:'%Y%m%d%H%M%S' {{ operator.pr_sha }})
+    short_hash=$(echo "{{ operator.pr_sha }}" | cut -c1-12)
+    echo "v0.0.0-${commit_date}-${short_hash}"
+  args:
+    chdir: "{{ operator.src }}"
+  register: pseudo_version_out
+  when:
+    - cifmw_operator_build_meta_build
+    - operator.name != cifmw_operator_build_meta_name
+    - operator.pr_owner is defined
+    - operator.pr_sha is defined
+    - operator_base_module
+
 - name: "{{ operator.name }} - Update the go.mod file in meta operator for provided PR_SHA"  # noqa: name[template]
   ansible.builtin.shell: |
     set -e
-    go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+    go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ pseudo_version_out.stdout | trim }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+      go mod edit -replace {{ operator_api_path }}=github.com/{{ operator.pr_owner }}/{{ operator_base_module_name }}@{{ pseudo_version_out.stdout | trim }}
       go mod tidy
       popd
     fi
@@ -68,14 +84,29 @@
   ansible.builtin.set_fact:
     pr_sha: "{{ operator.pr_sha | default(git_head_out.stdout | trim) }}"
 
+- name: "{{ operator.name }} - Build pseudo-version from HEAD commit"  # noqa: name[template]
+  ansible.builtin.shell: |
+    set -e
+    commit_date=$(TZ=UTC git log -1 --format='%cd' --date=format:'%Y%m%d%H%M%S' HEAD)
+    short_hash=$(git log -1 --format='%H' HEAD | cut -c1-12)
+    echo "v0.0.0-${commit_date}-${short_hash}"
+  args:
+    chdir: "{{ operator.src }}"
+  register: pseudo_version_out
+  when:
+    - cifmw_operator_build_meta_build
+    - operator.name != cifmw_operator_build_meta_name
+    - operator.pr_owner is not defined
+    - operator_base_module
+
 - name: "{{ operator.name }} - Update the go.mod file using latest commit if no PR is provided"  # noqa: name[template]
   ansible.builtin.shell: |
     set -e
-    go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+    go mod edit -replace {{ operator_api_path }}={{ operator_api_path }}@{{ pseudo_version_out.stdout | trim }}
     go mod tidy
     if [ -d ./apis ]; then
       pushd ./apis/
-      go mod edit -replace {{ operator_api_path }}={{ operator.src }}/{{ operator_base_module_name }}
+      go mod edit -replace {{ operator_api_path }}={{ operator_api_path }}@{{ pseudo_version_out.stdout | trim }}
       go mod tidy
       popd
     fi
