@@ -16,23 +16,130 @@
 
 - name: Command execution block
   block:
-    - name: Execute in the pod the command '{{ command }}'
+    - name: Kill any previous background command and clear markers
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ pod_name }}"
+        command: >-
+          bash -c 'if [ -f /tmp/cifmw_cmd_pid ]; then
+          kill $(cat /tmp/cifmw_cmd_pid) 2>/dev/null;
+          wait $(cat /tmp/cifmw_cmd_pid) 2>/dev/null; fi;
+          rm -f /tmp/cifmw_cmd_rc /tmp/cifmw_cmd_pid
+          /tmp/cifmw_cmd_script.sh /tmp/cifmw_cmd_output.log'
+      changed_when: false
+      failed_when: false
+
+    - name: Copy the command script into the pod
+      kubernetes.core.k8s_cp:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ pod_name }}"
+        remote_path: /tmp/cifmw_cmd_script.sh
+        content: |
+          #!/bin/bash
+          {{ command }}
+        state: to_pod
+
+    - name: Execute detached in the pod - {{ command }}
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ pod_name }}"
+        command: >-
+          bash -c 'nohup bash -c "bash /tmp/cifmw_cmd_script.sh;
+          echo \$? > /tmp/cifmw_cmd_rc"
+          > /tmp/cifmw_cmd_output.log 2>&1 &
+          echo $! > /tmp/cifmw_cmd_pid && cat /tmp/cifmw_cmd_pid'
+      register: pod_command_result
+
+    - name: Wait for the command to complete in the pod
       environment:
         PATH: "{{ cifmw_path }}"
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
       ansible.builtin.command:
-        cmd: "oc rsh -n {{ namespace }} {{ pod_name }} bash -c '{{ command }}'"
-      register: pod_command_result
+        cmd: >-
+          oc exec -n {{ namespace }} {{ pod_name }} --
+          bash -c 'if cat /tmp/cifmw_cmd_rc 2>/dev/null; then exit 0;
+          elif [ -f /tmp/cifmw_cmd_pid ] && kill -0 $(cat /tmp/cifmw_cmd_pid) 2>/dev/null; then exit 1;
+          else exit 2; fi'
+      register: pod_exit_code
+      changed_when: false
+      failed_when: false
+      until: pod_exit_code.rc == 0 or pod_exit_code.rc == 2
+      retries: "{{ cifmw_shiftstack_exec_retries }}"
+      delay: "{{ cifmw_shiftstack_exec_delay }}"
+
+    - name: Fail if the background process died without writing the marker
+      ansible.builtin.fail:
+        msg: >-
+          The background process in pod {{ pod_name }} exited without writing a result.
+          The command may have been killed by OOM or a signal.
+      when: pod_exit_code.rc == 2
+
+    - name: Fail if polling timed out
+      ansible.builtin.fail:
+        msg: >-
+          Timed out waiting for "{{ command }}" to complete
+          in pod {{ pod_name }} after {{ cifmw_shiftstack_exec_retries }} attempts.
+      when: pod_exit_code.rc != 0 and pod_exit_code.rc != 2
+
+    - name: Fail if the command failed inside the pod
+      ansible.builtin.fail:
+        msg: >-
+          "{{ command }}" failed inside the pod with
+          exit code {{ pod_exit_code.stdout | trim }}.
+      when:
+        - pod_exit_code.rc == 0
+        - (pod_exit_code.stdout | default('') | trim) != '0'
 
   rescue:
-    - name: Fail when the command module fails
+    - name: Kill background process on failure
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ pod_name }}"
+        command: >-
+          bash -c 'if [ -f /tmp/cifmw_cmd_pid ]; then
+          kill $(cat /tmp/cifmw_cmd_pid) 2>/dev/null; fi'
+      failed_when: false
+      changed_when: false
+
+    - name: Retrieve command output from pod
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ pod_name }}"
+        command: >-
+          bash -c 'tail -c 8192 /tmp/cifmw_cmd_output.log 2>/dev/null
+          || echo "(output not available)"'
+      register: pod_output_log
+      failed_when: false
+      changed_when: false
+
+    - name: Fail with diagnostic information
       ansible.builtin.fail:
-        msg: '"{{ command }}" command execution failed with exit code "{{ pod_command_result.rc }}" and error: "{{ pod_command_result.stderr }}".'
+        msg: >-
+          "{{ command }}" failed.
+          pod exit code: {{ pod_exit_code.stdout | default('N/A') | trim }},
+          output (last 8KB): {{ pod_output_log.stdout | default('(not retrieved)') }}
 
   always:
     - name: Command execution log saving block
       when: log_file_name | default(false)
       block:
+        - name: Retrieve command output for log
+          kubernetes.core.k8s_exec:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            namespace: "{{ namespace }}"
+            pod: "{{ pod_name }}"
+            command: >-
+              bash -c 'tail -c 16384 /tmp/cifmw_cmd_output.log 2>/dev/null
+              || echo "(output not available)"'
+          register: pod_output_for_log
+          failed_when: false
+          changed_when: false
+
         - name: Get current date and time
           ansible.builtin.command:
             cmd: date +"%Y_%m_%d-%H_%M_%S"
@@ -44,7 +151,9 @@
               namespace: "{{ namespace }}"
               pod_name: "{{ pod_name }}"
               command: "{{ command }}"
-              pod_command_result: "{{ pod_command_result }}"
+              pod_command_result: "{{ pod_command_result | default('N/A') }}"
+              pod_exit_code: "{{ pod_exit_code | default('N/A') }}"
+              pod_output: "{{ pod_output_for_log.stdout | default('N/A') }}"
           ansible.builtin.copy:
             content: "{{ command_info | to_nice_yaml }}"
             dest: "{{ cifmw_shiftstack_ansible_command_logs_dir }}/{{ current_date.stdout }}.{{ log_file_name }}"
