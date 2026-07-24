@@ -118,6 +118,30 @@
     - cifmw_libvirt_manager_mac_map is undefined
   ansible.builtin.include_tasks: generate_networking_data.yml
 
+- name: Ensure DNS/DHCP records exist when mac_map is pre-defined
+  when:
+    - cifmw_libvirt_manager_mac_map is defined
+  block:
+    - name: Load networking env definition if not already set
+      when:
+        - cifmw_networking_env_definition is not defined or
+          (cifmw_networking_env_definition.instances | default({}) | length == 0)
+      block:
+        - name: Read networking environment definition file
+          ansible.builtin.slurp:
+            path: "{{ cifmw_networking_mapper_networking_env_def_path | default('/etc/ci/env/networking-environment-definition.yml') }}"
+          register: _net_env_def_file
+
+        - name: Set networking env definition fact
+          ansible.builtin.set_fact:
+            cifmw_networking_env_definition: "{{ _net_env_def_file.content | b64decode | from_yaml }}"
+
+    - name: Create DNS/DHCP records
+      when:
+        - cifmw_networking_env_definition is defined
+        - cifmw_networking_env_definition.instances | default({}) | length > 0
+      ansible.builtin.include_tasks: create_dns_records.yml
+
 - name: Create group inventories
   when:
     - _cifmw_libvirt_manager_layout.vms[item].manage | default(true)
