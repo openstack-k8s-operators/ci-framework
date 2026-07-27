@@ -101,6 +101,18 @@
   delay: 5
   until: _cifmw_edpm_build_images_ipa_manifest_check.status == 200
 
+- name: Push bootc image to registry with tag {{ cifmw_edpm_build_images_tag }}
+  when: cifmw_edpm_build_images_bootc | bool
+  become: true
+  containers.podman.podman_image:
+    name: edpm-bootc
+    tag: "{{ cifmw_edpm_build_images_tag }}"
+    pull: false
+    push: true
+    push_args:
+      dest: >-
+        {{ cifmw_edpm_build_images_bootc_repo }}:{{ cifmw_edpm_build_images_tag }}
+
 - name: Push bootc qcow2 image to registry with tag {{ cifmw_edpm_build_images_tag }}
   when: cifmw_edpm_build_images_bootc | bool
   become: true
@@ -120,6 +132,22 @@
       {{ cifmw_edpm_build_images_bootc_repo | split('/', 1) | first }}
     _cifmw_edpm_build_images_bootc_repository: >-
       {{ cifmw_edpm_build_images_bootc_repo | split('/', 1) | last }}
+
+- name: Verify bootc image manifest is available in registry
+  when: cifmw_edpm_build_images_bootc | bool
+  ansible.builtin.uri:
+    url: >-
+      http://{{ _cifmw_edpm_build_images_bootc_registry }}/v2/{{
+      _cifmw_edpm_build_images_bootc_repository
+      }}/manifests/{{ cifmw_edpm_build_images_tag }}
+    method: GET
+    headers:
+      Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
+    status_code: 200
+  register: _cifmw_edpm_build_images_bootc_native_manifest_check
+  retries: 12
+  delay: 5
+  until: _cifmw_edpm_build_images_bootc_native_manifest_check.status == 200
 
 - name: Verify bootc qcow2 image manifest is available in registry
   when: cifmw_edpm_build_images_bootc | bool
