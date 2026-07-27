@@ -86,6 +86,17 @@
       ssh core@{{ vm_con_name }}
       "sudo growpart /dev/sda {{ _root_part }}; sudo unshare --mount -- bash -c 'mount -o remount,rw /sysroot && xfs_growfs /sysroot'"
 
+- name: "Wait for SSH access on {{ vm }}"
+  when:
+    - vm_type is match('^controller.*$')
+    - _cifmw_libvirt_manager_layout.vms[vm_type].start | default(true)
+  delegate_to: "{{ vm_con_name }}"
+  remote_user: "{{ _init_admin_user }}"
+  ansible.builtin.wait_for_connection:
+    timeout: 300
+    delay: 10
+    sleep: 15
+
 - name: "Manage ssh keys on {{ vm }}"
   when:
     - vm_type is match('^controller.*$')
@@ -96,33 +107,27 @@
     - name: "Inject private key on hosts {{ vm }}"
       delegate_to: "{{ vm_con_name }}"
       remote_user: "{{ _init_admin_user }}"
-      ignore_unreachable: true
       ansible.builtin.copy:
         dest: "/home/{{ _user }}/.ssh/id_cifw"
         content: "{{ priv_key }}"
         owner: "{{ _user }}"
         group: "{{ _user }}"
         mode: "0400"
-      retries: 5
-      delay: 30
+      retries: 3
+      delay: 10
       register: _inject_private_key
-      until: >-
-        _inject_private_key is not failed and
-        not (_inject_private_key.unreachable | default(false))
+      until: _inject_private_key is success
 
     - name: "Inject public key on hosts {{ vm }}"
       delegate_to: "{{ vm_con_name }}"
       remote_user: "{{ _init_admin_user }}"
-      ignore_unreachable: true
       ansible.builtin.copy:
         dest: "/home/{{ _user }}/.ssh/id_cifw.pub"
         content: "{{ pub_key }}"
         owner: "{{ _user }}"
         group: "{{ _user }}"
         mode: "0444"
-      retries: 5
-      delay: 30
+      retries: 3
+      delay: 10
       register: _inject_public_key
-      until: >-
-        _inject_public_key is not failed and
-        not (_inject_public_key.unreachable | default(false))
+      until: _inject_public_key is success
