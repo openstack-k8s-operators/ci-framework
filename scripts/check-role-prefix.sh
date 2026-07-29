@@ -8,6 +8,15 @@ if [ -z "$GITHUB_BASE_REF" ]; then
     exit 0
 fi
 
+# Skip prefix check for automated cherry-pick PRs.
+# The Prow cherrypicker robot creates branches matching cherry-pick-*
+# and does not preserve role prefixes in commit messages.
+# The original PR already passed this check.
+if [[ "${GITHUB_HEAD_REF:-}" == cherry-pick-* ]]; then
+    echo "Cherry-pick PR detected (branch: $GITHUB_HEAD_REF) - skipping prefix check"
+    exit 0
+fi
+
 echo "Checking all commits in PR against base: origin/${GITHUB_BASE_REF}"
 echo ""
 
