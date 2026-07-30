@@ -155,13 +155,9 @@ Default value: {}
 * `cifmw_test_operator_horizontest_debug`: (Bool) Run HorizonTest in debug mode, it keeps the operator pod sleeping infinitely (it must only set to `true` only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_horizontest_extra_flag`: (String) The extra flag to modify pytest command to include/exclude tests. Default value: `not pagination`
 * `cifmw_test_operator_horizontest_extra_mounts`: (List) A list of additional volume mounts for the horizontest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
-* `cifmw_test_operator_horizontest_flavor_name`: (String) The name of the OpenStack flavor to create for Horizon tests. Default value: `m1.tiny`
 * `cifmw_test_operator_horizontest_horizon_repo_branch`: (String) The branch of the Horizon repository to checkout. Default value: `master`
-* `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
 * `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_horizontest_registry }}/{{ stage_vars_dict.cifmw_test_operator_horizontest_namespace }}/{{ stage_vars_dict.cifmw_test_operator_horizontest_container }}`
 * `cifmw_test_operator_horizontest_image_tag`: (String) Tag for the `cifmw_test_operator_horizontest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
-* `cifmw_test_operator_horizontest_image_url`: (String) The URL to download the Cirros image. Default value: `http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img`
-* `cifmw_test_operator_horizontest_logs_directory_name`: (String) The name of the directory to store test logs. Default value: `horizon`
 * `cifmw_test_operator_horizontest_name`: (String) Value used in the `Horizontest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `horizontest-tests`
 * `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `{{ cifmw_test_operator_default_namespace }}`
 * `cifmw_test_operator_horizontest_project_name_xpath`: (String) The xpath to select project name based on dashboard theme. Default value: `//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
