@@ -1,5 +1,5 @@
 ---
-# Test Cinder backup and restore capabilities across availability zones in dz-storage DT
+# Test Cinder backup and restore capabilities across availability zones in dz-storage/DCN DT
 # Tests three scenarios:
 # 1. AZ1 backs up to AZ1 and restores to AZ1
 # 2. AZ1 backs up to AZ2 and restores to AZ1
@@ -14,6 +14,39 @@
       KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default('/home/' + ansible_user | default('zuul') + '/.kube/config') }}"
       PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
   tasks:
+      - name: Wait for cinder-backup services to be up in all availability zones
+        block:
+            - name: Check cinder-backup service status
+              ansible.builtin.command: >-
+                oc rsh
+                -n {{ cifmw_openstack_namespace }}
+                openstackclient
+                openstack volume service list
+                --service cinder-backup
+                -c Host -c State
+                -f json
+              register: cinder_backup_service_status
+              until: >-
+                (cinder_backup_service_status.stdout | from_json | length > 0)
+                and ((cinder_backup_service_status.stdout | from_json)
+                | selectattr('State', 'equalto', 'down')
+                | list
+                | length == 0)
+              retries: 30
+              delay: 10
+        rescue:
+            - name: Show cinder-backup service status
+              ansible.builtin.debug:
+                  msg: >-
+                    Here is the output of openstack volume service list:
+                    {{ cinder_backup_service_status.stdout | default('<no output>') }}
+            - name: Fail because cinder-backup services are missing or still down
+              ansible.builtin.fail:
+                  msg: >-
+                    Timed out waiting for cinder-backup services to be up in all
+                    availability zones (or no cinder-backup services were found
+                    at all). See the debug output above for the last observed
+                    Host/State values.
     # ==================================================================================
     # Scenario 1: AZ1 backs up to AZ1 and restores to AZ1
     # ==================================================================================
