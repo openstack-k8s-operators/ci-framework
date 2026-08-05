@@ -180,6 +180,51 @@
   retries: 30
   delay: 10
 
+# RHSSO with externalAccess.enabled creates an Ingress on host keycloak.local.
+# That does not match cifmw_federation_keycloak_url (keycloak-<ns>.<domain>),
+# so the readiness probe gets 503. Create an explicit reencrypt Route with the
+# expected host. Use service CA as destinationCACertificate so clients that
+# trust the ingress CA still verify the backend (avoids the old passthrough SSL race).
+- name: Get OpenShift service CA for Keycloak Route
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_version: v1
+    kind: ConfigMap
+    name: openshift-service-ca.crt
+    namespace: "{{ cifmw_federation_keycloak_namespace }}"
+  register: _keycloak_service_ca_cm
+  until: >-
+    _keycloak_service_ca_cm.resources | length > 0 and
+    _keycloak_service_ca_cm.resources[0].data['service-ca.crt'] is defined
+  retries: 30
+  delay: 10
+
+- name: Create Route for Keycloak
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: keycloak
+        namespace: "{{ cifmw_federation_keycloak_namespace }}"
+      spec:
+        host: "keycloak-{{ cifmw_federation_keycloak_namespace }}.{{ cifmw_federation_domain }}"
+        to:
+          kind: Service
+          name: keycloak
+        port:
+          targetPort: keycloak
+        tls:
+          termination: reencrypt
+          insecureEdgeTerminationPolicy: Redirect
+          destinationCACertificate: "{{ _keycloak_service_ca_cm.resources[0].data['service-ca.crt'] }}"
+  register: _keycloak_route
+  until: _keycloak_route is succeeded
+  retries: 30
+  delay: 10
+
 - name: Grant privileged SCC to namespace default serviceaccount for Keycloak
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
