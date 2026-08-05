@@ -191,6 +191,47 @@
               combine({'cifmw_test_operator_tempest_workflow': overriden_workflow})
           }}
 
+- name: Inject whitebox database password from osp-secret
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - >-
+        'whitebox-database.host' in
+        (test_operator_cr.spec.tempestconfRun.overrides | default(''))
+  block:
+    - name: Fetch database root password from osp-secret
+      no_log: true
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Secret
+        name: osp-secret
+        namespace: "{{ stage_vars_dict.cifmw_test_operator_namespace }}"
+      register: _tempest_osp_secret
+      failed_when: >-
+        _tempest_osp_secret.resources | default([]) | length == 0 or
+        _tempest_osp_secret.resources[0].data.DbRootPassword | default('') | length == 0
+
+    - name: Add whitebox database password to the overrides section in Tempest CR
+      no_log: true
+      vars:
+        _tempest_db_root_password: >-
+          {{ _tempest_osp_secret.resources[0].data.DbRootPassword | b64decode }}
+        _overrides_cleaned: >-
+          {{
+            (test_operator_cr.spec.tempestconfRun.overrides | default('')) |
+            regex_replace("whitebox-database\.password\s+.*?(\s+|$)", "") | trim
+          }}
+      ansible.builtin.set_fact:
+        test_operator_cr: >-
+          {{
+              test_operator_cr |
+              combine({'spec': {'tempestconfRun': {'overrides':
+                        (_overrides_cleaned | trim) + ' ' +
+                        'whitebox-database.password ' + _tempest_db_root_password
+                      }}}, recursive=true)
+          }}
+
 - name: Make sure resources are not set for worklfow step
   when:
     - not cifmw_test_operator_dry_run | bool
