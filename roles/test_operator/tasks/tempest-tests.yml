@@ -191,6 +191,109 @@
               combine({'cifmw_test_operator_tempest_workflow': overriden_workflow})
           }}
 
+# Prefer k8s_info over bare `oc get` so kubeconfig/token match the rest of this role.
+- name: Fetch database root password from osp-secret
+  no_log: true
+  when: not cifmw_test_operator_dry_run | bool
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Secret
+    name: osp-secret
+    namespace: "{{ stage_vars_dict.cifmw_test_operator_namespace }}"
+  register: _tempest_osp_secret
+  failed_when: false
+
+- name: Set whitebox database password fact from osp-secret
+  no_log: true
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _tempest_osp_secret is defined
+    - _tempest_osp_secret.resources | default([]) | length > 0
+    - _tempest_osp_secret.resources[0].data.DbRootPassword is defined
+    - _tempest_osp_secret.resources[0].data.DbRootPassword | length > 0
+  ansible.builtin.set_fact:
+    _tempest_db_root_password: >-
+      {{ _tempest_osp_secret.resources[0].data.DbRootPassword | b64decode }}
+
+- name: Fail when whitebox needs DbRootPassword but osp-secret is unavailable
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - >-
+        'whitebox-database.host' in
+        (test_operator_cr.spec.tempestconfRun.overrides | default(''))
+    - _tempest_db_root_password is not defined
+  ansible.builtin.fail:
+    msg: >-
+      whitebox-database.host is configured but DbRootPassword could not be
+      read from Secret osp-secret in namespace
+      {{ stage_vars_dict.cifmw_test_operator_namespace }}.
+
+- name: Add whitebox database password to the overrides section in Tempest CR
+  no_log: true
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _tempest_db_root_password is defined
+  vars:
+    _overrides_cleaned: >-
+      {{
+        (test_operator_cr.spec.tempestconfRun.overrides | default('')) |
+        regex_replace('whitebox-database\\.password\\s+\\S+\\s*', '')
+      }}
+  ansible.builtin.set_fact:
+    test_operator_cr: >-
+      {{
+          test_operator_cr |
+          combine({'spec': {'tempestconfRun': {'overrides':
+                    (_overrides_cleaned | trim) + ' ' +
+                    'whitebox-database.password ' + _tempest_db_root_password
+                  }}}, recursive=true)
+      }}
+
+- name: Add whitebox database password to each workflow step overrides section
+  no_log: true
+  when:
+    - not cifmw_test_operator_dry_run | bool
+    - _tempest_db_root_password is defined
+    - stage_vars_dict.cifmw_test_operator_tempest_workflow | list | length > 0
+  block:
+    - name: Add whitebox database password to each workflow step - Create overriden_workflow
+      vars:
+        _overrides_cleaned: >-
+          {{
+            (item.tempestconfRun.overrides | default('')) |
+            regex_replace('whitebox-database\\.password\\s+\\S+\\s*', '')
+          }}
+        _db_pass_overriden_workflow_step: >-
+          {{
+              item
+              if (item.tempestconfRun is not defined or item.tempestconfRun.overrides is not defined)
+              else
+              item |
+              combine({'tempestconfRun': {'overrides':
+                (_overrides_cleaned | trim) + ' ' +
+                'whitebox-database.password ' + _tempest_db_root_password
+              }}, recursive=true)
+          }}
+      ansible.builtin.set_fact:
+        db_pass_overriden_workflow: >-
+          {{ db_pass_overriden_workflow | default([]) + [_db_pass_overriden_workflow_step] }}
+      loop: "{{ stage_vars_dict.cifmw_test_operator_tempest_workflow | list }}"
+
+    - name: Override the Tempest CR workflow with whitebox database password
+      ansible.builtin.set_fact:
+        test_operator_cr: >-
+          {{
+              test_operator_cr |
+              combine({'spec': {'workflow': db_pass_overriden_workflow}}, recursive=true)
+          }}
+        stage_vars_dict: >-
+          {{
+              stage_vars_dict |
+              combine({'cifmw_test_operator_tempest_workflow': db_pass_overriden_workflow})
+          }}
+
 - name: Make sure resources are not set for worklfow step
   when:
     - not cifmw_test_operator_dry_run | bool
