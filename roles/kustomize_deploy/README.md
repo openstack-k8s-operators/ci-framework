@@ -95,6 +95,41 @@ with a message.
   CR file for the DataPlane resources deploy. Defaults to
   `cifmw_kustomize_deploy_kustomizations_dest_dir + dataplane.yaml`
 
+### osp-secret randomization
+
+- `cifmw_kustomize_deploy_osp_secrets_special_keys`: _(dict)_ Keys in the
+  `osp-secret` that require a specific value format rather than a plain
+  alphanumeric password. Each entry maps a key name to its generation
+  parameters:
+  - `type: "hex"` — generates `length` random bytes as a hex string
+    (output is `length * 2` hex characters).
+  - `type: "base64"` — generates `length` random characters, then
+    base64-encodes.
+
+  Default:
+
+  ```yaml
+  cifmw_kustomize_deploy_osp_secrets_special_keys:
+    HeatAuthEncryptionKey:
+      type: "hex"
+      length: 16
+  ```
+
+- `cifmw_kustomize_deploy_osp_secrets_skip_keys`: _(list)_ Keys to leave
+  untouched by the general randomizer. Use this for keys that are managed
+  by a dedicated mechanism (e.g. `BarbicanSimpleCryptoKEK` is handled
+  separately with a Fernet key).
+  Default: `[BarbicanSimpleCryptoKEK]`.
+
+After each `kustomize build`, if the rendered manifest contains an
+`osp-secret` Secret, all data keys are randomized using a two-tier
+resolution:
+
+1. **Live cluster** — if `osp-secret` already exists in the target namespace,
+   its values take priority (preserves secrets across redeploys).
+2. **Generate** — a new random value is produced (respecting the special-keys
+   format rules). Keys in the skip list are never touched.
+
 ## Automation specificities
 
 ### Timeouts
