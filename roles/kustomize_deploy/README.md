@@ -95,6 +95,56 @@ with a message.
   CR file for the DataPlane resources deploy. Defaults to
   `cifmw_kustomize_deploy_kustomizations_dest_dir + dataplane.yaml`
 
+### osp-secrets randomization
+
+- `cifmw_kustomize_deploy_osp_secrets_env_path`: _(string)_ Relative path
+  (within the architecture repo) to the `osp-secrets.env` file whose default
+  hardcoded values are replaced with random ones before `kustomize build`.
+  Defaults to `lib/control-plane/base/osp-secrets.env`.
+
+- `cifmw_kustomize_deploy_osp_secrets_special_keys`: _(dict)_ Keys that
+  require a specific value format rather than a plain alphanumeric password.
+  Each entry maps a key name to its generation parameters:
+  - `type: "base64"` — generates `length` random bytes, then base64-encodes.
+  - `type: "hex"` — generates `length` random bytes as a hex string
+    (output is `length * 2` hex characters).
+
+  Default:
+
+  ```yaml
+  cifmw_kustomize_deploy_osp_secrets_special_keys:
+    HeatAuthEncryptionKey:
+      type: "hex"
+      length: 16
+  ```
+
+- `cifmw_kustomize_deploy_osp_secrets_skip_keys`: _(list)_ Keys to leave
+  unchanged (their original value from the architecture repo is preserved).
+  Use this for keys that are managed by a separate mechanism.
+  Default: `[BarbicanSimpleCryptoKEK]`.
+
+- `cifmw_kustomize_deploy_osp_secrets_cache_path`: _(string)_ Path to a
+  local file where generated secrets are cached between runs. On subsequent
+  runs the cached values are reused rather than regenerated.
+  Default: `{{ cifmw_kustomize_deploy_basedir }}/artifacts/osp-secrets-generated.env`.
+
+The randomization runs automatically after the architecture repo is cloned
+and before any kustomize build. For each key the task uses a three-tier
+resolution order:
+
+1. **Live cluster** — if the `osp-secret` K8s Secret already exists in the
+   target namespace, its values take priority (preserves secrets across
+   redeploys).
+2. **Local cache** — if a previous run cached the generated secrets on disk,
+   those values are reused.
+3. **Generate** — a new random value is produced (respecting the special-keys
+   format rules). Keys in the skip list are never touched.
+
+If the `.env` file does not exist in the architecture checkout (e.g. it was
+removed upstream), the task is silently skipped. If the cluster is
+unreachable the task falls through to the cache/generation layers without
+failing.
+
 ## Automation specificities
 
 ### Timeouts
