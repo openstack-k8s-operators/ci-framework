@@ -16,9 +16,9 @@ If apply, please explain the privilege escalation done in this role.
 * `cifmw_update_containers_name_prefix`: The container name prefix. Default to "openstack".
 * `cifmw_update_containers_org`: The container registry namespace to pull container from. Default to `{{ cifmw_default_container_image_namespace }}` (defined in group_vars/all.yml)
 * `cifmw_update_containers_tag`: The container tag. Default to `{{ cifmw_default_container_image_tag }}` (defined in group_vars/all.yml).
-* `cifmw_update_containers_cindervolumes`: The names of the cinder volumes prefix. Default to `[]`.
+* `cifmw_update_containers_cindervolumes`: The names of the cinder volume backends, used as keys under `customContainerImages.cinderVolumeImages`. Must match the backends in `OpenStackControlPlane.spec.cinder.template.cinderVolumes`. Default to `[]`.
 * `cifmw_update_containers_cindervolumes_extra`: Additional cinder volumes containers, meaning names and container URIs. Default to `{}`.
-* `cifmw_update_containers_manilashares`: The names of the manila shares prefix. Default to `[]`.
+* `cifmw_update_containers_manilashares`: The names of the manila share backends, used as keys under `customContainerImages.manilaShareImages`. Must match the backends in `OpenStackControlPlane.spec.manila.template.manilaShares`. Default to `[]`.
 * `cifmw_update_containers_agentimage`: Full Agent Image url for updating Agent Image.
 * `cifmw_update_containers_ceilometersgcoreImage`: Full Ceilometersgcore Image url for updating Ceilometersgcore Image.
 * `cifmw_update_containers_ceilometermysqldexporterImage`: Full Ceilometer mysqld_exporter Image url for updating Ceilometer mysqld_exporter Image.
@@ -46,6 +46,13 @@ If apply, please explain the privilege escalation done in this role.
       ansible.builtin.include_role:
         name: update_containers
 ```
+
+When updating Cinder volume or Manila share images, the keys under
+`customContainerImages.cinderVolumeImages` and
+`customContainerImages.manilaShareImages` must match the backend names defined
+in `OpenStackControlPlane`. Provide them via
+`cifmw_update_containers_cindervolumes` / `cifmw_update_containers_manilashares`.
+When empty, no per-backend image overrides are emitted.
 
 ### 2 - Update Ansibleee container image
 ```yaml
