@@ -28,47 +28,6 @@
     cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
     cifmw_update_containers_openstack: true
 
-- name: Prepare OpenStackVersion CR
-  when: >-
-      (cifmw_prepare_openstackversion | bool) and
-      ((cifmw_update_containers_edpm_image_url is defined and
-      cifmw_update_containers_openstack is defined and
-      cifmw_update_containers_openstack | bool) or
-      (cifmw_update_containers_ansibleee_image_url is defined) or
-      (cifmw_update_containers_openstack is defined and
-      cifmw_update_containers_openstack | bool) or
-      (cifmw_update_containers_custom_images is defined and
-      cifmw_update_containers_custom_images is mapping) or
-      (cifmw_update_containers_watcher is defined and
-      cifmw_update_containers_watcher | bool) or
-      (cifmw_update_containers_ceilometersgcoreImage is defined) or
-      (cifmw_update_containers_ceilometermysqldexporterImage is defined) or
-      (cifmw_update_containers_edpmpodmanexporterImage is defined))
-  vars:
-    cifmw_update_containers_metadata: "{{ _ctlplane_name }}"
-  ansible.builtin.include_role:
-    name: update_containers
-
-- name: Apply custom OpenStackVersion container overrides
-  when:
-    - cifmw_prepare_openstackversion | bool
-    - cifmw_set_containers_images is defined
-    - cifmw_set_containers_images | length > 0
-  cifmw.general.set_containers:
-    dest_path: >-
-      {{
-        cifmw_set_containers_dest_path | default(
-          (cifmw_edpm_prepare_basedir, 'artifacts', 'manifests', 'set_containers.yml') |
-          ansible.builtin.path_join
-        )
-      }}
-    metadata_name: "{{ _ctlplane_name }}"
-    namespace: "{{ cifmw_update_containers_namespace | default('openstack') }}"
-    apply: "{{ cifmw_set_containers_apply | default(true) | bool }}"
-    preserve_unlisted: "{{ cifmw_set_containers_preserve_unlisted | default(true) | bool }}"
-    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-    images: "{{ cifmw_set_containers_images }}"
-
 - name: Controlplane name kustomization
   ansible.builtin.set_fact:
     _ctlplane_name_kustomizations:
@@ -119,6 +78,137 @@
 - name: Log the CR that is about to be applied
   ansible.builtin.debug:
     var: cifmw_edpm_prepare_crs_kustomize_result
+
+# Runs after kustomize (so backends injected via kustomizations are visible) and
+# before the OSCP apply (so the OpenStackVersion custom images are seeded first).
+- name: Prepare OpenStackVersion CR
+  when: >-
+      (cifmw_prepare_openstackversion | bool) and
+      ((cifmw_update_containers_edpm_image_url is defined and
+      cifmw_update_containers_openstack is defined and
+      cifmw_update_containers_openstack | bool) or
+      (cifmw_update_containers_ansibleee_image_url is defined) or
+      (cifmw_update_containers_openstack is defined and
+      cifmw_update_containers_openstack | bool) or
+      (cifmw_update_containers_custom_images is defined and
+      cifmw_update_containers_custom_images is mapping) or
+      (cifmw_update_containers_watcher is defined and
+      cifmw_update_containers_watcher | bool) or
+      (cifmw_update_containers_ceilometersgcoreImage is defined) or
+      (cifmw_update_containers_ceilometermysqldexporterImage is defined) or
+       (cifmw_update_containers_edpmpodmanexporterImage is defined) or
+       ((cifmw_set_containers_images | default([])) | length > 0))
+  block:
+    - name: Derive cinder/manila backend names from the control plane CR
+      # Migration fallback: callers still passing cifmw_update_containers_cindervolumes /
+      # cifmw_update_containers_manilashares (e.g. component jobs) keep working until they
+      # migrate to the cifmw_edpm_prepare_* variables.
+      vars:
+        _ctlplane_spec: >-
+          {{
+            ((lookup('file', cifmw_edpm_prepare_crs_kustomize_result.output_path)
+              | from_yaml_all | selectattr('kind', 'equalto', 'OpenStackControlPlane')
+              | map(attribute='spec') | list) + [{}]) | first
+          }}
+      ansible.builtin.set_fact:
+        cifmw_edpm_prepare_cindervolumes: >-
+          {{
+            (cifmw_edpm_prepare_cindervolumes | default(cifmw_update_containers_cindervolumes | default([])))
+            or (((_ctlplane_spec.get('cinder') or {}).get('template') or {}).get('cinderVolumes') | default({}, true) | list)
+          }}
+        cifmw_edpm_prepare_manilashares: >-
+          {{
+            (cifmw_edpm_prepare_manilashares | default(cifmw_update_containers_manilashares | default([])))
+            or (((_ctlplane_spec.get('manila') or {}).get('template') or {}).get('manilaShares') | default({}, true) | list)
+          }}
+
+    - name: Generate the OpenStackVersion CR with custom images
+      cifmw.general.set_containers:
+        dest_path: >-
+          {{
+            cifmw_set_containers_dest_path | default(
+              (cifmw_basedir, 'artifacts', 'manifests', 'set_containers.yml') |
+              ansible.builtin.path_join
+            )
+          }}
+        metadata_name: "{{ _ctlplane_name }}"
+        namespace: "{{ cifmw_update_containers_namespace | default('openstack') }}"
+        preserve_unlisted: "{{ cifmw_set_containers_preserve_unlisted | default(true) | bool }}"
+        registry: >-
+          {{
+            cifmw_set_containers_registry |
+            default(cifmw_update_containers_registry | default(cifmw_default_registry))
+          }}
+        org: >-
+          {{
+            cifmw_set_containers_org |
+            default(cifmw_update_containers_org | default(cifmw_default_container_image_namespace))
+          }}
+        tag: >-
+          {{
+            cifmw_set_containers_tag |
+            default(cifmw_update_containers_tag | default(cifmw_default_container_image_tag))
+          }}
+        include_openstack: >-
+          {{
+            cifmw_set_containers_include_openstack |
+            default(cifmw_update_containers_openstack | default(false)) | bool
+          }}
+        apply: >-
+          {{
+            cifmw_set_containers_apply |
+            default(cifmw_update_containers | default(false)) | bool
+          }}
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        images: >-
+          {%- set _custom_images = [] -%}
+          {%- for _image_name, _image_uri in (cifmw_update_containers_custom_images | default({})).items() -%}
+          {%- set _ = _custom_images.append({'name': _image_name, 'full_registry': _image_uri}) -%}
+          {%- endfor -%}
+          {{
+            (cifmw_set_containers_images | default([])) +
+            _custom_images +
+            (
+              [{'name': 'cinderVolumeImages', 'container_suffix': 'cinder-volume', 'backends': cifmw_edpm_prepare_cindervolumes}]
+              if cifmw_edpm_prepare_cindervolumes else []
+            ) +
+            (
+              [{'name': 'manilaShareImages', 'container_suffix': 'manila-share', 'backends': cifmw_edpm_prepare_manilashares}]
+              if cifmw_edpm_prepare_manilashares else []
+            ) +
+            (
+              [{'name': 'osContainerImage', 'full_registry': cifmw_update_containers_edpm_image_url}]
+              if cifmw_update_containers_edpm_image_url is defined else []
+            ) +
+            (
+              [{'name': 'ironicPythonAgentImage', 'full_registry': cifmw_update_containers_ipa_image_url}]
+              if cifmw_update_containers_ipa_image_url is defined else []
+            ) +
+            (
+              [{'name': 'ansibleeeImage', 'full_registry': cifmw_update_containers_ansibleee_image_url}]
+              if cifmw_update_containers_ansibleee_image_url is defined else []
+            ) +
+            (
+              [{'name': 'ceilometerSgcoreImage', 'full_registry': cifmw_update_containers_ceilometersgcoreImage}]
+              if cifmw_update_containers_ceilometersgcoreImage is defined else []
+            ) +
+            (
+              [{'name': 'ceilometerMysqldExporterImage', 'full_registry': cifmw_update_containers_ceilometermysqldexporterImage}]
+              if cifmw_update_containers_ceilometermysqldexporterImage is defined else []
+            ) +
+            (
+              [{'name': 'edpmPodmanExporterImage', 'full_registry': cifmw_update_containers_edpmpodmanexporterImage}]
+              if cifmw_update_containers_edpmpodmanexporterImage is defined else []
+            ) +
+            (
+              [
+                {'name': 'watcherAPIImage', 'container_suffix': 'watcher-api'},
+                {'name': 'watcherApplierImage', 'container_suffix': 'watcher-applier'},
+                {'name': 'watcherDecisionEngineImage', 'container_suffix': 'watcher-decision-engine'}
+              ]
+              if (cifmw_update_containers_watcher | default(false) | bool) else []
+            )
+          }}
 
 - name: Apply the OpenStackControlPlane CR
   environment:
