@@ -14,37 +14,24 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: BGP pre_undercloud hook
+- name: BGP pre_overcloud hook
   hosts: "{{ cifmw_target_host | default('localhost') }}"
   gather_facts: false
   tasks:
-    - name: Add default route to UC
+    - name: Add default route to OC nodes
       delegate_to: "{{ _vm }}"
       become: true
+      vars:
+        gw_ip: >-
+          {{
+            '192.168.122.1' if 'r0' in _vm
+            else '192.168.123.1' if 'r1' in _vm
+            else '192.168.124.1' if 'r2' in _vm
+          }}
       ansible.builtin.command:
-        cmd: ip route add default via 192.168.111.1
+        cmd: ip route replace default via {{ gw_ip }}
       loop: >-
         {{
-          _vm_groups['osp-underclouds'] | list
-        }}
-      loop_control:
-        loop_var: _vm
-
-    - name: Prefer IPv4 over IPv6 for name resolution (both UC and OC)
-      delegate_to: "{{ _vm }}"
-      become: true
-      ansible.builtin.lineinfile:
-        path: /etc/gai.conf
-        line: 'precedence ::ffff:0:0/96  100'
-        regexp: '^#?\s*precedence ::ffff:0:0/96' # Matches the line, even if commented
-        state: present
-        create: true
-        owner: root
-        group: root
-        mode: '0644'
-      loop: >-
-        {{
-          _vm_groups['osp-underclouds'] | list +
           _vm_groups['osp-r0-computes'] | list +
           _vm_groups['osp-r0-controllers'] | list +
           _vm_groups['osp-r1-computes'] | list +
