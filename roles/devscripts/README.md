@@ -33,6 +33,10 @@ networks.
   Defaults to 7200, 2 hours.
 * `cifmw_devscripts_dry_run` (bool) If enabled, the workflow is evaluated.
 * `cifmw_devscripts_src_dir` (str) The parent folder of dev-scripts repository.
+* `cifmw_devscripts_repo` (str) URL of the dev-scripts repository.
+* `cifmw_devscripts_repo_branch` (str) Git ref to check out. Defaults to the
+  CI-validated commit `9116d288bb2885a29d3c9c9c4bf422305bef370d`. Callers
+  may override it with another tested branch, tag, or commit.
 * `cifmw_devscripts_remove_libvirt_net_default` (bool) Remove the default
   virtual network. Defaults to `false`.
 * `cifmw_devscripts_enable_ocp_nodes_host_routing` (bool) Enable routing via
