@@ -72,3 +72,26 @@
           {{ cifmw_shiftstack_client_pod_name }}:{{ cifmw_shiftstack_shiftstackclient_artifacts_dir }}/
           {{ testconfig_artifacts_dir }}/
       failed_when: false
+
+    - name: Check for UNSTABLE shiftstack testing stages flag in artifacts
+      ansible.builtin.stat:
+        path: "{{ testconfig_artifacts_dir }}/test_stage_unstable_flag"
+      register: _shiftstack_test_unstable_flag
+
+    - name: Read UNSTABLE shiftstack testing stage messages from artifacts
+      ansible.builtin.set_fact:
+        _shiftstack_test_unstable_messages: >-
+          {{ lookup('ansible.builtin.file', testconfig_artifacts_dir + '/test_stage_unstable_flag')
+             | split('\n')
+             | map('trim')
+             | reject('equalto', '')
+             | list
+             | join('; ') }}
+      when: _shiftstack_test_unstable_flag.stat.exists
+
+    - name: Fail when shiftstack testing stages were marked UNSTABLE
+      ansible.builtin.fail:
+        msg: >-
+          UNSTABLE: one or more shiftstack testing stages failed:
+          {{ _shiftstack_test_unstable_messages }}
+      when: _shiftstack_test_unstable_flag.stat.exists
