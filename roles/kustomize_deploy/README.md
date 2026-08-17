@@ -118,6 +118,13 @@ $ ansible-playbook deploy-edpm.yml \
 ```
 This would skip the first stage described in the automation file.
 
+During control-plane stages, `kustomize_deploy` ensures `BarbicanSimpleCryptoKEK`
+is present in generated `osp-secret` manifests before `oc apply`. The role
+looks up the live secret in the namespace declared on the manifest (for example
+`openstack2` in multi-namespace scenarios), reuses an existing cluster key when
+present, otherwise keeps keys from the kustomize output, otherwise generates a
+Fernet key at deploy time.
+
 ### Break point
 
 You can also stop the automated deploy by setting `cifmw_deploy_architecture_stopper`
