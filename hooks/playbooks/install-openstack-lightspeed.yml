@@ -121,7 +121,53 @@
       retries: 30
       delay: 10
 
-    # STEP 3: Create OpenStackLightspeed CR to deploy the service
+    # STEP 3: Create prerequisites (secrets and certificates)
+
+    - name: Create LLM API token secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          stringData:
+            apitoken: "{{ cifmw_openstack_lightspeed_api_token }}"
+      when: cifmw_openstack_lightspeed_api_token is defined
+
+    - name: Verify LLM credentials secret exists
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+        namespace: "{{ openstack_lightspeed_namespace }}"
+      register: secret_check
+      failed_when: secret_check.resources | length == 0
+      when: cifmw_openstack_lightspeed_api_token is not defined
+
+    - name: Create TLS CA certificate bundle ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          data:
+            ca-bundle.crt: "{{ cifmw_openstack_lightspeed_ca_cert }}"
+      when: cifmw_openstack_lightspeed_ca_cert is defined
+
+    - name: Verify TLS certificate bundle ConfigMap exists
+      kubernetes.core.k8s_info:
+        kind: ConfigMap
+        name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+        namespace: "{{ openstack_lightspeed_namespace }}"
+      register: cert_check
+      failed_when: cert_check.resources | length == 0
+      when: cifmw_openstack_lightspeed_ca_cert is not defined
+
+    # STEP 4: Create OpenStackLightspeed CR to deploy the service
     # Note: Uses configurable parameters for LLM integration
 
     - name: Create OpenStackLightspeed custom resource
@@ -134,10 +180,14 @@
             name: "{{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
             namespace: "{{ openstack_lightspeed_namespace }}"
           spec:
-            llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
-            llmEndpoint: "{{ cifmw_openstack_lightspeed_llm_endpoint | default('https://api.models.corp/v1/chat/completions') }}"
+            # REQUIRED: LLM endpoint must be provided via cifmw_openstack_lightspeed_llm_endpoint
+            # Example: https://your-llm-service/v1/chat/completions
+            llmEndpoint: "{{ cifmw_openstack_lightspeed_llm_endpoint }}"
             llmEndpointType: "{{ cifmw_openstack_lightspeed_llm_endpoint_type | default('openai') }}"
-            modelName: "{{ cifmw_openstack_lightspeed_model_name | default('openai/gpt-oss-20b') }}"
+            # REQUIRED: Model name must be provided via cifmw_openstack_lightspeed_model_name
+            # Example: gpt-4, llama3.1:8b, granite-3.1-8b
+            modelName: "{{ cifmw_openstack_lightspeed_model_name }}"
+            llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
             tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
 
     - name: Wait for OpenStackLightspeed CR to be ready
