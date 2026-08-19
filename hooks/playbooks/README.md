@@ -43,7 +43,7 @@ This hook deploys the operator, waits for it to be ready, then creates a CR to d
 * `cifmw_openstack_lightspeed_llm_credentials`: (String) Secret name containing LLM API token. Defaults to `openstack-lightspeed-apitoken`.
 * `cifmw_openstack_lightspeed_api_token`: (String) LLM API token value. If provided, playbook creates the secret. If not provided, playbook validates secret exists.
 * `cifmw_openstack_lightspeed_tls_ca_cert_bundle`: (String) ConfigMap name containing TLS CA certificates. Defaults to `openstack-lightspeed-certs`.
-* `cifmw_openstack_lightspeed_ca_cert_url`: (String) URL to download TLS CA certificate from. If provided, playbook downloads cert from URL and creates the ConfigMap. Example: `http://certs.corp.redhat.com/certs/Current-IT-Root-CAs.pem`
+* `cifmw_openstack_lightspeed_ca_cert_url`: (String) URL to download TLS CA certificate from. If provided, playbook downloads cert from URL and creates the ConfigMap. Example: `https://certs.corp.redhat.com/certs/Current-IT-Root-CAs.pem`
 * `cifmw_openstack_lightspeed_ca_cert`: (String) TLS CA certificate content. If provided (and URL not provided), playbook creates the ConfigMap from this content. If neither URL nor content provided, playbook validates ConfigMap exists.
 * `cifmw_openstack_lightspeed_cr_name`: (String) Name for OpenStackLightspeed CR. Defaults to `openstacklightspeed-sample`.
 
