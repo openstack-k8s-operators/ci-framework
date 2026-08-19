@@ -135,6 +135,7 @@
           stringData:
             apitoken: "{{ cifmw_openstack_lightspeed_api_token }}"
       when: cifmw_openstack_lightspeed_api_token is defined
+      no_log: true
 
     - name: Verify LLM credentials secret exists
       kubernetes.core.k8s_info:
@@ -145,7 +146,27 @@
       failed_when: secret_check.resources | length == 0
       when: cifmw_openstack_lightspeed_api_token is not defined
 
-    - name: Create TLS CA certificate bundle ConfigMap
+    - name: Download TLS CA certificate from URL
+      ansible.builtin.uri:
+        url: "{{ cifmw_openstack_lightspeed_ca_cert_url }}"
+        return_content: true
+      register: ca_cert_download
+      when: cifmw_openstack_lightspeed_ca_cert_url is defined
+
+    - name: Create TLS CA certificate bundle ConfigMap (from URL)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          data:
+            ca-bundle.crt: "{{ ca_cert_download.content }}"
+      when: cifmw_openstack_lightspeed_ca_cert_url is defined
+
+    - name: Create TLS CA certificate bundle ConfigMap (from content)
       kubernetes.core.k8s:
         state: present
         definition:
@@ -156,7 +177,9 @@
             namespace: "{{ openstack_lightspeed_namespace }}"
           data:
             ca-bundle.crt: "{{ cifmw_openstack_lightspeed_ca_cert }}"
-      when: cifmw_openstack_lightspeed_ca_cert is defined
+      when:
+        - cifmw_openstack_lightspeed_ca_cert is defined
+        - cifmw_openstack_lightspeed_ca_cert_url is not defined
 
     - name: Verify TLS certificate bundle ConfigMap exists
       kubernetes.core.k8s_info:
@@ -165,7 +188,9 @@
         namespace: "{{ openstack_lightspeed_namespace }}"
       register: cert_check
       failed_when: cert_check.resources | length == 0
-      when: cifmw_openstack_lightspeed_ca_cert is not defined
+      when:
+        - cifmw_openstack_lightspeed_ca_cert is not defined
+        - cifmw_openstack_lightspeed_ca_cert_url is not defined
 
     # STEP 4: Create OpenStackLightspeed CR to deploy the service
     # Note: Uses configurable parameters for LLM integration
@@ -189,23 +214,6 @@
             modelName: "{{ cifmw_openstack_lightspeed_model_name }}"
             llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
             tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
-
-    - name: Wait for OpenStackLightspeed CR to be ready
-      kubernetes.core.k8s_info:
-        api_version: lightspeed.openstack.org/v1beta1
-        kind: OpenStackLightspeed
-        name: "{{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
-        namespace: "{{ openstack_lightspeed_namespace }}"
-      register: osls_cr
-      until:
-        - osls_cr.resources is defined
-        - osls_cr.resources | length > 0
-        - osls_cr.resources[0].status is defined
-        - osls_cr.resources[0].status.conditions is defined
-        - osls_cr.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
-      retries: 60
-      delay: 10
-      ignore_errors: true
 
     - name: Display deployment summary
       ansible.builtin.debug:
