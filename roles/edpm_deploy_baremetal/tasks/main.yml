@@ -243,15 +243,17 @@
           delay: 10
           until: cifmw_edpm_deploy_baremetal_provisionserver_pod_output.stdout != ''
 
-        - name: Wait for OpenStack Provision Server deployment to be available
+        - name: Wait for OpenStack Provision Server CR to be Ready
+          # Ready guarantees status.localImageUrl/localImageChecksumUrl are
+          # populated; Deployment Available does not.
           environment:
             KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
             PATH: "{{ cifmw_path }}"
           ansible.builtin.command:
             cmd: >-
-              oc wait deployment openstack-edpm-ipam-provisionserver-openstackprovisionserver
+              oc wait openstackprovisionserver openstack-edpm-ipam-provisionserver
               -n {{ cifmw_install_yamls_defaults['NAMESPACE'] }}
-              --for condition=Available
+              --for=condition=Ready
               --timeout={{ cifmw_edpm_deploy_baremetal_wait_provisionserver_timeout_mins }}m
 
         - name: Get OpenStack Provision Server status
@@ -267,23 +269,6 @@
           failed_when: cifmw_edpm_deploy_baremetal_provisionserver.resources | length == 0
           changed_when: false
 
-        - name: Set OpenStack Provision Server local image checksum URL fallback
-          ansible.builtin.set_fact:
-            cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective: >-
-              {{
-                cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
-                if (
-                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl
-                  | default('', true)
-                  | trim | length
-                ) > 0
-                else
-                (
-                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl
-                  ~ '.sha256'
-                )
-              }}
-
         - name: Verify OpenStack Provision Server image is reachable
           ansible.builtin.uri:
             url: "{{ cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl }}"
@@ -296,7 +281,7 @@
 
         - name: Verify OpenStack Provision Server image checksum is reachable
           ansible.builtin.uri:
-            url: "{{ cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective }}"
+            url: "{{ cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageChecksumUrl }}"
             method: HEAD
             status_code: 200
           register: cifmw_edpm_deploy_baremetal_provisionserver_checksum_head
