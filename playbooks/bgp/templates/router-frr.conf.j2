@@ -13,6 +13,12 @@ debug bgp neighbor-events
 debug bgp updates
 debug bgp update-groups
 
+{% if router_evpn_vtep | default(false) %}
+vrf vrf-l3vni{{ router_evpn_l3vni | default(1) }}
+  vni {{ router_evpn_l3vni | default(1) }}
+exit-vrf
+
+{% endif %}
 router bgp {{ router_asn | default(65000) }}
 {% if _router_id %}
   bgp router-id {{_router_id}}
@@ -39,6 +45,9 @@ router bgp {{ router_asn | default(65000) }}
     neighbor downlink default-originate
     neighbor downlink prefix-list only-host-prefixes in
     neighbor uplink prefix-list only-default-host-prefixes in
+{% if router_evpn_vtep | default(false) %}
+    import vrf vrf-l3vni{{ router_evpn_l3vni | default(1) }}
+{% endif %}
   exit-address-family
 
   address-family ipv6 unicast
@@ -57,6 +66,30 @@ router bgp {{ router_asn | default(65000) }}
     advertise-all-vni
   exit-address-family
 
+{% if router_evpn_vtep | default(false) %}
+{# Second BGP instance for the L3VNI VRF: imports the VTEP IP from the default
+   VRF and advertises it (only) into EVPN so SNAT'd return traffic can come
+   back. route-target must match the EDPM/OVN side (<edpm_asn>:<l3vni>). #}
+router bgp {{ router_asn | default(65000) }} vrf vrf-l3vni{{ router_evpn_l3vni | default(1) }}
+  bgp router-id {{ router_evpn_vtep_ip | default(router_loopback_ip) }}
+
+  address-family ipv4 unicast
+    import vrf route-map RM-ADV-VTEP-ONLY
+    import vrf default
+  exit-address-family
+
+  address-family l2vpn evpn
+    advertise ipv4 unicast route-map RM-ADV-VTEP-ONLY
+    route-target import {{ router_evpn_edpm_asn | default(65000) }}:{{ router_evpn_l3vni | default(1) }}
+    route-target export {{ router_evpn_edpm_asn | default(65000) }}:{{ router_evpn_l3vni | default(1) }}
+  exit-address-family
+
+ip prefix-list PL-VTEP-IP seq 5 permit {{ router_evpn_vtep_ip | default(router_loopback_ip) }}/32
+
+route-map RM-ADV-VTEP-ONLY permit 10
+  match ip address prefix-list PL-VTEP-IP
+
+{% endif %}
 ip prefix-list only-default-host-prefixes permit 0.0.0.0/0
 ip prefix-list only-default-host-prefixes permit 0.0.0.0/0 ge 32
 ip prefix-list only-host-prefixes permit 0.0.0.0/0 ge 32
