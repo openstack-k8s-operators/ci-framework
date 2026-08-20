@@ -28,25 +28,6 @@
     cifmw_update_containers_tag: "{{ content_provider_dlrn_md5_hash }}"
     cifmw_update_containers_openstack: true
 
-- name: Prepare OpenStackVersion CR
-  when: >-
-      (cifmw_prepare_openstackversion | bool) and
-      ((cifmw_update_containers_edpm_image_url is defined and
-      cifmw_update_containers_openstack is defined and
-      cifmw_update_containers_openstack | bool) or
-      (cifmw_update_containers_ansibleee_image_url is defined) or
-      (cifmw_update_containers_openstack is defined and
-      cifmw_update_containers_openstack | bool) or
-      (cifmw_update_containers_watcher is defined and
-      cifmw_update_containers_watcher | bool) or
-      (cifmw_update_containers_ceilometersgcoreImage is defined) or
-      (cifmw_update_containers_ceilometermysqldexporterImage is defined) or
-      (cifmw_update_containers_edpmpodmanexporterImage is defined))
-  vars:
-    cifmw_update_containers_metadata: "{{ _ctlplane_name }}"
-  ansible.builtin.include_role:
-    name: update_containers
-
 - name: Controlplane name kustomization
   ansible.builtin.set_fact:
     _ctlplane_name_kustomizations:
@@ -97,6 +78,49 @@
 - name: Log the CR that is about to be applied
   ansible.builtin.debug:
     var: cifmw_edpm_prepare_crs_kustomize_result
+
+# Runs after kustomize (so backends injected via kustomizations are visible) and
+# before the OSCP apply (so the OpenStackVersion custom images are seeded first).
+- name: Prepare OpenStackVersion CR
+  when: >-
+      (cifmw_prepare_openstackversion | bool) and
+      ((cifmw_update_containers_edpm_image_url is defined and
+      cifmw_update_containers_openstack is defined and
+      cifmw_update_containers_openstack | bool) or
+      (cifmw_update_containers_ansibleee_image_url is defined) or
+      (cifmw_update_containers_openstack is defined and
+      cifmw_update_containers_openstack | bool) or
+      (cifmw_update_containers_watcher is defined and
+      cifmw_update_containers_watcher | bool) or
+      (cifmw_update_containers_ceilometersgcoreImage is defined) or
+      (cifmw_update_containers_ceilometermysqldexporterImage is defined) or
+      (cifmw_update_containers_edpmpodmanexporterImage is defined))
+  block:
+    - name: Derive cinder/manila backend names from the control plane CR
+      vars:
+        _ctlplane_spec: >-
+          {{
+            ((lookup('file', cifmw_edpm_prepare_crs_kustomize_result.output_path)
+              | from_yaml_all | selectattr('kind', 'equalto', 'OpenStackControlPlane')
+              | map(attribute='spec') | list) + [{}]) | first
+          }}
+      ansible.builtin.set_fact:
+        cifmw_update_containers_cindervolumes: >-
+          {{
+            (cifmw_update_containers_cindervolumes | default([]))
+            or (_ctlplane_spec.get('cinder', {}).get('template', {}).get('cinderVolumes', {}) | list)
+          }}
+        cifmw_update_containers_manilashares: >-
+          {{
+            (cifmw_update_containers_manilashares | default([]))
+            or (_ctlplane_spec.get('manila', {}).get('template', {}).get('manilaShares', {}) | list)
+          }}
+
+    - name: Generate the OpenStackVersion CR with custom images
+      vars:
+        cifmw_update_containers_metadata: "{{ _ctlplane_name }}"
+      ansible.builtin.include_role:
+        name: update_containers
 
 - name: Apply the OpenStackControlPlane CR
   environment:
