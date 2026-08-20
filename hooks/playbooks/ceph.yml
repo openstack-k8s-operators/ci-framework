@@ -372,9 +372,19 @@
         all_addresses: ansible_all_ipv6_addresses
         cidr: 64
 
+    - name: Select cephx cipher default for Ceph release
+      ansible.builtin.set_fact:
+        _cifmw_ceph_key_cipher_default: >-
+          {{
+            'aes256k' if (
+              cifmw_cephadm_version | default('') == 'tentacle'
+              or (cifmw_cephadm_container_tag | default('v18') is match('^v(20|[2-9][0-9])'))
+            ) else 'aes'
+          }}
+
     - name: Generate a cephx key
       cephx_key:
-        cipher: "{{ cifmw_ceph_key_cipher | default('aes') }}"
+        cipher: "{{ cifmw_ceph_key_cipher | default(_cifmw_ceph_key_cipher_default) }}"
       register: cephx
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
@@ -386,11 +396,36 @@
             mode: '0600'
             caps:
               mgr: allow *
-              mon: profile rbd
-              osd: "{{ pools | map('regex_replace', '^(.*)$',
-                                   'profile rbd pool=\\1') | join(', ') }}"
+              mon: allow r, profile rbd
+              osd: "{{ _cifmw_cephadm_osd_caps }}"
       vars:
-        pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
+        _cifmw_cephadm_rbd_pools: >-
+          {{
+            cifmw_cephadm_pools
+            | selectattr('application', 'equalto', 'rbd')
+            | map(attribute='name')
+            | list
+          }}
+        _cifmw_cephadm_cephfs_pools: >-
+          {{
+            cifmw_cephadm_pools
+            | selectattr('application', 'equalto', 'cephfs')
+            | map(attribute='name')
+            | list
+          }}
+        _cifmw_cephadm_osd_caps: >-
+          {{
+            (
+              _cifmw_cephadm_rbd_pools
+              | map('regex_replace', '^(.*)$', 'profile rbd pool=\\1')
+              | list
+              + (
+                _cifmw_cephadm_cephfs_pools
+                | map('regex_replace', '^(.*)$', 'allow rw pool=\\1')
+                | list
+              )
+            ) | join(', ')
+          }}
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     # for deploying external ceph for 17.1 using cifmw, we need this playbook to create keyring
