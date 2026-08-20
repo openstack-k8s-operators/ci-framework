@@ -137,6 +137,16 @@ that they do not need to be changed for a typical EDPM deployment.
    Example values are `"aes,aes256k"` or `"aes256k"` or `"aes"`.
    Defaults to `""` (unset, no command is run).
 
+* `cifmw_cephadm_auth_preferred_cipher`: (String) When set, runs
+  `ceph mon set auth_preferred_cipher <value>` during cluster configuration.
+   Use `aes256k` for Ceph Tentacle (v20+) greenfield deployments.
+   Defaults to `""` (unset, no command is run).
+
+* `cifmw_ceph_key_cipher`: (String) Cipher passed to the `cephx_key` module
+  when generating `client.openstack`. Use `aes256k` for Ceph v20/Tentacle.
+  The `ceph.yml` hook defaults to `aes256k` when `cifmw_cephadm_version` is
+  `tentacle` or `cifmw_cephadm_container_tag` matches `v20+`.
+
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
 ```
@@ -169,7 +179,7 @@ cifmw_cephadm_keys:
     mode: '0600'
     caps:
       mgr: allow *
-      mon: profile rbd
+      mon: allow r, profile rbd
       osd: profile rbd pool=vms, profile rbd pool=volumes, profile rbd pool=backups, profile rbd pool=images
 ```
 
