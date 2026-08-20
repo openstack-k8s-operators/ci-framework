@@ -282,6 +282,39 @@
           ip address replace {{ router_loopback_ip }}/32 dev lo
       changed_when: true
 
+    # Make router-0 an EVPN VTEP so it can reach tenant IPs advertised via
+    # BGP-EVPN Type-5 routes. Netdevs are created before FRR starts so zebra can
+    # map "vni N" to the VRF and program the L3VNI. They are not persistent, but
+    # the router is never rebooted (same rationale as the IPv6 route below).
+    # NOTE: dstport must be 4789 to match the OVN dataplane VXLAN port on EDPM
+    # nodes; the kernel FRR device default (8472/60010) is advertisement-only.
+    - name: Create EVPN VTEP netdevs on router
+      when:
+        - _ip_version == 4
+        - router_evpn_vtep | default(false)
+      become: true
+      vars:
+        _vni: "{{ router_evpn_l3vni | default(1) }}"
+        _vtep_ip: "{{ router_evpn_vtep_ip | default(router_loopback_ip) }}"
+        _table: "{{ 1000 + (router_evpn_l3vni | default(1) | int) }}"
+      ansible.builtin.shell:
+        cmd: |
+          set -o errexit
+          ip link show vrf-l3vni{{ _vni }} \
+            || ip link add vrf-l3vni{{ _vni }} type vrf table {{ _table }}
+          ip link set vrf-l3vni{{ _vni }} up
+          ip link show br-l3vni{{ _vni }} \
+            || ip link add br-l3vni{{ _vni }} type bridge
+          ip link set br-l3vni{{ _vni }} master vrf-l3vni{{ _vni }}
+          ip link set br-l3vni{{ _vni }} up
+          ip link show vx-0-{{ _vni }} \
+            || ip link add vx-0-{{ _vni }} type vxlan id {{ _vni }} \
+                 local {{ _vtep_ip }} dstport 4789 nolearning
+          ip link set vx-0-{{ _vni }} master br-l3vni{{ _vni }}
+          ip link set vx-0-{{ _vni }} up
+        executable: /bin/bash
+      changed_when: true
+
     - name: Configure FRR
       vars:
         # Prefer loopback IP as BGP router-id when set; else 1.1.1.1 (IPv4 and IPv6).
@@ -327,6 +360,30 @@
               ip6tables -t nat -A POSTROUTING -s f00d:f00d:f00d:f00d:99:99::/96 -o {{ router_ext_if }} -j MASQUERADE
               {% endif %}
           changed_when: false
+
+        # SNAT tenant-bound traffic to the VTEP IP so the return path works
+        # without leaking the worker-3 subnet into the tenant VRF: the VM sees
+        # the VTEP IP as source and replies to it, and router-0 advertises only
+        # that /32 into EVPN. The destination is the whole tempest
+        # project_network_cidr (default 10.100.0.0/16), not a single subnet,
+        # because tempest carves /28 subnets sequentially out of it.
+        # -C || -A keeps the rule idempotent across playbook re-runs.
+        - name: SNAT tenant-bound traffic to the EVPN VTEP IP
+          when:
+            - _ip_version == 4
+            - router_evpn_vtep | default(false)
+          become: true
+          vars:
+            _vni: "{{ router_evpn_l3vni | default(1) }}"
+            _vtep_ip: "{{ router_evpn_vtep_ip | default(router_loopback_ip) }}"
+            _tenant_cidr: "{{ router_tenant_cidr | default('10.100.0.0/16') }}"
+          ansible.builtin.shell:
+            cmd: >
+              iptables -t nat -C POSTROUTING -d {{ _tenant_cidr }}
+              -o br-l3vni{{ _vni }} -j SNAT --to-source {{ _vtep_ip }}
+              || iptables -t nat -A POSTROUTING -d {{ _tenant_cidr }}
+              -o br-l3vni{{ _vni }} -j SNAT --to-source {{ _vtep_ip }}
+          changed_when: true
 
     - name: Add route to RH intranet from router via HV when IPv6
       when: _ip_version == 6
