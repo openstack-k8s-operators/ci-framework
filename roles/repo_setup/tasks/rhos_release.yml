@@ -47,3 +47,51 @@
     cmd: >-
       rhos-release {{ cifmw_repo_setup_rhos_release_args }} \
         -t {{ cifmw_repo_setup_output }}
+
+- name: Make generated repos RHEL 10 safe
+  when:
+    - ansible_distribution_major_version | int >= 10
+  become: "{{ not cifmw_repo_setup_output.startswith(ansible_user_dir) }}"
+  vars:
+    _rhel_major: "{{ ansible_distribution_major_version }}"
+    _rhel_ver: "{{ ansible_distribution_version }}"
+    _base_url: >-
+      http://download.devel.redhat.com/released/rhel-{{ _rhel_major }}/RHEL-{{ _rhel_major }}/{{ _rhel_ver }}
+  block:
+    - name: Disable all rhos-release generated repos
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          for f in {{ cifmw_repo_setup_output }}/rhos-release*.repo
+          {{ cifmw_repo_setup_output }}/osp-trunk*.repo; do
+            [ -f "$f" ] || continue;
+            sed -i 's/^enabled=1/enabled=0/' "$f";
+          done
+      changed_when: true
+
+    - name: Add RHEL 10 base repos to generated directory
+      ansible.builtin.copy:
+        dest: "{{ cifmw_repo_setup_output }}/rhel-{{ _rhel_major }}-{{ item.name }}.repo"
+        content: |
+          [rhel-{{ _rhel_major }}-{{ item.name }}]
+          name=RHEL {{ _rhel_major }} {{ item.path }}
+          baseurl={{ _base_url }}/{{ item.path }}/x86_64/os
+          gpgcheck=0
+          enabled=1
+        mode: "0644"
+      loop:
+        - name: baseos
+          path: BaseOS
+        - name: appstream
+          path: AppStream
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ensure python3 build deps are available on RHEL 10+
+      become: true
+      ansible.builtin.dnf:
+        name:
+          - python3-setuptools
+          - gcc
+          - python3-devel
+        state: present

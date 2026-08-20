@@ -9,6 +9,50 @@
   ansible.builtin.command:
     cmd: "rhos-release {{ _rhos_release_args_override | default(cifmw_repo_setup_rhos_release_args) | default('rhel') }}"
 
+- name: Make RHEL 10+ safe from rhos-release RHEL 9 repo contamination
+  when:
+    - ansible_distribution_major_version | int >= 10
+  become: true
+  vars:
+    _rhel_major: "{{ ansible_distribution_major_version }}"
+    _rhel_ver: "{{ ansible_distribution_version }}"
+    _base_url: >-
+      http://download.devel.redhat.com/released/rhel-{{ _rhel_major }}/RHEL-{{ _rhel_major }}/{{ _rhel_ver }}
+  block:
+    - name: Disable all rhos-release generated repos
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          for f in /etc/yum.repos.d/rhos-release*.repo
+          /etc/yum.repos.d/osp-trunk*.repo; do
+            [ -f "$f" ] || continue;
+            sed -i 's/^enabled=1/enabled=0/' "$f";
+          done
+      changed_when: true
+
+    - name: Add RHEL 10 base repos
+      ansible.builtin.yum_repository:
+        name: "rhel-{{ _rhel_major }}-{{ item.name }}"
+        description: "RHEL {{ _rhel_major }} {{ item.path }}"
+        baseurl: "{{ _base_url }}/{{ item.path }}/x86_64/os"
+        gpgcheck: false
+        enabled: true
+      loop:
+        - name: baseos
+          path: BaseOS
+        - name: appstream
+          path: AppStream
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Ensure python3 build deps are available on RHEL 10+
+      ansible.builtin.dnf:
+        name:
+          - python3-setuptools
+          - gcc
+          - python3-devel
+        state: present
+
 - name: Run custom commands after rhos-release setup
   ansible.builtin.command:
     cmd: "{{ cifmw_repo_setup_rhos_release_post }}"
