@@ -3,6 +3,7 @@
 
 from __future__ import absolute_import, division, print_function
 
+import json
 import unittest
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -28,6 +29,20 @@ REG = "quay.io"
 ORG = "openstack-k8s-operators"
 PREFIX = "openstack"
 TAG = "current-podified"
+
+
+def _osversion_json(images=None):
+    spec = {}
+    if images is not None:
+        spec["customContainerImages"] = images
+    return json.dumps(
+        {
+            "apiVersion": "core.openstack.org/v1beta1",
+            "kind": "OpenStackVersion",
+            "metadata": {"name": "controlplane", "namespace": "openstack"},
+            "spec": spec,
+        }
+    )
 
 
 class TestBuildUrl(unittest.TestCase):
@@ -334,6 +349,117 @@ class TestRunModule(ModuleBaseTestCase):
         mock_oc.assert_called_once()
         self.assertEqual(mock_oc.call_args[0][1][0], "apply")
         self.assertTrue(cm.exception.args[0]["changed"])
+
+    def test_present_preserve_unlisted_calls_oc_get_and_apply(self):
+        set_module_args(
+            self._args(
+                apply=True,
+                preserve_unlisted=True,
+                kubeconfig="/home/zuul/.kube/config",
+                images=[
+                    dict(
+                        name="glanceAPIImage",
+                        full_registry="registry.example:5000/ns/glance:tag",
+                    )
+                ],
+            )
+        )
+        mopen = mock_open()
+        with patch(_MOD + ".os.path.exists", return_value=False), patch(
+            _MOD + ".os.makedirs"
+        ), patch("builtins.open", mopen), patch(
+            _MOD + "._run_oc",
+            side_effect=[
+                (0, _osversion_json({"keystoneAPIImage": "keep-me"}), ""),
+                (0, "", ""),
+            ],
+        ) as mock_oc:
+            with self.assertRaises(AnsibleExitJson) as cm:
+                set_containers.run_module()
+        self.assertEqual(mock_oc.call_count, 2)
+        get_args = mock_oc.call_args_list[0][0][1]
+        self.assertEqual(get_args[0], "get")
+        self.assertEqual(get_args[-2:], ["-o", "json"])
+        self.assertEqual(mock_oc.call_args_list[1][0][1][0], "apply")
+        self.assertTrue(cm.exception.args[0]["changed"])
+        written = yaml.safe_load(mopen.return_value.write.call_args[0][0])
+        images = written["spec"]["customContainerImages"]
+        self.assertEqual(images["keystoneAPIImage"], "keep-me")
+        self.assertEqual(
+            images["glanceAPIImage"], "registry.example:5000/ns/glance:tag"
+        )
+
+    def test_present_preserve_unlisted_not_found_applies_overrides_only(self):
+        set_module_args(
+            self._args(
+                apply=True,
+                preserve_unlisted=True,
+                kubeconfig="/home/zuul/.kube/config",
+                images=[
+                    dict(
+                        name="glanceAPIImage",
+                        full_registry="registry.example:5000/ns/glance:tag",
+                    )
+                ],
+            )
+        )
+        mopen = mock_open()
+        not_found = (
+            "Error from server (NotFound): openstackversions.core.openstack.org"
+            ' "controlplane" not found'
+        )
+        with patch(_MOD + ".os.path.exists", return_value=False), patch(
+            _MOD + ".os.makedirs"
+        ), patch("builtins.open", mopen), patch(
+            _MOD + "._run_oc",
+            side_effect=[(1, "", not_found), (0, "", "")],
+        ):
+            with self.assertRaises(AnsibleExitJson) as cm:
+                set_containers.run_module()
+        self.assertTrue(cm.exception.args[0]["changed"])
+        written = yaml.safe_load(mopen.return_value.write.call_args[0][0])
+        images = written["spec"]["customContainerImages"]
+        self.assertEqual(
+            images, {"glanceAPIImage": "registry.example:5000/ns/glance:tag"}
+        )
+
+    def test_present_preserve_unlisted_oc_get_failure_fails(self):
+        set_module_args(
+            self._args(
+                preserve_unlisted=True,
+                kubeconfig="/home/zuul/.kube/config",
+                images=[
+                    dict(
+                        name="glanceAPIImage",
+                        full_registry="registry.example:5000/ns/glance:tag",
+                    )
+                ],
+            )
+        )
+        with patch(_MOD + ".os.path.exists", return_value=False), patch(
+            _MOD + "._run_oc",
+            return_value=(1, "", "Error from server (Forbidden): access denied"),
+        ):
+            with self.assertRaises(AnsibleFailJson) as cm:
+                set_containers.run_module()
+        self.assertIn("oc get openstackversion failed", cm.exception.args[0]["msg"])
+
+    def test_present_preserve_unlisted_requires_kubeconfig(self):
+        set_module_args(
+            self._args(
+                preserve_unlisted=True,
+                images=[
+                    dict(
+                        name="glanceAPIImage",
+                        full_registry="registry.example:5000/ns/glance:tag",
+                    )
+                ],
+            )
+        )
+        with patch(_MOD + ".os.path.exists", return_value=False):
+            with self.assertRaises(AnsibleFailJson) as cm:
+                set_containers.run_module()
+        self.assertIn("kubeconfig is required", cm.exception.args[0]["msg"])
 
     def test_present_apply_oc_failure_fails(self):
         set_module_args(self._args(apply=True))
