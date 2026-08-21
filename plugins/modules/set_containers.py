@@ -56,6 +56,14 @@ options:
     - When C(true) and C(state=present), run C(oc apply -f dest_path).
     type: bool
     default: false
+  preserve_unlisted:
+    description:
+    - When C(true), read the current OpenStackVersion CR from the cluster
+      and keep C(spec.customContainerImages) entries that are not overridden
+      before writing/applying the manifest.
+    - Requires C(kubeconfig) when the cluster lookup is needed.
+    type: bool
+    default: false
   namespace:
     description:
     - Kubernetes namespace for the OpenStackVersion CR.
@@ -250,6 +258,7 @@ changed:
     returned: always
 """
 
+import json
 import os
 
 from ansible.module_utils.basic import AnsibleModule
@@ -484,6 +493,37 @@ def _run_oc(module, args, kubeconfig):
     return rc, out, err
 
 
+def _fetch_existing_custom_container_images(module, params, kubeconfig):
+    rc, out, err = _run_oc(
+        module,
+        [
+            "get",
+            "openstackversion",
+            params["metadata_name"],
+            "-n",
+            params["namespace"],
+            "-o",
+            "jsonpath={.spec.customContainerImages}",
+        ],
+        kubeconfig,
+    )
+    if rc != 0 or not out.strip():
+        return {}
+    try:
+        images = json.loads(out)
+    except ValueError as exc:
+        module.fail_json(
+            msg=(
+                "Could not decode existing customContainerImages from cluster: " "{}"
+            ).format(exc)
+        )
+    if not isinstance(images, dict):
+        module.fail_json(
+            msg="Existing customContainerImages from cluster is not a mapping"
+        )
+    return images
+
+
 _IMAGE_ELEMENT_SPEC = dict(
     name=dict(type="str", required=True),
     full_registry=dict(type="str"),
@@ -501,6 +541,7 @@ def run_module():
     module_args = dict(
         state=dict(type="str", choices=["present", "absent"], default="present"),
         apply=dict(type="bool", default=False),
+        preserve_unlisted=dict(type="bool", default=False),
         namespace=dict(type="str", default="openstack"),
         metadata_name=dict(type="str", default="controlplane"),
         dest_path=dict(type="path", required=True),
@@ -591,6 +632,15 @@ def run_module():
             )
 
     cr = _build_cr(module.params, module)
+    if module.params["preserve_unlisted"]:
+        if not kubeconfig:
+            module.fail_json(msg="kubeconfig is required when preserve_unlisted=true")
+        existing_images = _fetch_existing_custom_container_images(
+            module, module.params, kubeconfig
+        )
+        merged_images = existing_images.copy()
+        merged_images.update(cr["spec"]["customContainerImages"])
+        cr["spec"]["customContainerImages"] = merged_images
     cr_yaml = yaml.dump(cr, default_flow_style=False, sort_keys=False)
 
     existing = None
