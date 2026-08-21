@@ -108,6 +108,25 @@
         name: reproducer
         tasks_from: reuse_main
 
+    - name: Find stale root-owned log files
+      delegate_to: controller-0
+      ansible.builtin.find:
+        paths: /home/zuul/ci-framework-data/logs
+        patterns: "ansible-*.log"
+        file_type: file
+      register: _stale_logs
+      failed_when: false
+
+    - name: Fix log file ownership for reuse runs
+      delegate_to: controller-0
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: zuul
+        group: zuul
+      loop: "{{ _stale_logs.files | default([]) | map(attribute='path') | list }}"
+      failed_when: false
+
     - name: Run deployment if instructed to
       when:
         - cifmw_deploy_architecture | default(false) | bool
