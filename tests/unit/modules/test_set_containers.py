@@ -335,6 +335,50 @@ class TestRunModule(ModuleBaseTestCase):
         self.assertEqual(mock_oc.call_args[0][1][0], "apply")
         self.assertTrue(cm.exception.args[0]["changed"])
 
+    def test_present_preserve_unlisted_calls_oc_get_and_apply(self):
+        set_module_args(
+            self._args(
+                apply=True,
+                preserve_unlisted=True,
+                kubeconfig="/home/zuul/.kube/config",
+                images=[
+                    dict(
+                        name="glanceAPIImage",
+                        full_registry="registry.example:5000/ns/glance:tag",
+                    )
+                ],
+            )
+        )
+        with patch(_MOD + ".os.path.exists", return_value=False), patch(
+            _MOD + ".os.makedirs"
+        ), patch("builtins.open", mock_open()), patch(
+            _MOD + "._run_oc",
+            side_effect=[(0, '{"keystoneAPIImage": "keep-me"}', ""), (0, "", "")],
+        ) as mock_oc:
+            with self.assertRaises(AnsibleExitJson) as cm:
+                set_containers.run_module()
+        self.assertEqual(mock_oc.call_count, 2)
+        self.assertEqual(mock_oc.call_args_list[0][0][1][0], "get")
+        self.assertEqual(mock_oc.call_args_list[1][0][1][0], "apply")
+        self.assertTrue(cm.exception.args[0]["changed"])
+
+    def test_present_preserve_unlisted_requires_kubeconfig(self):
+        set_module_args(
+            self._args(
+                preserve_unlisted=True,
+                images=[
+                    dict(
+                        name="glanceAPIImage",
+                        full_registry="registry.example:5000/ns/glance:tag",
+                    )
+                ],
+            )
+        )
+        with patch(_MOD + ".os.path.exists", return_value=False):
+            with self.assertRaises(AnsibleFailJson) as cm:
+                set_containers.run_module()
+        self.assertIn("kubeconfig is required", cm.exception.args[0]["msg"])
+
     def test_present_apply_oc_failure_fails(self):
         set_module_args(self._args(apply=True))
         with patch(_MOD + ".os.path.exists", return_value=False), patch(
