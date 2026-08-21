@@ -145,6 +145,7 @@
       register: secret_check
       failed_when: secret_check.resources | length == 0
       when: cifmw_openstack_lightspeed_api_token is not defined
+      no_log: true 
 
     - name: Download TLS CA certificate from URL
       ansible.builtin.uri:
@@ -153,7 +154,7 @@
       register: ca_cert_download
       when: cifmw_openstack_lightspeed_ca_cert_url is defined
 
-    - name: Create TLS CA certificate bundle ConfigMap (from URL)
+    - name: Create TLS CA certificate bundle ConfigMap
       kubernetes.core.k8s:
         state: present
         definition:
@@ -163,23 +164,9 @@
             name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
             namespace: "{{ openstack_lightspeed_namespace }}"
           data:
-            ca-bundle.crt: "{{ ca_cert_download.content }}"
-      when: cifmw_openstack_lightspeed_ca_cert_url is defined
-
-    - name: Create TLS CA certificate bundle ConfigMap (from content)
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
-            namespace: "{{ openstack_lightspeed_namespace }}"
-          data:
-            ca-bundle.crt: "{{ cifmw_openstack_lightspeed_ca_cert }}"
-      when:
-        - cifmw_openstack_lightspeed_ca_cert is defined
-        - cifmw_openstack_lightspeed_ca_cert_url is not defined
+            ca-bundle.crt: >-
+              {{ ca_cert_download.content if cifmw_openstack_lightspeed_ca_cert_url is defined else cifmw_openstack_lightspeed_ca_cert }}
+      when: cifmw_openstack_lightspeed_ca_cert_url is defined or cifmw_openstack_lightspeed_ca_cert is defined
 
     - name: Verify TLS certificate bundle ConfigMap exists
       kubernetes.core.k8s_info:
