@@ -122,3 +122,27 @@
   loop_control:
     loop_var: compute
     label: "{{ compute.key }}"
+
+# macvlan CNI assigns a new random MAC per AnsibleEE pod while
+# Whereabouts IPAM reuses the same IPv6 address. Target nodes' NDP
+# cache maps the address to the previous pod's MAC, silently dropping
+# return traffic and causing SSH timeouts.
+# Reducing base_reachable_time_ms makes stale entries expire faster
+# so the kernel re-probes on the next packet.
+- name: Reduce IPv6 NDP reachable time on nodes reachable via ctlplane
+  when:
+    - cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+    - _ndp_host.value.networks.ctlplane is defined
+    - _ndp_host.key is not match('^(ocp|crc).*')
+  delegate_to: "{{ _ndp_host.key }}"
+  become: true
+  ansible.posix.sysctl:
+    name: net.ipv6.neigh.default.base_reachable_time_ms
+    value: "5000"
+    sysctl_set: true
+    state: present
+  loop: >-
+    {{ cifmw_networking_env_definition.instances | dict2items }}
+  loop_control:
+    loop_var: _ndp_host
+    label: "{{ _ndp_host.key }}"
