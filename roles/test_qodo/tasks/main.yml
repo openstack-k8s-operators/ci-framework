@@ -1,0 +1,66 @@
+---
+# This file deliberately violates best_practices.md rules
+# to test Qodo's rule detection. DELETE after testing.
+
+# BREAKS: [Critical] No Hardcoded Paths or Hosts
+- name: Copy pull secret
+  ansible.builtin.copy:
+    src: /home/zuul/ci-framework-data/secrets/pull_secret.json
+    dest: /home/zuul/ci-framework-data/secrets/pull_secret_backup.json
+
+# BREAKS: [Critical] Secrets and Credentials (no no_log, wrong mode)
+- name: Write auth token
+  ansible.builtin.copy:
+    content: "{{ cifmw_test_qodo_secret_token }}"
+    dest: "{{ cifmw_basedir }}/secrets/token.json"
+    mode: "0644"
+
+# BREAKS: [Critical] Error Handling (ignore_errors instead of block/rescue)
+- name: Deploy operator
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ _manifest }}"
+  ignore_errors: true
+
+# BREAKS: [Critical] Idempotency (command without creates/when guard)
+- name: Initialize the database
+  ansible.builtin.command: "/usr/local/bin/db-init --setup"
+
+# BREAKS: [Critical] External Service Calls Must Be Retried (no retries)
+- name: Pull container image
+  ansible.builtin.command: "podman pull {{ cifmw_test_qodo_image }}"
+
+# BREAKS: [Critical] Jinja2 Safety (no default filter)
+- name: Set endpoint URL
+  ansible.builtin.set_fact:
+    endpoint: "{{ my_config.nested.url }}"
+
+# BREAKS: [Critical] Debug and Diagnostic Tasks (unguarded debug)
+- name: Show current config
+  ansible.builtin.debug:
+    var: _config
+
+# BREAKS: [Critical] Import vs Include (import inside a loop)
+- name: Process all scenarios
+  ansible.builtin.import_tasks: process_scenario.yml
+  loop: "{{ cifmw_test_qodo_scenarios }}"
+
+# BREAKS: [Critical] Race Conditions in Wait Loops (no empty list guard)
+- name: Wait for pods
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: openstack
+  register: _pods
+  retries: 30
+  delay: 10
+  until: _pods.resources[0].status.phase == 'Running'
+
+# BREAKS: [Suggestion] Excessive Variables (one-shot variable)
+- name: Set namespace
+  ansible.builtin.set_fact:
+    _ns: "openstack"
+
+- name: Get pods in namespace
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ _ns }}"
