@@ -50,16 +50,22 @@
   retries: "{{ cifmw_openshift_adm_retry_count }}"
   delay: 30
 
+- name: Set current context to admin for CSR approval
+  when:
+    - _openshift_adm_check_cert_approve | default(false) | bool
+  ansible.builtin.shell: |
+    KUBECONFIG="{{ cifmw_openshift_kubeconfig }}" oc config use-context "{{ cifmw_openshift_adm_context }}"
+
 # MachineConfigs applied during devscripts install (e.g. iSCSI, Cinder LVM)
 # trigger an MCO update cycle that continues asynchronously after the cluster
 # is first reachable.  On compact (3-master) clusters the MCO controller can
 # get stuck: all nodes reboot and report state=Done / desiredDrain=uncordon-*,
 # but the controller never issues the final kubectl-uncordon, leaving every
-# node SchedulingDisabled indefinitely.  We handle this with a loop that:
-#   1. Waits until no MCP is mid-update (unavailableMachineCount drops to 0)
-#      OR detects the stuck state (all updated, none ready).
-#   2. If stuck, uncordons all nodes to break the deadlock.
-#   3. Repeats until all MCPs report Updated=True.
+# node SchedulingDisabled indefinitely.
+#
+# Rebooting nodes also present new CSRs that must be approved before the nodes
+# can rejoin the cluster.  CSR approval is done on every retry iteration so
+# that nodes are not stuck waiting for approval while we wait for MCPs.
 - name: Wait for MachineConfigPools to complete, fixing stuck cordons if needed.
   when:
     - not cifmw_openshift_adm_dry_run
@@ -68,6 +74,19 @@
     PATH: "{{ cifmw_path }}"
   ansible.builtin.shell: |
     set -eo pipefail
+
+    {% if _openshift_adm_check_cert_approve | default(false) | bool %}
+    PENDING=$(oc get csr -o json | jq -r '
+      .items[] |
+      select((.status.conditions // []) | length == 0) |
+      .metadata.name
+    ')
+    if [ -n "$PENDING" ]; then
+      echo "Approving pending CSRs: $PENDING"
+      echo "$PENDING" | xargs -r oc adm certificate approve
+    fi
+    {% endif %}
+
     MCP_JSON=$(oc get mcp -o json)
 
     UPDATING=$(echo "$MCP_JSON" | jq -r '
@@ -85,8 +104,6 @@
       exit 0
     fi
 
-    # At least one MCP is still Updating.  Check for the stuck-uncordon case:
-    # updatedMachineCount == machineCount but readyMachineCount == 0.
     STUCK=$(echo "$MCP_JSON" | jq -r '
       .items[] |
       select(
@@ -108,27 +125,21 @@
   until: _mcp_wait.rc == 0
   retries: 60
   delay: 30
-  changed_when: "'uncordoning' in _mcp_wait.stdout"
+  changed_when: "'uncordoning' in _mcp_wait.stdout or 'Approving pending CSRs' in _mcp_wait.stdout"
   failed_when: false
 
-- name: Check for pending certificate approval.
+- name: Final quiet-period CSR approval after MCPs converge.
   when:
     - _openshift_adm_check_cert_approve | default(false) | bool
-  block:
-    - name: Set current context to admin for CSR approval
-      ansible.builtin.shell: |
-        KUBECONFIG="{{ cifmw_openshift_kubeconfig }}" oc config use-context "{{ cifmw_openshift_adm_context }}"
-
-    - name: Approve pending certificate requests
-      register: _approve_csr
-      cifmw.general.approve_csr:
-        k8s_config: "{{ cifmw_openshift_kubeconfig }}"
-      retries: 10
-      delay: 30
-      until:
-        - _approve_csr is defined
-        - _approve_csr.rc is defined
-        - _approve_csr.rc == 0
+  cifmw.general.approve_csr:
+    k8s_config: "{{ cifmw_openshift_kubeconfig }}"
+  register: _approve_csr
+  retries: 10
+  delay: 30
+  until:
+    - _approve_csr is defined
+    - _approve_csr.rc is defined
+    - _approve_csr.rc == 0
 
 - name: Wait until the OpenShift cluster is stable.
   environment:
