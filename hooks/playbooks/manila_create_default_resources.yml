@@ -21,14 +21,17 @@
         ( ( _manila_share_creation.rc | int ) != 0 )
         and not ( "HTTP 409" in _manila_share_creation.stderr )
 
+    - name: Prepare extra spec options string
+      when: extra_specs is mapping and extra_specs | length > 0
+      ansible.builtin.set_fact:
+        # convert dict to 'k=v ...' format; guard against extra_specs being passed as a string
+        extra_spec_opt: "{%- for k, v in extra_specs.items() -%}{{ k }}={{ v }} {% endfor -%}"
+
     - name: Update default share type properties
+      when: extra_spec_opt is defined
       environment:
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
         PATH: "{{ cifmw_path }}"
-      vars:
-        # convert dict to 'k=v ...' format
-        extra_spec_opt: "{%- for k, v in extra_specs.items() -%}{{ k }}={{ v }} {% endfor -%}"
-      when: extra_spec_opt | length > 0
       ansible.builtin.command: |
         oc -n {{ namespace }} exec -it pod/openstackclient \
           -- openstack share type set {{ share_type_name }} --extra-specs {{ extra_spec_opt }}

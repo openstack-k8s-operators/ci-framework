@@ -1,4 +1,65 @@
 ---
+# Note(kstrenko): Remove WA once the TCIB and test-operator fix reaches downstream
+- name: Check if admin credentials need fetching
+  ansible.builtin.set_fact:
+    _horizontest_fetch_creds: >-
+      {{
+        stage_vars_dict.cifmw_test_operator_horizontest_admin_username | default('') | length == 0 or
+        stage_vars_dict.cifmw_test_operator_horizontest_admin_password | default('') | length == 0
+      }}
+
+- name: Fetch admin credentials from OpenStack config
+  when: _horizontest_fetch_creds | bool
+  block:
+    - name: Fetch OpenStackConfigMap
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: ConfigMap
+        name: openstack-config
+        namespace: "{{ stage_vars_dict.cifmw_test_operator_namespace }}"
+      register: _horizontest_configmap
+
+    - name: Fetch OpenStackConfigSecret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Secret
+        name: openstack-config-secret
+        namespace: "{{ stage_vars_dict.cifmw_test_operator_namespace }}"
+      register: _horizontest_secret
+
+    - name: Override admin credentials in stage_vars_dict
+      ansible.builtin.set_fact:
+        stage_vars_dict: >-
+          {{
+            stage_vars_dict | combine({
+              'cifmw_test_operator_horizontest_admin_username':
+                (_horizontest_configmap.resources[0].data['clouds.yaml'] | from_yaml).clouds.default.auth.username,
+              'cifmw_test_operator_horizontest_admin_password':
+                (_horizontest_secret.resources[0].data['secure.yaml'] | b64decode | from_yaml).clouds.default.auth.password | string
+            })
+          }}
+
+    - name: Patch admin credentials into horizontest config
+      ansible.builtin.set_fact:
+        stage_vars_dict: >-
+          {{
+            stage_vars_dict | combine({
+              'cifmw_test_operator_horizontest_config':
+                stage_vars_dict.cifmw_test_operator_horizontest_config | combine(
+                  {'spec': {
+                    'adminUsername': stage_vars_dict.cifmw_test_operator_horizontest_admin_username,
+                    'adminPassword': stage_vars_dict.cifmw_test_operator_horizontest_admin_password
+                  }},
+                  recursive=true
+                )
+            })
+          }}
+
+
 - name: Run horizontest job
   vars:
     run_test_fw: horizontest

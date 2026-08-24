@@ -146,8 +146,8 @@ Default value: {}
 
 ## Horizontest specific parameters
 <!-- START HORIZONTEST_SPECIFIC_PARAMETERS -->
-* `cifmw_test_operator_horizontest_admin_password`: (String) OpenStack admin credentials. Default value: `12345678`
-* `cifmw_test_operator_horizontest_admin_username`: (String) OpenStack admin credentials. Default value: `admin`
+* `cifmw_test_operator_horizontest_admin_password`: WARNING: This parameter will be deprecated! Credentials are now read from the `OpenStackConfigSecret` (`secure.yaml`). (String) OpenStack admin credentials. Default value: ``
+* `cifmw_test_operator_horizontest_admin_username`: WARNING: This parameter will be deprecated! Credentials are now read from the `OpenStackConfigMap` (`clouds.yaml`). (String) OpenStack admin credentials. Default value: ``
 * `cifmw_test_operator_horizontest_auth_url`: (String) The OpenStack authentication URL. Default value: `https://keystone-public-openstack.apps.ocp.openstack.lab`
 * `cifmw_test_operator_horizontest_config`: (Dict) Definition of HorizonTest CR instance that is passed to the test-operator (see [the test-operator documentation](https://openstack-k8s-operators.github.io/test-operator/crds.html#horizontest-custom-resource)). Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml)
 * `cifmw_test_operator_horizontest_container`: (String) Name of the horizontest container. Default value: `openstack-horizontest`
@@ -155,23 +155,16 @@ Default value: {}
 * `cifmw_test_operator_horizontest_debug`: (Bool) Run HorizonTest in debug mode, it keeps the operator pod sleeping infinitely (it must only set to `true` only for debugging purposes). Default value: `false`
 * `cifmw_test_operator_horizontest_extra_flag`: (String) The extra flag to modify pytest command to include/exclude tests. Default value: `not pagination`
 * `cifmw_test_operator_horizontest_extra_mounts`: (List) A list of additional volume mounts for the horizontest test pods. Each item specifies a volume name, mount path, and other mount properties. Default value: `[]`
-* `cifmw_test_operator_horizontest_flavor_name`: (String) The name of the OpenStack flavor to create for Horizon tests. Default value: `m1.tiny`
 * `cifmw_test_operator_horizontest_horizon_repo_branch`: (String) The branch of the Horizon repository to checkout. Default value: `master`
-* `cifmw_test_operator_horizontest_horizon_test_dir`: (String) The directory path for Horizon tests. Default value: `/var/lib/horizontest`
 * `cifmw_test_operator_horizontest_image`: (String) Horizontest image to be used. Default value: `{{ stage_vars_dict.cifmw_test_operator_horizontest_registry }}/{{ stage_vars_dict.cifmw_test_operator_horizontest_namespace }}/{{ stage_vars_dict.cifmw_test_operator_horizontest_container }}`
 * `cifmw_test_operator_horizontest_image_tag`: (String) Tag for the `cifmw_test_operator_horizontest_image`. Default value: `{{ cifmw_test_operator_default_image_tag }}`
-* `cifmw_test_operator_horizontest_image_url`: (String) The URL to download the Cirros image. Default value: `http://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img`
-* `cifmw_test_operator_horizontest_logs_directory_name`: (String) The name of the directory to store test logs. Default value: `horizon`
 * `cifmw_test_operator_horizontest_name`: (String) Value used in the `Horizontest.Metadata.Name` field. The value specifies the name of some resources spawned by the test-operator role. Default value: `horizontest-tests`
 * `cifmw_test_operator_horizontest_namespace`: (String) Registry's namespace where to pull horizontest container. Default value: `{{ cifmw_test_operator_default_namespace }}`
-* `cifmw_test_operator_horizontest_password`: (String) The password for the user running the Horizon tests. Default value: `horizontest`
-* `cifmw_test_operator_horizontest_project_name`: (String) The name of the OpenStack project for Horizon tests. Default value: `horizontest`
 * `cifmw_test_operator_horizontest_project_name_xpath`: (String) The xpath to select project name based on dashboard theme. Default value: `//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
 * `cifmw_test_operator_horizontest_project_text_xpath`: (String) The xpath to element displaying current project based on dashboard theme. Default value: `.//span[@class='rcueicon rcueicon-folder-open']/ancestor::li`
 * `cifmw_test_operator_horizontest_registry`: (String) The registry where to pull horizontest container. Default value: `{{ cifmw_test_operator_default_registry }}`
 * `cifmw_test_operator_horizontest_repo_url`: (String) The Horizon tests repository URL. Default value: `https://review.opendev.org/openstack/horizon`
 * `cifmw_test_operator_horizontest_resources`: (Dict) A dictionary that specifies resources (cpu, memory) for the test pods. When kept untouched it defaults to the resource limits specified on the test-operator side. Default value: `{}`
-* `cifmw_test_operator_horizontest_user`: (String) The username under which Horizon tests will run. Default value: `horizontest`
 <!-- END HORIZONTEST_SPECIFIC_PARAMETERS -->
 
 ## Examples

@@ -1,0 +1,122 @@
+---
+- name: Ensure bootc output directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ cifmw_edpm_build_images_bootc_repo_path }}/output"
+    - "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/yum.repos.d"
+
+- name: Discover repo files for bootc build
+  ansible.builtin.find:
+    paths: /etc/yum.repos.d
+    file_type: file
+    recurse: false
+  register: cifmw_edpm_build_images_bootc_repo_files
+
+- name: Copy repo files for bootc build
+  become: true
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/yum.repos.d/{{ item.path | basename }}"
+    remote_src: true
+    mode: "0644"
+  loop: "{{ cifmw_edpm_build_images_bootc_repo_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Build bootc container image
+  become: true
+  args:
+    chdir: "{{ cifmw_edpm_build_images_bootc_repo_path }}"
+  ansible.builtin.shell: >-
+    buildah bud
+    --network host
+    --build-arg EDPM_BASE_IMAGE={{ cifmw_edpm_build_images_bootc_base_image }}
+    --build-arg RHSM_SCRIPT={{ cifmw_edpm_build_images_bootc_rhsm_script }}
+    --build-arg FIPS={{ cifmw_edpm_build_images_bootc_fips }}
+    --build-arg USER_PACKAGES={{ cifmw_edpm_build_images_bootc_user_packages }}
+    --volume /etc/pki/ca-trust:/etc/pki/ca-trust:ro,Z
+    --volume {{ cifmw_edpm_build_images_bootc_repo_path }}/output/yum.repos.d:/etc/yum.repos.d:rw,Z
+    -f ./Containerfile
+    -t localhost/edpm-bootc:{{ cifmw_edpm_build_images_tag }}
+    . > {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_image_build.log
+    2> {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_image_build_err.log
+
+- name: Generate bootc qcow2 image
+  become: true
+  args:
+    chdir: "{{ cifmw_edpm_build_images_bootc_repo_path }}"
+  ansible.builtin.shell: >-
+    podman run --rm --privileged
+    --security-opt label=type:unconfined_t
+    -v ./output:/output
+    -v /var/lib/containers/storage:/var/lib/containers/storage
+    {{ cifmw_edpm_build_images_bootc_builder_image }}
+    --type qcow2
+    --local
+    localhost/edpm-bootc:{{ cifmw_edpm_build_images_tag }}
+    > {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_qcow2_build.log
+    2> {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_qcow2_build_err.log
+
+- name: Rename generated bootc qcow2 image
+  become: true
+  ansible.builtin.command:
+    cmd: >-
+      mv
+      {{ cifmw_edpm_build_images_bootc_repo_path }}/output/qcow2/disk.qcow2
+      {{ cifmw_edpm_build_images_bootc_repo_path }}/output/{{ cifmw_edpm_build_images_bootc_qcow2_name }}
+    creates: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/{{ cifmw_edpm_build_images_bootc_qcow2_name }}"
+    removes: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/qcow2/disk.qcow2"
+
+- name: Generate bootc qcow2 checksum
+  become: true
+  args:
+    chdir: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output"
+  ansible.builtin.command:
+    cmd: sha256sum {{ cifmw_edpm_build_images_bootc_qcow2_name }}
+  register: _cifmw_edpm_build_images_bootc_qcow2_checksum
+
+- name: Write bootc qcow2 checksum file
+  become: true
+  ansible.builtin.copy:
+    dest: >-
+      {{ cifmw_edpm_build_images_bootc_repo_path }}/output/{{
+      cifmw_edpm_build_images_bootc_qcow2_name }}.sha256
+    content: "{{ _cifmw_edpm_build_images_bootc_qcow2_checksum.stdout }}\n"
+    mode: "0644"
+
+- name: Copy bootc qcow2 packaging helper files
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    mode: "{{ item.mode }}"
+  loop:
+    - src: "{{ cifmw_edpm_image_builder_repo_path }}/copy_out.sh"
+      dest: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/copy_out.sh"
+      mode: "0755"
+    - src: "{{ cifmw_edpm_image_builder_repo_path }}/Containerfile.image"
+      dest: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/Containerfile.image"
+      mode: "0644"
+
+- name: Package bootc qcow2 image inside container image
+  become: true
+  args:
+    chdir: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output"
+  ansible.builtin.command:
+    cmd: >-
+      buildah bud -f ./Containerfile.image
+      -t edpm-bootc:{{ cifmw_edpm_build_images_tag }}-qcow2
+      --build-arg IMAGE_NAME=edpm-bootc
+      --build-arg BASE_IMAGE={{ cifmw_edpm_build_images_base_image }}
+      --logfile {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_qcow2_container_package.log
+
+- name: Set bootc build images output
+  ansible.builtin.set_fact:
+    cifmw_edpm_build_images_bootc_output:
+      images:
+        edpm-bootc-qcow2:
+          image: "{{ cifmw_edpm_build_images_bootc_repo }}:{{ cifmw_edpm_build_images_tag }}-qcow2"
+    cacheable: true

@@ -272,9 +272,25 @@
         state: present
       when: _ip_version == 6
 
+    - name: Assign loopback IPv4 on router loopback interface
+      when:
+        - _ip_version == 4
+        - (router_loopback_ip | default('') | length) > 0
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          ip address replace {{ router_loopback_ip }}/32 dev lo
+      changed_when: true
+
     - name: Configure FRR
       vars:
-        _router_id: "{{ '' if _ip_version == 4 else '1.1.1.1' }}"
+        # Prefer loopback IP as BGP router-id when set; else 1.1.1.1 (IPv4 and IPv6).
+        _router_id: >-
+          {{
+            router_loopback_ip
+            if (router_loopback_ip | default('') | length) > 0
+            else '1.1.1.1'
+          }}
       become: true
       ansible.builtin.template:
         src: templates/router-frr.conf.j2
@@ -440,6 +456,11 @@
     leaf_id: "{{ (ansible_hostname.split('-')[-1] | int) % 2 }}"  # always 2 leaves per rack
     rack_id: "{{ (ansible_hostname.split('-')[-1] | int) // 2 }}"  # always 2 leaves per rack
     _ip_version: "{{ ip_version | default(4) | int }}"
+    # ebgp_racks: comma-separated rack IDs that use eBGP (e.g. "1,2")
+    # ebgp_leaf_asn: base ASN for eBGP leaves (default: 64999 - rack_id)
+    _is_ebgp_rack: "{{ (rack_id | int) in (ebgp_racks | default('') | split(',') | select | map('int') | list) }}"
+    downlink_remote_as: "{{ 'external' if _is_ebgp_rack else 'internal' }}"
+    leaf_asn: "{{ ebgp_leaf_asn | default(64999 - (rack_id | int)) if _is_ebgp_rack else 64999 }}"
   tasks:
     - name: Obtain the connection for the eth0 interface
       ansible.builtin.command:

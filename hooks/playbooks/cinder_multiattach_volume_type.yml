@@ -28,6 +28,19 @@
     - name: Block to configure cinder_volume_type when needed
       when: configure_cinder_volume_type | default(false) | bool
       block:
+        - name: Get OpenStackControlPlane CR name
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            api_version: core.openstack.org/v1beta1
+            kind: OpenStackControlPlane
+            namespace: "{{ namespace }}"
+          register: _ctlplane_cr
+
+        - name: Set OpenStackControlPlane CR name
+          ansible.builtin.set_fact:
+            _glance_cinder_volume_type_ctlplane_name: >-
+              openstackcontrolplane.core.openstack.org/{{ _ctlplane_cr.resources[0].metadata.name }}
+
         - name: Create tempfile
           ansible.builtin.tempfile:
             state: file
@@ -37,8 +50,7 @@
         - name: Write current glance customServiceConfig to tempfile
           ansible.builtin.shell: |
             set -xe -o pipefail
-            crname=$(oc get openstackcontrolplane -o name -n {{ namespace }})
-            oc -n {{ namespace }} get ${crname} -o jsonpath={.spec.glance.template.customServiceConfig} > {{ _glance_custom_service_config_file.path }}
+            oc -n {{ namespace }} get {{ _glance_cinder_volume_type_ctlplane_name }} -o jsonpath={.spec.glance.template.customServiceConfig} >{{ _glance_custom_service_config_file.path }}
           changed_when: false
 
         - name: Ensure cinder_volume_type is configured with proper value in tempfile
@@ -65,8 +77,48 @@
                     customServiceConfig: "{{ _glance_ini_content.content | b64decode }}"
           ansible.builtin.shell: |
             set -xe -o pipefail
-            crname=$(oc get openstackcontrolplane -o name -n {{ namespace }})
-            oc -n {{ namespace }} patch ${crname} --type=merge --patch "{{ _yaml_patch | to_nice_yaml }}"
-            oc -n {{ namespace }} wait ${crname} --for condition=Ready --timeout=10m
+            oc -n {{ namespace }} patch {{ _glance_cinder_volume_type_ctlplane_name }} --type=merge --patch "{{ _yaml_patch | to_nice_yaml }}"
           changed_when: _glance_ini_file.changed
+          when: _glance_ini_file.changed
+
+        # After patching the controlplane, there is a window where both
+        # Glance and the controlplane still report Ready because the
+        # reconciliation has not propagated yet. Wait for Glance to
+        # enter reconciliation (Ready=False) before waiting for it
+        # and the controlplane to become Ready again.
+        - name: Get Glance CR name # noqa: no-handler
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+            api_version: glance.openstack.org/v1beta1
+            kind: Glance
+            namespace: "{{ namespace }}"
+          register: _glance_cr
+          when: _glance_ini_file.changed
+
+        - name: Set Glance CR name # noqa: no-handler
+          ansible.builtin.set_fact:
+            _glance_cinder_volume_type_glance_name: >-
+              glance.glance.openstack.org/{{ _glance_cr.resources[0].metadata.name }}
+          when: _glance_ini_file.changed
+
+        - name: Wait for Glance reconciliation to start # noqa: no-handler
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.shell: |
+            set -xe -o pipefail
+            oc -n {{ namespace }} wait {{ _glance_cinder_volume_type_glance_name }} \
+              --for=condition=Ready=False --timeout=5m
+          when: _glance_ini_file.changed
+
+        - name: Wait for Glance and the ctlplane to complete reconciliation # noqa: no-handler
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.shell: |
+            set -xe -o pipefail
+            oc -n {{ namespace }} wait {{ item }} --for condition=Ready --timeout=10m
+          loop:
+            - "{{ _glance_cinder_volume_type_glance_name }}"
+            - "{{ _glance_cinder_volume_type_ctlplane_name }}"
           when: _glance_ini_file.changed
