@@ -266,12 +266,42 @@
             name: openstack-edpm-ipam-provisionserver
             namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] }}"
           register: cifmw_edpm_deploy_baremetal_provisionserver
-          failed_when: cifmw_edpm_deploy_baremetal_provisionserver.resources | length == 0
+          until: >-
+            cifmw_edpm_deploy_baremetal_provisionserver.resources | length > 0
+            and (
+              cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.get('localImageUrl', '')
+              | trim | length
+            ) > 0
+          retries: "{{ cifmw_edpm_deploy_baremetal_wait_provisionserver_retries }}"
+          delay: 10
           changed_when: false
+
+        - name: Set OpenStack Provision Server local image URL facts
+          ansible.builtin.set_fact:
+            cifmw_edpm_deploy_baremetal_provisionserver_local_image_url: >-
+              {{
+                cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.get('localImageUrl', '')
+              }}
+            cifmw_edpm_deploy_baremetal_provisionserver_local_image_checksum_url_effective: >-
+              {{
+                (
+                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.get('localImageChecksumUrl', '')
+                  | trim
+                )
+                if (
+                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.get('localImageChecksumUrl', '')
+                  | trim | length
+                ) > 0
+                else
+                (
+                  cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.get('localImageUrl', '')
+                  | trim
+                ) ~ '.sha256'
+              }}
 
         - name: Verify OpenStack Provision Server image is reachable
           ansible.builtin.uri:
-            url: "{{ cifmw_edpm_deploy_baremetal_provisionserver.resources[0].status.localImageUrl }}"
+            url: "{{ cifmw_edpm_deploy_baremetal_provisionserver_local_image_url }}"
             method: HEAD
             status_code: 200
           register: cifmw_edpm_deploy_baremetal_provisionserver_image_head
