@@ -12,6 +12,7 @@
     mirror_location: "{{ disconnect_working_dir }}/mirror_location"
     local_registry: "{{ disconnect_working_dir }}/local_registry"
     oc_mirror_cert_manager_catalog_url: "{{ cifmw_cert_manager_catalog_url | default('registry.redhat.io/redhat/redhat-operator-index:v4.18') }}"
+    verify_image_signatures: "{{ cifmw_disconnected_verify_image_signatures | default(false) }}"
   tasks:
     - name: Create disconnected working directories
       ansible.builtin.file:
@@ -294,6 +295,18 @@
         - "'kubernetes-nmstate-operator' in packagemanifest_out.stdout"
       retries: 10
       delay: 30
+
+    - name: Generate ClusterImagePolicies from mirror data
+      cifmw.general.generate_cluster_image_policies:
+        input_dir: "{{ mirror_location }}/working-dir/cluster-resources"
+        output_file: "{{ disconnect_working_dir }}/ClusterImagePolicies.yaml"
+      when: verify_image_signatures
+
+    - name: Apply cluster image policies yaml
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ disconnect_working_dir }}/ClusterImagePolicies.yaml"
+      when: verify_image_signatures
 
     - name: Wait until the OpenShift cluster is stable
       ansible.builtin.command:
