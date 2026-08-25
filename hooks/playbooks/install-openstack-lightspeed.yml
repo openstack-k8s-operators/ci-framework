@@ -76,6 +76,35 @@
           metadata:
             name: "{{ openstack_lightspeed_namespace }}"
 
+    - name: Create ClusterRole for Lightspeed tests
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: "lightspeed-test-role"
+          rules:
+            - nonResourceURLs: ["/ls-access"]
+              verbs: ["get"]
+
+    - name: Create ClusterRoleBinding for Lightspeed tests
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "lightspeed-test-role-binding"
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: "lightspeed-test-role"
+          subjects:
+            - kind: ServiceAccount
+              name: "default"
+              namespace: "{{ openstack_lightspeed_namespace }}"
+
     - name: Create OperatorGroup for OpenStack Lightspeed
       kubernetes.core.k8s:
         state: present
@@ -178,6 +207,61 @@
       when:
         - cifmw_openstack_lightspeed_ca_cert is not defined
         - cifmw_openstack_lightspeed_ca_cert_url is not defined
+
+    - name: Create test-operator dummy config ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "test-operator-dummy-config"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+            labels:
+              app: "lightspeed-tests"
+              persistent: "true"
+              managed-by: "test-operator"
+          data:
+            clouds.yaml: |
+              # Dummy file - not used by lightspeed tests
+              # Required by test-operator but lightspeed tests don't need OpenStack
+
+    - name: Create test-operator dummy secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "test-operator-dummy-secret"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+            labels:
+              app: "lightspeed-tests"
+              persistent: "true"
+              managed-by: "test-operator"
+          type: Opaque
+          stringData:
+            secure.yaml: |
+              # Dummy file - not used by lightspeed tests
+              # Required by test-operator but lightspeed tests don't need OpenStack
+
+    - name: Create dataplane-ansible-ssh-private-key-secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "dataplane-ansible-ssh-private-key-secret"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+            labels:
+              app: "lightspeed-tests"
+              persistent: "true"
+              managed-by: "test-operator"
+          type: Opaque
+          stringData:
+            ssh-privatekey: |
+              # Dummy SSH key - not used by lightspeed tests
 
     # STEP 4: Create OpenStackLightspeed CR to deploy the service
     # Note: Uses configurable parameters for LLM integration
