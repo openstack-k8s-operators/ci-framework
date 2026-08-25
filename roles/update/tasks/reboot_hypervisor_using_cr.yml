@@ -1,5 +1,6 @@
 ---
 - name: Fetch NodeSets for the Reboot OpenStackDataPlaneDeployment
+  when: cifmw_update_node_sets is not defined
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
@@ -8,8 +9,13 @@
     oc -n {{ cifmw_update_namespace }}
     get openstackdataplanenodeset -o name
     | awk -F'/' '{print $2}'
-  register: cifmw_update_node_sets
+  register: _cifmw_update_node_sets_fetch
   changed_when: false
+
+- name: Set cifmw_update_node_sets from fetch result
+  when: _cifmw_update_node_sets_fetch is not skipped
+  ansible.builtin.set_fact:
+    cifmw_update_node_sets: "{{ _cifmw_update_node_sets_fetch }}"
 
 - name: Construct the Reboot CR name
   ansible.builtin.set_fact:
