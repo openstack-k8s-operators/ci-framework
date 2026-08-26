@@ -148,6 +148,67 @@
     name: "devscripts"
     tasks_from: "110_check_ocp.yml"
 
+# devscripts cleanup (make clean) destroys all devscripts-managed
+# resources including the ocpbm/ocppr libvirt networks that were
+# already created by prepare_networking.yml. Recreate any that are
+# missing so that VBMC can reach ipmi.utility before devscripts
+# redeploys the OCP cluster.
+- name: Restore networks destroyed by devscripts cleanup
+  when:
+    - not cifmw_devscripts_ocp_comply | bool
+    - _cifmw_libvirt_manager_layout.networks is defined
+  vars:
+    _fixed_nets: >-
+      {{
+        ['ocpbm', 'ocppr'] +
+        (cifmw_libvirt_manager_fixed_networks | default([]))
+      }}
+  block:
+    - name: List existing libvirt networks after cleanup
+      register: _post_cleanup_nets
+      community.libvirt.virt_net:
+        command: list_nets
+        uri: "qemu:///system"
+
+    - name: Identify fixed networks needing restoration
+      ansible.builtin.set_fact:
+        _nets_to_restore: >-
+          {{
+            _cifmw_libvirt_manager_layout.networks |
+            dict2items |
+            selectattr('key', 'in', _fixed_nets) |
+            rejectattr('key', 'in', _post_cleanup_nets.list_nets) |
+            list
+          }}
+
+    - name: Define missing networks in libvirt
+      community.libvirt.virt_net:
+        command: define
+        name: "{{ item.key }}"
+        xml: "{{ item.value }}"
+        uri: "qemu:///system"
+      loop: "{{ _nets_to_restore }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Start missing networks
+      community.libvirt.virt_net:
+        command: create
+        name: "{{ item.key }}"
+        uri: "qemu:///system"
+      loop: "{{ _nets_to_restore }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Ensure restored networks are active with autostart
+      community.libvirt.virt_net:
+        autostart: true
+        name: "{{ item.key }}"
+        uri: "qemu:///system"
+      loop: "{{ _nets_to_restore }}"
+      loop_control:
+        label: "{{ item.key }}"
+
 - name: Bootstrap devscript using baremetal provisioning
   when:
     - not cifmw_devscripts_ocp_comply | bool
