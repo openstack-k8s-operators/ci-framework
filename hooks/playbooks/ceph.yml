@@ -372,6 +372,10 @@
         all_addresses: ansible_all_ipv6_addresses
         cidr: 64
 
+    # OpenStack service images still ship librados that only understands
+    # CephX type aes. CVE-2025-30156: keep daemons on aes256k via
+    # auth_allowed_ciphers, but mint client.openstack as aes until those
+    # images are upgraded. Do not set auth_preferred_cipher.
     - name: Generate a cephx key
       cephx_key:
         cipher: "{{ cifmw_ceph_key_cipher | default('aes') }}"
@@ -386,11 +390,36 @@
             mode: '0600'
             caps:
               mgr: allow *
-              mon: profile rbd
-              osd: "{{ pools | map('regex_replace', '^(.*)$',
-                                   'profile rbd pool=\\1') | join(', ') }}"
+              mon: allow r, profile rbd
+              osd: "{{ _cifmw_cephadm_osd_caps }}"
       vars:
-        pools: "{{ cifmw_cephadm_pools | map(attribute='name') | list }}"
+        _cifmw_cephadm_rbd_pools: >-
+          {{
+            cifmw_cephadm_pools
+            | selectattr('application', 'equalto', 'rbd')
+            | map(attribute='name')
+            | list
+          }}
+        _cifmw_cephadm_cephfs_pools: >-
+          {{
+            cifmw_cephadm_pools
+            | selectattr('application', 'equalto', 'cephfs')
+            | map(attribute='name')
+            | list
+          }}
+        _cifmw_cephadm_osd_caps: >-
+          {{
+            (
+              _cifmw_cephadm_rbd_pools
+              | map('regex_replace', '^(.*)$', 'profile rbd pool=\\1')
+              | list
+              + (
+                _cifmw_cephadm_cephfs_pools
+                | map('regex_replace', '^(.*)$', 'allow rw pool=\\1')
+                | list
+              )
+            ) | join(', ')
+          }}
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
     # for deploying external ceph for 17.1 using cifmw, we need this playbook to create keyring

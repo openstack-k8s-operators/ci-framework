@@ -136,6 +136,16 @@ that they do not need to be changed for a typical EDPM deployment.
   `ceph mon set auth_allowed_ciphers <value>` during cluster configuration.
    Example values are `"aes,aes256k"` or `"aes256k"` or `"aes"`.
    Defaults to `""` (unset, no command is run).
+   For Tentacle (v20) HCI with older OpenStack librados, set
+   `"aes,aes256k"` so daemons can use `aes256k` while `client.openstack`
+   keys of type `aes` still authenticate (CVE-2025-30156). Do not set
+   `auth_preferred_cipher` until Glance/Cinder/Manila images understand
+   `aes256k`.
+
+* `cifmw_ceph_key_cipher`: (String) Cipher passed to the `cephx_key` module
+  when generating `client.openstack`. Defaults to `aes`. Keep `aes` for
+  OpenStack clients until service images ship librados that understands
+  `aes256k`.
 
 Use the `cifmw_cephadm_pools` list of dictionaries to define pools for
 Nova (vms), Cinder (volumes), Cinder-backups (backups), and Glance (images).
@@ -169,7 +179,7 @@ cifmw_cephadm_keys:
     mode: '0600'
     caps:
       mgr: allow *
-      mon: profile rbd
+      mon: allow r, profile rbd
       osd: profile rbd pool=vms, profile rbd pool=volumes, profile rbd pool=backups, profile rbd pool=images
 ```
 
