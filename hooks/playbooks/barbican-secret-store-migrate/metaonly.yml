@@ -1,0 +1,86 @@
+---
+# Metadata-only secrets have no payload and must fail migrate (HTTP 409).
+
+- name: Metadata-only migrate must conflict
+  block:
+    - name: Create metadata-only secret
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - secret
+          - store
+          - --name
+          - ci-migrate-metaonly
+          - -f
+          - value
+          - -c
+          - Secret href
+      register: _meta_create
+      changed_when: false
+      no_log: true
+
+    - name: Parse metadata-only secret
+      ansible.builtin.set_fact:
+        _meta_secret_href: "{{ _meta_create.stdout | trim }}"
+
+    - name: Migrate metadata-only secret (expect conflict)
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - --os-key-manager-api-version
+          - "1.3"
+          - secret
+          - migrate
+          - "{{ _meta_secret_href }}"
+          - --secret-store
+          - "{{ _store_other.id }}"
+      register: _meta_migrate
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Assert metadata-only migrate failed
+      ansible.builtin.assert:
+        that:
+          - _meta_migrate.rc != 0
+          - >-
+              ('409' in (_meta_migrate.stderr | default('')))
+              or ('Conflict' in (_meta_migrate.stderr | default('')))
+              or ('no stored payload' in (_meta_migrate.stderr | default('')))
+              or ('409' in (_meta_migrate.stdout | default('')))
+              or ('Conflict' in (_meta_migrate.stdout | default('')))
+              or ('no stored payload' in (_meta_migrate.stdout | default('')))
+        fail_msg: >-
+          Metadata-only migrate should fail with HTTP 409 / Conflict.
+          rc={{ _meta_migrate.rc }}
+          stderr={{ _meta_migrate.stderr | default('') }}
+  always:
+    - name: Delete metadata-only secret
+      when: _meta_secret_href is defined
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - secret
+          - delete
+          - "{{ _meta_secret_href }}"
+      changed_when: false
+      failed_when: false
+      no_log: true

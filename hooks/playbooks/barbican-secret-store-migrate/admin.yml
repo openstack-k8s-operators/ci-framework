@@ -1,0 +1,73 @@
+---
+# Run barbican-secret-migrate in the API pod.
+#
+# That image has the admin CLI; openstackclient does not. The API pod is
+# not logged in as project admin, so pass a token issued from
+# openstackclient plus Keystone and Key Manager URLs.
+
+- name: "Run barbican-secret-migrate ({{ cifmw_barbican_migrate_case }})"
+  when: not (cifmw_barbican_migrate_admin_dry_run | default(false) | bool)
+  ansible.builtin.command:
+    argv:
+      - oc
+      - -n
+      - "{{ cifmw_barbican_migrate_namespace }}"
+      - exec
+      - "{{ cifmw_barbican_migrate_api_pod }}"
+      - -c
+      - "{{ cifmw_barbican_migrate_api_container }}"
+      - --
+      - barbican-secret-migrate
+      - --os-auth-type
+      - v3token
+      - --os-token
+      - "{{ _os_token }}"
+      - --os-auth-url
+      - "{{ cifmw_barbican_migrate_keystone }}"
+      - --os-endpoint-override
+      - "{{ cifmw_barbican_migrate_v1 }}"
+      - --os-identity-api-version
+      - "3"
+      - --secret-store-id
+      - "{{ cifmw_barbican_migrate_admin_store_id }}"
+      - --secret-id
+      - "{{ cifmw_barbican_migrate_admin_secret_id }}"
+      - --error-file
+      - /tmp/cifmw-barbican-secret-migrate-errors.jsonl
+  register: _migrate_admin
+  changed_when: false
+  no_log: true
+
+- name: "Dry-run barbican-secret-migrate ({{ cifmw_barbican_migrate_case }})"
+  when: cifmw_barbican_migrate_admin_dry_run | default(false) | bool
+  ansible.builtin.command:
+    argv:
+      - oc
+      - -n
+      - "{{ cifmw_barbican_migrate_namespace }}"
+      - exec
+      - "{{ cifmw_barbican_migrate_api_pod }}"
+      - -c
+      - "{{ cifmw_barbican_migrate_api_container }}"
+      - --
+      - barbican-secret-migrate
+      - --os-auth-type
+      - v3token
+      - --os-token
+      - "{{ _os_token }}"
+      - --os-auth-url
+      - "{{ cifmw_barbican_migrate_keystone }}"
+      - --os-endpoint-override
+      - "{{ cifmw_barbican_migrate_v1 }}"
+      - --os-identity-api-version
+      - "3"
+      - --secret-store-id
+      - "{{ cifmw_barbican_migrate_admin_store_id }}"
+      - --secret-id
+      - "{{ cifmw_barbican_migrate_admin_secret_id }}"
+      - --error-file
+      - /tmp/cifmw-barbican-secret-migrate-errors.jsonl
+      - --dry-run
+  register: _migrate_admin_dry
+  changed_when: false
+  no_log: true

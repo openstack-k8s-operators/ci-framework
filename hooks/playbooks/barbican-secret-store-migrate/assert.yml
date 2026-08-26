@@ -1,0 +1,93 @@
+---
+# Assert a secret is on the expected Barbican backend.
+#
+# store_crypto (simple_crypto / p11_crypto): ciphertext is in encrypted_data;
+# kek_data.plugin_name is the crypto plugin FQCN.
+#
+# KMIP and other secret-store plugins: payload is outside MariaDB;
+# secret_store_metadata.plugin_name is the store plugin FQCN and there is
+# no active encrypted_data row.
+#
+# Expects:
+#   cifmw_barbican_migrate_assert_label
+#   cifmw_barbican_migrate_assert_secret_id
+#   cifmw_barbican_migrate_assert_store  (id, store_plugin, crypto_plugin)
+
+- name: "{{ cifmw_barbican_migrate_assert_label }}: resolve expected backend"
+  ansible.builtin.set_fact:
+    _assert_is_store_crypto: "{{ _store.store_plugin == 'store_crypto' or _store.crypto_plugin in ['simple_crypto', 'p11_crypto'] }}"
+    _assert_expected_fqcn: "{{ _crypto_fqcn if (_store.store_plugin == 'store_crypto' or _store.crypto_plugin in ['simple_crypto', 'p11_crypto']) else _store_fqcn }}"
+  vars:
+    _store: "{{ cifmw_barbican_migrate_assert_store }}"
+    _crypto_fqcn: "{{ cifmw_barbican_migrate_crypto_fqcns[_store.crypto_plugin] | default('') }}"
+    _store_fqcn: "{{ cifmw_barbican_migrate_store_fqcns[_store.store_plugin] | default('') }}"
+
+- name: "{{ cifmw_barbican_migrate_assert_label }}: require a known plugin FQCN"
+  ansible.builtin.assert:
+    that:
+      - _assert_expected_fqcn | length > 0
+    fail_msg: >-
+      {{ cifmw_barbican_migrate_assert_label }}: no FQCN mapping for
+      store_plugin={{ cifmw_barbican_migrate_assert_store.store_plugin }}
+      crypto_plugin={{ cifmw_barbican_migrate_assert_store.crypto_plugin }}.
+
+- name: "{{ cifmw_barbican_migrate_assert_label }}: verify store_crypto backend"
+  when: _assert_is_store_crypto | bool
+  block:
+    - name: "{{ cifmw_barbican_migrate_assert_label }}: read kek_data.plugin_name"
+      ansible.builtin.include_tasks: sql.yml
+      vars:
+        cifmw_barbican_migrate_sql_desc: "{{ cifmw_barbican_migrate_assert_label }} kek plugin_name"
+        cifmw_barbican_migrate_sql: >-
+          SELECT k.plugin_name FROM encrypted_data e
+          JOIN kek_data k ON e.kek_id = k.id
+          WHERE e.secret_id='{{ cifmw_barbican_migrate_assert_secret_id }}'
+          AND e.deleted=0;
+
+    - name: "{{ cifmw_barbican_migrate_assert_label }}: assert kek_data.plugin_name"
+      ansible.builtin.assert:
+        that:
+          - cifmw_barbican_migrate_sql_result.stdout | trim == _assert_expected_fqcn
+        fail_msg: >-
+          {{ cifmw_barbican_migrate_assert_label }}: expected kek_data.plugin_name
+          '{{ _assert_expected_fqcn }}' for crypto_plugin
+          '{{ cifmw_barbican_migrate_assert_store.crypto_plugin }}', got
+          '{{ cifmw_barbican_migrate_sql_result.stdout | trim }}'.
+
+- name: "{{ cifmw_barbican_migrate_assert_label }}: verify secret-store plugin backend"
+  when: not (_assert_is_store_crypto | bool)
+  block:
+    - name: "{{ cifmw_barbican_migrate_assert_label }}: read secret_store_metadata.plugin_name"
+      ansible.builtin.include_tasks: sql.yml
+      vars:
+        cifmw_barbican_migrate_sql_desc: "{{ cifmw_barbican_migrate_assert_label }} store plugin_name"
+        cifmw_barbican_migrate_sql: >-
+          SELECT value FROM secret_store_metadata
+          WHERE secret_id='{{ cifmw_barbican_migrate_assert_secret_id }}'
+          AND `key`='plugin_name' AND deleted=0;
+
+    - name: "{{ cifmw_barbican_migrate_assert_label }}: save store plugin_name"
+      ansible.builtin.set_fact:
+        _assert_meta_plugin_name: "{{ cifmw_barbican_migrate_sql_result.stdout | trim }}"
+
+    - name: "{{ cifmw_barbican_migrate_assert_label }}: count leftover ciphertext"
+      ansible.builtin.include_tasks: sql.yml
+      vars:
+        cifmw_barbican_migrate_sql_desc: "{{ cifmw_barbican_migrate_assert_label }} encrypted_data count"
+        cifmw_barbican_migrate_sql: >-
+          SELECT COUNT(*) FROM encrypted_data
+          WHERE secret_id='{{ cifmw_barbican_migrate_assert_secret_id }}'
+          AND deleted=0;
+
+    - name: "{{ cifmw_barbican_migrate_assert_label }}: assert metadata plugin and no ciphertext"
+      ansible.builtin.assert:
+        that:
+          - _assert_meta_plugin_name == _assert_expected_fqcn
+          - cifmw_barbican_migrate_sql_result.stdout | trim == "0"
+        fail_msg: >-
+          {{ cifmw_barbican_migrate_assert_label }}: expected
+          secret_store_metadata.plugin_name '{{ _assert_expected_fqcn }}'
+          and no active encrypted_data for store_plugin
+          '{{ cifmw_barbican_migrate_assert_store.store_plugin }}'.
+          plugin_name='{{ _assert_meta_plugin_name }}'
+          encrypted_data_count='{{ cifmw_barbican_migrate_sql_result.stdout | trim }}'.
