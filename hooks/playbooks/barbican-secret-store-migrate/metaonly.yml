@@ -1,5 +1,5 @@
 ---
-# Metadata-only secrets have no payload and must fail migrate (HTTP 409).
+# Metadata-only secrets have no payload and must fail migrate (HTTP 400).
 
 - name: Metadata-only migrate must conflict
   block:
@@ -39,8 +39,6 @@
           - "{{ cifmw_barbican_migrate_osc_pod }}"
           - --
           - openstack
-          - --os-key-manager-api-version
-          - "1.3"
           - secret
           - migrate
           - "{{ _meta_secret_href }}"
@@ -49,23 +47,54 @@
       register: _meta_migrate
       changed_when: false
       failed_when: false
-      no_log: true
 
     - name: Assert metadata-only migrate failed
       ansible.builtin.assert:
         that:
           - _meta_migrate.rc != 0
           - >-
-              ('409' in (_meta_migrate.stderr | default('')))
-              or ('Conflict' in (_meta_migrate.stderr | default('')))
+              ('400' in (_meta_migrate.stderr | default('')))
+              or ('Bad Request' in (_meta_migrate.stderr | default('')))
               or ('no stored payload' in (_meta_migrate.stderr | default('')))
-              or ('409' in (_meta_migrate.stdout | default('')))
-              or ('Conflict' in (_meta_migrate.stdout | default('')))
+              or ('400' in (_meta_migrate.stdout | default('')))
+              or ('Bad Request' in (_meta_migrate.stdout | default('')))
               or ('no stored payload' in (_meta_migrate.stdout | default('')))
         fail_msg: >-
-          Metadata-only migrate should fail with HTTP 409 / Conflict.
+          Metadata-only migrate should fail with HTTP 400 / Bad Request.
           rc={{ _meta_migrate.rc }}
           stderr={{ _meta_migrate.stderr | default('') }}
+
+    - name: Get metadata-only secret (expect null secret_store_id)
+      when: _meta_secret_href is defined
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - secret
+          - get
+          - "{{ _meta_secret_href }}"
+          - -f
+          - json
+      register: _meta_get
+      changed_when: false
+      no_log: true
+
+    - name: Assert metadata-only secret has null store fields
+      when: _meta_get is defined and _meta_get is not skipped
+      ansible.builtin.assert:
+        that:
+          - "'Secret store id' in (_meta_get.stdout | from_json)"
+          - "'Secret store href' in (_meta_get.stdout | from_json)"
+          - (_meta_get.stdout | from_json)['Secret store id'] is none
+          - (_meta_get.stdout | from_json)['Secret store href'] is none
+        fail_msg: >-
+          Metadata-only secret should include Secret store id/href as null.
+          body={{ _meta_get.stdout | default('') }}
   always:
     - name: Delete metadata-only secret
       when: _meta_secret_href is defined

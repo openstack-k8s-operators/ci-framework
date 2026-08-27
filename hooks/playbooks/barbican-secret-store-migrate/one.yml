@@ -1,6 +1,6 @@
 ---
 # Create a secret on the global-default store, migrate it, assert the
-# expected backend in MariaDB, decrypt via OSC, then delete.
+# expected secret_store_id via GET metadata, decrypt via OSC, then delete.
 #
 # cifmw_barbican_migrate_via: osc | admin
 #   osc   — openstack secret migrate in the openstackclient pod
@@ -45,7 +45,7 @@
         _migrate_secret_href: "{{ _create_secret.stdout | trim }}"
         _migrate_secret_id: "{{ _create_secret.stdout | trim | regex_replace('.*/', '') }}"
 
-    - name: "Assert source backend before migrate ({{ cifmw_barbican_migrate_case }})"
+    - name: "Assert source store before migrate ({{ cifmw_barbican_migrate_case }})"
       ansible.builtin.include_tasks: assert.yml
       vars:
         cifmw_barbican_migrate_assert_label: "{{ cifmw_barbican_migrate_case }} before"
@@ -63,8 +63,6 @@
           - "{{ cifmw_barbican_migrate_osc_pod }}"
           - --
           - openstack
-          - --os-key-manager-api-version
-          - "1.3"
           - secret
           - migrate
           - "{{ _migrate_secret_href }}"
@@ -72,7 +70,6 @@
           - "{{ cifmw_barbican_migrate_dst_store.id }}"
       register: _migrate_osc
       changed_when: false
-      no_log: true
 
     - name: "Migrate secret with barbican-secret-migrate ({{ cifmw_barbican_migrate_case }})"
       when: cifmw_barbican_migrate_via | default('osc') == 'admin'
@@ -82,7 +79,7 @@
         cifmw_barbican_migrate_admin_secret_id: "{{ _migrate_secret_id }}"
         cifmw_barbican_migrate_admin_dry_run: "{{ cifmw_barbican_migrate_dry_run | default(false) | bool }}"
 
-    - name: "Assert backend after migrate ({{ cifmw_barbican_migrate_case }})"
+    - name: "Assert store after migrate ({{ cifmw_barbican_migrate_case }})"
       ansible.builtin.include_tasks: assert.yml
       vars:
         cifmw_barbican_migrate_assert_label: "{{ cifmw_barbican_migrate_case }} after"
@@ -103,8 +100,6 @@
           - "{{ cifmw_barbican_migrate_osc_pod }}"
           - --
           - openstack
-          - --os-key-manager-api-version
-          - "1.3"
           - secret
           - migrate
           - "{{ _migrate_secret_href }}"
@@ -112,7 +107,6 @@
           - "{{ cifmw_barbican_migrate_src_store.id }}"
       register: _migrate_osc_back
       changed_when: false
-      no_log: true
 
     - name: "Migrate secret back with barbican-secret-migrate ({{ cifmw_barbican_migrate_case }})"
       when:
@@ -125,7 +119,7 @@
         cifmw_barbican_migrate_admin_secret_id: "{{ _migrate_secret_id }}"
         cifmw_barbican_migrate_admin_dry_run: false
 
-    - name: "Assert source backend after roundtrip ({{ cifmw_barbican_migrate_case }})"
+    - name: "Assert source store after roundtrip ({{ cifmw_barbican_migrate_case }})"
       when:
         - cifmw_barbican_migrate_roundtrip | default(false) | bool
         - not (cifmw_barbican_migrate_dry_run | default(false) | bool)
