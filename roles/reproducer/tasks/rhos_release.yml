@@ -9,13 +9,39 @@
   ansible.builtin.command:
     cmd: "rhos-release {{ _rhos_release_args_override | default(cifmw_repo_setup_rhos_release_args) | default('rhel') }}"
 
+# ansible_* under delegate_to is evaluated from the inventory host
+# (hypervisor). RHEL 9 computes on a RHEL 10 hypervisor must not get this
+# block (uni03gamma HCI). Read VERSION_ID from the connection target.
+# Do not use setup: without delegate_facts it assigns facts to the
+# hypervisor (Ansible "Delegating facts").
+- name: Detect OS on the rhos-release target
+  ansible.builtin.command:
+    argv:
+      - awk
+      - -F=
+      - /^VERSION_ID=/ { gsub(/"/, "", $2); print $2 }
+      - /etc/os-release
+  register: _rhos_release_version_id
+  changed_when: false
+  failed_when: >-
+    _rhos_release_version_id.rc != 0 or
+    _rhos_release_version_id.stdout | trim | length == 0
+
+- name: Show detected rhos-release target OS
+  ansible.builtin.debug:
+    msg: "rhos-release target VERSION_ID={{ _rhos_release_version_id.stdout }}"
+
+# Disable-all is intentional on RHEL 10 (not extras-only). Selective
+# python3 exclude is overwritten by repo_setup sync_repos.yml, and
+# osp-trunk-candidate.repo is not a rhos-release-* file. See KB
+# "Python3 Contamination - Structural Problem (2026-08-18)".
 - name: Make RHEL 10+ safe from rhos-release RHEL 9 repo contamination
   when:
-    - ansible_distribution_major_version | int >= 10
+    - ((_rhos_release_version_id.stdout | trim).split('.') | first | int) >= 10
   become: true
   vars:
-    _rhel_major: "{{ ansible_distribution_major_version }}"
-    _rhel_ver: "{{ ansible_distribution_version }}"
+    _rhel_ver: "{{ _rhos_release_version_id.stdout | trim }}"
+    _rhel_major: "{{ (_rhos_release_version_id.stdout | trim).split('.') | first }}"
     _base_url: >-
       http://download.devel.redhat.com/released/rhel-{{ _rhel_major }}/RHEL-{{ _rhel_major }}/{{ _rhel_ver }}
   block:
