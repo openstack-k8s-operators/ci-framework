@@ -28,6 +28,18 @@ None
   which is created by the `cifmw_block_device` role)
 * `cifmw_ceph_spec_path`: path of the rendered spec file (default
   `/tmp/ceph_spec.yml`)
+* `cifmw_ceph_spec_path_initial_conf`: path of the rendered initial Ceph
+  conf file (default `/tmp/initial_ceph.conf`)
+* `cifmw_ceph_spec_public_network`: CIDR written as `public_network`
+  (default `192.168.122.0/24`). Extra-vars override the role parameter
+  (uni03gamma uses this for OSPRH-6675). After the templates are written
+  the resolved CIDR is exported as `cifmw_ceph_spec_rendered_public_network`
+  on the spec host so later plays can read it from hostvars instead of
+  parsing the file. A distinct name is required because extra-vars beat
+  `set_fact` of the same name.
+* `cifmw_ceph_spec_private_network`: CIDR written as `cluster_network`
+  (default empty, omits the key). Exported as
+  `cifmw_ceph_spec_rendered_private_network`.
 * `cifmw_ceph_spec_encryption`: Produce an initial Ceph configuration
   file with both over-the-wire
   ([msgr2 secure mode](https://docs.ceph.com/en/latest/rados/configuration/msgr2/))
