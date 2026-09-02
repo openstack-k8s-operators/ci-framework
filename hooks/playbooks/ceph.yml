@@ -416,10 +416,12 @@
       when: adoption_deploy_ceph_for_tripleo | default (false)
       no_log: "{{ cifmw_nolog | default(true) | bool }}"
 
-    # public network always exist because is provided by the ceph_spec role
+    # Use the snapshot exported by cifmw_ceph_spec, not storage_network_range
+    # and not the extra-var name: extra-vars beat set_fact of the same name,
+    # and uni03gamma (OSPRH-6675) overrides the role param with ctlplane.
     - name: Get Storage network range
       ansible.builtin.set_fact:
-        cifmw_cephadm_rgw_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+        cifmw_cephadm_rgw_network: "{{ hostvars['localhost']['cifmw_ceph_spec_rendered_public_network'] | mandatory }}"
 
     - name: Set IP address of first monitor
       ansible.builtin.set_fact:
@@ -491,7 +493,7 @@
         name: cifmw_cephadm
         tasks_from: monitoring
       vars:
-        cifmw_cephadm_monitoring_network: "{{ lookup('ansible.builtin.ini', 'public_network section=global file=' ~ cifmw_cephadm_bootstrap_conf) }}"
+        cifmw_cephadm_monitoring_network: "{{ cifmw_cephadm_rgw_network }}"
         cifmw_cephadm_dashboard_crt: "{{ cifmw_cephadm_certificate }}"
         cifmw_cephadm_dashboard_key: "{{ cifmw_cephadm_key }}"
 

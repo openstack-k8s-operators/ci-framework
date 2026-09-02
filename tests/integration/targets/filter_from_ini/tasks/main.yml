@@ -1,0 +1,39 @@
+---
+- name: Sample Ceph initial conf
+  ansible.builtin.set_fact:
+    _ceph_conf: |
+      [global]
+      osd pool default size = 1
+      public_network = 192.168.122.0/24
+      cluster_network = 172.18.0.0/24
+      fsid = 5b5fd001-8e21-4a0a-ba87-c12e77892b2c
+      path = /var/lib/ceph/%s/osd
+      [mon]
+      mon_warn_on_pool_no_redundancy = false
+
+- name: Test from_ini extracts Ceph keys
+  ansible.builtin.assert:
+    that:
+      - _ceph_conf | cifmw.general.from_ini('public_network') == '192.168.122.0/24'
+      - _ceph_conf | cifmw.general.from_ini('cluster_network') == '172.18.0.0/24'
+      - _ceph_conf | cifmw.general.from_ini('fsid') == '5b5fd001-8e21-4a0a-ba87-c12e77892b2c'
+      - _ceph_conf | cifmw.general.from_ini('osd pool default size') == '1'
+      - _ceph_conf | cifmw.general.from_ini('path') == '/var/lib/ceph/%s/osd'
+      - _ceph_conf | cifmw.general.from_ini('mon_warn_on_pool_no_redundancy', 'mon') == 'false'
+      - _ceph_conf | cifmw.general.from_ini('missing') == ''
+      - _ceph_conf | cifmw.general.from_ini('missing', 'global', 'unset') == 'unset'
+
+- name: Test from_ini bad argument
+  vars:
+    input:
+      - "not ini"
+  ansible.builtin.debug:
+    var: "input | cifmw.general.from_ini('public_network')"
+  register: _bad_from_ini_argument
+  ignore_errors: true
+
+- name: Verify from_ini showed an error message
+  ansible.builtin.assert:
+    that:
+      - _bad_from_ini_argument is failed
+      - "'from_ini requires INI content as a string' in _bad_from_ini_argument.msg"
