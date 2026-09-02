@@ -67,7 +67,19 @@
       register: pod_exit_code
       changed_when: false
       failed_when: false
-      until: pod_exit_code.rc != 10
+      # Keep polling while the background command is running (rc=10) or while
+      # oc exec fails with transient API/admission errors during long-running
+      # shiftstack tests (for example SCCExecRestrictions webhook timeouts).
+      until: >-
+        pod_exit_code.rc == 0 or
+        pod_exit_code.rc == 2 or
+        (
+          pod_exit_code.rc != 10 and
+          not (
+            pod_exit_code.stderr | default('') is
+            search(cifmw_shiftstack_exec_transient_patterns | join('|'), ignorecase=True)
+          )
+        )
       retries: "{{ cifmw_shiftstack_exec_retries }}"
       delay: "{{ cifmw_shiftstack_exec_delay }}"
 
@@ -76,6 +88,7 @@
         msg: >-
           Lost connection to pod {{ pod_name }}. The pod may have been
           evicted, OOM-killed, or the API server became unreachable.
+          Failed after {{ pod_exit_code.attempts | default(1) }} polling attempt(s).
           oc exec stderr: {{ pod_exit_code.stderr | default('(none)') | trim }}
       when:
         - pod_exit_code.rc != 0
