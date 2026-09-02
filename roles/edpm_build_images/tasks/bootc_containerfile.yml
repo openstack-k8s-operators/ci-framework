@@ -1,0 +1,31 @@
+---
+- name: Set bootc base image variant
+  ansible.builtin.set_fact:
+    cifmw_edpm_build_images_bootc_base_variant: >-
+      {{ cifmw_edpm_build_images_bootc_base_image
+         | regex_search('(?P<d>centos|rhel)[^0-9]*(?P<v>\d+)', '\g<d>', '\g<v>')
+         | default([], true) | join('') }}
+
+- name: Check bootc Containerfile
+  ansible.builtin.stat:
+    path: "{{ cifmw_edpm_build_images_bootc_repo_path }}/{{ item }}"
+  loop:
+    - "Containerfile.{{ cifmw_edpm_build_images_bootc_base_variant }}"
+    - Containerfile
+  register: cifmw_edpm_build_images_bootc_containerfiles
+
+- name: Fail when bootc Containerfile missing
+  ansible.builtin.fail:
+    msg: >-
+      No bootc Containerfile found in {{ cifmw_edpm_build_images_bootc_repo_path }}.
+      The installed edpm-image-builder package does not include bootc content.
+      Update the edpm-image-builder repository.
+  when: not (cifmw_edpm_build_images_bootc_containerfiles.results
+             | selectattr('stat.exists') | list)
+
+- name: Set bootc Containerfile
+  ansible.builtin.set_fact:
+    cifmw_edpm_build_images_bootc_containerfile: >-
+      {{ cifmw_edpm_build_images_bootc_containerfiles.results
+         | selectattr('stat.exists') | map(attribute='item')
+         | list | first }}
