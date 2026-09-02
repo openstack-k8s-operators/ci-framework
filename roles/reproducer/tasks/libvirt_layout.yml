@@ -122,3 +122,46 @@
   loop_control:
     loop_var: compute
     label: "{{ compute.key }}"
+
+# macvlan CNI assigns a random MAC per AnsibleEE pod, but Whereabouts
+# IPAM reuses the same IPv6 from a small pool. EDPM nodes' NDP cache
+# keeps the old MAC, silently dropping return traffic.
+# Reducing base_reachable_time_ms from 30s to 5s forces faster
+# re-probing so TCP retransmits succeed with the new MAC.
+- name: Reduce IPv6 NDP reachable time on EDPM ctlplane interfaces
+  when:
+    - cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+    - _ndp_host.value.networks.ctlplane is defined
+    - _ndp_host.value.networks.ctlplane.interface_name | default('') | length > 0
+    - _ndp_host.key is not match('^(ocp|crc).*')
+  delegate_to: "{{ _ndp_host.key }}"
+  become: true
+  ansible.posix.sysctl:
+    name: >-
+      net.ipv6.neigh.{{ _ndp_host.value.networks.ctlplane.interface_name }}.base_reachable_time_ms
+    value: "5000"
+    sysctl_set: true
+    state: present
+  loop: >-
+    {{ cifmw_networking_env_definition.instances | dict2items }}
+  loop_control:
+    loop_var: _ndp_host
+    label: "{{ _ndp_host.key }}"
+
+- name: Set IPv6 NDP reachable time default for new interfaces
+  when:
+    - cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+    - _ndp_host.value.networks.ctlplane is defined
+    - _ndp_host.key is not match('^(ocp|crc).*')
+  delegate_to: "{{ _ndp_host.key }}"
+  become: true
+  ansible.posix.sysctl:
+    name: net.ipv6.neigh.default.base_reachable_time_ms
+    value: "5000"
+    sysctl_set: true
+    state: present
+  loop: >-
+    {{ cifmw_networking_env_definition.instances | dict2items }}
+  loop_control:
+    loop_var: _ndp_host
+    label: "{{ _ndp_host.key }}"
