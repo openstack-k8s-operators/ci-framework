@@ -419,28 +419,44 @@ Never hand-edit these files — they're overwritten by `make role_molecule`:
 
 ---
 
-## [Suggestion] Register Variable Naming
+## [Critical] Variable Naming: Public vs Internal
 
-Use a leading underscore for task-local registered variables. This
-signals they are private to the current file and not part of the role's
-public interface.
+The `cifmw_<role>_<var>` naming convention applies **only to public
+variables** -- parameters defined in `defaults/main.yml` that consumers
+set in their inventory or job variables. These are the role's public
+interface.
+
+Internal runtime variables -- those created via `register:` or
+`set_fact` within task files -- use a **leading underscore prefix**
+instead (`_<role>_<var>` or just `_<var>`). This is not a violation of
+the `cifmw_` rule; they are two separate conventions for two separate
+purposes.
 
 ```yaml
-# Bad - looks like a public role variable
-- name: Get pod list
-  kubernetes.core.k8s_info:
-    kind: Pod
-  register: pod_list
+# Public variable (defaults/main.yml) -- must use cifmw_ prefix
+cifmw_my_role_timeout: 300
 
-# Good - clearly scoped to this file
+# Internal registered variable (tasks/) -- must use _ prefix
 - name: Get pod list
   kubernetes.core.k8s_info:
     kind: Pod
   register: _pod_list
-```
 
-Reserve unprefixed names for `set_fact` values that intentionally
-persist across roles or plays.
+# Internal set_fact (tasks/) -- must use _ prefix
+- name: Track approval state
+  ansible.builtin.set_fact:
+    _my_role_certs_approved: true
+
+# Bad - internal variable using cifmw_ prefix (pollutes public namespace)
+- name: Get pod list
+  kubernetes.core.k8s_info:
+    kind: Pod
+  register: cifmw_my_role_pod_list
+
+# Bad - public variable without cifmw_ prefix (breaks downstream consumers)
+# In defaults/main.yml:
+my_role_timeout: 300
+```
 
 ---
 
