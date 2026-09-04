@@ -1,0 +1,272 @@
+---
+# Live-migrate Barbican secrets between SimpleCrypto and PKCS#11.
+#
+# Asserts movement via GET /v1/secrets/{id} secret_store_id (microversion
+# 1.3). A 204 plus a decryptable payload is not enough without checking
+# the catalogue UUID on the secret metadata.
+#
+# Prerequisite: the control plane must enable both stores, for example:
+#
+#   spec.barbican.template.enabledSecretStores: [simple_crypto, pkcs11]
+#   spec.barbican.template.globalDefaultSecretStore: pkcs11
+#
+# The current Luna/Proteccio hooks only enable pkcs11. This playbook fails
+# with a clear error if GET /v1/secret-stores has fewer than those two
+# backends.
+#
+# Secrets are created with OSC on the global-default store (OSC has no
+# preferred-store command). Store discovery uses openstacksdk in the
+# openstackclient pod (OSC has no secret-store list command). Secret
+# placement is asserted with ``openstack secret get``. Coverage is OSC
+# round-trip, barbican-secret-migrate round-trip, dry-run, and a
+# metadata-only conflict.
+#
+# Wire it as a pre_tests hook (fail before tempest) or post_tests:
+#
+#   pre_tests:
+#     - name: 90 Barbican secret-store migrate
+#       type: playbook
+#       source: "{{ ci_framework_base_src_dir }}/hooks/playbooks/barbican-secret-store-migrate/migrate.yml"
+#
+# Related: OSPRH-35280 / OSPRH-35261 / RHOSSTRAT-1435
+
+- name: Test Barbican secret-store migrate via GET secret_store_id
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_barbican_migrate_namespace: "{{ namespace | default(cifmw_openstack_namespace) | default('openstack') }}"
+    cifmw_barbican_migrate_osc_pod_name: openstackclient
+    cifmw_barbican_migrate_api_label: component=barbican-api
+    cifmw_barbican_migrate_api_container: barbican-api
+    _oc_env:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      PATH: "{{ cifmw_path }}"
+  environment: "{{ _oc_env }}"
+  tasks:
+    - name: Get openstackclient pod
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ cifmw_barbican_migrate_namespace }}"
+        name: "{{ cifmw_barbican_migrate_osc_pod_name }}"
+      register: _osc_pod_info
+
+    - name: Get Barbican API pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ cifmw_barbican_migrate_namespace }}"
+        label_selectors:
+          - "{{ cifmw_barbican_migrate_api_label }}"
+        field_selectors:
+          - status.phase=Running
+      register: _barbican_api_pod_info
+
+    - name: Fail if required pods are missing
+      ansible.builtin.assert:
+        that:
+          - _osc_pod_info.resources | length > 0
+          - _barbican_api_pod_info.resources | length > 0
+        fail_msg: >-
+          Need Running openstackclient and a pod labelled
+          {{ cifmw_barbican_migrate_api_label }} in
+          {{ cifmw_barbican_migrate_namespace }}.
+
+    - name: Set pod names
+      ansible.builtin.set_fact:
+        cifmw_barbican_migrate_osc_pod: "{{ _osc_pod_info.resources[0].metadata.name }}"
+        cifmw_barbican_migrate_api_pod: "{{ _barbican_api_pod_info.resources[0].metadata.name }}"
+
+    - name: Get project-admin token from openstackclient
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - token
+          - issue
+          - -f
+          - json
+      register: _os_token_cmd
+      changed_when: false
+      no_log: true
+
+    - name: Save project-admin token
+      ansible.builtin.set_fact:
+        _os_token: "{{ (_os_token_cmd.stdout | from_json).id }}"
+        _os_project_id: "{{ (_os_token_cmd.stdout | from_json).project_id }}"
+      no_log: true
+
+    - name: Fail if the token has no project id
+      ansible.builtin.assert:
+        that:
+          - _os_project_id | default('') | length > 0
+        fail_msg: >-
+          openstack token issue did not return project_id. barbican-secret-migrate
+          with v3token needs a project-scoped token.
+
+    - name: Get Keystone internal URL
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - endpoint
+          - list
+          - --service
+          - identity
+          - --interface
+          - internal
+          - -c
+          - URL
+          - -f
+          - value
+      register: _keystone_url_cmd
+      changed_when: false
+
+    - name: Get Key Manager internal URL
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - openstack
+          - endpoint
+          - list
+          - --service
+          - key-manager
+          - --interface
+          - internal
+          - -c
+          - URL
+          - -f
+          - value
+      register: _barbican_url_cmd
+      changed_when: false
+
+    - name: Normalize Keystone and Barbican v1 URLs
+      ansible.builtin.set_fact:
+        cifmw_barbican_migrate_keystone: "{{ _keystone_url_cmd.stdout_lines | first | trim }}"
+        cifmw_barbican_migrate_v1: "{{ (_barbican_url | regex_replace('/$', '')) + ('' if _barbican_url.rstrip('/').endswith('/v1') else '/v1') }}"
+      vars:
+        _barbican_url: "{{ _barbican_url_cmd.stdout_lines | first | trim }}"
+
+    # OSC has no secret-store list command; use openstacksdk in the OSC pod.
+    - name: List secret stores via openstacksdk
+      ansible.builtin.command:
+        argv:
+          - oc
+          - -n
+          - "{{ cifmw_barbican_migrate_namespace }}"
+          - exec
+          - "{{ cifmw_barbican_migrate_osc_pod }}"
+          - --
+          - python3
+          - -c
+          - |
+            import json
+            import openstack
+            conn = openstack.connect()
+            stores = []
+            for s in conn.key_manager.secret_stores():
+                stores.append({
+                    'id': s.id,
+                    'store_plugin': s.secret_store_plugin or '',
+                    'crypto_plugin': s.crypto_plugin or '',
+                    'global_default': bool(s.global_default),
+                })
+            print(json.dumps(stores))
+      register: _stores_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse secret stores
+      ansible.builtin.set_fact:
+        _secret_stores: "{{ _stores_raw.stdout | from_json }}"
+
+    - name: Fail if secret-stores list was empty
+      ansible.builtin.assert:
+        that:
+          - _secret_stores | default([]) | length > 0
+        fail_msg: >-
+          GET /v1/secret-stores returned no stores. Multiple secret stores
+          are not enabled on this control plane.
+
+    - name: Map SimpleCrypto and PKCS#11 stores
+      ansible.builtin.set_fact:
+        _stores_simple: "{{ _secret_stores | selectattr('crypto_plugin', 'equalto', 'simple_crypto') | list }}"
+        _stores_pkcs11: "{{ _secret_stores | selectattr('crypto_plugin', 'equalto', 'p11_crypto') | list }}"
+        _stores_default: "{{ _secret_stores | selectattr('global_default', 'in', [true, True, 'True', 'true', 1, '1']) | list }}"
+
+    - name: Require SimpleCrypto and PKCS#11 stores
+      ansible.builtin.assert:
+        that:
+          - _stores_simple | length == 1
+          - _stores_pkcs11 | length == 1
+          - _stores_default | length == 1
+        fail_msg: >-
+          Expected one simple_crypto store, one p11_crypto store, and one
+          global_default from GET /v1/secret-stores. Enable both backends in
+          spec.barbican.template.enabledSecretStores before running this
+          playbook. Stores: {{ _secret_stores }}
+
+    - name: Resolve source (global default) and destination stores
+      ansible.builtin.set_fact:
+        _store_src: "{{ _stores_default[0] }}"
+        _store_other: "{{ _stores_simple[0] if _stores_default[0].crypto_plugin == 'p11_crypto' else _stores_pkcs11[0] }}"
+
+    - name: Choose a payload for this run
+      ansible.builtin.set_fact:
+        _payload: "ci-migrate-payload-{{ 999999 | random }}"
+
+    - name: Run migrate scenarios
+      block:
+        - name: Round-trip migrate via OSC
+          ansible.builtin.include_tasks: one.yml
+          vars:
+            cifmw_barbican_migrate_case: osc_roundtrip
+            cifmw_barbican_migrate_via: osc
+            cifmw_barbican_migrate_roundtrip: true
+            cifmw_barbican_migrate_src_store: "{{ _store_src }}"
+            cifmw_barbican_migrate_dst_store: "{{ _store_other }}"
+            cifmw_barbican_migrate_payload: "{{ _payload }}-osc"
+
+        - name: Round-trip migrate via barbican-secret-migrate
+          ansible.builtin.include_tasks: one.yml
+          vars:
+            cifmw_barbican_migrate_case: admin_roundtrip
+            cifmw_barbican_migrate_via: admin
+            cifmw_barbican_migrate_roundtrip: true
+            cifmw_barbican_migrate_src_store: "{{ _store_src }}"
+            cifmw_barbican_migrate_dst_store: "{{ _store_other }}"
+            cifmw_barbican_migrate_payload: "{{ _payload }}-admin"
+
+        - name: Dry-run barbican-secret-migrate must not change the backend
+          ansible.builtin.include_tasks: one.yml
+          vars:
+            cifmw_barbican_migrate_case: admin_dry_run
+            cifmw_barbican_migrate_via: admin
+            cifmw_barbican_migrate_dry_run: true
+            cifmw_barbican_migrate_src_store: "{{ _store_src }}"
+            cifmw_barbican_migrate_dst_store: "{{ _store_other }}"
+            cifmw_barbican_migrate_payload: "{{ _payload }}-dry"
+
+        - name: Metadata-only secret must fail migrate
+          ansible.builtin.include_tasks: metaonly.yml
