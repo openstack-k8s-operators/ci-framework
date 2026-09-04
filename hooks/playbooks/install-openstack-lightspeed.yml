@@ -19,16 +19,16 @@
   connection: local
   vars:
     # OpenStack Lightspeed configuration
-    # Note: Installing in openshift-lightspeed namespace to ensure compatibility
-    openstack_lightspeed_namespace: "{{ cifmw_openstack_lightspeed_namespace | default('openshift-lightspeed') }}"
+    # Note: Using openstack-lightspeed namespace per operator's suggested namespace
+    openstack_lightspeed_namespace: "{{ cifmw_openstack_lightspeed_namespace | default('openstack-lightspeed') }}"
     openstack_lightspeed_operator_group: "{{ cifmw_openstack_lightspeed_operator_group | default('openstack-lightspeed-operator-group') }}"
     openstack_lightspeed_catalog_image: "{{ cifmw_openstack_lightspeed_catalog_image | default('quay.io/openstack-lightspeed/operator-catalog:latest') }}"
     openstack_lightspeed_catalog_name: "{{ cifmw_openstack_lightspeed_catalog_name | default('openstack-lightspeed-catalog') }}"
 
     # Kubeconfig path - use user-provided or default to CRC location
-    cifmw_openshift_kubeconfig: "{{ cifmw_openshift_kubeconfig | default(ansible_env.HOME ~ '/.crc/machines/crc/kubeconfig') }}"
+    kubeconfig_path: "{{ cifmw_openshift_kubeconfig | default(ansible_env.HOME ~ '/.crc/machines/crc/kubeconfig') }}"
   environment:
-    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    KUBECONFIG: "{{ kubeconfig_path }}"
 
   tasks:
     # STEP 1: Deploy OpenStack Lightspeed catalog
@@ -121,8 +121,86 @@
       retries: 30
       delay: 10
 
+    # STEP 3: Create prerequisites (secrets and certificates)
+
+    - name: Create LLM API token secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          stringData:
+            apitoken: "{{ cifmw_openstack_lightspeed_api_token }}"
+      when: cifmw_openstack_lightspeed_api_token is defined
+      no_log: true
+
+    - name: Verify LLM credentials secret exists
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+        namespace: "{{ openstack_lightspeed_namespace }}"
+      register: secret_check
+      failed_when: secret_check.resources | length == 0
+      when: cifmw_openstack_lightspeed_api_token is not defined
+      no_log: true 
+
+    - name: Download TLS CA certificate from URL
+      ansible.builtin.uri:
+        url: "{{ cifmw_openstack_lightspeed_ca_cert_url }}"
+        return_content: true
+      register: ca_cert_download
+      when: cifmw_openstack_lightspeed_ca_cert_url is defined
+
+    - name: Create TLS CA certificate bundle ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          data:
+            ca-bundle.crt: >-
+              {{ ca_cert_download.content if cifmw_openstack_lightspeed_ca_cert_url is defined else cifmw_openstack_lightspeed_ca_cert }}
+      when: cifmw_openstack_lightspeed_ca_cert_url is defined or cifmw_openstack_lightspeed_ca_cert is defined
+
+    - name: Verify TLS certificate bundle ConfigMap exists
+      kubernetes.core.k8s_info:
+        kind: ConfigMap
+        name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+        namespace: "{{ openstack_lightspeed_namespace }}"
+      register: cert_check
+      failed_when: cert_check.resources | length == 0
+      when:
+        - cifmw_openstack_lightspeed_ca_cert is not defined
+        - cifmw_openstack_lightspeed_ca_cert_url is not defined
+
+    # STEP 4: Create OpenStackLightspeed CR to deploy the service
+    # Note: Uses configurable parameters for LLM integration
+
+    - name: Create OpenStackLightspeed custom resource
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: lightspeed.openstack.org/v1beta1
+          kind: OpenStackLightspeed
+          metadata:
+            name: "{{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          spec:
+            llmEndpoint: "{{ cifmw_openstack_lightspeed_llm_endpoint }}"
+            llmEndpointType: "{{ cifmw_openstack_lightspeed_llm_endpoint_type | default('openai') }}"
+            modelName: "{{ cifmw_openstack_lightspeed_model_name }}"
+            llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+            tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+
     - name: Display deployment summary
       ansible.builtin.debug:
         msg:
           - "✓ OpenStack Lightspeed operator deployed in namespace: {{ openstack_lightspeed_namespace }}"
+          - "✓ OpenStack Lightspeed CR created: {{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
           - "✓ OpenShift Lightspeed operator will be automatically managed by OpenStack Lightspeed"
