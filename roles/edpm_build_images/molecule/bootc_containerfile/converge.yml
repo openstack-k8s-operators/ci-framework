@@ -1,0 +1,102 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_edpm_build_images_test_base: /tmp/bootc_containerfile_test
+  tasks:
+    - name: Create test repository directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ cifmw_edpm_build_images_test_base }}/centos_variant"
+        - "{{ cifmw_edpm_build_images_test_base }}/fallback"
+        - "{{ cifmw_edpm_build_images_test_base }}/rhel_variant"
+        - "{{ cifmw_edpm_build_images_test_base }}/missing"
+
+    - name: Create Containerfile fixtures
+      ansible.builtin.copy:
+        content: "FROM scratch\n"
+        dest: "{{ item }}"
+        mode: "0644"
+      loop:
+        # Variant must win when both files exist
+        - "{{ cifmw_edpm_build_images_test_base }}/centos_variant/Containerfile.centos9"
+        - "{{ cifmw_edpm_build_images_test_base }}/centos_variant/Containerfile"
+        - "{{ cifmw_edpm_build_images_test_base }}/fallback/Containerfile"
+        - "{{ cifmw_edpm_build_images_test_base }}/rhel_variant/Containerfile.rhel9"
+
+    - name: Select centos9 variant Containerfile
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_containerfile.yml
+      vars:
+        cifmw_edpm_build_images_bootc_repo_path: "{{ cifmw_edpm_build_images_test_base }}/centos_variant"
+        cifmw_edpm_build_images_bootc_base_image: quay.io/centos-bootc/centos-bootc:stream9
+
+    - name: Assert centos9 variant selected
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_bootc_base_variant == 'centos9'
+          - cifmw_edpm_build_images_bootc_containerfile == 'Containerfile.centos9'
+
+    - name: Fall back to plain Containerfile
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_containerfile.yml
+      vars:
+        cifmw_edpm_build_images_bootc_repo_path: "{{ cifmw_edpm_build_images_test_base }}/fallback"
+        cifmw_edpm_build_images_bootc_base_image: quay.io/centos-bootc/centos-bootc:stream9
+
+    - name: Assert plain Containerfile fallback
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_bootc_containerfile == 'Containerfile'
+
+    - name: Select rhel9 variant Containerfile
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_containerfile.yml
+      vars:
+        cifmw_edpm_build_images_bootc_repo_path: "{{ cifmw_edpm_build_images_test_base }}/rhel_variant"
+        cifmw_edpm_build_images_bootc_base_image: registry.example.com/rhel-bootc/rhel:9
+
+    - name: Assert rhel9 variant selected
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_bootc_base_variant == 'rhel9'
+          - cifmw_edpm_build_images_bootc_containerfile == 'Containerfile.rhel9'
+
+    - name: Fail when no Containerfile exists
+      block:
+        - name: Run Containerfile detection on empty repository
+          ansible.builtin.include_role:
+            name: edpm_build_images
+            tasks_from: bootc_containerfile.yml
+          vars:
+            cifmw_edpm_build_images_bootc_repo_path: "{{ cifmw_edpm_build_images_test_base }}/missing"
+            cifmw_edpm_build_images_bootc_base_image: quay.io/centos-bootc/centos-bootc:stream9
+      rescue:
+        - name: Assert failure message
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result is defined
+              - "'No bootc Containerfile found' in ansible_failed_result.msg"
+            fail_msg: "Expected Containerfile detection to fail on empty repository"
