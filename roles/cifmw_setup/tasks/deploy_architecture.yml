@@ -305,17 +305,50 @@
     - openstack_ca
     - edpm_post
 
+- name: Wait for nova-compute services to register
+  tags:
+    - edpm_post
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  register: _nova_compute_services
+  changed_when: false
+  ansible.builtin.shell:
+    cmd: >-
+      oc rsh -n {{ cifmw_openstack_namespace }}
+      openstackclient
+      openstack compute service list
+      --service nova-compute -f value |
+      wc -l
+  retries: 90
+  delay: 10
+  until: >-
+    _nova_compute_services.rc == 0 and
+    _nova_compute_services.stdout | int > 0
+
 - name: Run nova host discover process
   tags:
     - edpm_post
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
-  ansible.builtin.command: >-
-    oc rsh
-    -n {{ cifmw_openstack_namespace }}
-    nova-cell0-conductor-0
-    nova-manage cell_v2 discover_hosts --verbose
+  register: _nova_discover_hosts
+  ansible.builtin.shell:
+    cmd: |
+      set -eo pipefail
+      oc rsh -n {{ cifmw_openstack_namespace }} \
+        nova-cell0-conductor-0 \
+        nova-manage cell_v2 discover_hosts --verbose
+      oc rsh -n {{ cifmw_openstack_namespace }} \
+        nova-cell0-conductor-0 \
+        nova-manage cell_v2 list_hosts | tr -d '\r' | \
+        grep '^|' | grep -vc 'Cell Name'
+  retries: 30
+  delay: 10
+  until: >-
+    _nova_discover_hosts.rc == 0 and
+    _nova_discover_hosts.stdout | int >=
+    (_nova_compute_services.stdout | int)
 
 - name: Run post_deploy hooks
   vars:
