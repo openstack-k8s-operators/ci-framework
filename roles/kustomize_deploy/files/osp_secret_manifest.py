@@ -3,6 +3,8 @@
 
 import base64
 import json
+import secrets
+import string
 import sys
 
 import yaml
@@ -59,8 +61,69 @@ def apply_secret_keys(docs, keys):
     return bool(changed_keys), changed_keys
 
 
+def generate_random_password(length=20):
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def generate_hex_key(byte_length):
+    return secrets.token_hex(byte_length)
+
+
+def randomize_secret_keys(docs, config):
+    """Replace osp-secret data values with random ones.
+
+    ``config`` is a dict with optional keys:
+      cluster_values  - dict of key->plaintext from the live cluster
+      skip_keys       - list of keys to leave untouched
+      special_keys    - dict of key->{type, length} for non-password formats
+    """
+    secret = find_osp_secret(docs)
+    if secret is None:
+        return False, []
+
+    data = secret.setdefault("data", {})
+    cluster_values = config.get("cluster_values", {})
+    skip_keys = set(config.get("skip_keys", []))
+    special_keys = config.get("special_keys", {})
+
+    changed_keys = []
+    for key in list(data.keys()):
+        if key in skip_keys:
+            continue
+
+        if key in cluster_values and cluster_values[key]:
+            new_value = cluster_values[key]
+        elif key in special_keys:
+            spec = special_keys[key]
+            if spec.get("type") == "hex":
+                new_value = generate_hex_key(spec.get("length", 16))
+            elif spec.get("type") == "base64":
+                raw = generate_random_password(spec.get("length", 32))
+                new_value = base64.b64encode(raw.encode()).decode()
+            else:
+                new_value = generate_random_password()
+        else:
+            new_value = generate_random_password()
+
+        encoded = base64.b64encode(new_value.encode()).decode()
+        if data.get(key) != encoded:
+            data[key] = encoded
+            changed_keys.append(key)
+
+    return bool(changed_keys), changed_keys
+
+
 def cmd_has(path):
-    secret = find_osp_secret(load_docs(path))
+    # Exit codes: 0 = osp-secret found, 1 = not found, 2 = error while
+    # reading/parsing the manifest. Callers must not treat 2 the same as 1:
+    # a parse failure should never be silently mistaken for "nothing to do".
+    try:
+        docs = load_docs(path)
+    except Exception as exc:
+        sys.stderr.write("error: failed to load manifest {}: {}\n".format(path, exc))
+        sys.exit(2)
+    secret = find_osp_secret(docs)
     sys.exit(0 if secret else 1)
 
 
@@ -94,10 +157,22 @@ def cmd_set(path, keys_path):
         print("Set: {}".format(key))
 
 
+def cmd_randomize(path, config_path):
+    docs = load_docs(path)
+    config = load_keys(config_path)
+    changed, changed_keys = randomize_secret_keys(docs, config)
+    if changed:
+        with open(path, "w") as handle:
+            yaml.dump_all(docs, handle, default_flow_style=False)
+    for key in changed_keys:
+        print("Randomized: {}".format(key))
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(
-            "usage: osp_secret_manifest.py <has|get|get-namespace|set> <path> [args]"
+            "usage: osp_secret_manifest.py"
+            " <has|get|get-namespace|set|randomize> <path> [args]"
         )
     command = sys.argv[1]
     path = sys.argv[2]
@@ -113,6 +188,12 @@ def main():
         if len(sys.argv) != 4:
             sys.exit("usage: osp_secret_manifest.py set <path> <keys-json-file>")
         cmd_set(path, sys.argv[3])
+    elif command == "randomize":
+        if len(sys.argv) != 4:
+            sys.exit(
+                "usage: osp_secret_manifest.py randomize <path> <config-json-file>"
+            )
+        cmd_randomize(path, sys.argv[3])
     else:
         sys.exit("unknown command: {}".format(command))
 
