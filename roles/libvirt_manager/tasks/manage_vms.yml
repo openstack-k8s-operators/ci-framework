@@ -86,6 +86,22 @@
       ssh core@{{ vm_con_name }}
       "sudo growpart /dev/sda {{ _root_part }}; sudo unshare --mount -- bash -c 'mount -o remount,rw /sysroot && xfs_growfs /sysroot'"
 
+- name: "Wait for SSH access on {{ vm }}"
+  when:
+    - vm_type is match('^controller.*$')
+    - _cifmw_libvirt_manager_layout.vms[vm_type].start | default(true)
+  ansible.builtin.command:
+    cmd: >-
+      ssh -v -o BatchMode=yes -o ConnectTimeout=10
+      -o IdentitiesOnly=yes
+      -i {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
+      {{ _init_admin_user }}@{{ vm_con_name }} true
+  retries: 20
+  delay: 15
+  register: _ssh_wait
+  until: _ssh_wait.rc == 0
+  changed_when: false
+
 - name: "Manage ssh keys on {{ vm }}"
   when:
     - vm_type is match('^controller.*$')
@@ -93,22 +109,52 @@
   vars:
     _user: "{{ vm_data.get('user', 'zuul') }}"
   block:
-    - name: "Inject private key on hosts {{ vm }}"
-      delegate_to: "{{ vm_con_name }}"
-      remote_user: "{{ _init_admin_user }}"
+    - name: "Stage private key for {{ vm }}"
       ansible.builtin.copy:
-        dest: "/home/{{ _user }}/.ssh/id_cifw"
+        dest: "{{ ansible_user_dir }}/.ssh/.inject_id_cifw_{{ vm }}"
         content: "{{ priv_key }}"
-        owner: "{{ _user }}"
-        group: "{{ _user }}"
         mode: "0400"
 
-    - name: "Inject public key on hosts {{ vm }}"
-      delegate_to: "{{ vm_con_name }}"
-      remote_user: "{{ _init_admin_user }}"
+    - name: "Stage public key for {{ vm }}"
       ansible.builtin.copy:
-        dest: "/home/{{ _user }}/.ssh/id_cifw.pub"
+        dest: "{{ ansible_user_dir }}/.ssh/.inject_id_cifw_{{ vm }}.pub"
         content: "{{ pub_key }}"
-        owner: "{{ _user }}"
-        group: "{{ _user }}"
         mode: "0444"
+
+    - name: "Inject private key on hosts {{ vm }}"
+      ansible.builtin.command:
+        cmd: >-
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o IdentitiesOnly=yes
+          -i {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
+          {{ ansible_user_dir }}/.ssh/.inject_id_cifw_{{ vm }}
+          {{ _init_admin_user }}@{{ vm_con_name }}:/home/{{ _user }}/.ssh/id_cifw
+
+    - name: "Inject public key on hosts {{ vm }}"
+      ansible.builtin.command:
+        cmd: >-
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o IdentitiesOnly=yes
+          -i {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
+          {{ ansible_user_dir }}/.ssh/.inject_id_cifw_{{ vm }}.pub
+          {{ _init_admin_user }}@{{ vm_con_name }}:/home/{{ _user }}/.ssh/id_cifw.pub
+
+    - name: "Set key ownership on {{ vm }}"
+      ansible.builtin.command:
+        cmd: >-
+          ssh -o IdentitiesOnly=yes
+          -i {{ ansible_user_dir }}/.ssh/cifmw_reproducer_key
+          {{ _init_admin_user }}@{{ vm_con_name }}
+          "chown {{ _user }}:{{ _user }}
+          /home/{{ _user }}/.ssh/id_cifw
+          /home/{{ _user }}/.ssh/id_cifw.pub &&
+          chmod 0400 /home/{{ _user }}/.ssh/id_cifw &&
+          chmod 0444 /home/{{ _user }}/.ssh/id_cifw.pub"
+
+    - name: "Remove staged keys for {{ vm }}"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ ansible_user_dir }}/.ssh/.inject_id_cifw_{{ vm }}"
+        - "{{ ansible_user_dir }}/.ssh/.inject_id_cifw_{{ vm }}.pub"
