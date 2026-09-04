@@ -14,9 +14,16 @@
         name: run_hook
 
     - name: run kuttl test suite from operator Makefile
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      # cifmw_zuul_target_host_env lets a job pass extra env vars (e.g.
+      # KUTTL_SUITE) into the operator Make targets. Merge it last so a job
+      # can override the suite selected by the operator Makefile default.
+      environment: >-
+        {{
+          {
+            'KUBECONFIG': cifmw_openshift_kubeconfig,
+            'PATH': cifmw_path | default(ansible_env.PATH),
+          } | combine(cifmw_zuul_target_host_env | default({}))
+        }}
       ansible.builtin.command:
         cmd: make kuttl-test-run
         chdir: "{{ ansible_user_dir }}/{{ operator_basedir }}"
