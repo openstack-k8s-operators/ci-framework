@@ -165,3 +165,47 @@
   loop_control:
     loop_var: _ndp_host
     label: "{{ _ndp_host.key }}"
+
+# Once the neighbour entry goes STALE, Linux still sends to the old MAC
+# through DELAY (delay_first_probe_time) and PROBE (ucast_solicit x
+# retrans_time). With the defaults that window is 8s, which lands between
+# the t=7s and t=15s SYN retransmits while Ansible gives up at t=10s.
+# Cutting DELAY to 1s brings the window to 4s so the t=7s retransmit wins.
+- name: Reduce IPv6 NDP first-probe delay on EDPM ctlplane interfaces
+  when:
+    - cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+    - _ndp_host.value.networks.ctlplane is defined
+    - _ndp_host.value.networks.ctlplane.interface_name | default('') | length > 0
+    - _ndp_host.key is not match('^(ocp|crc).*')
+  delegate_to: "{{ _ndp_host.key }}"
+  become: true
+  ansible.posix.sysctl:
+    name: >-
+      net.ipv6.neigh.{{ _ndp_host.value.networks.ctlplane.interface_name
+      }}.delay_first_probe_time
+    value: "1"
+    sysctl_set: true
+    state: present
+  loop: >-
+    {{ cifmw_networking_env_definition.instances | dict2items }}
+  loop_control:
+    loop_var: _ndp_host
+    label: "{{ _ndp_host.key }}"
+
+- name: Set IPv6 NDP first-probe delay default for new interfaces
+  when:
+    - cifmw_networking_env_definition.networks.ctlplane.network_v6 is defined
+    - _ndp_host.value.networks.ctlplane is defined
+    - _ndp_host.key is not match('^(ocp|crc).*')
+  delegate_to: "{{ _ndp_host.key }}"
+  become: true
+  ansible.posix.sysctl:
+    name: net.ipv6.neigh.default.delay_first_probe_time
+    value: "1"
+    sysctl_set: true
+    state: present
+  loop: >-
+    {{ cifmw_networking_env_definition.instances | dict2items }}
+  loop_control:
+    loop_var: _ndp_host
+    label: "{{ _ndp_host.key }}"
