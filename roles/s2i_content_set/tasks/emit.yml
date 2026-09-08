@@ -1,0 +1,50 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Overlay job-provided images on the resolved set
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_merged: >-
+      {{
+        (
+          cifmw_s2i_content_set_resolved_images |
+          rejectattr('name', 'in', cifmw_s2i_content_set_skip_images) |
+          rejectattr(
+            'name',
+            'in',
+            (cifmw_set_containers_images | default([]) | map(attribute='name') | list)
+          ) | list
+        ) + (cifmw_set_containers_images | default([]) | list)
+      }}
+
+- name: Fail when no images were resolved
+  when: cifmw_s2i_content_set_merged | length == 0
+  ansible.builtin.fail:
+    msg: >-
+      s2i_content_set resolved an empty image list. Check the catalog, pin,
+      mappings, skip list, and Quay tags for
+      {{ cifmw_s2i_content_set_registry }}/{{ cifmw_s2i_content_set_namespace }}.
+
+- name: Export cifmw_set_containers_images
+  ansible.builtin.set_fact:
+    cifmw_set_containers_images: "{{ cifmw_s2i_content_set_merged }}"
+    cifmw_s2i_content_set_commit: "{{ cifmw_s2i_content_set_resolved_commit }}"
+    cacheable: true
+
+- name: Default preserve_unlisted so unmapped services keep payload defaults
+  when: cifmw_set_containers_preserve_unlisted is not defined
+  ansible.builtin.set_fact:
+    cifmw_set_containers_preserve_unlisted: true
+    cacheable: true
