@@ -1,0 +1,40 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Initialize S2I content-set facts
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_digests: {}
+    cifmw_s2i_content_set_resolved_images: []
+    cifmw_s2i_content_set_resolved_commit: "{{ cifmw_s2i_content_set_commit | default('') }}"
+    cifmw_s2i_content_set_from_catalog: false
+    cifmw_s2i_content_set_inspect_labels: {}
+
+- name: Resolve s2iCommit from the operator pin file
+  when: cifmw_s2i_content_set_resolved_commit | length == 0
+  ansible.builtin.include_tasks: load_pin.yml
+
+- name: Load a local digest catalog when present
+  ansible.builtin.include_tasks: load_catalog.yml
+
+- name: Inspect the promoted Quay set
+  when: not cifmw_s2i_content_set_from_catalog | bool
+  ansible.builtin.include_tasks: inspect_set.yml
+
+- name: Emit cifmw_set_containers_images
+  ansible.builtin.include_tasks: emit.yml
+
+- name: Write the resolved content-set artifact
+  ansible.builtin.include_tasks: write_artifact.yml
