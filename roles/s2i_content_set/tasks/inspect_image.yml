@@ -1,0 +1,45 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Inspect promoted image
+  ansible.builtin.command:
+    argv:
+      - skopeo
+      - inspect
+      - "docker://{{ cifmw_s2i_content_set_inspect_ref }}"
+  register: cifmw_s2i_content_set_inspect_raw
+  changed_when: false
+  failed_when: >-
+    (cifmw_s2i_content_set_inspect_raw.rc != 0) and
+    (not cifmw_s2i_content_set_ignore_missing | bool)
+
+- name: Record digest and labels
+  when: cifmw_s2i_content_set_inspect_raw.rc == 0
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_digests: >-
+      {{
+        cifmw_s2i_content_set_digests | combine({
+          cifmw_s2i_content_set_inspect_name: (
+            cifmw_s2i_content_set_inspect_raw.stdout | from_json
+          ).Digest
+        })
+      }}
+    cifmw_s2i_content_set_inspect_labels: >-
+      {{
+        (
+          cifmw_s2i_content_set_inspect_raw.stdout | from_json
+        ).Labels | default({})
+      }}
