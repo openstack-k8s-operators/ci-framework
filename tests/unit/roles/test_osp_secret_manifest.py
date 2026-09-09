@@ -399,3 +399,109 @@ class TestRandomizeCli:
             osp_secret_module.get_secret_key(loaded, "AdminPassword")
             == "kept-from-cluster"
         )
+
+
+def _make_libvirt_secret_docs(data_dict):
+    return [
+        {
+            "kind": "Secret",
+            "metadata": {"name": "libvirt-secret", "namespace": "openstack"},
+            "data": {k: _b64(v) for k, v in data_dict.items()},
+        }
+    ]
+
+
+class TestSecretNameParameter:
+    """Same helpers/CLI, targeting a Secret other than osp-secret."""
+
+    def test_find_secret_matches_by_name(self, osp_secret_module):
+        docs = _make_libvirt_secret_docs({"LibvirtPassword": "12345678"})
+        assert osp_secret_module.find_secret(docs, "libvirt-secret") is not None
+        assert osp_secret_module.find_secret(docs, "osp-secret") is None
+
+    def test_get_secret_key_with_secret_name(self, osp_secret_module):
+        docs = _make_libvirt_secret_docs({"LibvirtPassword": "12345678"})
+        assert (
+            osp_secret_module.get_secret_key(docs, "LibvirtPassword", "libvirt-secret")
+            == "12345678"
+        )
+
+    def test_randomize_secret_keys_with_secret_name(self, osp_secret_module):
+        docs = _make_libvirt_secret_docs({"LibvirtPassword": "12345678"})
+        changed, changed_keys = osp_secret_module.randomize_secret_keys(
+            docs, {}, "libvirt-secret"
+        )
+        assert changed is True
+        assert changed_keys == ["LibvirtPassword"]
+        value = osp_secret_module.get_secret_key(
+            docs, "LibvirtPassword", "libvirt-secret"
+        )
+        assert value != "12345678"
+        assert len(value) == 20
+
+    def test_randomize_secret_keys_ignores_other_named_secret(self, osp_secret_module):
+        # A libvirt-secret config must not touch an unrelated osp-secret
+        # present in the same manifest.
+        docs = _make_osp_secret_docs(
+            {"AdminPassword": "12345678"}
+        ) + _make_libvirt_secret_docs({"LibvirtPassword": "12345678"})
+        osp_secret_module.randomize_secret_keys(docs, {}, "libvirt-secret")
+        assert osp_secret_module.get_secret_key(docs, "AdminPassword") == "12345678"
+
+    def test_has_cli_supports_secret_name(self, manifest_path):
+        write_manifest(
+            manifest_path,
+            _make_libvirt_secret_docs({"LibvirtPassword": "12345678"}),
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "has",
+                str(manifest_path),
+                "libvirt-secret",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "has", str(manifest_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 1
+
+    def test_randomize_cli_supports_secret_name(
+        self, manifest_path, osp_secret_module, tmp_path
+    ):
+        write_manifest(
+            manifest_path,
+            _make_libvirt_secret_docs({"LibvirtPassword": "12345678"}),
+        )
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "randomize",
+                str(manifest_path),
+                str(config_file),
+                "libvirt-secret",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0
+        assert "Randomized: LibvirtPassword" in result.stdout
+        loaded = osp_secret_module.load_docs(manifest_path)
+        assert (
+            osp_secret_module.get_secret_key(
+                loaded, "LibvirtPassword", "libvirt-secret"
+            )
+            != "12345678"
+        )
