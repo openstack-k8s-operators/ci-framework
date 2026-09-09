@@ -11,6 +11,25 @@
     _parsed: "{{ _net_conf.content | b64decode | from_yaml}}"
     _crc: "{{ _parsed.instances['crc-0'].networks.ctlplane }}"
   block:
+    # The CRC bundle ships kubelet/crio disabled; they are normally started by
+    # `crc start`. As we boot the CRC disk directly as crc-0, enable and start
+    # them ourselves so the single-node control plane comes up.
+    - name: Ensure CRC control plane services are enabled and running
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - crio
+        - kubelet
+
+    - name: Wait for the CRC API server to start listening
+      ansible.builtin.wait_for:
+        host: "{{ _crc.ip_v4 }}"
+        port: 6443
+        timeout: 600
+
     - name: Check which dnsmasq config we must edit
       register: _dnsmasq
       ansible.builtin.stat:
