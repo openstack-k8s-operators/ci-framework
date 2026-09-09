@@ -22,6 +22,10 @@
     state: directory
     mode: "0755"
 
+- name: Wait for OpenShift API readiness
+  when: not cifmw_openshift_setup_dry_run
+  ansible.builtin.include_tasks: wait_for_api.yml
+
 - name: Fetch namespaces to create
   ansible.builtin.set_fact:
     cifmw_openshift_setup_namespaces: >-
@@ -43,6 +47,10 @@
     state: present
   with_items: "{{ cifmw_openshift_setup_namespaces }}"
   when: not cifmw_openshift_setup_dry_run
+  register: _create_ns
+  until: _create_ns is succeeded
+  retries: 10
+  delay: 10
 
 - name: Get internal OpenShift registry route
   when: not cifmw_openshift_setup_skip_internal_registry | bool
@@ -54,6 +62,9 @@
     name: default-route
     namespace: openshift-image-registry
   register: cifmw_openshift_setup_registry_default_route
+  until: cifmw_openshift_setup_registry_default_route is succeeded
+  retries: 30
+  delay: 10
 
 - name: Allow anonymous image-pulls in CRC registry for targeted namespaces
   with_items: "{{ cifmw_openshift_setup_namespaces }}"

@@ -1,0 +1,33 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Wait for OpenShift API to be available
+  environment:
+    PATH: "{{ ansible_env.PATH }}:{{ ansible_user_dir }}/bin"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    cmd: "oc cluster-info"
+  register: _ocp_api_check
+  until: _ocp_api_check.rc == 0
+  retries: 60
+  delay: 10
+  changed_when: false
+  failed_when: false
+
+- name: Fail if OpenShift API is not available
+  when: _ocp_api_check.rc != 0
+  ansible.builtin.fail:
+    msg: "OpenShift API is not available after waiting 10 minutes. Cluster may not be fully started."
