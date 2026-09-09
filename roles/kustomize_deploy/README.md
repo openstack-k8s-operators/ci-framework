@@ -130,6 +130,18 @@ resolution:
 2. **Generate** — a new random value is produced (respecting the special-keys
    format rules). Keys in the skip list are never touched.
 
+### libvirt-secret randomization
+
+The architecture repo's `lib/dataplane/nodeset` component generates a
+`libvirt-secret` Secret from a hardcoded
+[`libvirt-secret.env`](https://github.com/openstack-k8s-operators/architecture/blob/main/lib/dataplane/nodeset/libvirt-secret.env)
+file (`LibvirtPassword=12345678`). After each `kustomize build`, if the
+rendered dataplane manifest contains a `libvirt-secret` Secret, its data
+keys are randomized before `oc apply` using the same two-tier resolution as
+`osp-secret` (live cluster value takes priority over a freshly generated
+20-char alphanumeric password). This is a no-op for stages that do not
+produce a `libvirt-secret` (e.g. control-plane, operators).
+
 ## Automation specificities
 
 ### Timeouts
