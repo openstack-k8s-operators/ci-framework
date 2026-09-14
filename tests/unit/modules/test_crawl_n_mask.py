@@ -156,6 +156,19 @@ class TestCrawlNMask:
                 "'BARBICAN_SIMPLE_CRYPTO_ENCRYPTION_KEY' : 'sE12312341==48943y21'",
                 "'BARBICAN_SIMPLE_CRYPTO_ENCRYPTION_KEY' : 'sE**********21'",
             ),
+            # test OpenAI secret masking
+            (
+                "This is a secret token sk-svcacct-12345678-ABCDEFGHJIJK",
+                "This is a secret token **********",
+            ),
+            (
+                "This is a secret token sk-admin-12345678-ABCDEFGHJIJK",
+                "This is a secret token **********",
+            ),
+            (
+                "This is a secret token sk-proj-12345678-ABCDEFGHJIJK",
+                "This is a secret token **********",
+            ),
         ],
     )
     def test_mask_log_line(self, input_line, expected_output):

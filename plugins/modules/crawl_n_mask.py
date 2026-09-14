@@ -304,6 +304,8 @@ excluded_file_ext_regex = r"(^.*(%s).*)" % "|".join(EXCLUDED_FILE_EXT)
 
 QUICK_KEYWORDS = frozenset([key.lower() for key in PROTECT_KEYS])
 
+TOKEN_PREFIXES = frozenset(["sk-proj", "sk-admin", "sk-svcacct"])
+
 # Pre-compiled regex patterns for log file masking.
 LOG_PATTERNS = {
     # Matches: 'password': 'value' OR \n'password': 'value'
@@ -339,6 +341,7 @@ LOG_PATTERNS = {
     "connection_string": re.compile(
         r"://([a-zA-Z0-9_-]+):([a-zA-Z0-9_@!#$%^&*]+)@([a-zA-Z0-9.-]+)"
     ),
+    "openai_secret": re.compile(r"sk\-svcacct\S+|sk\-proj\S+|sk\-admin\S+"),
 }
 
 # Available CPU-1, Max 8
@@ -395,6 +398,12 @@ def mask_log_line(line: str) -> str:
 
     line_lower = line.lower()
     has_keyword = any(kw in line_lower for kw in QUICK_KEYWORDS)
+    has_prefix = any(prefix in line_lower for prefix in TOKEN_PREFIXES)
+
+    if has_prefix:
+        # OpenAI secret tokens: sk-proj-XXX..., sk-svcacct-XXX..., sk-admin-XXX...
+        # sk-proj-12345678-ABCDEFGH: **********
+        line = LOG_PATTERNS["openai_secret"].sub(MASK_STR, line)
 
     if not has_keyword:
         return line
