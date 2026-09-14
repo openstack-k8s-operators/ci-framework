@@ -25,7 +25,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
 * `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
 * `cifmw_test_operator_node_selector`: (Dict) `nodeSelector` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
-* `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `true`
+* `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `false`
 * `cifmw_test_operator_selinux_level`: (String) Specify SELinux level that should be used for pods spawned with the test-operator. Note, that `cifmw_test_operator_privileged: true` must be set when this parameter has non-empty value. Default value: `s0:c478,c978`
 * `cifmw_test_operator_stages`: (List) List of dictionaries defining the stages that should be used in the test operator role. List items options are:
   * `name`: (String) The name of the stage. The name must be unique.
