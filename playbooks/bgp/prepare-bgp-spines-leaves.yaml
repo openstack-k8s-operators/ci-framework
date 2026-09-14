@@ -15,9 +15,17 @@
     routers_list:
       - router-0
     fabric_list: "{{ leafs_list + spines_list + routers_list }}"
+    # use controller-0.cifmw_hypervisor_host whenever it exists, but it may not exist
+    # e.g. when this playbook runs from a different node, before controller-0 is deployed, as in adoption jobs
+    hypervisor_host: >-
+      {{
+        hostvars['controller-0'].cifmw_hypervisor_host | default('hypervisor')
+        if 'controller-0' in hostvars
+        else 'hypervisor'
+      }}
   tasks:
     - name: Start spine and leaf VMs
-      delegate_to: "{{ hostvars['controller-0'].cifmw_hypervisor_host }}"
+      delegate_to: "{{ hypervisor_host }}"
       become: true
       community.libvirt.virt:
         name: "cifmw-{{ item }}"
@@ -46,7 +54,7 @@
       loop: "{{ routers_list }}"
 
     - name: Check SSH connectivity
-      delegate_to: "{{ hostvars['controller-0'].cifmw_hypervisor_host }}"
+      delegate_to: "{{ hypervisor_host }}"
       ansible.builtin.wait_for:
         port: 22
         host: "{{ item }}.utility"
