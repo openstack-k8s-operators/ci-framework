@@ -60,6 +60,34 @@
 - name: Reboot the hypervisors using CR
   ansible.builtin.include_tasks: reboot_hypervisor_using_cr.yml
 
+- name: Re-apply Ceph MON IPs after compute reboot
+  when: cifmw_update_reapply_ceph_mon_ips | default(false)
+  block:
+    - name: Extract Ceph storage-net IPs from os-net-config
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "grep -oE '{{ cifmw_update_ceph_storage_net_prefix | regex_escape }}\.[0-9]+/[0-9]+'
+        /etc/os-net-config/config.yaml | sort -u"
+      register: cifmw_update_ceph_mon_ips
+      changed_when: false
+      failed_when: false
+
+    - name: Apply Ceph MON IPs to storage vlan interface
+      when:
+        - cifmw_update_ceph_mon_ips.rc == 0
+        - cifmw_update_ceph_mon_ips.stdout_lines | length > 0
+      ansible.builtin.command: >-
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "sudo ip addr add {{ item }} dev vlan{{ cifmw_update_ceph_storage_vlan_id }}"
+      loop: "{{ cifmw_update_ceph_mon_ips.stdout_lines }}"
+      changed_when: true
+      failed_when: false
+
 - name: Perform sanity checks post-reboot
   ansible.builtin.include_tasks: reboot_hypervisor_sanity_checks.yml
   vars:

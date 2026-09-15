@@ -24,5 +24,8 @@ Role to run update
 * `cifmw_update_wait_controplane_status_change_sec`: (Integer) Time, in seconds, to wait before checking openstack control plane deployment status. Used when need to wait to allow the control plane's ready condition to transition from its initial state, preventing premature completion while the control plane is still reconciling the operator changes. Defaults to `60`.
 * `cifmw_update_openstack_update_kpatch`: (Boolean) Activate `kpatch` during update. Default to false.
 * `cifmw_update_cleanup`: (Bool) Cleanup resources created on OpenStack during update testing. Set to `false` to skip cleanup for debugging. Default to `true`.
+* `cifmw_update_reapply_ceph_mon_ips`: (Boolean) Enable re-applying Ceph MON IPs after each compute node reboot. Required for HCI scenarios where Ceph MON IPs are kept on compute nodes but not persisted in NetworkManager profiles. Default to `false`.
+* `cifmw_update_ceph_storage_vlan_id`: (Integer) VLAN ID for the Ceph storage network. Used when `cifmw_update_reapply_ceph_mon_ips` is enabled. No default (must be provided when feature is enabled).
+* `cifmw_update_ceph_storage_net_prefix`: (String) Network prefix for Ceph storage network (e.g., `"172.18.0"`). Used to identify Ceph MON IPs in `/etc/os-net-config/config.yaml`. No default (must be provided when feature is enabled).
 
 ## Examples
