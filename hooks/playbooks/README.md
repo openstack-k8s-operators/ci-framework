@@ -25,16 +25,27 @@ on removing "import_playbook" usage in ci-framework project.
 None
 
 ## install-openstack-lightspeed.yml
-Installs OpenShift Lightspeed and OpenStack Lightspeed operators on CRC cluster.
-This hook deploys both operators sequentially, setting up required namespaces,
-operator groups, catalog sources, and subscriptions.
+Installs OpenStack Lightspeed operator and creates the OpenStackLightspeed custom resource.
+This hook deploys the operator, waits for it to be ready, then creates a CR to deploy the service. The CI job calling this hook is responsible for waiting for full service health.
 
 ### Input
-* `cifmw_openstack_lightspeed_namespace`: (String) Namespace for OpenStack Lightspeed operator. Defaults to `openshift-lightspeed`.
+
+**Required variables:**
+* `cifmw_openstack_lightspeed_llm_endpoint`: (String) **REQUIRED.** LLM service endpoint URL. Example: `https://your-llm-service/v1/chat/completions`
+* `cifmw_openstack_lightspeed_model_name`: (String) **REQUIRED.** LLM model name. Example: `gpt-4`, `llama3.1:8b`, `granite-3.1-8b`
+
+**Optional variables:**
+* `cifmw_openstack_lightspeed_namespace`: (String) Namespace for OpenStack Lightspeed operator. Defaults to `openstack-lightspeed`.
 * `cifmw_openstack_lightspeed_operator_group`: (String) OperatorGroup name for OpenStack Lightspeed. Defaults to `openstack-lightspeed-operator-group`.
 * `cifmw_openstack_lightspeed_catalog_image`: (String) Container image for OpenStack Lightspeed catalog source. Defaults to `quay.io/openstack-lightspeed/operator-catalog:latest`.
 * `cifmw_openstack_lightspeed_catalog_name`: (String) Name for OpenStack Lightspeed CatalogSource resource. Defaults to `openstack-lightspeed-catalog`.
-* `cifmw_openshift_kubeconfig`: (String) Path to kubeconfig file for OpenShift cluster. Defaults to `{{ ansible_env.HOME }}/.crc/machines/crc/kubeconfig`.
+* `cifmw_openstack_lightspeed_llm_endpoint_type`: (String) LLM endpoint API format. Defaults to `openai`.
+* `cifmw_openstack_lightspeed_llm_credentials`: (String) Secret name containing LLM API token. Defaults to `openstack-lightspeed-apitoken`.
+* `cifmw_openstack_lightspeed_api_token`: (String) LLM API token value. If provided, playbook creates the secret. If not provided, playbook validates secret exists.
+* `cifmw_openstack_lightspeed_tls_ca_cert_bundle`: (String) ConfigMap name containing TLS CA certificates. Defaults to `openstack-lightspeed-certs`.
+* `cifmw_openstack_lightspeed_ca_cert_url`: (String) URL to download TLS CA certificate from. If provided, playbook downloads cert from URL and creates the ConfigMap. Example: `https://certs.corp.redhat.com/certs/Current-IT-Root-CAs.pem`
+* `cifmw_openstack_lightspeed_ca_cert`: (String) TLS CA certificate content. If provided (and URL not provided), playbook creates the ConfigMap from this content. If neither URL nor content provided, playbook validates ConfigMap exists.
+* `cifmw_openstack_lightspeed_cr_name`: (String) Name for OpenStackLightspeed CR. Defaults to `openstacklightspeed-sample`.
 
 ### Output
 None
