@@ -1,0 +1,123 @@
+---
+# Create or update the SKMO leaf admin user in central Keystone using the
+# randomized AdminPassword from the leaf osp-secret kustomize manifest.
+# Runs after inject_osp_secret_keys and before oc apply so leaf operators can
+# authenticate as admin-two on the first reconcile.
+
+- name: Configure SKMO leaf admin user in central Keystone
+  when:
+    - stage.path is defined
+    - "'multi-namespace-skmo/control-plane2' in stage.path"
+    - _osp_secret_manifest_check.rc == 0
+  vars:
+    _skmo_values_file: >-
+      {{
+        (cifmw_kustomize_deploy_architecture_repo_dest_dir,
+         stage.path, 'skmo-values.yaml') | path_join
+      }}
+    _central_namespace: openstack
+    _nolog: "{{ cifmw_nolog | default(true) | bool }}"
+  block:
+    - name: Read osp-secret namespace from kustomize manifest
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ role_path }}/files/osp_secret_manifest.py"
+          - get-namespace
+          - "{{ cifmw_kustomize_deploy_manifest_path }}"
+      register: _skmo_leaf_namespace_cmd
+      changed_when: false
+      failed_when: _skmo_leaf_namespace_cmd.rc != 0
+
+    - name: Bootstrap SKMO leaf admin user in central Keystone
+      when: _skmo_leaf_namespace_cmd.stdout == 'openstack2'
+      block:
+        - name: Load SKMO values
+          ansible.builtin.set_fact:
+            _skmo_values: "{{ lookup('file', _skmo_values_file) | from_yaml }}"
+
+        - name: Set SKMO leaf admin facts
+          ansible.builtin.set_fact:
+            _leaf_admin_user: "{{ _skmo_values.data.leafAdminUser }}"
+            _leaf_admin_project: "{{ _skmo_values.data.leafAdminProject }}"
+            _leaf_admin_password_key: "{{ _skmo_values.data.leafAdminPasswordKey }}"
+
+        - name: Read leaf admin password from kustomize manifest
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ role_path }}/files/osp_secret_manifest.py"
+              - get
+              - "{{ cifmw_kustomize_deploy_manifest_path }}"
+              - "{{ _leaf_admin_password_key }}"
+          register: _leaf_admin_password_cmd
+          changed_when: false
+          failed_when: _leaf_admin_password_cmd.rc != 0
+          no_log: "{{ _nolog }}"
+
+        - name: Set leaf admin password fact
+          ansible.builtin.set_fact:
+            _leaf_admin_password: "{{ _leaf_admin_password_cmd.stdout }}"
+          no_log: "{{ _nolog }}"
+
+        - name: Wait for central Keystone API to be ready
+          kubernetes.core.k8s_info:
+            api_version: keystone.openstack.org/v1beta1
+            kind: KeystoneAPI
+            namespace: "{{ _central_namespace }}"
+          register: _keystoneapi_info
+          retries: 60
+          delay: 10
+          until:
+            - _keystoneapi_info.resources is defined
+            - _keystoneapi_info.resources | length > 0
+            - _keystoneapi_info.resources[0].status.conditions is defined
+            - _keystoneapi_info.resources[0].status.conditions |
+              selectattr('type', 'equalto', 'Ready') |
+              selectattr('status', 'equalto', 'True') | list | length > 0
+
+        - name: Wait for openstackclient pod to be ready in central region
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Pod
+            namespace: "{{ _central_namespace }}"
+            name: openstackclient
+          register: _osc_pod_info
+          retries: 30
+          delay: 10
+          until:
+            - _osc_pod_info.resources is defined
+            - _osc_pod_info.resources | length > 0
+            - _osc_pod_info.resources[0].status.conditions is defined
+            - _osc_pod_info.resources[0].status.conditions |
+              selectattr('type', 'equalto', 'Ready') |
+              selectattr('status', 'equalto', 'True') | list | length > 0
+
+        - name: Ensure leaf admin project exists in central Keystone
+          ansible.builtin.shell: |
+            set -euo pipefail
+            oc -n {{ _central_namespace | quote }} rsh openstackclient \
+              openstack project show {{ _leaf_admin_project | quote }} >/dev/null 2>&1 || \
+            oc -n {{ _central_namespace | quote }} rsh openstackclient \
+              openstack project create {{ _leaf_admin_project | quote }}
+          args:
+            executable: /bin/bash
+
+        - name: Ensure leaf admin user exists with manifest password
+          ansible.builtin.shell: |
+            set -euo pipefail
+            if oc -n {{ _central_namespace | quote }} rsh openstackclient \
+              openstack user show {{ _leaf_admin_user | quote }} >/dev/null 2>&1; then
+              oc -n {{ _central_namespace | quote }} rsh openstackclient \
+                openstack user set --password {{ _leaf_admin_password | quote }} {{ _leaf_admin_user | quote }}
+            else
+              oc -n {{ _central_namespace | quote }} rsh openstackclient \
+                openstack user create --domain Default --password {{ _leaf_admin_password | quote }} {{ _leaf_admin_user | quote }}
+            fi
+            oc -n {{ _central_namespace | quote }} rsh openstackclient \
+              openstack role add --project {{ _leaf_admin_project | quote }} --user {{ _leaf_admin_user | quote }} admin
+            oc -n {{ _central_namespace | quote }} rsh openstackclient \
+              openstack role add --system all --user {{ _leaf_admin_user | quote }} --user-domain Default admin
+          args:
+            executable: /bin/bash
+          no_log: "{{ _nolog }}"
