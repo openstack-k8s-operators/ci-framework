@@ -40,6 +40,10 @@
           #!/bin/bash
           {{ command }}
         state: to_pod
+      register: pod_script_copy
+      until: pod_script_copy is succeeded
+      retries: "{{ cifmw_shiftstack_k8s_cp_retries }}"
+      delay: "{{ cifmw_shiftstack_k8s_cp_delay }}"
 
     - name: Execute detached in the pod - {{ command }}
       kubernetes.core.k8s_exec:
@@ -67,7 +71,19 @@
       register: pod_exit_code
       changed_when: false
       failed_when: false
-      until: pod_exit_code.rc != 10
+      # Keep polling while the background command is running (rc=10) or while
+      # oc exec fails with transient API/admission errors during long-running
+      # shiftstack tests (for example SCCExecRestrictions webhook timeouts).
+      until: >-
+        pod_exit_code.rc == 0 or
+        pod_exit_code.rc == 2 or
+        (
+          pod_exit_code.rc != 10 and
+          not (
+            pod_exit_code.stderr | default('') is
+            search(cifmw_shiftstack_exec_transient_patterns | join('|'), ignorecase=True)
+          )
+        )
       retries: "{{ cifmw_shiftstack_exec_retries }}"
       delay: "{{ cifmw_shiftstack_exec_delay }}"
 
@@ -76,6 +92,7 @@
         msg: >-
           Lost connection to pod {{ pod_name }}. The pod may have been
           evicted, OOM-killed, or the API server became unreachable.
+          Failed after {{ pod_exit_code.attempts | default(1) }} polling attempt(s).
           oc exec stderr: {{ pod_exit_code.stderr | default('(none)') | trim }}
       when:
         - pod_exit_code.rc != 0
@@ -107,6 +124,11 @@
         - (pod_exit_code.stdout | default('') | trim) != '0'
 
   rescue:
+    - name: Collect cluster diagnostics after command failure
+      vars:
+        diagnostics_label: "{{ log_file_name | default('command_failure') }}"
+      ansible.builtin.include_tasks: collect_cluster_diagnostics.yml
+
     - name: Kill background process on failure
       kubernetes.core.k8s_exec:
         kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
@@ -134,8 +156,12 @@
       ansible.builtin.fail:
         msg: >-
           "{{ command }}" failed.
+          Original error: {{ ansible_failed_result.msg | default('N/A') | trim }}.
+          k8s_cp attempts: {{ pod_script_copy.attempts | default('N/A') }}.
           pod exit code: {{ pod_exit_code.stdout | default('N/A') | trim }},
-          output (last 8KB): {{ pod_output_log.stdout | default('(not retrieved)') }}
+          output (last 8KB): {{ pod_output_log.stdout | default('(not retrieved)') }}.
+          Diagnostics file: {{ shiftstack_diagnostics_file | default('N/A') }}.
+          Diagnostics tail: {{ shiftstack_diagnostics_summary | default('(not collected)') }}
 
   always:
     - name: Command execution log saving block
@@ -165,8 +191,11 @@
               pod_name: "{{ pod_name }}"
               command: "{{ command }}"
               pod_command_result: "{{ pod_command_result | default('N/A') }}"
+              pod_script_copy: "{{ pod_script_copy | default('N/A') }}"
               pod_exit_code: "{{ pod_exit_code | default('N/A') }}"
               pod_output: "{{ pod_output_for_log.stdout | default('N/A') }}"
+              ansible_failed_result: "{{ ansible_failed_result | default('N/A') }}"
+              diagnostics_file: "{{ shiftstack_diagnostics_file | default('N/A') }}"
           ansible.builtin.copy:
             content: "{{ command_info | to_nice_yaml }}"
             dest: "{{ cifmw_shiftstack_ansible_command_logs_dir }}/{{ current_date.stdout }}.{{ log_file_name }}"

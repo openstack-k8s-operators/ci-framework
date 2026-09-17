@@ -1,0 +1,107 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Ensure shiftstack diagnostics directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_shiftstack_diagnostics_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Get current date and time for diagnostics file
+  ansible.builtin.command:
+    cmd: date +"%Y_%m_%d-%H_%M_%S"
+  register: shiftstack_diagnostics_timestamp
+  changed_when: false
+
+- name: Set diagnostics output file path
+  ansible.builtin.set_fact:
+    shiftstack_diagnostics_file: >-
+      {{ cifmw_shiftstack_diagnostics_dir }}/{{ shiftstack_diagnostics_timestamp.stdout }}.{{ diagnostics_label | default('cluster') }}.txt
+
+- name: Collect CRC and cluster diagnostics
+  environment:
+    PATH: "{{ cifmw_path }}"
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.shell:
+    cmd: |
+      set +e
+      exec > "{{ shiftstack_diagnostics_file }}" 2>&1
+      echo "=== shiftstack cluster diagnostics ==="
+      echo "timestamp: $(date -Is)"
+      echo "command: {{ command | default('N/A') }}"
+      echo "namespace: {{ namespace | default('N/A') }}"
+      echo "pod: {{ pod_name | default('N/A') }}"
+      echo "kubeconfig: {{ cifmw_openshift_kubeconfig }}"
+      echo
+      echo "=== crc status ==="
+      if command -v crc >/dev/null 2>&1; then
+        crc status
+      else
+        echo "crc CLI not found in PATH"
+      fi
+      echo
+      echo "=== oc version ==="
+      oc version
+      echo
+      echo "=== API /readyz ==="
+      oc get --raw /readyz?verbose 2>&1 | head -c 8192
+      echo
+      echo "=== oc get nodes ==="
+      oc get nodes -o wide
+      echo
+      echo "=== cluster operators ==="
+      oc get clusteroperators
+      echo
+      echo "=== kube-apiserver pods ==="
+      oc get pods -n openshift-kube-apiserver -o wide
+      echo
+      echo "=== kube-apiserver logs (tail) ==="
+      oc logs -n openshift-kube-apiserver -l app=openshift-kube-apiserver --tail=80 2>&1 | tail -c 16384
+      echo
+      echo "=== pods in {{ namespace | default('openstack') }} ==="
+      oc get pods -n {{ namespace | default('openstack') }} -o wide
+      echo
+      echo "=== events in {{ namespace | default('openstack') }} (last 30) ==="
+      oc get events -n {{ namespace | default('openstack') }} --sort-by='.lastTimestamp' 2>&1 | tail -30
+  args:
+    executable: /bin/bash
+  register: shiftstack_diagnostics_collect
+  changed_when: false
+  failed_when: false
+
+- name: Append ansible failure context to diagnostics file
+  ansible.builtin.lineinfile:
+    path: "{{ shiftstack_diagnostics_file }}"
+    line: "{{ item }}"
+    create: true
+    mode: "0644"
+  loop:
+    - ""
+    - "=== ansible failure context ==="
+    - "ansible_failed_task: {{ ansible_failed_task.name | default('N/A') }}"
+    - "ansible_failed_result: {{ ansible_failed_result.msg | default('N/A') }}"
+  failed_when: false
+
+- name: Read collected diagnostics summary
+  ansible.builtin.slurp:
+    src: "{{ shiftstack_diagnostics_file }}"
+  register: shiftstack_diagnostics_content
+  failed_when: false
+
+- name: Set diagnostics summary fact
+  ansible.builtin.set_fact:
+    shiftstack_diagnostics_summary: >-
+      {{ (shiftstack_diagnostics_content.content | b64decode)[-8192:] if shiftstack_diagnostics_content.content is defined else '(diagnostics file not readable)' }}
