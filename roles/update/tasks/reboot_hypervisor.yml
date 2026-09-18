@@ -88,6 +88,64 @@
       changed_when: true
       failed_when: false
 
+- name: Fail over the Ceph mgr after reboot when the active mgr is stray
+  when: cifmw_update_failover_ceph_mgr | default(false)
+  block:
+    - name: Get the current Ceph health details
+      ansible.builtin.command: >-
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "sudo cephadm shell -- ceph health detail -f json"
+      register: cifmw_update_ceph_health
+      changed_when: false
+      failed_when: false
+
+    - name: Get the active Ceph mgr
+      ansible.builtin.command: >-
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "sudo cephadm shell -- ceph mgr stat -f json"
+      register: cifmw_update_ceph_mgr_stat
+      changed_when: false
+      failed_when: false
+
+    - name: Fail the active Ceph mgr when it is the stray daemon
+      when:
+        - cifmw_update_ceph_health.rc == 0
+        - cifmw_update_ceph_mgr_stat.rc == 0
+        - >-
+          ('stray daemon mgr.' ~
+          ((cifmw_update_ceph_mgr_stat.stdout | default('{}', true) | from_json).active_name | default('')) ~
+          ' on host ') in cifmw_update_ceph_health.stdout
+      block:
+        - name: Promote a standby Ceph mgr
+          ansible.builtin.command: >-
+            ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+            -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+            {{ cifmw_update_hypervisor_short_name }}
+            "sudo cephadm shell -- ceph mgr fail"
+          changed_when: true
+
+        - name: Wait for the promoted mgr to become active and collect stats
+          ansible.builtin.pause:
+            seconds: "{{ cifmw_update_ceph_mgr_failover_wait }}"
+
+        - name: Re-check the Ceph cluster status after the failover
+          ansible.builtin.command: >-
+            ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+            -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+            {{ cifmw_update_hypervisor_short_name }}
+            "sudo cephadm shell -- ceph -s"
+          register: cifmw_update_ceph_status_after
+          changed_when: false
+          failed_when: false
+
+        - name: Report the Ceph cluster status after the failover
+          ansible.builtin.debug:
+            msg: "{{ cifmw_update_ceph_status_after.stdout_lines | default([]) }}"
+
 - name: Perform sanity checks post-reboot
   ansible.builtin.include_tasks: reboot_hypervisor_sanity_checks.yml
   vars:
