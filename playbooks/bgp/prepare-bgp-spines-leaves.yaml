@@ -342,6 +342,27 @@
               {% endif %}
           changed_when: false
 
+        # The neutron-tempest-plugin EVPN provisioner creates one br-<vni>
+        # bridge per allocated VNI and advertises the VTEP /32 into EVPN. SNAT
+        # tenant-bound traffic leaving any of those bridges to the VTEP IP so
+        # the VM replies to an address router-0 advertises and return traffic
+        # comes back through the tunnel (conntrack un-NATs it). Matching the
+        # output interface (br-+) is enough and VNI-agnostic: routing has
+        # already picked the right br-<vni> from the EVPN route before
+        # POSTROUTING runs, so no per-subnet/per-VNI rule is needed.
+        # -C || -A keeps the rule idempotent across playbook re-runs.
+        - name: SNAT EVPN tenant-bound traffic to the VTEP IP
+          when:
+            - router_evpn_vtep | default(false)
+          become: true
+          ansible.builtin.shell:
+            cmd: >
+              iptables -t nat -C POSTROUTING -o br-+ -j SNAT
+              --to-source {{ router_loopback_ip }}
+              || iptables -t nat -A POSTROUTING -o br-+ -j SNAT
+              --to-source {{ router_loopback_ip }}
+          changed_when: true
+
     - name: Add route to RH intranet from router via HV when IPv6
       when: _ip_version == 6
       block:
