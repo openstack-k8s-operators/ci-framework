@@ -60,6 +60,80 @@
 - name: Reboot the hypervisors using CR
   ansible.builtin.include_tasks: reboot_hypervisor_using_cr.yml
 
+- name: Re-apply Ceph MON IPs after compute reboot
+  when: cifmw_update_reapply_ceph_mon_ips | default(false)
+  block:
+    - name: Extract Ceph storage-net IPs from os-net-config
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "grep -oE '{{ cifmw_update_ceph_storage_net_prefix | regex_escape }}\.[0-9]+/[0-9]+'
+        /etc/os-net-config/config.yaml | sort -u"
+      register: cifmw_update_ceph_mon_ips
+      changed_when: false
+      failed_when: false
+
+    - name: Apply Ceph MON IPs to storage vlan interface
+      when:
+        - cifmw_update_ceph_mon_ips.rc == 0
+        - cifmw_update_ceph_mon_ips.stdout_lines | length > 0
+      ansible.builtin.command: >-
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "sudo ip addr add {{ item }} dev vlan{{ cifmw_update_ceph_storage_vlan_id }}"
+      loop: "{{ cifmw_update_ceph_mon_ips.stdout_lines }}"
+      changed_when: true
+      failed_when: false
+
+- name: Fail over the Ceph mgr after reboot when the cluster is unhealthy
+  when: cifmw_update_failover_ceph_mgr | default(false)
+  block:
+    - name: Get the current Ceph health status
+      ansible.builtin.command: >-
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "sudo cephadm shell -- ceph health -f json"
+      register: cifmw_update_ceph_health
+      changed_when: false
+      failed_when: false
+
+    - name: Fail the active Ceph mgr when the cluster is not healthy
+      when:
+        - cifmw_update_ceph_health.rc == 0
+        - cifmw_update_ceph_health.stdout | length > 0
+        - (cifmw_update_ceph_health.stdout | from_json).status
+          | default('HEALTH_OK') != 'HEALTH_OK'
+      block:
+        - name: Promote a standby Ceph mgr
+          ansible.builtin.command: >-
+            ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+            -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+            {{ cifmw_update_hypervisor_short_name }}
+            "sudo cephadm shell -- ceph mgr fail"
+          changed_when: true
+
+        - name: Wait for the promoted mgr to become active and collect stats
+          ansible.builtin.pause:
+            seconds: "{{ cifmw_update_ceph_mgr_failover_wait }}"
+
+        - name: Re-check the Ceph cluster status after the failover
+          ansible.builtin.command: >-
+            ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+            -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+            {{ cifmw_update_hypervisor_short_name }}
+            "sudo cephadm shell -- ceph -s"
+          register: cifmw_update_ceph_status_after
+          changed_when: false
+          failed_when: false
+
+        - name: Report the Ceph cluster status after the failover
+          ansible.builtin.debug:
+            msg: "{{ cifmw_update_ceph_status_after.stdout_lines | default([]) }}"
+
 - name: Perform sanity checks post-reboot
   ansible.builtin.include_tasks: reboot_hypervisor_sanity_checks.yml
   vars:
