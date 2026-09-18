@@ -54,34 +54,130 @@
           echo $! > /tmp/cifmw_cmd_pid && cat /tmp/cifmw_cmd_pid'
       register: pod_command_result
 
+    # Poll in a shell loop so soft-transient errors (connection refused / i/o
+    # timeout) can use a consecutive failure budget without burning the full
+    # 8h window when the API is truly unreachable. Hard-transient patterns
+    # still retry for the full cifmw_shiftstack_exec_retries window.
+    # Exit codes from this poller:
+    #   0  - background command finished (stdout holds /tmp/cifmw_cmd_rc)
+    #   2  - background process gone without writing a marker
+    #   3  - soft-transient budget exhausted
+    #  10  - still running after cifmw_shiftstack_exec_retries attempts
+    # other - non-retryable oc exec failure
     - name: Wait for the command to complete in the pod
       environment:
         PATH: "{{ cifmw_path }}"
         KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-      ansible.builtin.command:
-        cmd: >-
-          oc exec -n {{ namespace }} {{ pod_name }} --
-          bash -c 'if cat /tmp/cifmw_cmd_rc 2>/dev/null; then exit 0;
-          elif [ -f /tmp/cifmw_cmd_pid ] && kill -0 $(cat /tmp/cifmw_cmd_pid) 2>/dev/null; then exit 10;
-          else exit 2; fi'
+      vars:
+        _hard_transient_re: "{{ cifmw_shiftstack_exec_transient_patterns | join('|') }}"
+        _soft_transient_re: "{{ cifmw_shiftstack_exec_soft_transient_patterns | join('|') }}"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        soft=0
+        attempts=0
+        max_retries={{ cifmw_shiftstack_exec_retries | int }}
+        delay={{ cifmw_shiftstack_exec_delay | int }}
+        soft_max={{ cifmw_shiftstack_exec_soft_transient_max | int }}
+        hard_re={{ _hard_transient_re | quote }}
+        soft_re={{ _soft_transient_re | quote }}
+        ns={{ namespace | quote }}
+        pod={{ pod_name | quote }}
+        poll_cmd='if cat /tmp/cifmw_cmd_rc 2>/dev/null; then exit 0; elif [ -f /tmp/cifmw_cmd_pid ] && kill -0 $(cat /tmp/cifmw_cmd_pid) 2>/dev/null; then exit 10; else exit 2; fi'
+
+        emit_attempts() {
+          echo "CIFMW_SHIFTSTACK_POLL_ATTEMPTS=${attempts}" >&2
+        }
+
+        while [ "${attempts}" -lt "${max_retries}" ]; do
+          attempts=$((attempts + 1))
+          stderr_file="$(mktemp)"
+          set +e
+          stdout="$(oc exec -n "${ns}" "${pod}" -- bash -c "${poll_cmd}" 2>"${stderr_file}")"
+          rc=$?
+          set -e
+          stderr="$(cat "${stderr_file}" 2>/dev/null || true)"
+          rm -f "${stderr_file}"
+
+          if [ "${rc}" -eq 0 ] || [ "${rc}" -eq 2 ]; then
+            printf '%s\n' "${stdout}"
+            printf '%s\n' "${stderr}" >&2
+            emit_attempts
+            exit "${rc}"
+          fi
+
+          if [ "${rc}" -eq 10 ]; then
+            soft=0
+            sleep "${delay}"
+            continue
+          fi
+
+          # oc exec itself failed (typically rc=1). Classify stderr.
+          if [ -n "${hard_re}" ] && printf '%s\n' "${stderr}" | grep -Eiq -- "${hard_re}"; then
+            soft=0
+            sleep "${delay}"
+            continue
+          fi
+
+          if [ -n "${soft_re}" ] && printf '%s\n' "${stderr}" | grep -Eiq -- "${soft_re}"; then
+            soft=$((soft + 1))
+            if [ "${soft}" -ge "${soft_max}" ]; then
+              printf '%s\n' "${stderr}" >&2
+              emit_attempts
+              exit 3
+            fi
+            sleep "${delay}"
+            continue
+          fi
+
+          printf '%s\n' "${stderr}" >&2
+          emit_attempts
+          exit "${rc}"
+        done
+
+        emit_attempts
+        exit 10
+      args:
+        executable: /bin/bash
       register: pod_exit_code
       changed_when: false
       failed_when: false
-      # Keep polling while the background command is running (rc=10) or while
-      # oc exec fails with transient API/admission errors during long-running
-      # shiftstack tests (for example SCCExecRestrictions webhook timeouts).
-      until: >-
-        pod_exit_code.rc == 0 or
-        pod_exit_code.rc == 2 or
-        (
-          pod_exit_code.rc != 10 and
-          not (
-            pod_exit_code.stderr | default('') is
-            search(cifmw_shiftstack_exec_transient_patterns | join('|'), ignorecase=True)
-          )
-        )
-      retries: "{{ cifmw_shiftstack_exec_retries }}"
-      delay: "{{ cifmw_shiftstack_exec_delay }}"
+
+    - name: Normalize poll result metadata
+      vars:
+        _attempt_line: >-
+          {{
+            pod_exit_code.stderr_lines | default([])
+            | select('match', '^CIFMW_SHIFTSTACK_POLL_ATTEMPTS=')
+            | list | first | default('CIFMW_SHIFTSTACK_POLL_ATTEMPTS=1')
+          }}
+        _stderr_without_attempts: >-
+          {{
+            pod_exit_code.stderr_lines | default([])
+            | reject('match', '^CIFMW_SHIFTSTACK_POLL_ATTEMPTS=')
+            | list | join('\n')
+          }}
+      ansible.builtin.set_fact:
+        pod_exit_code: >-
+          {{
+            pod_exit_code | combine({
+              'attempts': (_attempt_line | regex_replace('^CIFMW_SHIFTSTACK_POLL_ATTEMPTS=', '') | int),
+              'stderr': _stderr_without_attempts,
+              'stderr_lines': (
+                _stderr_without_attempts | split('\n')
+                if (_stderr_without_attempts | length) > 0 else []
+              )
+            })
+          }}
+
+    - name: Fail if soft-transient API errors exhausted
+      ansible.builtin.fail:
+        msg: >-
+          Lost connection to pod {{ pod_name }} after
+          {{ cifmw_shiftstack_exec_soft_transient_max }} consecutive soft-transient
+          oc exec errors (for example connection refused or i/o timeout).
+          Failed after {{ pod_exit_code.attempts | default(1) }} polling attempt(s).
+          oc exec stderr: {{ pod_exit_code.stderr | default('(none)') | trim }}
+      when: pod_exit_code.rc == 3
 
     - name: Fail if the pod is no longer reachable
       ansible.builtin.fail:
@@ -93,6 +189,7 @@
       when:
         - pod_exit_code.rc != 0
         - pod_exit_code.rc != 2
+        - pod_exit_code.rc != 3
         - pod_exit_code.rc != 10
 
     - name: Fail if the background process died without writing the marker
