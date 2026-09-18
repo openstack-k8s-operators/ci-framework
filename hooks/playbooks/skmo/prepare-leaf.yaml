@@ -1,10 +1,12 @@
 ---
+# Prepare SKMO leaf prerequisites in the central region before the leaf OSCP
+# apply. Leaf admin user bootstrap (admin-two) runs later in kustomize_deploy,
+# after osp-secret passwords are randomized and before oc apply.
 - name: Prepare SKMO leaf prerequisites in regionZero
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
   vars:
     skmo_values_file: "{{ cifmw_architecture_repo }}/examples/va/multi-namespace-skmo/control-plane2/skmo-values.yaml"
-    osp_secrets_env_file: "{{ cifmw_architecture_repo }}/lib/control-plane/base/osp-secrets.env"
     central_namespace: openstack
     leaf_namespace: openstack2
     central_rootca_secret: rootca-public
@@ -51,18 +53,9 @@
     - name: Set SKMO leaf facts
       ansible.builtin.set_fact:
         leaf_region: "{{ skmo_values.data.leafRegion }}"
-        leaf_admin_user: "{{ skmo_values.data.leafAdminUser }}"
-        leaf_admin_project: "{{ skmo_values.data.leafAdminProject }}"
-        leaf_admin_password_key: "{{ skmo_values.data.leafAdminPasswordKey }}"
         keystone_internal_url: "{{ skmo_values.data.keystoneInternalURL }}"
         keystone_public_url: "{{ skmo_values.data.keystonePublicURL }}"
         ca_bundle_secret_name: "{{ skmo_values.data.leafCaBundleSecretName }}"
-
-    - name: Read leaf admin password from env file
-      ansible.builtin.set_fact:
-        leaf_admin_password: >-
-          {{ dict(lookup('file', osp_secrets_env_file) |
-                  regex_findall('^([^#=\n][^=\n]*)=(.*)', multiline=True))[leaf_admin_password_key] | trim }}
 
     - name: Ensure leaf region exists in central Keystone
       ansible.builtin.shell: |
@@ -91,30 +84,6 @@
         fi
       args:
         executable: /bin/bash
-
-    - name: Ensure leaf admin project exists in central Keystone
-      ansible.builtin.shell: |
-        set -euo pipefail
-        oc -n {{ central_namespace }} rsh openstackclient \
-          openstack project show {{ leaf_admin_project }} >/dev/null 2>&1 || \
-        oc -n {{ central_namespace }} rsh openstackclient \
-          openstack project create {{ leaf_admin_project }}
-      args:
-        executable: /bin/bash
-
-    - name: Ensure leaf admin user exists and has admin role
-      ansible.builtin.shell: |
-        set -euo pipefail
-        if ! oc -n {{ central_namespace }} rsh openstackclient \
-          openstack user show {{ leaf_admin_user }} >/dev/null 2>&1; then
-          oc -n {{ central_namespace }} rsh openstackclient \
-            openstack user create --domain Default --password "{{ leaf_admin_password }}" {{ leaf_admin_user }}
-        fi
-        oc -n {{ central_namespace }} rsh openstackclient \
-          openstack role add --project {{ leaf_admin_project }} --user {{ leaf_admin_user }} admin
-      args:
-        executable: /bin/bash
-      no_log: true
 
     - name: Get existing leaf CA bundle secret if present
       kubernetes.core.k8s_info:
