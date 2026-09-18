@@ -1,0 +1,137 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Reset inspect target list
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_inspect_targets: []
+
+- name: Check for image mappings
+  ansible.builtin.stat:
+    path: "{{ cifmw_s2i_content_set_mappings_file }}"
+  register: cifmw_s2i_content_set_mappings_stat
+
+- name: Require image mappings for live inspect
+  when: not cifmw_s2i_content_set_mappings_stat.stat.exists
+  ansible.builtin.fail:
+    msg: >-
+      S2I image mappings not found at {{ cifmw_s2i_content_set_mappings_file }}.
+      Add openstack-k8s-operators/s2i-openstack-containers to required-projects.
+
+- name: Load image mappings
+  ansible.builtin.include_vars:
+    file: "{{ cifmw_s2i_content_set_mappings_file }}"
+    name: cifmw_s2i_content_set_mappings
+
+- name: Build inspect list from mappings
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_inspect_targets: "{{ cifmw_s2i_content_set_inspect_targets | default([]) + [cifmw_s2i_content_set_mapping_entry] }}"
+  vars:
+    cifmw_s2i_content_set_mapping_entry:
+      target: "{{ item.key }}"
+      fields: "{{ item.value }}"
+      image: "{{ cifmw_s2i_content_set_prefix }}-{{ item.key.split('/')[-1] }}"
+      backends: []
+  loop: "{{ cifmw_s2i_content_set_mappings.openstack_version.custom_container_images | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Add backend images to the inspect list
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_inspect_targets: "{{ cifmw_s2i_content_set_inspect_targets + [cifmw_s2i_content_set_backend_entry] }}"
+  vars:
+    cifmw_s2i_content_set_backend_entry:
+      target: "{{ item.image }}"
+      fields:
+        - "{{ item.name }}"
+      image: "{{ item.image }}"
+      backends: "{{ item.backends }}"
+  loop: "{{ cifmw_s2i_content_set_backend_images }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Inspect probe image at master-latest for s2iCommit
+  when: cifmw_s2i_content_set_resolved_commit | length == 0
+  vars:
+    cifmw_s2i_content_set_inspect_name: "{{ cifmw_s2i_content_set_probe_image }}"
+    cifmw_s2i_content_set_inspect_ref: >-
+      {{
+        [
+          cifmw_s2i_content_set_registry,
+          cifmw_s2i_content_set_namespace,
+          cifmw_s2i_content_set_probe_image
+        ] | join('/') ~ ':' ~ cifmw_s2i_content_set_stream ~ '-latest'
+      }}
+  ansible.builtin.include_tasks: inspect_image.yml
+
+- name: Record s2iCommit from probe labels
+  when:
+    - cifmw_s2i_content_set_resolved_commit | length == 0
+    - cifmw_s2i_content_set_inspect_labels['org.opencontainers.image.revision'] | default('') | length > 0
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_resolved_commit: "{{ cifmw_s2i_content_set_inspect_labels['org.opencontainers.image.revision'] }}"
+
+- name: Inspect each unique promoted image
+  vars:
+    cifmw_s2i_content_set_inspect_name: "{{ cifmw_s2i_content_set_unique_image }}"
+    cifmw_s2i_content_set_inspect_tag: >-
+      {{
+        cifmw_s2i_content_set_stream ~ '-' ~
+        (
+          cifmw_s2i_content_set_resolved_commit
+          if (cifmw_s2i_content_set_resolved_commit | length > 0)
+          else 'latest'
+        )
+      }}
+    cifmw_s2i_content_set_inspect_ref: >-
+      {{
+        [
+          cifmw_s2i_content_set_registry,
+          cifmw_s2i_content_set_namespace,
+          cifmw_s2i_content_set_unique_image
+        ] | join('/') ~ ':' ~ cifmw_s2i_content_set_inspect_tag
+      }}
+  ansible.builtin.include_tasks: inspect_image.yml
+  loop: "{{ cifmw_s2i_content_set_inspect_targets | map(attribute='image') | unique | list }}"
+  loop_control:
+    loop_var: cifmw_s2i_content_set_unique_image
+    label: "{{ cifmw_s2i_content_set_unique_image }}"
+
+- name: Build resolved images from digest map
+  when:
+    - item.0.image in cifmw_s2i_content_set_digests
+  ansible.builtin.set_fact:
+    cifmw_s2i_content_set_resolved_images: "{{ cifmw_s2i_content_set_resolved_images + [cifmw_s2i_content_set_field_entry] }}"
+  vars:
+    cifmw_s2i_content_set_field_entry: >-
+      {{
+        {
+          'name': item.1,
+          'full_registry': (
+            [
+              cifmw_s2i_content_set_registry,
+              cifmw_s2i_content_set_namespace,
+              item.0.image
+            ] | join('/') ~ '@' ~ cifmw_s2i_content_set_digests[item.0.image]
+          )
+        } | combine(
+          {'backends': item.0.backends}
+          if (item.0.backends | default([]) | length > 0)
+          else {}
+        )
+      }}
+  loop: "{{ cifmw_s2i_content_set_inspect_targets | subelements('fields') }}"
+  loop_control:
+    label: "{{ item.1 }}"
