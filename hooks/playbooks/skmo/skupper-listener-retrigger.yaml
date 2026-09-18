@@ -1,0 +1,123 @@
+---
+- name: Check if Skupper Listener exists
+  when: cifmw_skupper_listener_enabled | default(true) | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  kubernetes.core.k8s_info:
+    api_version: skupper.io/v2alpha1
+    kind: Listener
+    name: "{{ cifmw_skupper_listener_name }}"
+    namespace: "{{ cifmw_skupper_listener_namespace | default('openstack2') }}"
+  register: _listener
+
+- name: Check if Listener is already configured
+  when:
+    - cifmw_skupper_listener_enabled | default(true) | bool
+    - _listener.resources | length > 0
+  ansible.builtin.set_fact:
+    _listener_is_configured: "{{
+      (_listener.resources[0].status is defined) and
+      (_listener.resources[0].status.conditions is defined) and
+      (_listener.resources[0].status.conditions |
+        selectattr('type', 'equalto', 'Configured') |
+        selectattr('status', 'equalto', 'True') | list | length > 0)
+    }}"
+
+- name: Wait for cert-manager to issue the TLS Secret
+  when:
+    - cifmw_skupper_listener_enabled | default(true) | bool
+    - _listener.resources | length > 0
+    - not (_listener_is_configured | default(false) | bool)
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ cifmw_skupper_listener_cert_secret }}"
+    namespace: "{{ cifmw_skupper_listener_namespace | default('openstack2') }}"
+  register: _listener_cert_secret
+  retries: "{{ cifmw_skupper_listener_retrigger_secret_retries | default(60) | int }}"
+  delay: "{{ cifmw_skupper_listener_retrigger_secret_delay | default(30) | int }}"
+  until:
+    - _listener_cert_secret.resources | length > 0
+    - _listener_cert_secret.resources[0].data is defined
+    - _listener_cert_secret.resources[0].data['tls.crt'] is defined
+    - _listener_cert_secret.resources[0].data['tls.key'] is defined
+
+- name: Check if Secret contains required TLS data
+  when:
+    - cifmw_skupper_listener_enabled | default(true) | bool
+    - _listener.resources | length > 0
+    - not (_listener_is_configured | default(false) | bool)
+    - _listener_cert_secret.resources | length > 0
+  ansible.builtin.set_fact:
+    _secret_has_tls: "{{
+      (_listener_cert_secret.resources[0].data is defined) and
+      (_listener_cert_secret.resources[0].data['tls.crt'] is defined) and
+      (_listener_cert_secret.resources[0].data['tls.key'] is defined)
+    }}"
+
+- name: Restart Skupper controller to force Listener re-reconciliation
+  when:
+    - cifmw_skupper_listener_enabled | default(true) | bool
+    - _listener.resources | length > 0
+    - not (_listener_is_configured | default(false) | bool)
+    - _secret_has_tls | default(false) | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: kubectl rollout restart deployment skupper-controller -n skupper
+
+- name: Wait for Skupper controller deployment to complete rollout
+  when:
+    - cifmw_skupper_listener_enabled | default(true) | bool
+    - _listener.resources | length > 0
+    - not (_listener_is_configured | default(false) | bool)
+    - _secret_has_tls | default(false) | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: kubectl rollout status deployment skupper-controller -n skupper --timeout=5m
+
+- name: Wait for Skupper Listener to be configured after controller restart
+  when:
+    - cifmw_skupper_listener_enabled | default(true) | bool
+    - _listener.resources | length > 0
+    - not (_listener_is_configured | default(false) | bool)
+    - _secret_has_tls | default(false) | bool
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  kubernetes.core.k8s_info:
+    api_version: skupper.io/v2alpha1
+    kind: Listener
+    name: "{{ cifmw_skupper_listener_name }}"
+    namespace: "{{ cifmw_skupper_listener_namespace | default('openstack2') }}"
+  register: _listener_after_restart
+  retries: 30
+  delay: 10
+  until:
+    - _listener_after_restart.resources | length > 0
+    - _listener_after_restart.resources[0].status is defined
+    - _listener_after_restart.resources[0].status.conditions is defined
+    - _listener_after_restart.resources[0].status.conditions |
+      selectattr('type', 'equalto', 'Configured') |
+      selectattr('status', 'equalto', 'True') | list | length > 0
+
+- name: Report Listener configuration status
+  when: cifmw_skupper_listener_enabled | default(true) | bool
+  ansible.builtin.debug:
+    msg: >-
+      Skupper Listener {{ cifmw_skupper_listener_name }} in namespace
+      {{ cifmw_skupper_listener_namespace | default('openstack2') }} status:
+      {% if _listener.resources | length == 0 %}
+      does not exist (no action needed)
+      {% elif _listener_is_configured | default(false) | bool %}
+      already configured (no restart needed)
+      {% else %}
+      controller restarted and Listener is now configured
+      {% endif %}
