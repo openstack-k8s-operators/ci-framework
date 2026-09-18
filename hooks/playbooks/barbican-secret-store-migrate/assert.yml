@@ -1,0 +1,43 @@
+---
+# Assert a secret is on the expected Barbican secret-store catalogue entry.
+#
+# Microversion 1.3 secret metadata always includes secret_store_id and
+# secret_store_ref (UUID/href, or null when there is no live payload).
+# Use OSC — the patched client negotiates key-manager 1.3.
+#
+# Expects:
+#   cifmw_barbican_migrate_assert_label
+#   cifmw_barbican_migrate_assert_secret_id
+#   cifmw_barbican_migrate_assert_store  (id, store_plugin, crypto_plugin)
+#   cifmw_barbican_migrate_osc_pod, cifmw_barbican_migrate_namespace
+
+- name: "{{ cifmw_barbican_migrate_assert_label }}: get secret metadata"
+  ansible.builtin.command:
+    argv:
+      - oc
+      - -n
+      - "{{ cifmw_barbican_migrate_namespace }}"
+      - exec
+      - "{{ cifmw_barbican_migrate_osc_pod }}"
+      - --
+      - openstack
+      - secret
+      - get
+      - "{{ cifmw_barbican_migrate_assert_secret_id }}"
+      - -f
+      - json
+  register: _assert_secret_get
+  changed_when: false
+  no_log: true
+
+- name: "{{ cifmw_barbican_migrate_assert_label }}: assert secret_store_id"
+  ansible.builtin.assert:
+    that:
+      - "'Secret store id' in (_assert_secret_get.stdout | from_json)"
+      - "'Secret store href' in (_assert_secret_get.stdout | from_json)"
+      - (_assert_secret_get.stdout | from_json)['Secret store id'] == cifmw_barbican_migrate_assert_store.id
+      - cifmw_barbican_migrate_assert_store.id in ((_assert_secret_get.stdout | from_json)['Secret store href'] | default(''))
+    fail_msg: >-
+      {{ cifmw_barbican_migrate_assert_label }}: expected secret_store_id
+      '{{ cifmw_barbican_migrate_assert_store.id }}', got
+      '{{ (_assert_secret_get.stdout | from_json)['Secret store id'] | default('') }}'.
