@@ -43,6 +43,7 @@ parameter_defaults:
   CephClientKey: '$KEY'
   CephManilaClientKey: '$KEY'
   CephExternalMonHost: '$CEPH_MON_HOST'
+  CephClientDeferredSync: false
 EOC
 
 echo "Successfully created ~/external_ceph_params.yaml on osp-undercloud-0"
