@@ -9,29 +9,36 @@
       snapshot_support: "True"
       create_share_from_snapshot_support: "True"
   tasks:
-    - name: Create share type default for manila tempest plugin tests
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command: |
-        oc -n {{ namespace }} exec -it pod/openstackclient \
-          -- openstack share type create {{ share_type_name }} {{ driver_handles_share_servers }}
-      register: _manila_share_creation
-      failed_when: >-
-        ( ( _manila_share_creation.rc | int ) != 0 )
-        and not ( "HTTP 409" in _manila_share_creation.stderr )
+    # *Only* if cifmw_services_manila_enabled was explicitly set to false,
+    # do not run the tasks. There are some use cases where that variable
+    # is not set and manila is enabled anyway (for example through
+    # the architecture workflow), so do not break them.
+    - name: Create manila resources when not explicitly denied
+      when: cifmw_services_manila_enabled | default(true) | bool
+      block:
+        - name: Create share type default for manila tempest plugin tests
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command: |
+            oc -n {{ namespace }} exec -it pod/openstackclient \
+              -- openstack share type create {{ share_type_name }} {{ driver_handles_share_servers }}
+          register: _manila_share_creation
+          failed_when: >-
+            ( ( _manila_share_creation.rc | int ) != 0 )
+            and not ( "HTTP 409" in _manila_share_creation.stderr )
 
-    - name: Prepare extra spec options string
-      when: extra_specs is mapping and extra_specs | length > 0
-      ansible.builtin.set_fact:
-        # convert dict to 'k=v ...' format; guard against extra_specs being passed as a string
-        extra_spec_opt: "{%- for k, v in extra_specs.items() -%}{{ k }}={{ v }} {% endfor -%}"
+        - name: Prepare extra spec options string
+          when: extra_specs is mapping and extra_specs | length > 0
+          ansible.builtin.set_fact:
+            # convert dict to 'k=v ...' format; guard against extra_specs being passed as a string
+            extra_spec_opt: "{%- for k, v in extra_specs.items() -%}{{ k }}={{ v }} {% endfor -%}"
 
-    - name: Update default share type properties
-      when: extra_spec_opt is defined
-      environment:
-        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
-        PATH: "{{ cifmw_path }}"
-      ansible.builtin.command: |
-        oc -n {{ namespace }} exec -it pod/openstackclient \
-          -- openstack share type set {{ share_type_name }} --extra-specs {{ extra_spec_opt }}
+        - name: Update default share type properties
+          when: extra_spec_opt is defined
+          environment:
+            KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+            PATH: "{{ cifmw_path }}"
+          ansible.builtin.command: |
+            oc -n {{ namespace }} exec -it pod/openstackclient \
+              -- openstack share type set {{ share_type_name }} --extra-specs {{ extra_spec_opt }}
