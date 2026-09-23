@@ -1,0 +1,132 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Minimal client bootstrap for phased Pipeline B (and similar) runs that
+# recreate the shiftstackclient pod but skip the QA "prepare" stage.
+#
+# prepare / ocp_testing normally:
+#   1) installs /usr/local/bin/oc (tools_get_openshift_release)
+#   2) writes guest API/apps FIPs into /etc/hosts (external_access.yml)
+#   3) registers those FIPs in artifacts/resources.yml (external_access.yml)
+#   4) restores ~/.config/openstack from ~/.original-config/openstack
+#      (ocp_testing.yaml, when cleanup or prepare is in stages)
+#
+# Without those, verification fails with "oc: command not found",
+# "lookup api.<cluster>.<basedomain>: no such host", or
+# "Cloud shiftstack was not found", and openstack_test fails with
+# "Could not find or access '.../artifacts/resources.yml'".
+
+- name: Bootstrap oc, clouds.yaml, resources.yml, and guest /etc/hosts in the shiftstackclient pod
+  vars:
+    namespace: "{{ cifmw_shiftstack_client_pod_namespace }}"
+    pod_name: "{{ cifmw_shiftstack_client_pod_name }}"
+    # Use a literal block (|). Folded style (>-) collapses newlines to spaces and
+    # turns "set -euo pipefail\nif ...; then" into invalid shell.
+    command: |
+      set -euo pipefail
+
+      # --- oc client ---
+      if command -v oc >/dev/null 2>&1; then
+        echo "oc already available: $(command -v oc)"
+        oc version --client || true
+      else
+        BOOT_DIR={{ cifmw_shiftstack_oc_bootstrap_dir | quote }}
+        MIRROR_URL={{ cifmw_shiftstack_oc_bootstrap_url | quote }}
+        mkdir -p "${BOOT_DIR}"
+        echo "Downloading oc client from ${MIRROR_URL}"
+        curl -fsSL "${MIRROR_URL}" -o /tmp/openshift-client-linux.tar.gz
+        tar -C "${BOOT_DIR}" -xzf /tmp/openshift-client-linux.tar.gz oc kubectl
+        rm -f /tmp/openshift-client-linux.tar.gz
+        sudo ln -sfn "${BOOT_DIR}/oc" /usr/local/bin/oc
+        sudo ln -sfn "${BOOT_DIR}/kubectl" /usr/bin/kubectl
+        command -v oc
+        oc version --client
+      fi
+
+      # --- OpenStack clouds.yaml (prepare writes shiftstack cloud under PVC) ---
+      # Prefer PVC copy (has clouds.shiftstack). Fall back to mounted original-config
+      # (usually only clouds.default from RHOSO).
+      PVC_CLOUD={{ cifmw_shiftstack_openstack_pvc_config_dir | quote }}
+      ORIG_CLOUD={{ cifmw_shiftstack_openstack_original_config_dir | quote }}
+      DST_CLOUD={{ cifmw_shiftstack_openstack_config_dir | quote }}
+      if [ -f "${PVC_CLOUD}/clouds.yaml" ]; then
+        echo "Restoring OpenStack config from PVC ${PVC_CLOUD} to ${DST_CLOUD}"
+        mkdir -p "${DST_CLOUD}"
+        cp -a "${PVC_CLOUD}/." "${DST_CLOUD}/"
+      elif [ -f "${ORIG_CLOUD}/clouds.yaml" ]; then
+        echo "Restoring OpenStack config from ${ORIG_CLOUD} to ${DST_CLOUD}"
+        mkdir -p "${DST_CLOUD}"
+        cp -a "${ORIG_CLOUD}/." "${DST_CLOUD}/"
+      else
+        echo "WARNING: no clouds.yaml found under ${PVC_CLOUD} or ${ORIG_CLOUD}"
+      fi
+      # Ensure secure.yaml exists (password) — often only on the original mount.
+      if [ ! -f "${DST_CLOUD}/secure.yaml" ] && [ -f "${ORIG_CLOUD}/secure.yaml" ]; then
+        cp -a "${ORIG_CLOUD}/secure.yaml" "${DST_CLOUD}/"
+      fi
+      ls -la "${DST_CLOUD}" || true
+
+      # --- guest API/apps /etc/hosts from install-config FIPs ---
+      IC={{ cifmw_shiftstack_install_config_path | quote }}
+      META={{ cifmw_shiftstack_cluster_metadata_path | quote }}
+      CLUSTER={{ cifmw_shiftstack_cluster_name | quote }}
+      if [ ! -f "${IC}" ]; then
+        echo "install-config not found at ${IC}; skipping /etc/hosts and resources.yml restore"
+        exit 0
+      fi
+      export IC META CLUSTER
+      API_IP=$(python3 -c "import yaml,os; d=yaml.safe_load(open(os.environ['IC'])); print(d['platform']['openstack']['apiFloatingIP'])")
+      APPS_IP=$(python3 -c "import yaml,os; d=yaml.safe_load(open(os.environ['IC'])); print(d['platform']['openstack']['ingressFloatingIP'])")
+      BASE=$(python3 -c "import yaml,os; d=yaml.safe_load(open(os.environ['IC'])); print(d['baseDomain'])")
+      if [ -f "${META}" ]; then
+        CLUSTER=$(python3 -c "import json,os; print(json.load(open(os.environ['META'])).get('clusterName', os.environ['CLUSTER']))")
+      fi
+      # openstack_test include_vars's this file. prepare writes it; do not
+      # overwrite an existing copy (it may contain extra keys such as bootstrap_fip).
+      RESOURCES={{ cifmw_shiftstack_resources_file | quote }}
+      if [ -f "${RESOURCES}" ]; then
+        echo "resources.yml already present at ${RESOURCES}"
+      else
+        echo "Writing resources.yml at ${RESOURCES} api=${API_IP} apps=${APPS_IP}"
+        mkdir -p "$(dirname "${RESOURCES}")"
+        export API_IP APPS_IP RESOURCES
+        python3 -c 'import os; open(os.environ["RESOURCES"], "w").write("api_accessible_ip: %s\napps_accessible_ip: %s\n" % (os.environ["API_IP"], os.environ["APPS_IP"]))'
+      fi
+      echo "Restoring /etc/hosts for api.${CLUSTER}.${BASE}=${API_IP} apps=${APPS_IP}"
+      # Append-only: sed -i often fails on Kubernetes-managed /etc/hosts (EBUSY).
+      add_host() {
+        local ip="$1" host="$2"
+        if ! grep -qE "[[:space:]]${host}([[:space:]]|$)" /etc/hosts; then
+          echo "${ip} ${host}" | sudo tee -a /etc/hosts >/dev/null
+        fi
+      }
+      add_host "${API_IP}" "api.${CLUSTER}.${BASE}"
+      for h in \
+        oauth-openshift.apps.${CLUSTER}.${BASE} \
+        console-openshift-console.apps.${CLUSTER}.${BASE} \
+        downloads-openshift-console.apps.${CLUSTER}.${BASE} \
+        canary-openshift-ingress-canary.apps.${CLUSTER}.${BASE} \
+        alertmanager-main-openshift-monitoring.apps.${CLUSTER}.${BASE} \
+        grafana-openshift-monitoring.apps.${CLUSTER}.${BASE} \
+        prometheus-k8s-openshift-monitoring.apps.${CLUSTER}.${BASE} \
+        prometheus-k8s-federate-openshift-monitoring.apps.${CLUSTER}.${BASE} \
+        thanos-querier-openshift-monitoring.apps.${CLUSTER}.${BASE}
+      do
+        add_host "${APPS_IP}" "${h}"
+      done
+      getent hosts "api.${CLUSTER}.${BASE}"
+    log_file_name: "bootstrap_oc_client.log"
+  ansible.builtin.include_tasks: exec_command_in_pod.yml
