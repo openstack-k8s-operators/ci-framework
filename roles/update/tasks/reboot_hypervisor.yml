@@ -88,36 +88,37 @@
       changed_when: true
       failed_when: false
 
-- name: Fail over the Ceph mgr after reboot when the cluster is unhealthy
+- name: Fail over the Ceph mgr after reboot when the active mgr is stray
   when: cifmw_update_failover_ceph_mgr | default(false)
   block:
-    - name: Get the current Ceph health status
+    - name: Get the current Ceph health details
       ansible.builtin.command: >-
         ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
         -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
         {{ cifmw_update_hypervisor_short_name }}
-        "sudo cephadm shell -- ceph health -f json"
+        "sudo cephadm shell -- ceph health detail -f json"
       register: cifmw_update_ceph_health
       changed_when: false
       failed_when: false
 
-    - name: Debug Ceph health check conditions
-      ansible.builtin.debug:
-        msg:
-          - "RC value: {{ cifmw_update_ceph_health.rc }}"
-          - "RC == 0: {{ cifmw_update_ceph_health.rc == 0 }}"
-          - "Stdout length: {{ cifmw_update_ceph_health.stdout | length }}"
-          - "Stdout has content: {{ (cifmw_update_ceph_health.stdout | length) > 0 }}"
-          - "Stdout content: {{ cifmw_update_ceph_health.stdout }}"
-          - "Parsed status: {{ (cifmw_update_ceph_health.stdout | from_json).status | default('HEALTH_OK') if cifmw_update_ceph_health.stdout | length > 0 else 'N/A' }}"
-          - "Status != HEALTH_OK: {{ (cifmw_update_ceph_health.stdout | from_json).status | default('HEALTH_OK') != 'HEALTH_OK' if cifmw_update_ceph_health.stdout | length > 0 else false }}"
+    - name: Get the active Ceph mgr
+      ansible.builtin.command: >-
+        ssh -i {{ cifmw_update_ansible_ssh_private_key_file }}
+        -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no
+        {{ cifmw_update_hypervisor_short_name }}
+        "sudo cephadm shell -- ceph mgr stat -f json"
+      register: cifmw_update_ceph_mgr_stat
+      changed_when: false
+      failed_when: false
 
-    - name: Fail the active Ceph mgr when the cluster is not healthy
+    - name: Fail the active Ceph mgr when it is the stray daemon
       when:
         - cifmw_update_ceph_health.rc == 0
-        - cifmw_update_ceph_health.stdout | length > 0
-        - (cifmw_update_ceph_health.stdout | from_json).status
-          | default('HEALTH_OK') != 'HEALTH_OK'
+        - cifmw_update_ceph_mgr_stat.rc == 0
+        - >-
+          ('stray daemon mgr.' ~
+          ((cifmw_update_ceph_mgr_stat.stdout | default('{}', true) | from_json).active_name | default('')) ~
+          ' on host ') in cifmw_update_ceph_health.stdout
       block:
         - name: Promote a standby Ceph mgr
           ansible.builtin.command: >-
