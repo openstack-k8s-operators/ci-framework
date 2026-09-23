@@ -44,6 +44,14 @@ with a message.
 - `cifmw_kustomize_deploy_olm_dest_file`: _(string)_ Path of the generated CR
   file for OLM resources. Defaults to
   `cifmw_kustomize_deploy_kustomizations_dest_dir + olm.yml`
+- `cifmw_kustomize_deploy_skip_openstack_operator_catalog`: _(boolean)_ Skip
+  applying the templated `openstack-operator-index` CatalogSource and
+  `openstack-operator` Subscription from the generated OLM manifest, leaving
+  every other resource in the same kustomize output (cert-manager, MetalLB,
+  NMState, namespaces, OperatorGroup) untouched. Use this when the
+  openstack-operator is installed out of band instead (e.g. via
+  `operator-sdk run bundle` from a `pre_operator_install` hook). Defaults to
+  `false`
 - `cifmw_kustomize_deploy_metallb_source_files`: _(string)_ Path of the source
   kustomization files for MetalLB resources. Defaults to
   `cifmw_kustomize_deploy_architecture_repo_dest_dir + /examples/common/metallb/`
