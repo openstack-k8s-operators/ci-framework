@@ -108,8 +108,13 @@ def main():
         module.fail_json(msg=result["error"])
 
     # Verify that cluster version is not less than 4.20
-    clusterver = match.group(1)
-    if float(clusterver) < 4.20:
+    try:
+        cluster_version = tuple(int(part) for part in match.group(1).split("."))
+    except (TypeError, ValueError):
+        result["error"] = NO_CLUSTERVERSION
+        module.fail_json(msg=result["error"])
+
+    if cluster_version < (4, 20):
         result["error"] = UNSUPPORTED_CLUSTERVERSION
         module.fail_json(msg=result["error"])
 

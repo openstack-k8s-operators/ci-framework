@@ -6,6 +6,7 @@
 import json
 import os
 import tempfile
+from subprocess import CompletedProcess
 
 from unittest.mock import patch
 
@@ -22,6 +23,22 @@ from ansible_collections.cifmw.general.plugins.modules import (
 
 class TestGenerateClusterImagePolicies(ModuleBaseTestCase):
 
+    @staticmethod
+    def _mock_cluster_version(version="4.20.0"):
+        return patch.object(
+            generate_cluster_image_policies.subprocess,
+            "run",
+            return_value=CompletedProcess(
+                args=["oc", "get", "clusterversion"],
+                returncode=0,
+                stdout=(
+                    "NAME VERSION AVAILABLE PROGRESSING SINCE STATUS\n"
+                    f"version {version} True False 1h Cluster version is {version}\n"
+                ),
+                stderr="",
+            ),
+        )
+
     def test_negative_missing_params(self):
         """Check failure when missing parameters."""
 
@@ -32,7 +49,7 @@ class TestGenerateClusterImagePolicies(ModuleBaseTestCase):
     def test_no_input_files(self):
         """Check failure when no input files are in an existing input directory."""
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, self._mock_cluster_version():
             with self.assertRaises(AnsibleFailJson):
                 set_module_args(
                     {
@@ -40,6 +57,21 @@ class TestGenerateClusterImagePolicies(ModuleBaseTestCase):
                         "output_file": os.path.join(temp_dir, "Cluster.yaml"),
                     }
                 )
+                generate_cluster_image_policies.main()
+
+    def test_unsupported_cluster_version(self):
+        """Check failure when the cluster version is below the supported minimum."""
+
+        with tempfile.TemporaryDirectory() as temp_dir, self._mock_cluster_version(
+            "4.2.0"
+        ):
+            set_module_args(
+                {
+                    "input_dir": temp_dir,
+                    "output_file": os.path.join(temp_dir, "Cluster.yaml"),
+                }
+            )
+            with self.assertRaises(AnsibleFailJson):
                 generate_cluster_image_policies.main()
 
     def test_invalid_input_file(self):
@@ -52,7 +84,7 @@ class TestGenerateClusterImagePolicies(ModuleBaseTestCase):
             "    source: registry.redhat.io/rhoso\n",
         ]
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, self._mock_cluster_version():
             with open(os.path.join(temp_dir, "idms-oc-mirror.yaml"), "w") as file:
                 file.writelines(oc_mirror_contents)
 
@@ -76,7 +108,7 @@ class TestGenerateClusterImagePolicies(ModuleBaseTestCase):
             "    source: registry.redhat.io/rhoso\n",
         ]
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, self._mock_cluster_version():
             with open(os.path.join(temp_dir, "idms-oc-mirror.yaml"), "w") as file:
                 file.writelines(oc_mirror_contents)
 
