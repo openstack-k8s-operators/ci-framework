@@ -23,7 +23,7 @@
   register: active_vms
   changed_when: false
 
-- name: Evacuate VMs if they are running
+- name: Evacuate VMs asynchronously if they are running
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
@@ -37,7 +37,36 @@
   when:
     - active_vms.stdout != ''
     - hypervisor_hostnames | length > 1
+    - not cifmw_update_evacuate_vms_synchronously | bool
   changed_when: true
+
+- name: Order active VMs for synchronous evacuation
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} server list --all --host {{ hypervisor }}
+    -f json -c ID -c Status -c "Created At"
+    | jq -r -c '[.[] | select(.Status |
+    contains("ACTIVE") or contains("PAUSED"))]
+    | sort_by(.["Created At"])[] | .ID'
+  register: cifmw_update_ordered_active_vms
+  changed_when: false
+  when:
+    - active_vms.stdout != ''
+    - hypervisor_hostnames | length > 1
+    - cifmw_update_evacuate_vms_synchronously | bool
+
+- name: Evacuate VMs synchronously if they are running
+  ansible.builtin.include_tasks: migrate_instance_from_hypervisor.yml
+  loop: "{{ cifmw_update_ordered_active_vms.stdout_lines }}"
+  loop_control:
+    loop_var: cifmw_update_instance_id
+  when:
+    - active_vms.stdout != ''
+    - hypervisor_hostnames | length > 1
+    - cifmw_update_evacuate_vms_synchronously | bool
 
 - name: Wait for compute node to get quiesced
   environment:
@@ -50,7 +79,7 @@
     contains("ACTIVE") or contains("PAUSED") or contains("MIGRATING"))]
     | length'
   register: compute_node_instances
-  until: compute_node_instances.stdout.find("0") > -1
+  until: compute_node_instances.rc == 0 and compute_node_instances.stdout == '0'
   retries: 30
   delay: 5
   when:
@@ -68,7 +97,10 @@
 - name: Display current stage
   ansible.builtin.debug:
     msg: "Migrate back {{ item }} to {{ cifmw_update_hypervisor_short_name }}."
-  with_items: "{{ active_vms.stdout_lines }}"
+  with_items: >-
+    {{ (cifmw_update_ordered_active_vms.stdout_lines | default([]))
+       if cifmw_update_evacuate_vms_synchronously | bool
+       else active_vms.stdout_lines }}
 
 - name: Migrate back VMs post-reboot
   environment:
@@ -88,7 +120,10 @@
   until: instance_migration_result.stdout.find(hypervisor) > -1
   retries: 30
   delay: 5
-  with_items: "{{ active_vms.stdout_lines }}"
+  with_items: >-
+    {{ (cifmw_update_ordered_active_vms.stdout_lines | default([]))
+       if cifmw_update_evacuate_vms_synchronously | bool
+       else active_vms.stdout_lines }}
   when:
     - active_vms.stdout != ''
     - hypervisor_hostnames | length > 1
