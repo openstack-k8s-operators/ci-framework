@@ -113,13 +113,41 @@ class ActionModule(ActionBase):
                 "can't be determined."
             )
 
-        last_image = image_list[-1]
-
         image_name_hash_pattern = re.compile(r"(SHA256|SHA1|MD5) \((.*?)\) = (.*)")
-        image_name_sha_match = image_name_hash_pattern.search(last_image)
-        hash_algorithm = image_name_sha_match.group(1)
-        image_name = image_name_sha_match.group(2)
-        image_hash = image_name_sha_match.group(3)
+
+        # The mirror can carry stale CHECKSUM entries for renamed
+        # -latest aliases (HTTP 502), so probe the -latest candidates
+        # and use the first one that resolves; otherwise keep the
+        # historical last-matching-line behavior.
+        latest_pattern = re.compile(
+            rf"(SHA256|SHA1|MD5) \(.*?({re.escape(img_prefix)}"
+            r"[^)]*latest[^)]*\.qcow2)\) = (.*)"
+        )
+        image_match = None
+        for line in image_list:
+            match = latest_pattern.search(line)
+            if not match:
+                continue
+            probe = self._execute_module(
+                module_name="ansible.builtin.uri",
+                module_args={
+                    "url": f"{base_image_url}/{match.group(2)}",
+                    "method": "HEAD",
+                    "status_code": [200],
+                },
+                task_vars=task_vars,
+                tmp=tmp,
+            )
+            if "failed" not in probe:
+                image_match = match
+                break
+
+        if image_match is None:
+            image_match = image_name_hash_pattern.search(image_list[-1])
+
+        hash_algorithm = image_match.group(1)
+        image_name = image_match.group(2)
+        image_hash = image_match.group(3)
 
         result = {
             "success": True,
