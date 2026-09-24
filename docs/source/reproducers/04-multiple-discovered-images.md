@@ -21,11 +21,11 @@ example:
 cifmw_discover_latest_image_requests:
   centos10:
     base_url: "https://cloud.centos.org/centos/10-stream/x86_64/images/"
-    qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+    qcow_prefix: "CentOS-Stream-GenericCloud-10-"
     images_file: CHECKSUM
   centos9:
     base_url: "https://cloud.centos.org/centos/9-stream/x86_64/images/"
-    qcow_prefix: "CentOS-Stream-GenericCloud-x86_64-"
+    qcow_prefix: "CentOS-Stream-GenericCloud-9-"
     images_file: CHECKSUM
 ```
 
