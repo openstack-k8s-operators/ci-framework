@@ -1,0 +1,30 @@
+---
+- name: Start live migration of {{ cifmw_update_instance_id }}
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    {{ cifmw_update_bash_cmd }} ". cloudrc &&
+    nova live-migration
+    {% if 'ceph' not in storage_backend.stdout %}
+    --block-migrate
+    {% endif %}
+    {{ cifmw_update_instance_id }}"
+  changed_when: true
+
+- name: Wait for live migration of {{ cifmw_update_instance_id }}
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    {{ cifmw_update_openstack_cmd }} server show
+    {{ cifmw_update_instance_id }} -f json
+    | jq -r -c --arg source_host "{{ hypervisor }}"
+    '((.status == "ACTIVE") or (.status == "PAUSED")) and
+    (.["OS-EXT-SRV-ATTR:host"] != $source_host)'
+  register: cifmw_update_instance_migration
+  changed_when: false
+  until: cifmw_update_instance_migration.stdout == 'true'
+  retries: "{{ cifmw_update_vm_migration_wait_retries | int }}"
+  delay: 5

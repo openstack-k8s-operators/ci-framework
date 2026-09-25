@@ -18,6 +18,8 @@ Role to run update
 * `cifmw_update_ctl_plane_max_tries`: (Integer) For continuous control plane testing, number of retries allowed to stop and destroy the last vm created. Each retry is 5 seconds apart. Default to 84, so 7 minutes.
 * `cifmw_update_openstackclient_pod_timeout`: (Integer) Maximum number of seconds to wait for the openstackclient Pod to be available during control plane testing, as it is being restarted during update.  Default to `10` seconds.
 * `cifmw_update_reboot_test`: (Boolean) Activate the reboot test after update. Default to `False`.
+* `cifmw_update_evacuate_vms_synchronously`: (Boolean) Live-migrate VMs from a hypervisor one at a time, then return them in the same creation order after reboot. Default to `False`.
+* `cifmw_update_vm_migration_wait_retries`: (Integer) Maximum number of checks for each synchronous live migration, five seconds apart. Default to `720`, allowing about one hour per VM.
 * `cifmw_update_ansible_ssh_private_key_file`: (String) Define the path to the private key file used for the compute nodes.
 * `cifmw_update_wait_retries_reboot`: (Integer) Number of retries to wait for a compute node reboot. One retry is done every five seconds. Default to 60, so five minutes.
 * `cifmw_update_resources_monitoring_interval`: (Integer) Interval, in seconds, between two resources monitor during update. Default to 10 seconds.
