@@ -20,6 +20,17 @@
 - name: Deploy the pod '{{ cifmw_shiftstack_client_pod_name }}'
   ansible.builtin.include_tasks: deploy_shiftstackclient_pod.yml
 
+# When stages_override skips prepare (e.g. Pipeline B run-tests), the fresh
+# client pod has no /usr/local/bin/oc, no guest API /etc/hosts entries, and no
+# artifacts/resources.yml. Bootstrap them from the OpenShift mirror + PVC
+# install-config FIPs.
+- name: Bootstrap oc client when prepare stage is skipped
+  when:
+    - cifmw_shiftstack_bootstrap_oc_client | default(true) | bool
+    - cifmw_shiftstack_stages_override | default([]) | length > 0
+    - "'prepare' not in cifmw_shiftstack_stages_override"
+  ansible.builtin.include_tasks: bootstrap_oc_client.yml
+
 - name: Test Openshift on Openstack
   ansible.builtin.include_tasks: test_shiftstack.yml
 
