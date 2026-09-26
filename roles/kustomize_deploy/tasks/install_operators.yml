@@ -82,6 +82,32 @@
     dest: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     mode: "0644"
 
+# When the openstack-operator CatalogSource/Subscription are installed out of
+# band (e.g. via `operator-sdk run bundle` in a pre_operator_install hook),
+# the generated manifest still carries the templated openstack-operator
+# CatalogSource/Subscription pointing at cifmw_ci_gen_kustomize_values_ooi_image.
+# Strip just those two resources so they don't fight the out-of-band ones;
+# every other resource in the same kustomize output (cert-manager, MetalLB,
+# NMState, namespaces, OperatorGroup) is left untouched.
+- name: Remove templated openstack-operator CatalogSource/Subscription
+  when: cifmw_kustomize_deploy_skip_openstack_operator_catalog | default(false) | bool
+  vars:
+    _cifmw_kustomize_deploy_olm_all_docs: "{{ lookup('file', cifmw_kustomize_deploy_olm_dest_file) | from_yaml_all | list }}"
+    _cifmw_kustomize_deploy_olm_kept_docs: >-
+      {{
+        _cifmw_kustomize_deploy_olm_all_docs |
+        rejectattr('kind', 'in', ['CatalogSource', 'Subscription']) | list +
+        (
+          _cifmw_kustomize_deploy_olm_all_docs |
+          selectattr('kind', 'in', ['CatalogSource', 'Subscription']) |
+          rejectattr('metadata.name', 'in', ['openstack-operator-index', 'openstack-operator']) | list
+        )
+      }}
+  ansible.builtin.copy:
+    content: "{{ _cifmw_kustomize_deploy_olm_kept_docs | map('to_nice_yaml') | join('---\n') }}"
+    dest: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+    mode: "0644"
+
 - name: OLM resources
   when: not cifmw_kustomize_deploy_generate_crs_only
   block:
@@ -134,7 +160,15 @@
       loop_control:
         label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
 
+    # When the openstack-operator Subscription is installed out of band
+    # (cifmw_kustomize_deploy_skip_openstack_operator_catalog: true), it was
+    # never part of this kustomize apply, so _cifmw_kustomize_deploy_olm_apply_out
+    # has no matching Subscription entry to wait on here. The out-of-band
+    # installer (e.g. the pre_operator_install hook running
+    # `operator-sdk run bundle`) is responsible for waiting on its own
+    # Subscription/InstallPlan before this stage runs.
     - name: Wait for subscription and handle resolution failures
+      when: not cifmw_kustomize_deploy_skip_openstack_operator_catalog | default(false) | bool
       block:
         - name: Wait for the openstack operators Subscription to be created
           vars:
@@ -194,10 +228,12 @@
     - name: Install plan
       ansible.builtin.include_tasks: install_plan.yml
       when:
+        - not cifmw_kustomize_deploy_skip_openstack_operator_catalog | default(false) | bool
         - cifmw_ci_gen_kustomize_values_installplan_approval is defined
         - cifmw_ci_gen_kustomize_values_installplan_approval | lower == 'manual'
 
     - name: Wait for the openstack operators InstallPlan to be finished
+      when: not cifmw_kustomize_deploy_skip_openstack_operator_catalog | default(false) | bool
       vars:
         _install_plan: >-
           {{
