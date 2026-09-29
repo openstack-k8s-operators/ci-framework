@@ -51,6 +51,32 @@
     group: "{{ cifmw_devscripts_user }}"
     mode: "0644"
 
+# TODO: Remove this patch once dev-scripts upstream adds RHEL 9.4 OpenSSL workaround
+# Context: dev-scripts commit cda6a0f removed OpenSSL version hacks assuming fixes
+# in CentOS Stream 9, but RHEL 9.4 repos still have the openssl-fips-provider-so
+# package conflict. This causes file conflicts during `dnf install openssl-devel`.
+# Track upstream fix at: https://github.com/openshift-metal3/dev-scripts/issues/1973
+- name: Re-add OpenSSL workaround removed by dev-scripts cda6a0f
+  when:
+    - ansible_distribution in ['CentOS', 'RedHat']
+    - ansible_distribution_major_version | int == 9
+  ansible.builtin.blockinfile:
+    path: "{{ cifmw_devscripts_repo_dir }}/01_install_requirements.sh"
+    insertbefore: '^attempt=1'
+    marker: "# {mark} ANSIBLE MANAGED: OpenSSL FIPS workaround for RHEL 9.x"
+    block: |
+      # TEMPORARY: Workaround for openssl-fips-provider-so package conflict in RHEL 9.4
+      # Install openssl-devel with --allowerasing --nobest to handle package/file conflicts.
+      # The --allowerasing allows DNF to remove conflicting packages like openssl-fips-provider-so.
+      # The --nobest allows installation even if the "best" version has conflicts.
+      echo "Pre-installing openssl-devel to avoid conflicts during dev-scripts package installation..."
+      if sudo dnf install -y --allowerasing --nobest openssl-devel; then
+          echo "Successfully pre-installed openssl-devel with conflict resolution"
+      else
+          echo "WARNING: Failed to pre-install openssl-devel. This may cause package conflicts later."
+          echo "Continuing anyway - dev-scripts will attempt its own installation."
+      fi
+
 - name: Force KVM domain type in dev-scripts configure to preserve host-passthrough CPU
   when:
     - cifmw_devscripts_cpu_passthrough | bool
