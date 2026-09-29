@@ -168,6 +168,46 @@
         (        cifmw_update_containers_watcher is defined and
         cifmw_update_containers_watcher | bool)
 
+    - name: Derive bootc system image for update-system from update bootc image
+      # Strip the -qcow2 suffix: ironic provisions from the qcow2 container
+      # image, while `bootc switch` needs the bootc system container image.
+      when: cifmw_edpm_deploy_baremetal_bootc | default(false) | bool
+      ansible.builtin.set_fact:
+        cifmw_minor_update_bootc_image: >-
+          {{ cifmw_update_containers_edpm_image_url | regex_replace('-qcow2$', '') }}
+
+    - name: Get EDPM nodesets to patch with the bootc OS container image
+      when: cifmw_minor_update_bootc_image is defined
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}"
+      register: edpm_nodeset_info
+
+    - name: Patch nodeset ansibleVars with edpm_update_system_bootc_os_container_image
+      # The update-system deployment is created without ansibleEE extraVars,
+      # so the var must reach the AEE job via nodeset group vars.
+      when: cifmw_minor_update_bootc_image is defined
+      loop: "{{ edpm_nodeset_info.resources | default([]) }}"
+      kubernetes.core.k8s:
+        state: patched
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: dataplane.openstack.org/v1beta1
+        kind: OpenStackDataPlaneNodeSet
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}"
+        definition:
+          spec:
+            nodeTemplate:
+              ansible:
+                ansibleVars:
+                  edpm_update_system_bootc_os_container_image: "{{ cifmw_minor_update_bootc_image }}"
+
     - name: Set update step to Starting the services update sequence
       ansible.builtin.command:
         cmd: >
