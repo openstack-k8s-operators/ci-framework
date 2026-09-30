@@ -123,6 +123,139 @@
 
     # STEP 3: Create prerequisites (secrets and certificates)
 
+    - name: Create mock LLM API server code ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: mock-llm-code
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          data:
+            app.py: |
+              import json
+
+              from fastapi import FastAPI, Request
+              from fastapi.responses import JSONResponse, StreamingResponse
+
+              app = FastAPI()
+              @app.post("/v1/chat/completions")
+              async def completions_post(request: Request):
+                  try:
+                      body = await request.json()
+                  except Exception:
+                      body = {}
+
+                  if not isinstance(body, dict):
+                      body = {}
+                  model = body.get("model") or "gpt-3.5-turbo"
+
+                  # The OpenAI API expects 'messages' (for chat) or 'prompt' (for completions), but for mock, we will accept either
+                  response = {
+                      "id": "cmpl-123",
+                      "object": "chat.completion",
+                      "created": 1234567890,
+                      "model": model,
+                      "choices": [
+                          {
+                              "index": 0,
+                              "message": {
+                                  "role": "assistant",
+                                  "content": "Hello, this is a dummy chat completion."
+                              },
+                              "finish_reason": "stop"
+                          }
+                      ],
+                      "usage": {
+                          "prompt_tokens": 5,
+                          "completion_tokens": 7,
+                          "total_tokens": 12
+                      }
+                  }
+
+                  # The provider adapter requests streaming even for /v1/query.
+                  if body.get("stream"):
+                      def stream_chunks():
+                          chunk = {
+                              "id": response["id"],
+                              "object": "chat.completion.chunk",
+                              "created": response["created"],
+                              "model": model,
+                          }
+                          content = response["choices"][0]["message"]["content"]
+                          for delta, finish_reason in [
+                              ({"role": "assistant"}, None),
+                              ({"content": content}, None),
+                              ({}, "stop"),
+                          ]:
+                              chunk["choices"] = [{
+                                  "index": 0,
+                                  "delta": delta,
+                                  "finish_reason": finish_reason,
+                              }]
+                              yield "data: " + json.dumps(chunk) + "\n\n"
+
+                          stream_options = body.get("stream_options") or {}
+                          if stream_options.get("include_usage"):
+                              chunk["choices"] = []
+                              chunk["usage"] = response["usage"]
+                              yield "data: " + json.dumps(chunk) + "\n\n"
+                          yield "data: [DONE]\n\n"
+
+                      return StreamingResponse(stream_chunks(), media_type="text/event-stream")
+
+                  return JSONResponse(content=response)
+
+    - name: Create mock LLM API server Pod
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: mock-llm-api-server-pod
+            namespace: "{{ openstack_lightspeed_namespace }}"
+            labels:
+              app: mock-llm-api-server-pod
+          spec:
+            containers:
+              - name: mock-llm-api-server
+                image: registry.redhat.io/ubi8/python-311:latest
+                ports:
+                  - containerPort: 8000
+                volumeMounts:
+                  - name: app-code
+                    mountPath: /app
+                workingDir: /app
+                command:
+                  - sh
+                  - -c
+                  - |
+                    pip install "fastapi[standard]" && \
+                    uvicorn app:app --host 0.0.0.0 --port 8000
+            volumes:
+              - name: app-code
+                configMap:
+                  name: mock-llm-code
+
+    - name: Create mock LLM API server Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: mock-llm-api-server-pod
+            namespace: "{{ openstack_lightspeed_namespace }}"
+          spec:
+            selector:
+              app: mock-llm-api-server-pod
+            ports:
+              - protocol: TCP
+                port: 8000
+                targetPort: 8000
+
     - name: Create LLM API token secret
       kubernetes.core.k8s:
         state: present
@@ -175,9 +308,7 @@
         namespace: "{{ openstack_lightspeed_namespace }}"
       register: cert_check
       failed_when: cert_check.resources | length == 0
-      when:
-        - cifmw_openstack_lightspeed_ca_cert is not defined
-        - cifmw_openstack_lightspeed_ca_cert_url is not defined
+      when: cifmw_openstack_lightspeed_ca_cert_url is defined or cifmw_openstack_lightspeed_ca_cert is defined
 
     # STEP 4: Create OpenStackLightspeed CR to deploy the service
     # Note: Uses configurable parameters for LLM integration
@@ -196,7 +327,8 @@
             llmEndpointType: "{{ cifmw_openstack_lightspeed_llm_endpoint_type | default('openai') }}"
             modelName: "{{ cifmw_openstack_lightspeed_model_name }}"
             llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
-            tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') if (cifmw_openstack_lightspeed_ca_cert is defined or cifmw_openstack_lightspeed_ca_cert_url is defined) else omit }}"
+            tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') if (cifmw_openstack_lightspeed_ca_cert is defined
+              or cifmw_openstack_lightspeed_ca_cert_url is defined) else omit }}"
 
     - name: Wait for OpenStackLightspeed CR to be ready
       kubernetes.core.k8s_info:
@@ -210,7 +342,8 @@
         - cr_status.resources | length > 0
         - cr_status.resources[0].status is defined
         - cr_status.resources[0].status.conditions is defined
-        - cr_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | select('equalto', 'True') | list | length > 0
+        - cr_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | select('equalto', 'True') | list |
+          length > 0
       retries: 30
       delay: 10
 
