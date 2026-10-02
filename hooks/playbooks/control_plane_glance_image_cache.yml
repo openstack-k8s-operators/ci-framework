@@ -1,0 +1,27 @@
+---
+- name: Kustomize ControlPlane for glance image-cache
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_manifests_dir }}/kustomizations/controlplane"
+        state: directory
+        mode: "0755"
+
+    - name: Create kustomization to enable glance image-cache
+      ansible.builtin.copy:
+        dest: "{{ cifmw_manifests_dir }}/kustomizations/controlplane/70-glance-image-cache.yaml"
+        content: |-
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+          namespace: {{ namespace }}
+          patches:
+          - target:
+              kind: OpenStackControlPlane
+            patch: |-
+              - op: replace
+                path: /spec/glance/template/default/imageCache/size
+                value: {{ cifmw_glance_image_cache_size | default("1G") }}
+        mode: "0644"
