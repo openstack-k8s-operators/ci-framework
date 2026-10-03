@@ -543,13 +543,62 @@
 # Log mode does not change exit code for drift (Neutron logs drift as WARNING lines).
 # Repair runs if OVN file backup was skipped, or if log output contains WARNING drift.
 # Ref: https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-10-verify-and-sync-neutron-to-ovn
+- name: Get Neutron deployment container names
+  ansible.builtin.command:
+    cmd: >-
+      oc get deployment neutron
+      -n {{ cifmw_backup_restore_namespace }}
+      -o jsonpath='{.spec.template.spec.containers[*].name}'
+  register: _neutron_container_names
+  changed_when: false
+  retries: 5
+  delay: 5
+  until: _neutron_container_names.rc == 0
+
+- name: Select Neutron container for OVN database sync
+  ansible.builtin.set_fact:
+    _neutron_sync_container: >-
+      {{
+        'neutron-api'
+        if 'neutron-api' in _neutron_container_names.stdout.split()
+        else 'neutron-httpd'
+      }}
+
+- name: Detect Neutron configuration layout
+  ansible.builtin.shell: |
+    oc exec -n {{ cifmw_backup_restore_namespace }} \
+      -c {{ _neutron_sync_container }} deploy/neutron -- \
+      sh -c '
+      if [ -f /etc/neutron/neutron.conf.d/01-neutron.conf ]; then
+        printf operator
+      elif [ -f /usr/share/neutron/neutron-dist.conf ] && [ -f /etc/neutron/neutron.conf ]; then
+        printf kolla
+      else
+        echo "Could not find operator-mounted or Kolla Neutron configuration." >&2
+        exit 1
+      fi
+    '
+  register: _neutron_config_layout
+  changed_when: false
+  retries: 5
+  delay: 5
+  until: _neutron_config_layout.rc == 0
+
+- name: Select Neutron OVN sync config arguments
+  ansible.builtin.set_fact:
+    _neutron_sync_config_file_args: >-
+      {{
+        '--config-file /etc/neutron/neutron.conf.d/01-neutron.conf'
+        if _neutron_config_layout.stdout == 'operator'
+        else '--config-file /usr/share/neutron/neutron-dist.conf --config-file /etc/neutron/neutron.conf'
+      }}
+
 - name: Verify Neutron vs OVN (neutron-ovn-db-sync-util log mode)
   ansible.builtin.shell: |
     set -o pipefail
-    oc exec -n {{ cifmw_backup_restore_namespace }} -c neutron-api deploy/neutron -- \
+    oc exec -n {{ cifmw_backup_restore_namespace }} -c {{ _neutron_sync_container }} deploy/neutron -- \
       neutron-ovn-db-sync-util \
-      --config-file /usr/share/neutron/neutron-dist.conf \
-      --config-file /etc/neutron/neutron.conf \
+      {{ _neutron_sync_config_file_args }} \
       --config-dir /etc/neutron/neutron.conf.d \
       --ovn-neutron_sync_mode=log \
       --debug
@@ -586,10 +635,9 @@
 - name: Sync Neutron state to OVN database (repair mode)
   ansible.builtin.shell: |
     set -o pipefail
-    oc exec -n {{ cifmw_backup_restore_namespace }} -c neutron-api deploy/neutron -- \
+    oc exec -n {{ cifmw_backup_restore_namespace }} -c {{ _neutron_sync_container }} deploy/neutron -- \
       neutron-ovn-db-sync-util \
-      --config-file /usr/share/neutron/neutron-dist.conf \
-      --config-file /etc/neutron/neutron.conf \
+      {{ _neutron_sync_config_file_args }} \
       --config-dir /etc/neutron/neutron.conf.d \
       --ovn-neutron_sync_mode=repair \
       --debug
