@@ -466,7 +466,14 @@ def plot(
     """
     plt.rcdefaults()
 
-    fig, axs = plt.subplots(nrows=6, sharex=True, layout="constrained")
+    # The steal/iowait columns are only present when the metricspec that
+    # collected the data requested them, so older CSVs may lack them; skip
+    # the extra panel in that case instead of failing the whole plot.
+    has_steal = "steal" in df.columns and "iowait" in df.columns
+
+    fig, axs = plt.subplots(
+        nrows=7 if has_steal else 6, sharex=True, layout="constrained"
+    )
 
     if not color:
         color = ColorCycler()
@@ -552,6 +559,18 @@ def plot(
         ylim_top=10**6,
         yscale="log",
     )
+
+    if has_steal:
+        subplot(
+            axs[6],
+            df,
+            y="steal + iowait",
+            z="iowait",
+            loop=loop,
+            color=color,
+            reset=reset,
+            ylabel="Steal + IOwait [%]",
+        )
 
     set_xaxis(axs)
     set_legend(fig, axs)

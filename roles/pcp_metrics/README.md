@@ -46,6 +46,21 @@ just main tasks file (the default one). For example:
 ```
 
 
+Collected metrics
+-----------------
+
+The set of metrics exported to CSV (and plotted) is defined in
+[pmrep-metricspec.conf](/roles/pcp_metrics/files/pmrep-metricspec.conf) and
+covers CPU, memory, disk and network usage. The CPU accounting includes
+`steal`, `iowait` and `idle` alongside `cpu` and `sys`. `steal` is the share
+of time a CPU was runnable but the hypervisor was busy running another guest,
+so it is a direct measure of noisy-neighbour contention on shared hosts -- it
+is what lets us tell apart a node that is slow because it is starved of CPU
+cycles from one that is merely idle or waiting on I/O. When these columns are
+present, `plot.py` renders an extra "Steal + IOwait" panel; older CSVs without
+them are still plotted (the panel is simply omitted).
+
+
 Impact
 ------
 
