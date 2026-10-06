@@ -122,7 +122,18 @@
       become: true
       delegate_to: "{{ overcloud_vm }}"
       vars:
-        _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_ctlplane] }}"
+        # In L3/BGP deployments each rack has its own ctlplane network
+        # (ctlplaner0/1/2) and each rack resolver only answers queries from
+        # its own subnet. Use the node's own ctlplane network so nodes in
+        # racks 1/2 are not pointed at rack-0's resolver, which ignores them.
+        # Falls back to the stack-wide ctlplane for non-BGP deployments.
+        _node_ctlplane_net_name: >-
+          {{
+            (cifmw_networking_env_definition.instances[overcloud_vm].networks.keys()
+             | select('match', '^ctlplane') | list | first)
+            | default(_ctlplane)
+          }}
+        _ctlplane_net: "{{ cifmw_networking_env_definition.networks[_node_ctlplane_net_name] }}"
         _dns_server: "{{ _ctlplane_net[dns_version|default('dns_v4')] }}"
       ansible.builtin.template:
         src: "resolv.conf.j2"
