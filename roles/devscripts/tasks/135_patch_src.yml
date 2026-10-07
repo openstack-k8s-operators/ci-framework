@@ -59,3 +59,35 @@
     insertbefore: '.*-b -vvv.*setup-playbook.yml'
     firstmatch: true
     line: '    -e "libvirt_domain_type=kvm" \'
+
+# Token-free GA reproducer deploys rely on dev-scripts' documented
+# OPENSHIFT_CI=true mode (set via cifmw_devscripts_config_overrides), which skips
+# both the CI_TOKEN validation and the app.ci pull-secret login. Its only
+# unwanted side effect on a single-host reproducer is that common.sh then forces
+# an NFS-backed persistent image registry, which needs infrastructure we do not
+# provision. Neutralize just that one line so the in-cluster registry stays
+# ephemeral.
+- name: Keep the image registry ephemeral under OPENSHIFT_CI (token-free deploy)
+  when:
+    - cifmw_devscripts_skip_persistent_imageregistry | bool
+  block:
+    - name: Read dev-scripts common.sh
+      ansible.builtin.slurp:
+        src: "{{ cifmw_devscripts_repo_dir }}/common.sh"
+      register: _persistent_imagereg_sh
+
+    - name: Ensure the expected PERSISTENT_IMAGEREG override is present before patching
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - "'export PERSISTENT_IMAGEREG=true' in (_persistent_imagereg_sh.content | b64decode)"
+        fail_msg: >-
+          cifmw_devscripts_skip_persistent_imageregistry is enabled but the
+          expected PERSISTENT_IMAGEREG override was not found in common.sh. The
+          dev-scripts source layout likely changed; update this patch.
+
+    - name: Prevent OPENSHIFT_CI from forcing an NFS-backed persistent image registry
+      ansible.builtin.replace:
+        path: "{{ cifmw_devscripts_repo_dir }}/common.sh"
+        regexp: 'export PERSISTENT_IMAGEREG=true'
+        replace: 'export PERSISTENT_IMAGEREG=false'
