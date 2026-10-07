@@ -30,6 +30,12 @@ avoid duplication, please do as follow:
 ```
 That way, you ensure that only unique, lower-case words are added to the list.
 
+To skip host packages, run the same check in the lightweight CentOS Stream 9
+docs container (`containerfiles/Containerfile.docs`):
+```Bash
+[laptop]$ make run_ctx_spelling
+```
+
 
 ## Prow CI
 
