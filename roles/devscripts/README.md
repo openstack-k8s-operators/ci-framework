@@ -84,6 +84,32 @@ You **must** provide either `cifmw_manage_secrets_citoken_file` OR
 
 If you provide neither, or both, it will fail.
 
+##### Token-free (GA) deploys
+
+dev-scripts normally requires a valid `app.ci` `CI_TOKEN`: `validation.sh`
+aborts on an empty token, and `utils.sh` logs in to `app.ci` to fetch registry
+credentials for the pull-secret. For a **GA** deploy this token is not needed to
+pull images -- they come from the `pull-secret` (quay.io / registry.redhat.io),
+not from `app.ci`.
+
+dev-scripts already provides a documented token-free mode: `OPENSHIFT_CI=true`
+(see `config_example.sh`). It skips both the `CI_TOKEN` validation and the
+`app.ci` pull-secret login. Enable it via the config overrides and pass an empty
+token:
+
+```yaml
+cifmw_devscripts_config_overrides:
+  openshift_ci: "true"          # dev-scripts token-free mode
+cifmw_manage_secrets_citoken_content: ''
+```
+
+`OPENSHIFT_CI=true` has one side effect that does not suit a single-host
+reproducer: it forces an NFS-backed **persistent** image registry, but that NFS
+storage is not provisioned here. Set
+`cifmw_devscripts_skip_persistent_imageregistry: true` to patch that one
+dev-scripts line so the in-cluster registry stays on `emptyDir`. Defaults to
+`false`, keeping the upstream behaviour.
+
 ### Supported keys in cifmw_devscripts_config_overrides
 
 The `openshift_version` value can be set to either a minor version "X.Y.Z" (e.g.
