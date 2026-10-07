@@ -1,15 +1,23 @@
 # Available containers
 
-The project provides two types of containers:
+The project provides three types of containers:
 
 - `Containerfile.ci`: builds a really basic container, mostly used in Prow, exposing needed tools
 - `Containerfile.tests`: based upon the previous one, allows to run some tests locally, or run the framework
+- `Containerfile.docs`: a lightweight CentOS Stream 9 image with Python 3.12, `aspell-en`, and `pyspelling` to build docs and run the spelling check without installing those tools on the host
 
 ## Build containers
 
 Leveraging make, you can build the container on your own:
 ```Bash
 $ make ci_ctx
+$ make docs_ctx
+```
+
+To run the GitHub spelling check without installing `python`, `aspell`, or
+`pyspelling` on the host:
+```Bash
+$ make run_ctx_spelling
 ```
 
 ## Using the container
