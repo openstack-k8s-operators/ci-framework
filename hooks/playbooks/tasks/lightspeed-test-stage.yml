@@ -1,0 +1,43 @@
+---
+- name: Write runner inputs without embedding a client token
+  ansible.builtin.copy:
+    dest: "{{ cifmw_lightspeed_tests_private.path }}/runner-vars.yml"
+    mode: '0600'
+    content: >-
+      {{ {'test_suite_path': cifmw_lightspeed_tests_source,
+          'lightspeed_url': 'https://127.0.0.1:' ~ cifmw_lightspeed_tests_port.stdout,
+          'lightspeed_token_file': cifmw_lightspeed_tests_private.path ~ '/token',
+          'lightspeed_timeout': cifmw_lightspeed_tests_timeout,
+          'pytest_args': cifmw_lightspeed_tests_pytest_args,
+          'junit_xml_path': cifmw_lightspeed_tests_artifacts ~ '/' ~ cifmw_lightspeed_tests_stage ~ '.xml'} | to_nice_yaml }}
+
+- name: Execute the Lightspeed test runner with a bounded runtime
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - --kill-after=30s
+      - 1800s
+      - "{{ ansible_playbook_python | dirname }}/ansible-playbook"
+      - "{{ cifmw_lightspeed_tests_source }}/playbooks/run_lightspeed_tests.yaml"
+      - -i
+      - localhost,
+      - -e
+      - "@{{ cifmw_lightspeed_tests_private.path }}/runner-vars.yml"
+  register: cifmw_lightspeed_tests_result
+  changed_when: true
+  failed_when: false
+
+- name: Save the runner log even when tests fail
+  ansible.builtin.copy:
+    dest: "{{ cifmw_lightspeed_tests_artifacts }}/{{ cifmw_lightspeed_tests_stage }}-ansible.log"
+    content: "{{ cifmw_lightspeed_tests_result.stdout }}\n{{ cifmw_lightspeed_tests_result.stderr }}\nExit code: {{ cifmw_lightspeed_tests_result.rc }}\n"
+    mode: '0644'
+
+- name: Display the runner log
+  ansible.builtin.debug:
+    var: cifmw_lightspeed_tests_result.stdout_lines
+
+- name: Propagate a failed Lightspeed test run
+  ansible.builtin.assert:
+    that: cifmw_lightspeed_tests_result.rc == 0
+    fail_msg: "Lightspeed {{ cifmw_lightspeed_tests_stage }} failed. See {{ cifmw_lightspeed_tests_artifacts }}."
