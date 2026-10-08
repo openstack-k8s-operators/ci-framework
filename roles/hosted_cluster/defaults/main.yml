@@ -1,0 +1,300 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+# All variables intended for modification should be placed in this file.
+# All variables within this role should have a prefix of "cifmw_hosted_cluster"
+
+cifmw_hosted_cluster_name: hcp-0
+cifmw_hosted_cluster_namespace: clusters
+cifmw_hosted_cluster_hosted_namespace: "clusters-{{ cifmw_hosted_cluster_name }}"
+cifmw_hosted_cluster_networks:
+  - ctlplane
+  - internalapi
+  - storage
+  - tenant
+
+# Physical NIC on each management cluster node (selected by
+# cifmw_hosted_cluster_management_node_selector) used as the base for the
+# hosted worker VMs' isolated networks: a NodeNetworkConfigurationPolicy
+# bridges it untagged for ctlplane and VLAN-tags it (per network, 1-per-NAD)
+# for internalapi/storage/tenant, mirroring the upstream documented
+# architecture (NNCP-created Linux bridges + per-network Multus NADs with
+# whereabouts IPAM) rather than cifmw's own ethN/networking_mapper node
+# provisioning -- a management cluster installed by an external tool (e.g.
+# dev-scripts) has no cifmw_networking_env_definition.instances entry to
+# resolve an interface name from. Required; there is no discovery fallback.
+cifmw_hosted_cluster_management_interface: ""
+
+# Selects which management cluster nodes the isolated-network
+# NodeNetworkConfigurationPolicy applies to. Defaults to all control-plane
+# nodes, since dev-scripts/compact management clusters run KubeVirt
+# workloads there too.
+cifmw_hosted_cluster_management_node_selector:
+  node-role.kubernetes.io/master: ""
+
+# group-templates entry name and dedicated networking_mapper IP range for
+# the hosted cluster's own worker nodes. Kept outside the ranges used by
+# ocps/ocp_workers/computes so hosted clusters never collide with the
+# management cluster's own node addressing.
+cifmw_hosted_cluster_worker_group: "hosted_cluster_workers"
+cifmw_hosted_cluster_worker_net_range_start: 200
+cifmw_hosted_cluster_worker_net_range_length: 10
+
+# SSH access used to gather facts from the hosted worker VMs once they are
+# Ready, so networking_mapper can resolve their real interface names. This
+# role runs on controller-0 (via deploy_architecture.yml), not the
+# hypervisor, so it cannot use libvirt_manager's cifmw_reproducer_key --
+# that keypair only ever exists on the hypervisor that generated it (see
+# roles/libvirt_manager/tasks/deploy_layout.yml). Reuses id_cifw instead,
+# the automation keypair already present on controller-0 and injected into
+# provisioned nodes by deploy_architecture.yml itself (see
+# cifmw_ci_gen_kustomize_values_ssh_public_key there).
+cifmw_hosted_cluster_ssh_user: "core"
+cifmw_hosted_cluster_ssh_public_key: "{{ ansible_user_dir }}/.ssh/id_cifw.pub"
+cifmw_hosted_cluster_ssh_private_key: "{{ ansible_user_dir }}/.ssh/id_cifw"
+
+# NodePool / KubeVirt worker sizing
+cifmw_hosted_cluster_worker_count: 3
+cifmw_hosted_cluster_worker_cores: 16
+cifmw_hosted_cluster_worker_memory: 24Gi
+cifmw_hosted_cluster_root_volume_size: 85
+cifmw_hosted_cluster_root_volume_storage_class: ""
+cifmw_hosted_cluster_etcd_storage_class: ""
+
+# Block devices on the MANAGEMENT cluster's OCP nodes, used only when
+# cifmw_hosted_cluster_etcd_storage_class / _root_volume_storage_class are
+# empty and ci_lvms_storage needs to be installed there. Deliberately
+# separate from the global cifmw_lvms_disk_list: the HOSTED cluster's own
+# KubeVirt worker nodes have no free block device of their own for the
+# generic deploy_architecture.yml flow (cifmw_use_lvms) to use once
+# retargeted -- see cifmw_hosted_cluster_map_infra_storage_class below,
+# which covers that cluster's storage instead.
+cifmw_hosted_cluster_lvms_disk_list: []
+
+# Maps the management cluster's resolved root-volume storage class into
+# the hosted (guest) cluster under the same name via `hcp create cluster
+# kubevirt --infra-storage-class-mapping=<infra SC>/<guest SC>`, using
+# KubeVirt CSI. hcp create cluster kubevirt only provisions worker VMs
+# with a root volume -- there is no documented way to attach a second
+# disk -- so without this, the generic cifmw_use_lvms step in
+# deploy_architecture.yml would try to install a second, real LVMS stack
+# against the guest cluster's worker nodes and time out (no free block
+# device for its LVMCluster to claim; the root disk and its partitions
+# are excluded). Using the same storage class name on both sides means
+# RHOSO/OpenStack PVCs inside the guest cluster keep working identically
+# to the non-hosted-cluster path, with no changes needed anywhere else.
+# When true, the generic storage-class-selection steps in
+# deploy_architecture.yml / deploy_edpm.yml (and the storage-class-prefix
+# defaults in ci_gen_kustomize_values / test_operator) also skip the
+# cifmw_use_lvms-driven LVMS install for the guest cluster, so that doomed
+# install never runs. Set false to restore the old behavior (e.g. if
+# worker VMs are ever given a real secondary disk by some other means).
+cifmw_hosted_cluster_map_infra_storage_class: true
+
+# Empty release_image resolves to the management cluster's own version,
+# mirroring the ClusterVersion-derived default used by `hcp create cluster`.
+cifmw_hosted_cluster_release_image: ""
+
+# Operator channels on the management cluster. Unlike OpenShift
+# Virtualization/MetalLB, MCE has no generic "stable" meta-channel -- it is
+# versioned as stable-2.X and must be kept in sync with the management
+# cluster's OpenShift version. stable-2.17 is current for OpenShift
+# 4.20-4.22 as of this writing; see the "multicluster engine for Kubernetes
+# operator Support Matrix" on https://access.redhat.com (search by MCE
+# version) before reusing this default against a different OpenShift
+# release -- MCE's hosted-control-planes support window is narrower than
+# its general N-2/N+1 operator support policy.
+cifmw_hosted_cluster_cnv_channel: stable
+cifmw_hosted_cluster_mce_channel: stable-2.17
+cifmw_hosted_cluster_metallb_channel: stable
+cifmw_hosted_cluster_nmstate_channel: stable
+
+# MetalLB address pool for the hosted cluster's KubeAPI. Required (a list of
+# addresses/ranges, e.g. ["192.168.100.50-192.168.100.60"]) unless rendering
+# only; it cannot be derived from cifmw_networking_env_definition because it
+# belongs to the management cluster's primary network, not an isolated RHOSO
+# network.
+cifmw_hosted_cluster_kubeapi_address_pool: []
+cifmw_hosted_cluster_kubeapi_interface: br-ex
+
+cifmw_hosted_cluster_artifacts_dir: "{{ cifmw_basedir }}/artifacts/hosted_cluster"
+cifmw_hosted_cluster_wait_retries: 120
+cifmw_hosted_cluster_wait_delay: 10
+cifmw_hosted_cluster_render_only: false
+
+# The hcp CLI is served from a management cluster `apps.*` route, normally
+# behind a self-signed ingress certificate (the default unless a custom
+# ingress CA is configured). Set to true once that CA is trusted.
+cifmw_hosted_cluster_cli_validate_certs: false
+
+# OpenShift Virtualization (management cluster)
+cifmw_hosted_cluster_cnv_namespace: openshift-cnv
+
+cifmw_hosted_cluster_cnv_olm_operator_group:
+  apiVersion: operators.coreos.com/v1
+  kind: OperatorGroup
+  metadata:
+    name: "{{ cifmw_hosted_cluster_cnv_namespace }}"
+    namespace: "{{ cifmw_hosted_cluster_cnv_namespace }}"
+  spec:
+    targetNamespaces:
+      - "{{ cifmw_hosted_cluster_cnv_namespace }}"
+
+cifmw_hosted_cluster_cnv_olm_subscription:
+  apiVersion: operators.coreos.com/v1alpha1
+  kind: Subscription
+  metadata:
+    name: kubevirt-hyperconverged
+    namespace: "{{ cifmw_hosted_cluster_cnv_namespace }}"
+  spec:
+    channel: "{{ cifmw_hosted_cluster_cnv_channel }}"
+    installPlanApproval: Automatic
+    name: kubevirt-hyperconverged
+    source: redhat-operators
+    sourceNamespace: openshift-marketplace
+
+cifmw_hosted_cluster_cnv_hyperconverged:
+  apiVersion: hco.kubevirt.io/v1beta1
+  kind: HyperConverged
+  metadata:
+    name: kubevirt-hyperconverged
+    namespace: "{{ cifmw_hosted_cluster_cnv_namespace }}"
+  spec:
+    # The default golden-image DataImportCrons (CentOS/Fedora/RHEL boot
+    # sources) compete with this role's own etcd/root-volume PVCs for the
+    # same node-local LVMS storage pool, and are not needed here -- the
+    # hosted cluster's worker VMs boot from the OCP release payload, not
+    # these boot sources. This is a top-level spec field, not nested under
+    # workloadSources (the HyperConverged CRD has no such property; setting
+    # it there is silently dropped and the import stays enabled).
+    enableCommonBootImageImport: false
+
+# Multicluster engine (management cluster)
+cifmw_hosted_cluster_mce_namespace: multicluster-engine
+
+cifmw_hosted_cluster_mce_olm_operator_group:
+  apiVersion: operators.coreos.com/v1
+  kind: OperatorGroup
+  metadata:
+    name: "{{ cifmw_hosted_cluster_mce_namespace }}"
+    namespace: "{{ cifmw_hosted_cluster_mce_namespace }}"
+  spec:
+    targetNamespaces:
+      - "{{ cifmw_hosted_cluster_mce_namespace }}"
+
+cifmw_hosted_cluster_mce_olm_subscription:
+  apiVersion: operators.coreos.com/v1alpha1
+  kind: Subscription
+  metadata:
+    name: multicluster-engine
+    namespace: "{{ cifmw_hosted_cluster_mce_namespace }}"
+  spec:
+    channel: "{{ cifmw_hosted_cluster_mce_channel }}"
+    installPlanApproval: Automatic
+    name: multicluster-engine
+    source: redhat-operators
+    sourceNamespace: openshift-marketplace
+
+# hypershift / hypershift-local-hosting enable the KubeVirt HostedCluster
+# provider. central-infrastructure-management is intentionally omitted: it
+# only serves the Agent provider's Assisted Service / InfraEnv machinery.
+cifmw_hosted_cluster_mce_multiclusterengine:
+  apiVersion: multicluster.openshift.io/v1
+  kind: MultiClusterEngine
+  metadata:
+    name: multiclusterengine
+  spec:
+    overrides:
+      components:
+        - name: hypershift
+          enabled: true
+        - name: hypershift-local-hosting
+          enabled: true
+
+# MetalLB on the management cluster, used to expose the hosted cluster's
+# KubeAPI. MetalLB on the hosted cluster itself is installed generically by
+# the RHOSO deploy_architecture.yml / kustomize_deploy flow (see
+# hosted_setup.yml).
+cifmw_hosted_cluster_metallb_namespace: metallb-system
+
+# metallb-operator's CSV only supports the AllNamespaces install mode
+# (OwnNamespace fails with reason: UnsupportedOperatorGroup), unlike CNV/MCE
+# above -- so, unlike those, this OperatorGroup must have no targetNamespaces.
+cifmw_hosted_cluster_metallb_olm_operator_group:
+  apiVersion: operators.coreos.com/v1
+  kind: OperatorGroup
+  metadata:
+    name: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+    namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+  spec: {}
+
+cifmw_hosted_cluster_metallb_olm_subscription:
+  apiVersion: operators.coreos.com/v1alpha1
+  kind: Subscription
+  metadata:
+    name: metallb-operator
+    namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+  spec:
+    channel: "{{ cifmw_hosted_cluster_metallb_channel }}"
+    installPlanApproval: Automatic
+    name: metallb-operator
+    source: redhat-operators
+    sourceNamespace: openshift-marketplace
+
+cifmw_hosted_cluster_metallb_operator_cr:
+  apiVersion: metallb.io/v1beta1
+  kind: MetalLB
+  metadata:
+    name: metallb
+    namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+
+# NMState on the management cluster. Provisions the NodeNetworkConfigurationPolicy
+# that bridges cifmw_hosted_cluster_management_interface into per-network Linux
+# bridges (ctlplane/internalapi/storage/tenant), which the Multus NADs created in
+# management_network.yml then expose to the hosted worker VMs with whereabouts
+# IPAM -- see roles/hosted_cluster/README.md for the full architecture.
+cifmw_hosted_cluster_nmstate_namespace: openshift-nmstate
+
+# The NMState Operator's CSV only supports the AllNamespaces install mode,
+# like metallb-operator above.
+cifmw_hosted_cluster_nmstate_olm_operator_group:
+  apiVersion: operators.coreos.com/v1
+  kind: OperatorGroup
+  metadata:
+    name: "{{ cifmw_hosted_cluster_nmstate_namespace }}"
+    namespace: "{{ cifmw_hosted_cluster_nmstate_namespace }}"
+  spec: {}
+
+cifmw_hosted_cluster_nmstate_olm_subscription:
+  apiVersion: operators.coreos.com/v1alpha1
+  kind: Subscription
+  metadata:
+    name: kubernetes-nmstate-operator
+    namespace: "{{ cifmw_hosted_cluster_nmstate_namespace }}"
+  spec:
+    channel: "{{ cifmw_hosted_cluster_nmstate_channel }}"
+    installPlanApproval: Automatic
+    name: kubernetes-nmstate-operator
+    source: redhat-operators
+    sourceNamespace: openshift-marketplace
+
+# Singleton CR that makes the operator deploy the nmstate-handler DaemonSet.
+cifmw_hosted_cluster_nmstate_cr:
+  apiVersion: nmstate.io/v1
+  kind: NMState
+  metadata:
+    name: nmstate

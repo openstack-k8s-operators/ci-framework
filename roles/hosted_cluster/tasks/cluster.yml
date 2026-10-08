@@ -1,0 +1,302 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create hosted cluster namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Namespace
+    name: "{{ cifmw_hosted_cluster_namespace }}"
+    state: present
+
+- name: Wait for hcp CLI download information
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: console.openshift.io/v1
+    kind: ConsoleCLIDownload
+    name: hcp-cli-download
+  register: _hosted_cluster_cli_download
+  until:
+    - _hosted_cluster_cli_download.resources | default([]) | length == 1
+    - _hosted_cluster_cli_download.resources[0].spec.links | default([]) | length > 0
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Select Linux hcp CLI archive
+  ansible.builtin.set_fact:
+    cifmw_hosted_cluster_cli_url: >-
+      {{ _hosted_cluster_cli_download.resources[0].spec.links |
+         selectattr('text', 'search', 'Linux') |
+         selectattr('text', 'search', 'x86_64|amd64') |
+         map(attribute='href') | first | default('') }}
+
+- name: Require a Linux hcp CLI download
+  ansible.builtin.assert:
+    that:
+      - cifmw_hosted_cluster_cli_url | length > 0
+    fail_msg: "The management cluster did not publish a Linux x86_64 hcp CLI archive."
+
+- name: Download management cluster hcp CLI
+  ansible.builtin.get_url:
+    url: "{{ cifmw_hosted_cluster_cli_url }}"
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}/hcp.tar.gz"
+    mode: "0600"
+    validate_certs: "{{ cifmw_hosted_cluster_cli_validate_certs }}"
+
+- name: Extract hcp CLI
+  ansible.builtin.unarchive:
+    src: "{{ cifmw_hosted_cluster_artifacts_dir }}/hcp.tar.gz"
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}"
+    remote_src: true
+    creates: "{{ cifmw_hosted_cluster_artifacts_dir }}/hcp"
+
+- name: Read management cluster pull secret for hcp
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Secret
+    name: pull-secret
+    namespace: openshift-config
+  register: _hosted_cluster_hcp_pull_secret
+  no_log: true
+
+- name: Write hcp pull secret
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}/pull-secret.json"
+    content: "{{ _hosted_cluster_hcp_pull_secret.resources[0].data['.dockerconfigjson'] | b64decode }}"
+    mode: "0600"
+  no_log: true
+
+- name: Resolve hosted cluster release image
+  when: cifmw_hosted_cluster_release_image | length == 0
+  block:
+    - name: Read management OpenShift version
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        argv:
+          - oc
+          - get
+          - clusterversion
+          - version
+          - -o
+          - jsonpath={.status.desired.version}
+      register: _hosted_cluster_ocp_version
+      changed_when: false
+
+    - name: Set resolved release image
+      ansible.builtin.set_fact:
+        cifmw_hosted_cluster_resolved_release_image: >-
+          quay.io/openshift-release-dev/ocp-release:{{ _hosted_cluster_ocp_version.stdout }}-multi
+
+- name: Keep the explicitly provided release image
+  when: cifmw_hosted_cluster_release_image | length > 0
+  ansible.builtin.set_fact:
+    cifmw_hosted_cluster_resolved_release_image: "{{ cifmw_hosted_cluster_release_image }}"
+
+- name: Render KubeVirt hosted cluster with hcp
+  vars:
+    # One additional-network per isolated network NAD created in
+    # management_network.yml (ctlplane/internalapi/storage/tenant).
+    _hosted_cluster_additional_networks: >-
+      {{
+        cifmw_hosted_cluster_networks |
+        map('regex_replace', '^(.*)$',
+            '--additional-network=name:' ~ cifmw_hosted_cluster_hosted_namespace ~ '/\1') |
+        list
+      }}
+    # Maps the management ("infra") cluster's resolved root-volume
+    # storage class into the guest cluster under the same name -- see
+    # cifmw_hosted_cluster_map_infra_storage_class in defaults/main.yml.
+    _hosted_cluster_infra_storage_class_mapping: >-
+      {{
+        ['--infra-storage-class-mapping=' ~
+         cifmw_hosted_cluster_resolved_root_volume_storage_class ~ '/' ~
+         cifmw_hosted_cluster_resolved_root_volume_storage_class]
+        if cifmw_hosted_cluster_map_infra_storage_class | bool else []
+      }}
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          cifmw_hosted_cluster_artifacts_dir ~ '/hcp',
+          'create',
+          'cluster',
+          'kubevirt',
+          '--name=' ~ cifmw_hosted_cluster_name,
+          '--namespace=' ~ cifmw_hosted_cluster_namespace,
+          '--node-pool-replicas=' ~ cifmw_hosted_cluster_worker_count,
+          '--memory=' ~ cifmw_hosted_cluster_worker_memory,
+          '--cores=' ~ cifmw_hosted_cluster_worker_cores,
+          '--root-volume-size=' ~ cifmw_hosted_cluster_root_volume_size,
+          '--root-volume-storage-class=' ~ cifmw_hosted_cluster_resolved_root_volume_storage_class,
+          '--etcd-storage-class=' ~ cifmw_hosted_cluster_resolved_etcd_storage_class,
+          '--pull-secret=' ~ cifmw_hosted_cluster_artifacts_dir ~ '/pull-secret.json',
+          '--ssh-key=' ~ cifmw_hosted_cluster_ssh_public_key,
+          '--release-image=' ~ cifmw_hosted_cluster_resolved_release_image,
+        ] + _hosted_cluster_additional_networks +
+        ['--additional-network=name:' ~ cifmw_hosted_cluster_hosted_namespace ~ '/datacentre'] +
+        _hosted_cluster_infra_storage_class_mapping +
+        ['--render', '--render-sensitive']
+      }}
+  register: _hosted_cluster_rendered
+  changed_when: false
+  no_log: true
+
+- name: Save KubeVirt hosted cluster manifests
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}/hosted-cluster.yaml"
+    content: "{{ _hosted_cluster_rendered.stdout }}\n"
+    mode: "0600"
+  no_log: true
+
+- name: Read existing HostedCluster before applying manifests
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    namespace: "{{ cifmw_hosted_cluster_namespace }}"
+    name: "{{ cifmw_hosted_cluster_name }}"
+  register: _hosted_cluster_existing
+  no_log: true
+
+- name: Preserve immutable fields from existing HostedCluster
+  when: _hosted_cluster_existing.resources | default([]) | length == 1
+  ansible.builtin.lineinfile:
+    path: "{{ cifmw_hosted_cluster_artifacts_dir }}/hosted-cluster.yaml"
+    regexp: "^([ \\t]*{{ item.field }}:[ \\t]*).*$"
+    line: '\g<1>{{ item.value }}'
+    backrefs: true
+  loop:
+    - field: infraID
+      value: "{{ _hosted_cluster_existing.resources[0].spec.infraID }}"
+    - field: baseDomain
+      value: "{{ _hosted_cluster_existing.resources[0].spec.dns.baseDomain }}"
+  loop_control:
+    label: "{{ item.field }}"
+  no_log: true
+
+- name: Apply KubeVirt hosted cluster manifests
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    src: "{{ cifmw_hosted_cluster_artifacts_dir }}/hosted-cluster.yaml"
+  no_log: true
+
+- name: Wait for the hosted KubeAPI Service to be created
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Service
+    namespace: "{{ cifmw_hosted_cluster_hosted_namespace }}"
+    name: kube-apiserver
+  register: _hosted_cluster_kubeapi_svc
+  until: _hosted_cluster_kubeapi_svc.resources | default([]) | length == 1
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Pin the hosted KubeAPI Service to its MetalLB address pool
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: patched
+    kind: Service
+    namespace: "{{ cifmw_hosted_cluster_hosted_namespace }}"
+    name: kube-apiserver
+    definition:
+      metadata:
+        annotations:
+          metallb.universe.tf/address-pool: "{{ cifmw_hosted_cluster_name }}-kubeapi"
+
+- name: Wait for HostedCluster to be available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    namespace: "{{ cifmw_hosted_cluster_namespace }}"
+    name: "{{ cifmw_hosted_cluster_name }}"
+  register: _hosted_cluster_ready
+  until:
+    - _hosted_cluster_ready.resources | default([]) | length == 1
+    - >-
+      _hosted_cluster_ready.resources[0].status.conditions | default([]) |
+      selectattr('type', 'equalto', 'Available') |
+      selectattr('status', 'equalto', 'True') | list | length == 1
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Wait for hosted admin kubeconfig secret
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Secret
+    namespace: "{{ cifmw_hosted_cluster_namespace }}"
+    name: "{{ cifmw_hosted_cluster_name }}-admin-kubeconfig"
+  register: _hosted_cluster_kubeconfig_secret
+  until:
+    - _hosted_cluster_kubeconfig_secret.resources | default([]) | length == 1
+    - "'kubeconfig' in _hosted_cluster_kubeconfig_secret.resources[0].data | default({})"
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+  no_log: true
+
+- name: Save hosted kubeconfig
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    content: "{{ _hosted_cluster_kubeconfig_secret.resources[0].data.kubeconfig | b64decode }}"
+    mode: "0600"
+  no_log: true
+
+- name: Wait for hosted worker nodes to register
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    kind: Node
+  register: _hosted_cluster_worker_nodes
+  until: >-
+    _hosted_cluster_worker_nodes.resources | default([]) | length >=
+    cifmw_hosted_cluster_worker_count | int
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Wait for all hosted worker nodes to become Ready
+  environment:
+    KUBECONFIG: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    argv:
+      - oc
+      - wait
+      - nodes
+      - --all
+      - --for=condition=Ready
+      - --timeout=20m
+  changed_when: false
