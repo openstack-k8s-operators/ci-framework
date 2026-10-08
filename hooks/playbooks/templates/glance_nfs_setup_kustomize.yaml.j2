@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+namespace: {{ namespace }}
+patches:
+- target:
+    kind: OpenStackControlPlane
+    name: .*
+  patch: |-
+    - op: replace
+      path: /metadata/name
+      value: openstack
+# the following steps should be normally done in post_deploy, because
+# the NFS server is only available after the deployment (it is created
+# on an EDPM node). But for some reason it does not seem to work,
+# so prepare the whole configuration with replica: 0, so that the
+# node is not really deployed, and enable the glance node
+# in post_deploy, which should find and mount the NFS share.
+#
+# the next line should not be needed, but otherwise for some magic
+# it does not work
+- target:
+    kind: OpenStackControlPlane
+    name: .*
+  patch: |-
+    - op: remove
+      path: /metadata/namespace
+- path: {{ glance_operator_path + '/config/samples/backends/nfs/nfs.yaml' }}
+- target:
+    kind: OpenStackControlPlane
+  patch: |
+    - op: replace
+      path: /spec/glance/template/glanceAPIs/default/replicas
+      value: 0
