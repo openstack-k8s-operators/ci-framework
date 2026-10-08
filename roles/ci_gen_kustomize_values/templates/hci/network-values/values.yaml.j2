@@ -1,12 +1,15 @@
 ---
 # source: hci/network-values/values.yaml.j2
 {% set _ipv = cifmw_ci_gen_kustomize_values_ip_version_var_mapping %}
+{% set hosted_cluster = cifmw_deploy_hosted_cluster | default(false) | bool %}
+{% set hosted_node_prefix = (cifmw_hosted_cluster_name | default('hcp-0')) ~ '-' %}
 {% set ns = namespace(interfaces={},
                       ocp_index=0,
                       lb_tools={}) %}
 data:
 {% for host in cifmw_networking_env_definition.instances.keys() -%}
-{%   if host is match('^(ocp|crc).*') %}
+{%   if (hosted_cluster and host.startswith(hosted_node_prefix)) or
+        (not hosted_cluster and host is match('^(ocp|crc).*')) %}
   node_{{ ns.ocp_index }}:
 {%     set ns.ocp_index = ns.ocp_index+1 %}
     name: {{ cifmw_networking_env_definition.instances[host]['hostname'] }}
@@ -43,7 +46,7 @@ data:
         gateway: {{ network[_ipv.gw_vX] }}
 {%    endif %}
         name: subnet1
-{%    if network.vlan_id is defined  %}
+{%    if network.vlan_id is defined %}
         vlan: {{ network.vlan_id }}
 {%    endif %}
 {%    if ns.lb_tools | length > 0 %}
@@ -62,7 +65,7 @@ data:
 {%  endif %}
     prefix-length: {{ network[_ipv.network_vX] | ansible.utils.ipaddr('prefix') }}
     mtu: {{ network.mtu | default(1500) }}
-{%  if network.vlan_id is defined  %}
+{%  if network.vlan_id is defined and not hosted_cluster %}
     vlan: {{ network.vlan_id }}
 {%    if ns.interfaces[network.network_name] is defined %}
     iface: {{ network.network_name }}
@@ -79,7 +82,7 @@ data:
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
         "type": "macvlan",
-{%  if network.vlan_id is defined%}
+{%  if network.vlan_id is defined and not hosted_cluster %}
         "master": "{{ network.network_name }}",
 {%  else %}
         "master": "{{ ns.interfaces[network.network_name] }}",
@@ -93,6 +96,19 @@ data:
       }
 {%  endif %}
 {% endfor %}
+
+{% if hosted_cluster %}
+  datacentre:
+    iface: {{ cifmw_hosted_cluster_datacentre_interface }}
+    net-attach-def: |
+      {
+        "cniVersion": "0.3.1",
+        "name": "datacentre",
+        "type": "host-device",
+        "device": "{{ cifmw_hosted_cluster_datacentre_interface }}",
+        "ipam": {}
+      }
+{% endif %}
 
   dns-resolver:
     config:
