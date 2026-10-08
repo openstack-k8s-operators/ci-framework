@@ -1,5 +1,5 @@
 ---
-- name: Ensure Cinder Rally prerequisites exist
+- name: Ensure common Rally prerequisites exist
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   gather_facts: false
   vars:
@@ -24,24 +24,6 @@
         command: >-
           openstack flavor create m1.tiny
           --ram 512 --disk 1 --vcpus 1 --public
-
-    - name: Check lvmdriver-1 volume type
-      kubernetes.core.k8s_exec:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        namespace: "{{ namespace }}"
-        pod: "{{ _openstackclient_pod }}"
-        command: openstack volume type show lvmdriver-1
-      register: _volume_type_show
-      failed_when: false
-      changed_when: false
-
-    - name: Create lvmdriver-1 volume type if missing
-      when: _volume_type_show.rc != 0
-      kubernetes.core.k8s_exec:
-        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
-        namespace: "{{ namespace }}"
-        pod: "{{ _openstackclient_pod }}"
-        command: openstack volume type create lvmdriver-1 --public
 
     - name: Check if cirros image already exists
       kubernetes.core.k8s_exec:
@@ -81,3 +63,50 @@
           --container-format bare
           --file /home/cloud-admin/cirros-0.6.2-x86_64-disk.img
           --public
+
+    - name: Remove stale network-args.json from previous runs
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/tests/rally/{{ item.name }}/tasks/network-args.json"
+        state: absent
+      loop: "{{ cifmw_rally_runs }}"
+
+    - name: Get internal shared network for VM booting (tenant-accessible, used to pin NIC)
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack network list --internal --share -f value -c Name
+      register: _internal_shared_networks
+      failed_when: false
+      changed_when: false
+
+    - name: Warn if network list command failed
+      when: _internal_shared_networks.rc | default(0) != 0
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: 'openstack network list --internal --share' failed
+          (rc={{ _internal_shared_networks.rc | default('unknown') }}).
+          NIC pinning will be skipped — VM-boot workloads may fail if
+          multiple networks are present.
+
+    - name: Debug internal shared networks for Rally NIC pinning
+      ansible.builtin.debug:
+        msg: "Internal shared networks (names): {{ _internal_shared_networks.stdout_lines }}"
+
+    - name: Ensure Rally tasks directory exists for each run
+      when: _internal_shared_networks.stdout_lines | length > 1
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/tests/rally/{{ item.name }}/tasks"
+        state: directory
+        mode: "0755"
+      loop: "{{ cifmw_rally_runs }}"
+
+    - name: Write network task-args file for each run so Rally uses the correct network
+      when: _internal_shared_networks.stdout_lines | length > 1
+      vars:
+        _network_name: "{{ _internal_shared_networks.stdout_lines | first }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/tests/rally/{{ item.name }}/tasks/network-args.json"
+        content: '{"network_name": "{{ _network_name }}"}'
+        mode: "0644"
+      loop: "{{ cifmw_rally_runs }}"
