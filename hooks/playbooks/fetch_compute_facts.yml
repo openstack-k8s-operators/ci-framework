@@ -211,6 +211,7 @@
                       - name: "ANSIBLE_VERBOSITY"
                         value: "2"
 
+              {% if ansible_distribution == "CentOS" and ansible_distribution_major_version|int == 9 %}
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
                     value: |-
@@ -251,6 +252,7 @@
                             routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
                         {% endfor %}
                         {% endraw %}
+              {% endif %}
 
                   - op: replace
                     path: /spec/nodeTemplate/ansible/ansibleUser
@@ -263,6 +265,122 @@
                       - "{{ dns_server }}"
               {% endfor %}
 
+              {% if ansible_distribution == "CentOS" and ansible_distribution_major_version|int == 10 %}
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_template
+                    value: |-
+                        {%- raw %}
+                        ---
+                        {% set mtu_list = [ctlplane_mtu] %}
+                        {% for network in nodeset_networks %}
+                        {% set _ = mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) %}
+                        {%- endfor %}
+                        {% set min_viable_mtu = mtu_list | max %}
+                        interfaces:
+                        - name: nic1
+                          type: ethernet
+                          state: up
+                          mtu: {{ min_viable_mtu }}
+                          ipv4:
+                            enabled: true
+                            dhcp: true
+                          ipv6:
+                            enabled: false
+
+                        - name: nic2
+                          type: ethernet
+                          state: up
+                          mtu: {{ min_viable_mtu }}
+                          ipv4:
+                            enabled: false
+                          ipv6:
+                            enabled: false
+
+                        # os-net-config "primary: true" on nic2 -> copy MAC onto the bridge iface
+                        - name: {{ neutron_physical_bridge_name }}
+                          type: ovs-interface
+                          state: up
+                          mtu: {{ min_viable_mtu }}
+                          copy-mac-from: nic2
+                          ipv4:
+                            enabled: true
+                            dhcp: false
+                            address:
+                            - ip: {{ ctlplane_ip }}
+                              prefix-length: {{ ctlplane_cidr }}
+                          ipv6:
+                            enabled: false
+
+                        {% for network in nodeset_networks %}
+                        - name: {{ networks_lower[network] }}
+                          type: ovs-interface
+                          state: up
+                          mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
+                          ipv4:
+                            enabled: true
+                            dhcp: false
+                            address:
+                            - ip: {{ lookup('vars', networks_lower[network] ~ '_ip') }}
+                              prefix-length: {{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+                          ipv6:
+                            enabled: false
+                        {% endfor %}
+
+                        - name: {{ neutron_physical_bridge_name }}
+                          type: ovs-bridge
+                          state: up
+                          bridge:
+                            options:
+                              fail-mode: standalone
+                              stp: false
+                              rstp: false
+                            port:
+                            - name: nic2
+                            - name: {{ neutron_physical_bridge_name }}
+                        {% for network in nodeset_networks %}
+                            - name: {{ networks_lower[network] }}
+                              vlan:
+                                mode: access
+                                tag: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                        {% endfor %}
+
+                        routes:
+                          config:
+                        {% for route in ctlplane_host_routes | default([]) %}
+                          - destination: {{ route.destination | default(route.ip_netmask) }}
+                            next-hop-address: {{ route['next-hop'] | default(route.next_hop) | default(route.nexthop) }}
+                            next-hop-interface: {{ neutron_physical_bridge_name }}
+                        {% endfor %}
+                        {% for network in nodeset_networks %}
+                        {% for route in lookup('vars', networks_lower[network] ~ '_host_routes') | default([]) %}
+                          - destination: {{ route.destination | default(route.ip_netmask) }}
+                            next-hop-address: {{ route['next-hop'] | default(route.next_hop) | default(route.nexthop) }}
+                            next-hop-interface: {{ networks_lower[network] }}
+                        {% endfor %}
+                        {% endfor %}
+
+                        dns-resolver:
+                          config:
+                            server: {{ ctlplane_dns_nameservers }}
+                            search: {{ dns_search_domains }}
+                        {% endraw %}
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_tool
+                    value: nmstate
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_manage_service
+                    value: true
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_update
+                    value: true
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_nonconfigured_cleanup
+                    value: false
+              {% endif %}
               {% if content_provider_registry_ip is defined or cifmw_crc_additional_insecure_registries is defined %}
                   - op: add
                     path: /spec/nodeTemplate/ansible/ansibleVars/edpm_container_registry_insecure_registries
