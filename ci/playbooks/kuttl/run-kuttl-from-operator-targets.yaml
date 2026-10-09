@@ -5,7 +5,6 @@
       {{
         zuul.projects[project_name].src_dir
         }}
-    kuttl_log_dir: "{{ local_log_dir | default(ansible_user_dir + '/zuul-output/logs/controller') }}"
   tasks:
     - name: Run hooks before running kuttl tests
       vars:
@@ -13,7 +12,12 @@
       ansible.builtin.include_role:
         name: run_hook
 
-    - name: run kuttl test suite from operator Makefile
+    - name: run kuttl tests
+      # Run via ci_script so the kuttl output is streamed live to a dedicated,
+      # zuul-collected file ({{ cifmw_basedir }}/logs/ci_script_NNN_run_kuttl_tests.log)
+      # instead of only being returned inline in job-output.txt when the task
+      # finishes. This means partial logs survive a hang/timeout.
+      #
       # cifmw_zuul_target_host_env lets a job pass extra env vars (e.g.
       # KUTTL_SUITE) into the operator Make targets. Merge it last so a job
       # can override the suite selected by the operator Makefile default.
@@ -24,21 +28,7 @@
             'PATH': cifmw_path | default(ansible_env.PATH),
           } | combine(cifmw_zuul_target_host_env | default({}))
         }}
-      ansible.builtin.command:
-        cmd: make kuttl-test-run
+      cifmw.general.ci_script:
+        output_dir: "{{ cifmw_basedir | default(ansible_user_dir + '/ci-framework-data') }}/artifacts"
         chdir: "{{ ansible_user_dir }}/{{ operator_basedir }}"
-      changed_when: true
-      register: kuttl_test_run
-
-    - name: Create log dir
-      ansible.builtin.file:
-        path: "{{ kuttl_log_dir }}"
-        state: directory
-        mode: "0755"
-        recurse: yes
-
-    - name: save output to file
-      ansible.builtin.copy:
-        content: "{{ kuttl_test_run.stdout }}"
-        dest: "{{ kuttl_log_dir }}/kuttl-test-run.out"
-      when: kuttl_test_run.stdout is defined
+        script: make kuttl-test-run
