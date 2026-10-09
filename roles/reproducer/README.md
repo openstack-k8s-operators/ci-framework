@@ -35,6 +35,91 @@ bare metal SNO deployments to the `bm_sno` role.
 * `cifmw_reproducer_computes_rhos_release_args`: (String) Arguments to use when installing rhos-release repos on compute nodes. Not defined by default, and `cifmw_repo_setup_rhos_release_args` is used instead.
 * `cifmw_bm_sno`: (Bool) Enable agent-based bare metal OCP SNO deployment instead of libvirt/dev-scripts. Defaults to `false`.
 
+### Native control for an existing PreMetal environment
+
+`cifmw_reproducer_native_control: true` selects the native preparation path in
+`reproducer.yml` when `cifmw_deploy_reproducer_env: false`. The caller registers
+the existing hypervisor and `controller-0` in the running Ansible inventory and
+supplies these required transport parameters:
+
+* `cifmw_reproducer_native_source_host`: Inventory name of the build node containing the current job's `configs`, `secrets` and `src` directories.
+* `cifmw_reproducer_native_source_home`: Absolute home directory containing those directories on the build node.
+* `cifmw_reproducer_native_source_ssh_config`: Absolute SSH configuration path on that build node, with routes and keys for the hypervisor and `controller-0`.
+
+The source node needs rsync; it pushes current job data to both targets using
+its supplied SSH configuration. The hypervisor needs Python 3 and PyYAML for
+the existing `merge_yaml_override.py` utility. The caller must validate that
+the deployed architecture matches the scenario being requested.
+
+The entire `--rsh` command is quoted as one rsync argument, including when the
+SSH configuration path contains spaces. Transfer output remains protected
+with `no_log`; failures report only destination/directory labels and return
+codes, leaving credential contents and raw transfer output hidden.
+
+The native path preserves the existing parameter-refresh merge: mappings are
+merged recursively, lists/scalars are replaced, current `zuul_vars.yaml` is
+applied before `extra_variable_files`, and excluded parameter keys are removed
+first. File transfers use native modules and private remote temporary files;
+they do not assume that executor paths also exist on managed nodes. Pull-secret
+refresh and deployment argument construction reuse the existing task files.
+
+The merge utility writes its output to a private file on the hypervisor;
+parameter transport does not depend on stdout returned by the command module.
+Existing, merged and published parameter files must be non-empty YAML mappings
+before deployment can proceed. Validation reports file shape and path only.
+If a previous failed run left an empty parameter file, restore a validated
+backup before retrying; the native path does not synthesize missing baseline
+parameters from job overrides alone.
+
+Timestamped copy backups are preserved under
+`{{ cifmw_reproducer_controller_basedir }}/backups/native-parameters`, outside
+the parameter directories loaded by `include_vars`. The native refresh also
+archives matching leftovers from earlier attempts. Archive names encode the
+relative source path to distinguish the two parameter directories.
+
+This flattens reproducer preparation into the caller's Ansible session. Without
+the additional native deployment opt-in below, deployment and post-deployment
+still use the existing wrapper commands. The default remains `false`.
+
+### Native architecture deployment and post-deployment
+
+`cifmw_reproducer_native_deployment: true` additionally skips both wrapper
+commands in `reproducer.yml`. The caller must import, in order:
+
+1. `reproducer.yml` with native control enabled and environment creation disabled;
+2. a play on `controller-0` including `reproducer`'s `native_controller_context.yml`;
+3. `deploy-architecture-native.yml`;
+4. `post-deployment-native.yml`.
+
+The context loader reads the controller's `parameters/reproducer-variables.yml`,
+then `parameters/openshift-environment.yml`, then
+`cifmw_reproducer_native_deployment_files` in caller-supplied order. Supply the
+same existing secret and extra-variable files formerly passed to deployment,
+including `/home/zuul/secrets/registry_token_creds.yaml` when no explicit secret
+list was configured. All listed files must exist on `controller-0`.
+`cifmw_helpers_tmp_dir` can select an executor-writable private snapshot parent;
+under Zuul the fallback is `{{ zuul.executor.work_root }}/tmp`.
+
+Deployment targets are registered only when `cifmw_deploy_architecture` is true.
+Post-deployment targets are registered only after the deployment tasks succeed
+and `cifmw_post_deployment` is true. The success marker is created after admin
+setup, scenario-controlled tests and `pre_end` hooks succeed. Log collection
+runs afterwards, unless `cifmw_post_deploy_args: --skip-tags=logs` is supplied.
+
+This entrypoint covers an existing IPv4 architecture environment. It rejects
+HCI, bare-metal SNO, FDP, compliance and backup/restore flows. Arbitrary CLI
+deployment/post-deployment arguments and `cifmw_reproducer_play_extravars` are
+unsupported; use variable files instead. Rendering, key reads, helper scripts
+and artifact parameter loading execute against the remote controller context.
+Playbook hooks still run through `run_hook`'s subprocess adapter, with remote
+checkout/config/inventory paths and native deployment disabled in the child.
+
+Phase inputs use `include_vars`, not immutable CLI extra-vars. Later artifact
+parameter files and hook callbacks can therefore override them, and deployment
+facts remain available during post-deployment in the same session. These are
+explicit precedence/lifetime differences from the two separate legacy commands
+and require end-to-end validation for each migrated scenario.
+
 ### Advanced parameters
 Those parameters shouldn't be used, unless the user is able to understand potential issues in their environment.
 

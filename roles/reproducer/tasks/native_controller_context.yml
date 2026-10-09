@@ -1,0 +1,79 @@
+---
+- name: Require the existing-architecture native deployment contract
+  ansible.builtin.assert:
+    that:
+      - cifmw_reproducer_native_control | default(false) | bool
+      - cifmw_reproducer_native_deployment | default(false) | bool
+      - not cifmw_deploy_reproducer_env | default(false) | bool
+      - cifmw_reproducer_play_extravars | default([]) | length == 0
+      - cifmw_post_deploy_args | default('') | trim in ['', '--skip-tags=logs']
+      - not cifmw_edpm_deploy_hci | default(false) | bool
+      - not cifmw_bm_sno | default(false) | bool
+      - not cifmw_fdp_update_enabled | default(false) | bool
+      - not cifmw_run_operators_compliance_scans | default(false) | bool
+      - not cifmw_run_compute_compliance_scans | default(false) | bool
+      - not cifmw_run_backup_restore_test | default(false) | bool
+    fail_msg: >-
+      This native entrypoint supports an existing architecture environment.
+      CLI play_extravars, post arguments other than --skip-tags=logs,
+      HCI/SNO, FDP, compliance and backup/restore require
+      their own native migration before enabling them here.
+
+- name: Build the controller phase input manifest
+  ansible.builtin.set_fact:
+    cifmw_reproducer_native_controller_files: >-
+      {{ [cifmw_reproducer_controller_basedir ~ '/parameters/reproducer-variables.yml',
+          cifmw_reproducer_controller_basedir ~ '/parameters/openshift-environment.yml'] +
+         (cifmw_reproducer_native_deployment_files | default([])) }}
+
+- name: Require all controller phase inputs to exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ cifmw_reproducer_native_controller_files }}"
+  register: cifmw_reproducer_native_controller_inputs
+
+- name: Reject missing native controller inputs
+  ansible.builtin.assert:
+    that:
+      - cifmw_reproducer_native_controller_inputs.results | rejectattr('stat.exists') | list | length == 0
+
+- name: Load phase files in the former wrapper order
+  vars:
+    included_file: "{{ cifmw_reproducer_native_controller_file }}"
+  ansible.builtin.include_role:
+    name: cifmw_helpers
+    tasks_from: include_file.yml
+  loop: "{{ cifmw_reproducer_native_controller_files }}"
+  loop_control:
+    loop_var: cifmw_reproducer_native_controller_file
+    label: "{{ cifmw_reproducer_native_controller_file | basename }}"
+  no_log: true
+
+- name: Require architecture parameters after loading phase inputs
+  ansible.builtin.assert:
+    that:
+      - cifmw_architecture_scenario is defined
+      - cifmw_architecture_scenario | length > 0
+      - cifmw_reproducer_native_deployment | bool
+      - cifmw_reproducer_play_extravars | default([]) | length == 0
+      - cifmw_post_deploy_args | default('') | trim in ['', '--skip-tags=logs']
+      - not cifmw_edpm_deploy_hci | default(false) | bool
+      - not cifmw_bm_sno | default(false) | bool
+      - not cifmw_fdp_update_enabled | default(false) | bool
+      - not cifmw_run_operators_compliance_scans | default(false) | bool
+      - not cifmw_run_compute_compliance_scans | default(false) | bool
+      - not cifmw_run_backup_restore_test | default(false) | bool
+
+- name: Expose controller-local hook paths for residual playbook adapters
+  ansible.builtin.set_fact:
+    cifmw_run_hook_playbook_dir: "{{ cifmw_repo }}/hooks/playbooks"
+    cifmw_run_hook_default_inventory: "{{ cifmw_reproducer_controller_basedir }}/artifacts/zuul_inventory.yml"
+    cifmw_run_hook_default_config: "{{ cifmw_repo }}/ansible.cfg"
+    cifmw_kustomize_deploy_script_dir: "{{ cifmw_repo }}/roles/kustomize_deploy/files"
+    cifmw_reproducer_native_run_logs: "{{ cifmw_post_deploy_args | default('') | trim != '--skip-tags=logs' }}"
+
+- name: Register the native deployment stage only when requested
+  when: cifmw_deploy_architecture | default(false) | bool
+  ansible.builtin.add_host:
+    name: "{{ inventory_hostname }}"
+    groups: native_deployment_targets

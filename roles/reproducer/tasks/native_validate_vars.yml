@@ -1,0 +1,26 @@
+---
+# Print only file-shape diagnostics. Parse errors may contain secret values,
+# so never propagate their raw exception text to task output.
+- name: Require a non-empty YAML mapping for reproducer parameters
+  delegate_to: "{{ cifmw_reproducer_native_validation_host | default(inventory_hostname) }}"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import pathlib
+        import sys
+        import yaml
+
+        path = pathlib.Path(sys.argv[1])
+        try:
+            data = yaml.safe_load(path.read_bytes())
+        except (OSError, yaml.YAMLError):
+            print("Parameter file is unreadable or invalid YAML: " + str(path))
+            sys.exit(4)
+        if not isinstance(data, dict) or not data:
+            print("Expected non-empty YAML mapping, got " + type(data).__name__ + ": " + str(path))
+            sys.exit(4)
+        print("Validated non-empty YAML mapping: " + str(path))
+      - "{{ cifmw_reproducer_native_validation_path }}"
+  changed_when: false
