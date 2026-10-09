@@ -1,0 +1,37 @@
+---
+# The source build node, hypervisor and controller-0 are distinct from the
+# Ansible control process. The caller supplies working SSH routes for all three.
+- name: Validate native reproducer transport inputs
+  ansible.builtin.assert:
+    that:
+      - cifmw_reproducer_native_source_host is defined
+      - cifmw_reproducer_native_source_home is defined
+      - cifmw_reproducer_native_source_ssh_config is defined
+      - inventory_hostname != 'controller-0'
+      - "'controller-0' in hostvars"
+    quiet: true
+
+- name: Synchronize current job data from the build node
+  ansible.builtin.include_tasks: native_sync.yml
+
+- name: Refresh reproducer parameters using remote-safe native tasks
+  ansible.builtin.include_tasks: native_overwrite_vars.yml
+
+- name: Refresh the cluster pull secret
+  ansible.builtin.include_tasks: overwrite_pull_secret.yml
+
+- name: Compute additional deployment arguments with secrets
+  ansible.builtin.include_tasks: compute_additional_args.yml
+  loop: >-
+    {{ cifmw_deploy_architecture_secret_files |
+       default([ansible_user_dir ~ '/secrets/registry_token_creds.yaml']) }}
+  loop_control:
+    loop_var: secret_file
+
+- name: Pass extra variable files to the remaining deployment wrappers
+  ansible.builtin.set_fact:
+    cifmw_deploy_architecture_args: >-
+      {{ cifmw_deploy_architecture_args | default('') }} -e @{{ extra_variable_file }}
+  loop: "{{ extra_variable_files | default([]) }}"
+  loop_control:
+    loop_var: extra_variable_file
