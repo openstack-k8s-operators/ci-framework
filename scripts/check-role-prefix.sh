@@ -17,6 +17,16 @@ if [[ "${GITHUB_HEAD_REF:-}" == cherry-pick-* ]]; then
     exit 0
 fi
 
+# Skip prefix check for Dependabot PRs.
+# Dependabot owns its commit messages (e.g. "Bump the go_modules group...")
+# and maintainers cannot amend them without breaking Dependabot automation.
+# A failing verify-prefix check still reports failure to GitHub, which blocks
+# Tide even when the job has continue-on-error: true.
+if [[ "${GITHUB_HEAD_REF:-}" == dependabot/* ]]; then
+    echo "Dependabot PR detected (branch: $GITHUB_HEAD_REF) - skipping prefix check"
+    exit 0
+fi
+
 echo "Checking all commits in PR against base: origin/${GITHUB_BASE_REF}"
 echo ""
 
