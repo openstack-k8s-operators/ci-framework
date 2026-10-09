@@ -6,6 +6,59 @@
   ansible.builtin.debug:
     var: cifmw_ci_setup_packages
 
+- name: Disable rhos-release generated repos on RHEL 10+
+  when:
+    - cifmw_repo_setup_rhos_release_rpm is defined
+  tags:
+    - bootstrap
+    - packages
+  block:
+    # ansible_* under delegate_to is evaluated from the inventory host, not
+    # the connection target (e.g. reproducer runs this role on controller-0
+    # via a delegate_to block, but ansible_distribution* still reflects the
+    # hypervisor). Read ID/VERSION_ID from the actual target instead of
+    # relying on those facts.
+    - name: Detect OS ID on the target host
+      ansible.builtin.command:
+        argv:
+          - awk
+          - -F=
+          - /^ID=/ { gsub(/"/, "", $2); print $2 }
+          - /etc/os-release
+      register: _cifmw_ci_setup_os_id
+      changed_when: false
+      failed_when: >-
+        _cifmw_ci_setup_os_id.rc != 0 or
+        _cifmw_ci_setup_os_id.stdout | trim | length == 0
+
+    - name: Detect OS VERSION_ID on the target host
+      ansible.builtin.command:
+        argv:
+          - awk
+          - -F=
+          - /^VERSION_ID=/ { gsub(/"/, "", $2); print $2 }
+          - /etc/os-release
+      register: _cifmw_ci_setup_os_version_id
+      changed_when: false
+      failed_when: >-
+        _cifmw_ci_setup_os_version_id.rc != 0 or
+        _cifmw_ci_setup_os_version_id.stdout | trim | length == 0
+
+    - name: Disable all rhos-release generated repos
+      when:
+        - (_cifmw_ci_setup_os_id.stdout | trim) == 'rhel'
+        - ((_cifmw_ci_setup_os_version_id.stdout | trim).split('.') | first | int) >= 10
+      become: true
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          for f in /etc/yum.repos.d/delorean.repo
+          /etc/yum.repos.d/osp-trunk*.repo; do
+            [ -f "$f" ] || continue;
+            case "$f" in *rhos-release-ceph*) continue ;; esac;
+            sed -i 's/^enabled=1/enabled=0/' "$f";
+          done
+
 - name: Install needed packages  # noqa: package-latest
   become: true
   tags:
