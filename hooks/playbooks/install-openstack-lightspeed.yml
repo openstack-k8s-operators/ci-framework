@@ -31,292 +31,507 @@
     KUBECONFIG: "{{ kubeconfig_path }}"
 
   tasks:
-    # STEP 1: Deploy OpenStack Lightspeed catalog
+    - name: Install and wait for OpenStack Lightspeed
+      block:
+        # STEP 1: Deploy OpenStack Lightspeed catalog
 
-    - name: Create CatalogSource for OpenStack Lightspeed
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: operators.coreos.com/v1alpha1
-          kind: CatalogSource
-          metadata:
+        - name: Create CatalogSource for OpenStack Lightspeed
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: CatalogSource
+              metadata:
+                name: "{{ openstack_lightspeed_catalog_name }}"
+                namespace: "openshift-marketplace"
+              spec:
+                sourceType: grpc
+                image: "{{ openstack_lightspeed_catalog_image }}"
+                displayName: "OpenStack Lightspeed Operator"
+                publisher: "Red Hat"
+
+        - name: Wait for CatalogSource to be ready
+          kubernetes.core.k8s_info:
+            api_version: operators.coreos.com/v1alpha1
+            kind: CatalogSource
             name: "{{ openstack_lightspeed_catalog_name }}"
             namespace: "openshift-marketplace"
-          spec:
-            sourceType: grpc
-            image: "{{ openstack_lightspeed_catalog_image }}"
-            displayName: "OpenStack Lightspeed Operator"
-            publisher: "Red Hat"
+          register: catalog_source
+          until:
+            - catalog_source.resources is defined
+            - catalog_source.resources | length > 0
+            - catalog_source.resources[0].status.connectionState.lastObservedState is defined
+            - catalog_source.resources[0].status.connectionState.lastObservedState == "READY"
+          retries: 30
+          delay: 10
 
-    - name: Wait for CatalogSource to be ready
-      kubernetes.core.k8s_info:
-        api_version: operators.coreos.com/v1alpha1
-        kind: CatalogSource
-        name: "{{ openstack_lightspeed_catalog_name }}"
-        namespace: "openshift-marketplace"
-      register: catalog_source
-      until:
-        - catalog_source.resources is defined
-        - catalog_source.resources | length > 0
-        - catalog_source.resources[0].status.connectionState.lastObservedState is defined
-        - catalog_source.resources[0].status.connectionState.lastObservedState == "READY"
-      retries: 30
-      delay: 10
+        # STEP 2: Deploy OpenStack Lightspeed operator
+        # Note: OpenStack Lightspeed operator will automatically install
+        # and manage the OpenShift Lightspeed operator as a dependency
 
-    # STEP 2: Deploy OpenStack Lightspeed operator
-    # Note: OpenStack Lightspeed operator will automatically install
-    # and manage the OpenShift Lightspeed operator as a dependency
+        - name: Create namespace for OpenStack Lightspeed
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: "{{ openstack_lightspeed_namespace }}"
 
-    - name: Create namespace for OpenStack Lightspeed
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: "{{ openstack_lightspeed_namespace }}"
+        - name: Create ClusterRole for Lightspeed tests
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: "lightspeed-test-role"
+              rules:
+                - nonResourceURLs: ["/ls-access"]
+                  verbs: ["get"]
+          register: _result
+          retries: 5
+          delay: 10
+          until: _result is not failed
 
-    - name: Create ClusterRole for Lightspeed tests
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: ClusterRole
-          metadata:
-            name: "lightspeed-test-role"
-          rules:
-            - nonResourceURLs: ["/ls-access"]
-              verbs: ["get"]
-      register: _result
-      retries: 5
-      delay: 10
-      until: _result is not failed
+        - name: Create ClusterRoleBinding for Lightspeed tests
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRoleBinding
+              metadata:
+                name: "lightspeed-test-role-binding"
+              roleRef:
+                apiGroup: rbac.authorization.k8s.io
+                kind: ClusterRole
+                name: "lightspeed-test-role"
+              subjects:
+                - kind: ServiceAccount
+                  name: "default"
+                  namespace: "{{ openstack_lightspeed_namespace }}"
+          register: _result
+          retries: 5
+          delay: 10
+          until: _result is not failed
 
-    - name: Create ClusterRoleBinding for Lightspeed tests
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: ClusterRoleBinding
-          metadata:
-            name: "lightspeed-test-role-binding"
-          roleRef:
-            apiGroup: rbac.authorization.k8s.io
-            kind: ClusterRole
-            name: "lightspeed-test-role"
-          subjects:
-            - kind: ServiceAccount
-              name: "default"
-              namespace: "{{ openstack_lightspeed_namespace }}"
-      register: _result
-      retries: 5
-      delay: 10
-      until: _result is not failed
+        - name: Create OperatorGroup for OpenStack Lightspeed
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: operators.coreos.com/v1
+              kind: OperatorGroup
+              metadata:
+                name: "{{ openstack_lightspeed_operator_group }}"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+              spec:
+                targetNamespaces:
+                  - "{{ openstack_lightspeed_namespace }}"
 
-    - name: Create OperatorGroup for OpenStack Lightspeed
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: operators.coreos.com/v1
-          kind: OperatorGroup
-          metadata:
-            name: "{{ openstack_lightspeed_operator_group }}"
+        - name: Subscribe to OpenStack Lightspeed operator
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: Subscription
+              metadata:
+                name: "openstack-lightspeed-operator"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+              spec:
+                channel: "alpha"
+                name: "openstack-lightspeed-operator"
+                source: "{{ openstack_lightspeed_catalog_name }}"
+                sourceNamespace: "openshift-marketplace"
+                installPlanApproval: "Automatic"
+
+        - name: Wait for OpenStack Lightspeed CSV to be ready
+          kubernetes.core.k8s_info:
+            api_version: operators.coreos.com/v1alpha1
+            kind: ClusterServiceVersion
             namespace: "{{ openstack_lightspeed_namespace }}"
-          spec:
-            targetNamespaces:
-              - "{{ openstack_lightspeed_namespace }}"
+            label_selectors:
+              - "operators.coreos.com/openstack-lightspeed-operator.{{ openstack_lightspeed_namespace }}"
+          register: osls_csv
+          until:
+            - osls_csv.resources is defined
+            - osls_csv.resources | length > 0
+            - osls_csv.resources[0].status.phase is defined
+            - osls_csv.resources[0].status.phase == "Succeeded"
+          retries: 30
+          delay: 10
 
-    - name: Subscribe to OpenStack Lightspeed operator
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: operators.coreos.com/v1alpha1
-          kind: Subscription
-          metadata:
-            name: "openstack-lightspeed-operator"
-            namespace: "{{ openstack_lightspeed_namespace }}"
-          spec:
-            channel: "alpha"
-            name: "openstack-lightspeed-operator"
-            source: "{{ openstack_lightspeed_catalog_name }}"
-            sourceNamespace: "openshift-marketplace"
-            installPlanApproval: "Automatic"
+        # STEP 3: Create prerequisites (secrets and certificates)
 
-    - name: Wait for OpenStack Lightspeed CSV to be ready
-      kubernetes.core.k8s_info:
-        api_version: operators.coreos.com/v1alpha1
-        kind: ClusterServiceVersion
-        namespace: "{{ openstack_lightspeed_namespace }}"
-        label_selectors:
-          - "operators.coreos.com/openstack-lightspeed-operator.{{ openstack_lightspeed_namespace }}"
-      register: osls_csv
-      until:
-        - osls_csv.resources is defined
-        - osls_csv.resources | length > 0
-        - osls_csv.resources[0].status.phase is defined
-        - osls_csv.resources[0].status.phase == "Succeeded"
-      retries: 30
-      delay: 10
+        - name: Deploy the mock LLM provider
+          when: cifmw_openstack_lightspeed_mock_enabled | default(false) | bool
+          block:
+            - name: Create mock LLM API server code ConfigMap
+              register: mock_code
+              kubernetes.core.k8s:
+                state: present
+                definition:
+                  apiVersion: v1
+                  kind: ConfigMap
+                  metadata:
+                    name: mock-llm-code
+                    namespace: "{{ openstack_lightspeed_namespace }}"
+                  data:
+                    app.py: |
+                      import json
 
-    # STEP 3: Create prerequisites (secrets and certificates)
+                      from fastapi import FastAPI, Request
+                      from fastapi.responses import JSONResponse, StreamingResponse
 
-    - name: Create LLM API token secret
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
+                      app = FastAPI()
+                      mock_model = {{ cifmw_openstack_lightspeed_model_name | to_json }}
+
+                      @app.get("/v1/models")
+                      async def models_get():
+                          return {
+                              "object": "list",
+                              "data": [{
+                                  "id": mock_model,
+                                  "object": "model",
+                                  "created": 1234567890,
+                                  "owned_by": "mock",
+                              }],
+                          }
+
+                      @app.post("/v1/chat/completions")
+                      async def completions_post(request: Request):
+                          try:
+                              body = await request.json()
+                          except Exception:
+                              body = {}
+
+                          if not isinstance(body, dict):
+                              body = {}
+                          model = body.get("model") or mock_model
+
+                          # The OpenAI API expects 'messages' (for chat) or 'prompt' (for completions), but for mock, we will accept either
+                          response = {
+                              "id": "cmpl-123",
+                              "object": "chat.completion",
+                              "created": 1234567890,
+                              "model": model,
+                              "choices": [
+                                  {
+                                      "index": 0,
+                                      "message": {
+                                          "role": "assistant",
+                                          "content": "Hello, this is a dummy chat completion."
+                                      },
+                                      "finish_reason": "stop"
+                                  }
+                              ],
+                              "usage": {
+                                  "prompt_tokens": 5,
+                                  "completion_tokens": 7,
+                                  "total_tokens": 12
+                              }
+                          }
+
+                          # The provider adapter requests streaming even for /v1/query.
+                          if body.get("stream"):
+                              def stream_chunks():
+                                  chunk = {
+                                      "id": response["id"],
+                                      "object": "chat.completion.chunk",
+                                      "created": response["created"],
+                                      "model": model,
+                                  }
+                                  content = response["choices"][0]["message"]["content"]
+                                  for delta, finish_reason in [
+                                      ({"role": "assistant"}, None),
+                                      ({"content": content}, None),
+                                      ({}, "stop"),
+                                  ]:
+                                      chunk["choices"] = [{
+                                          "index": 0,
+                                          "delta": delta,
+                                          "finish_reason": finish_reason,
+                                      }]
+                                      yield "data: " + json.dumps(chunk) + "\n\n"
+
+                                  stream_options = body.get("stream_options") or {}
+                                  if stream_options.get("include_usage"):
+                                      chunk["choices"] = []
+                                      chunk["usage"] = response["usage"]
+                                      yield "data: " + json.dumps(chunk) + "\n\n"
+                                  yield "data: [DONE]\n\n"
+
+                              return StreamingResponse(stream_chunks(), media_type="text/event-stream")
+
+                          return JSONResponse(content=response)
+
+            - name: Inspect the existing mock LLM Pod
+              kubernetes.core.k8s_info:
+                api_version: v1
+                kind: Pod
+                name: mock-llm-api-server-pod
+                namespace: "{{ openstack_lightspeed_namespace }}"
+              register: existing_mock_pod
+
+            - name: Restart mock LLM when its code or readiness configuration changes
+              kubernetes.core.k8s:
+                state: absent
+                api_version: v1
+                kind: Pod
+                name: mock-llm-api-server-pod
+                namespace: "{{ openstack_lightspeed_namespace }}"
+                wait: true
+              when: >-
+                mock_code is changed or
+                (existing_mock_pod.resources | length > 0 and
+                 existing_mock_pod.resources[0].spec.containers[0].readinessProbe is not defined)
+
+            - name: Create mock LLM API server Pod
+              kubernetes.core.k8s:
+                state: present
+                definition:
+                  apiVersion: v1
+                  kind: Pod
+                  metadata:
+                    name: mock-llm-api-server-pod
+                    namespace: "{{ openstack_lightspeed_namespace }}"
+                    labels:
+                      app: mock-llm-api-server-pod
+                  spec:
+                    containers:
+                      - name: mock-llm-api-server
+                        image: registry.redhat.io/ubi8/python-311:latest
+                        readinessProbe:
+                          tcpSocket:
+                            port: 8000
+                          periodSeconds: 5
+                        ports:
+                          - containerPort: 8000
+                        volumeMounts:
+                          - name: app-code
+                            mountPath: /app
+                        workingDir: /app
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            pip install "fastapi[standard]" && \
+                            uvicorn app:app --host 0.0.0.0 --port 8000
+                    volumes:
+                      - name: app-code
+                        configMap:
+                          name: mock-llm-code
+
+            - name: Create mock LLM API server Service
+              kubernetes.core.k8s:
+                state: present
+                definition:
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: mock-llm-api-server-pod
+                    namespace: "{{ openstack_lightspeed_namespace }}"
+                  spec:
+                    selector:
+                      app: mock-llm-api-server-pod
+                    ports:
+                      - protocol: TCP
+                        port: 8000
+                        targetPort: 8000
+
+            - name: Wait for mock LLM API server to be ready
+              kubernetes.core.k8s_info:
+                api_version: v1
+                kind: Pod
+                name: mock-llm-api-server-pod
+                namespace: "{{ openstack_lightspeed_namespace }}"
+                wait: true
+                wait_condition:
+                  type: Ready
+                  status: "True"
+                wait_timeout: 300
+
+        - name: Create LLM API token secret
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+              stringData:
+                apitoken: "{{ cifmw_openstack_lightspeed_api_token }}"
+          when: cifmw_openstack_lightspeed_api_token is defined
+          no_log: true
+
+        - name: Verify LLM credentials secret exists
+          kubernetes.core.k8s_info:
+            kind: Secret
             name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
             namespace: "{{ openstack_lightspeed_namespace }}"
-          stringData:
-            apitoken: "{{ cifmw_openstack_lightspeed_api_token }}"
-      when: cifmw_openstack_lightspeed_api_token is defined
-      no_log: true
+          register: secret_check
+          failed_when: secret_check.resources | length == 0
+          when: cifmw_openstack_lightspeed_api_token is not defined
+          no_log: true
 
-    - name: Verify LLM credentials secret exists
-      kubernetes.core.k8s_info:
-        kind: Secret
-        name: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
-        namespace: "{{ openstack_lightspeed_namespace }}"
-      register: secret_check
-      failed_when: secret_check.resources | length == 0
-      when: cifmw_openstack_lightspeed_api_token is not defined
-      no_log: true
+        - name: Download TLS CA certificate from URL
+          ansible.builtin.uri:
+            url: "{{ cifmw_openstack_lightspeed_ca_cert_url }}"
+            return_content: true
+          register: ca_cert_download
+          when: cifmw_openstack_lightspeed_ca_cert_url is defined
 
-    - name: Download TLS CA certificate from URL
-      ansible.builtin.uri:
-        url: "{{ cifmw_openstack_lightspeed_ca_cert_url }}"
-        return_content: true
-      register: ca_cert_download
-      when: cifmw_openstack_lightspeed_ca_cert_url is defined
+        - name: Create TLS CA certificate bundle ConfigMap
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+              data:
+                ca-bundle.crt: >-
+                  {{ ca_cert_download.content if cifmw_openstack_lightspeed_ca_cert_url is defined else cifmw_openstack_lightspeed_ca_cert }}
+          when: cifmw_openstack_lightspeed_ca_cert_url is defined or cifmw_openstack_lightspeed_ca_cert is defined
 
-    - name: Create TLS CA certificate bundle ConfigMap
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
+        - name: Verify TLS certificate bundle ConfigMap exists
+          kubernetes.core.k8s_info:
+            kind: ConfigMap
             name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
             namespace: "{{ openstack_lightspeed_namespace }}"
-          data:
-            ca-bundle.crt: >-
-              {{ ca_cert_download.content if cifmw_openstack_lightspeed_ca_cert_url is defined else cifmw_openstack_lightspeed_ca_cert }}
-      when: cifmw_openstack_lightspeed_ca_cert_url is defined or cifmw_openstack_lightspeed_ca_cert is defined
+          register: cert_check
+          failed_when: cert_check.resources | length == 0
+          when: cifmw_openstack_lightspeed_ca_cert_url is defined or cifmw_openstack_lightspeed_ca_cert is defined
 
-    - name: Verify TLS certificate bundle ConfigMap exists
-      kubernetes.core.k8s_info:
-        kind: ConfigMap
-        name: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') }}"
-        namespace: "{{ openstack_lightspeed_namespace }}"
-      register: cert_check
-      failed_when: cert_check.resources | length == 0
-      when:
-        - cifmw_openstack_lightspeed_ca_cert is not defined
-        - cifmw_openstack_lightspeed_ca_cert_url is not defined
+        - name: Create test-operator dummy config ConfigMap
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: "test-operator-dummy-config"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+                labels:
+                  app: "lightspeed-tests"
+                  persistent: "true"
+                  managed-by: "test-operator"
+              data:
+                clouds.yaml: |
+                  # Dummy file - not used by lightspeed tests
+                  # Required by test-operator but lightspeed tests don't need OpenStack
+          register: _result
+          retries: 5
+          delay: 10
+          until: _result is not failed
 
-    - name: Create test-operator dummy config ConfigMap
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: "test-operator-dummy-config"
-            namespace: "{{ openstack_lightspeed_namespace }}"
-            labels:
-              app: "lightspeed-tests"
-              persistent: "true"
-              managed-by: "test-operator"
-          data:
-            clouds.yaml: |
-              # Dummy file - not used by lightspeed tests
-              # Required by test-operator but lightspeed tests don't need OpenStack
-      register: _result
-      retries: 5
-      delay: 10
-      until: _result is not failed
+        - name: Create test-operator dummy secret
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "test-operator-dummy-secret"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+                labels:
+                  app: "lightspeed-tests"
+                  persistent: "true"
+                  managed-by: "test-operator"
+              type: Opaque
+              stringData:
+                secure.yaml: |
+                  # Dummy file - not used by lightspeed tests
+                  # Required by test-operator but lightspeed tests don't need OpenStack
+          register: _result
+          retries: 5
+          delay: 10
+          until: _result is not failed
 
-    - name: Create test-operator dummy secret
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: "test-operator-dummy-secret"
-            namespace: "{{ openstack_lightspeed_namespace }}"
-            labels:
-              app: "lightspeed-tests"
-              persistent: "true"
-              managed-by: "test-operator"
-          type: Opaque
-          stringData:
-            secure.yaml: |
-              # Dummy file - not used by lightspeed tests
-              # Required by test-operator but lightspeed tests don't need OpenStack
-      register: _result
-      retries: 5
-      delay: 10
-      until: _result is not failed
+        - name: Create dataplane-ansible-ssh-private-key-secret
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "dataplane-ansible-ssh-private-key-secret"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+                labels:
+                  app: "lightspeed-tests"
+                  persistent: "true"
+                  managed-by: "test-operator"
+              type: Opaque
+              stringData:
+                ssh-privatekey: |
+                  # Dummy SSH key - not used by lightspeed tests
+          register: _result
+          retries: 5
+          delay: 10
+          until: _result is not failed
 
-    - name: Create dataplane-ansible-ssh-private-key-secret
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: "dataplane-ansible-ssh-private-key-secret"
-            namespace: "{{ openstack_lightspeed_namespace }}"
-            labels:
-              app: "lightspeed-tests"
-              persistent: "true"
-              managed-by: "test-operator"
-          type: Opaque
-          stringData:
-            ssh-privatekey: |
-              # Dummy SSH key - not used by lightspeed tests
-      register: _result
-      retries: 5
-      delay: 10
-      until: _result is not failed
+        # STEP 4: Create OpenStackLightspeed CR to deploy the service
+        # Note: Uses configurable parameters for LLM integration
 
-    # STEP 4: Create OpenStackLightspeed CR to deploy the service
-    # Note: Uses configurable parameters for LLM integration
+        - name: Create OpenStackLightspeed custom resource
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: lightspeed.openstack.org/v1beta1
+              kind: OpenStackLightspeed
+              metadata:
+                name: "{{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
+                namespace: "{{ openstack_lightspeed_namespace }}"
+              spec:
+                defaultModel: default-model
+                models:
+                  - name: default-model
+                    llmEndpoint: "{{ cifmw_openstack_lightspeed_llm_endpoint }}"
+                    llmEndpointType: "{{ cifmw_openstack_lightspeed_llm_endpoint_type | default('openai') }}"
+                    modelName: "{{ cifmw_openstack_lightspeed_model_name }}"
+                    llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
+                tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') if (cifmw_openstack_lightspeed_ca_cert is defined
+                  or cifmw_openstack_lightspeed_ca_cert_url is defined) else omit }}"
 
-    - name: Create OpenStackLightspeed custom resource
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: lightspeed.openstack.org/v1beta1
-          kind: OpenStackLightspeed
-          metadata:
+        - name: Wait for OpenStackLightspeed CR to be ready
+          kubernetes.core.k8s_info:
+            api_version: lightspeed.openstack.org/v1beta1
+            kind: OpenStackLightspeed
             name: "{{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
             namespace: "{{ openstack_lightspeed_namespace }}"
-          spec:
-            llmEndpoint: "{{ cifmw_openstack_lightspeed_llm_endpoint }}"
-            llmEndpointType: "{{ cifmw_openstack_lightspeed_llm_endpoint_type | default('openai') }}"
-            modelName: "{{ cifmw_openstack_lightspeed_model_name }}"
-            llmCredentials: "{{ cifmw_openstack_lightspeed_llm_credentials | default('openstack-lightspeed-apitoken') }}"
-            tlsCACertBundle: "{{ cifmw_openstack_lightspeed_tls_ca_cert_bundle | default('openstack-lightspeed-certs') if (cifmw_openstack_lightspeed_ca_cert is defined or cifmw_openstack_lightspeed_ca_cert_url is defined) else omit }}"
+          register: cr_status
+          until:
+            - cr_status.resources is defined
+            - cr_status.resources | length > 0
+            - cr_status.resources[0].status is defined
+            - cr_status.resources[0].status.conditions is defined
+            - cr_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | select('equalto', 'True') | list |
+              length > 0
+          retries: "{{ cifmw_openstack_lightspeed_ready_retries | default(120) | int }}"
+          delay: 10
+      rescue:
+        - name: Collect Lightspeed deployment diagnostics
+          ansible.builtin.command:
+            argv:
+              - oc
+              - get
+              - pods,deployments,events
+              - -n
+              - "{{ openstack_lightspeed_namespace }}"
+              - -o
+              - wide
+          register: lightspeed_diagnostics
+          changed_when: false
+          failed_when: false
 
-    - name: Wait for OpenStackLightspeed CR to be ready
-      kubernetes.core.k8s_info:
-        api_version: lightspeed.openstack.org/v1beta1
-        kind: OpenStackLightspeed
-        name: "{{ cifmw_openstack_lightspeed_cr_name | default('openstacklightspeed-sample') }}"
-        namespace: "{{ openstack_lightspeed_namespace }}"
-      register: cr_status
-      until:
-        - cr_status.resources is defined
-        - cr_status.resources | length > 0
-        - cr_status.resources[0].status is defined
-        - cr_status.resources[0].status.conditions is defined
-        - cr_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | select('equalto', 'True') | list | length > 0
-      retries: 30
-      delay: 10
+        - name: Display Lightspeed deployment diagnostics
+          ansible.builtin.debug:
+            var: lightspeed_diagnostics.stdout_lines
+
+        - name: Fail the Lightspeed deployment
+          ansible.builtin.fail:
+            msg: "OpenStack Lightspeed deployment failed; inspect the failed task and namespace diagnostics above."
 
     - name: Display deployment summary
       ansible.builtin.debug:

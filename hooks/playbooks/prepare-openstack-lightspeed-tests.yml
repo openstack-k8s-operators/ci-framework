@@ -1,0 +1,161 @@
+---
+- name: Prepare OpenStack Lightspeed for the test operator stage
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  connection: local
+  vars:
+    cifmw_lightspeed_tests_namespace: "{{ cifmw_test_operator_namespace | default('openstack') }}"
+    cifmw_lightspeed_tests_source: "{{ ansible_env.HOME }}/src/github.com/openstack-k8s-operators/lightspeed-tests"
+    cifmw_lightspeed_tests_artifacts: "{{ cifmw_basedir }}/artifacts/lightspeed-tests"
+    cifmw_lightspeed_tests_timeout: 120
+    cifmw_lightspeed_tests_kubeconfig: "{{ cifmw_openshift_kubeconfig | default(ansible_env.HOME ~ '/.crc/machines/crc/kubeconfig') }}"
+    cifmw_lightspeed_tests_selinux_level: "{{ cifmw_test_operator_selinux_level | default('s0:c478,c978') }}"
+  environment:
+    KUBECONFIG: "{{ cifmw_lightspeed_tests_kubeconfig }}"
+  tasks:
+    - name: Require the installed AnsibleTest API
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: ansibletests.test.openstack.org
+      register: cifmw_lightspeed_tests_api
+      failed_when: cifmw_lightspeed_tests_api.resources | length != 1
+
+    - name: Check the existing OpenStack configuration and SSH resources
+      kubernetes.core.k8s_info:
+        kind: "{{ item.kind }}"
+        name: "{{ item.name }}"
+        namespace: "{{ cifmw_lightspeed_tests_namespace }}"
+      register: cifmw_lightspeed_tests_prerequisite
+      failed_when: cifmw_lightspeed_tests_prerequisite.resources | length != 1
+      # k8s_info returns Secret data; never include it in the hook log.
+      no_log: true
+      loop:
+        - kind: ConfigMap
+          name: "{{ cifmw_test_operator_ansibletest_openstack_config_map | default('openstack-config') }}"
+        - kind: Secret
+          name: "{{ cifmw_test_operator_ansibletest_openstack_config_secret | default('openstack-config-secret') }}"
+        - kind: Secret
+          name: "{{ cifmw_test_operator_ansibletest_compute_ssh_key_secret_name | default('dataplane-ansible-ssh-private-key-secret') }}"
+
+    - name: Create the source artifact directory
+      ansible.builtin.file:
+        path: "{{ cifmw_lightspeed_tests_artifacts }}"
+        state: directory
+        mode: '0755'
+
+    - name: Package the tracked working files from the prepared checkout
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/files/lightspeed-source.py"
+          - "{{ cifmw_lightspeed_tests_source }}"
+          - "{{ playbook_dir }}/files/lightspeed-test-pod.yml"
+          - "{{ cifmw_lightspeed_tests_artifacts }}"
+      changed_when: true
+
+    - name: Read the packaged source definition and identity
+      ansible.builtin.set_fact:
+        cifmw_lightspeed_tests_configmap: "{{ lookup('file', cifmw_lightspeed_tests_artifacts ~ '/configmap.json') | from_json }}"
+        cifmw_lightspeed_tests_identity: "{{ lookup('file', cifmw_lightspeed_tests_artifacts ~ '/source-revision.json') | from_json }}"
+      no_log: true
+
+    - name: Mount the immutable prepared source for the test Pod
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ cifmw_lightspeed_tests_namespace }}"
+        definition: "{{ cifmw_lightspeed_tests_configmap }}"
+      no_log: true
+
+    - name: Authorize the test Pod's explicitly projected client token
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          - apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRole
+            metadata:
+              name: lightspeed-tests-access
+            rules:
+              - nonResourceURLs: [/ls-access]
+                verbs: [get]
+          - apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRoleBinding
+            metadata:
+              name: "lightspeed-tests-access-{{ cifmw_lightspeed_tests_namespace }}"
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: ClusterRole
+              name: lightspeed-tests-access
+            subjects:
+              # The current test-operator uses the namespace's default account.
+              - kind: ServiceAccount
+                name: default
+                namespace: "{{ cifmw_lightspeed_tests_namespace }}"
+
+    - name: Write the Lightspeed stage variables for the existing test operator role
+      vars:
+        cifmw_lightspeed_tests_stage_vars:
+          cifmw_test_operator_namespace: "{{ cifmw_lightspeed_tests_namespace }}"
+          cifmw_test_operator_privileged: true
+          cifmw_test_operator_selinux_level: "{{ cifmw_lightspeed_tests_selinux_level }}"
+          cifmw_test_operator_ansibletest_name: ansibletest
+          cifmw_test_operator_ansibletest_image: quay.io/podified-antelope-centos9/openstack-ansible-tests
+          cifmw_test_operator_ansibletest_image_tag: current-podified
+          # The image clones this repository as part of its entrypoint. The mounted
+          # playbook below executes only the checksum-verified prepared source.
+          cifmw_test_operator_ansibletest_ansible_git_repo: https://github.com/openstack-k8s-operators/lightspeed-tests
+          cifmw_test_operator_ansibletest_ansible_git_branch: ""
+          cifmw_test_operator_ansibletest_ansible_playbook_path: /lightspeed-source/run.yml
+          cifmw_test_operator_ansibletest_ansible_inventory: |
+            localhost ansible_connection=local ansible_python_interpreter=python3
+          cifmw_test_operator_ansibletest_debug: false
+          cifmw_test_operator_ansibletest_resources:
+            requests:
+              cpu: 1000m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          cifmw_test_operator_ansibletest_ansible_var_files: "{{ cifmw_lightspeed_tests_pod_vars | to_nice_yaml }}"
+          cifmw_test_operator_ansibletest_extra_mounts:
+            - name: lightspeed
+              extraVol:
+                - propagation: [AnsibleTest]
+                  extraVolType: Undefined
+                  volumes:
+                    - name: lightspeed-source
+                      configMap:
+                        name: "{{ cifmw_lightspeed_tests_configmap.metadata.name }}"
+                    - name: lightspeed-client-token
+                      projected:
+                        sources:
+                          - serviceAccountToken:
+                              path: token
+                              expirationSeconds: 3600
+                  mounts:
+                    - name: lightspeed-source
+                      mountPath: /lightspeed-source
+                      readOnly: true
+                    - name: lightspeed-client-token
+                      mountPath: /lightspeed-auth
+                      readOnly: true
+          # Match the test Pod's UID and SELinux level to read its results PVC.
+          # Keep these changes local to this stage, including the reader Pod.
+          cifmw_test_operator_log_pod_security_context:
+            runAsUser: 227
+            runAsGroup: 227
+            fsGroup: 227
+            seLinuxOptions:
+              level: "{{ cifmw_lightspeed_tests_selinux_level }}"
+        cifmw_lightspeed_tests_pod_vars:
+          cifmw_lightspeed_tests_sha256: "{{ cifmw_lightspeed_tests_identity.sha256 }}"
+          cifmw_lightspeed_tests_inputs:
+            test_suite_path: /var/lib/ansible/lightspeed-tests
+            lightspeed_url: "https://lightspeed-app-server.{{ cifmw_openstack_lightspeed_namespace | default('openstack-lightspeed') }}.svc.cluster.local:8443"
+            lightspeed_timeout: "{{ cifmw_lightspeed_tests_timeout | int }}"
+            lightspeed_token_file: /lightspeed-auth/token
+            pytest_args: "-v --tb=short --color=no tests/integration"
+            junit_xml_path: /var/lib/AnsibleTests/external_files/baseline.xml
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/lightspeed-test-stage.yml"
+        content: "{{ cifmw_lightspeed_tests_stage_vars | to_nice_yaml }}"
+        mode: '0644'
