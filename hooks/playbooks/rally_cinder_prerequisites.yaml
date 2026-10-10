@@ -81,3 +81,42 @@
           --container-format bare
           --file /home/cloud-admin/cirros-0.6.2-x86_64-disk.img
           --public
+
+    - name: Count all shared networks visible to Rally tenant users
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack network list --shared -f value -c ID
+      register: _all_shared_networks
+      failed_when: false
+      changed_when: false
+
+    - name: Get internal shared networks for VM booting when multiple exist
+      when: _all_shared_networks.stdout_lines | length > 1
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        pod: "{{ _openstackclient_pod }}"
+        command: openstack network list --internal --shared -f value -c Name
+      register: _internal_shared_networks
+      failed_when: false
+      changed_when: false
+
+    - name: Ensure Rally tasks directory exists for network args file
+      when: _all_shared_networks.stdout_lines | length > 1
+      ansible.builtin.file:
+        path: "{{ cifmw_basedir }}/tests/rally/cinder/tasks"
+        state: directory
+        mode: "0755"
+
+    - name: Write network task-args file so Rally uses the correct network
+      when:
+        - _all_shared_networks.stdout_lines | length > 1
+        - _internal_shared_networks.stdout_lines | length > 0
+      vars:
+        _network_name: "{{ _internal_shared_networks.stdout_lines | first }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/tests/rally/cinder/tasks/network-args.json"
+        content: '{"network_name": "{{ _network_name }}"}'
+        mode: "0644"

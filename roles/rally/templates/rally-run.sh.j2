@@ -3,12 +3,18 @@ set -e
 RALLY_TASK_RC=0
 rally db ensure
 rally deployment create --fromenv --name {{ cifmw_rally_deployment_name }}
+NETWORK_ARGS_FILE="{{ _cifmw_rally_container_tasks_dir }}/network-args.json"
+NETWORK_ARGS_OPTS=""
+if [ -f "${NETWORK_ARGS_FILE}" ]; then
+  NETWORK_ARGS_OPTS="--task-args-file ${NETWORK_ARGS_FILE}"
+fi
 {% if cifmw_rally_task_file | length > 0 %}
 rally task start {{ _cifmw_rally_container_tasks_dir }}/{{ cifmw_rally_task_file | basename }} \
 {% else %}
 rally task start /rally/xrally_openstack/rally-jobs/{{ cifmw_rally_openstack_tests }}.yaml \
 {% endif %}
   --task-args '{"concurrency": {{ cifmw_rally_concurrency }}}' \
+  ${NETWORK_ARGS_OPTS} \
   {{ cifmw_rally_task_extra_args }} || RALLY_TASK_RC=$?
 rally task report --out {{ _cifmw_rally_container_reports_dir }}/rally-report.html || true
 rally task report --json \
