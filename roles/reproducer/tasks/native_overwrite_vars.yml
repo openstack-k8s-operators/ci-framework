@@ -1,0 +1,93 @@
+---
+- name: Create a private merge workspace on the hypervisor
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: cifmw-native-vars-
+  register: cifmw_reproducer_native_vars_dir
+
+- name: Refresh controller parameters without controller-local file assumptions
+  block:
+    - name: Validate existing parameters before reading or replacing them
+      vars:
+        cifmw_reproducer_native_validation_host: controller-0
+        cifmw_reproducer_native_validation_path: "{{ cifmw_reproducer_controller_basedir }}/parameters/reproducer-variables.yml"
+      ansible.builtin.include_tasks: native_validate_vars.yml
+
+    - name: Read existing reproducer variables from controller-0
+      delegate_to: controller-0
+      ansible.builtin.slurp:
+        src: "{{ cifmw_reproducer_controller_basedir }}/parameters/reproducer-variables.yml"
+      register: cifmw_reproducer_native_saved_vars
+      no_log: true
+
+    - name: Stage existing reproducer variables on the hypervisor
+      ansible.builtin.copy:
+        content: "{{ cifmw_reproducer_native_saved_vars.content | b64decode }}"
+        dest: "{{ cifmw_reproducer_native_vars_dir.path }}/merged.yml"
+        mode: "0600"
+      no_log: true
+
+    - name: Remove parameters excluded by the current job
+      when: exclude_discovered_files | default([]) | length > 0
+      cifmw.general.strip_dict_keys:
+        src: "{{ cifmw_reproducer_native_vars_dir.path }}/merged.yml"
+        keys_from: >-
+          {{ exclude_discovered_files |
+             map('regex_replace', '^(.*)$', ansible_user_dir ~ '/configs/\1') | list }}
+      no_log: true
+
+    - name: Stage the existing framework YAML merge utility
+      ansible.builtin.copy:
+        src: merge_yaml_override.py
+        dest: "{{ cifmw_reproducer_native_vars_dir.path }}/merge_yaml_override.py"
+        mode: "0600"
+
+    - name: Apply current job and extra variable overrides in their existing order
+      ansible.builtin.include_tasks: native_merge_file.yml
+      loop: "{{ [ansible_user_dir ~ '/configs/zuul_vars.yaml'] + (extra_variable_files | default([])) }}"
+      loop_control:
+        loop_var: cifmw_reproducer_native_override_file
+        label: "{{ cifmw_reproducer_native_override_file | basename }}"
+
+    - name: Read merged reproducer variables
+      ansible.builtin.slurp:
+        src: "{{ cifmw_reproducer_native_vars_dir.path }}/merged.yml"
+      register: cifmw_reproducer_native_merged_vars
+      no_log: true
+
+    - name: Validate the merged parameter file before updating controller-0
+      vars:
+        cifmw_reproducer_native_validation_path: "{{ cifmw_reproducer_native_vars_dir.path }}/merged.yml"
+      ansible.builtin.include_tasks: native_validate_vars.yml
+
+    - name: Write current parameters back to controller-0
+      delegate_to: controller-0
+      ansible.builtin.copy:
+        content: "{{ cifmw_reproducer_native_merged_vars.content | b64decode }}"
+        dest: "{{ cifmw_reproducer_controller_basedir }}/{{ item }}"
+        mode: "0664"
+        backup: true
+      loop:
+        - parameters/reproducer-variables.yml
+        - artifacts/parameters/custom-params.yml
+      no_log: true
+
+    - name: Archive generated backups outside directories consumed by include_vars
+      ansible.builtin.include_tasks: native_archive_backups.yml
+
+    - name: Validate both published parameter files before deployment
+      vars:
+        cifmw_reproducer_native_validation_host: controller-0
+        cifmw_reproducer_native_validation_path: "{{ cifmw_reproducer_controller_basedir }}/{{ cifmw_reproducer_native_parameter_file }}"
+      ansible.builtin.include_tasks: native_validate_vars.yml
+      loop:
+        - parameters/reproducer-variables.yml
+        - artifacts/parameters/custom-params.yml
+      loop_control:
+        loop_var: cifmw_reproducer_native_parameter_file
+  always:
+    - name: Remove the private hypervisor merge workspace
+      ansible.builtin.file:
+        path: "{{ cifmw_reproducer_native_vars_dir.path }}"
+        state: absent
+      no_log: true

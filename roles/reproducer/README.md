@@ -35,6 +35,53 @@ bare metal SNO deployments to the `bm_sno` role.
 * `cifmw_reproducer_computes_rhos_release_args`: (String) Arguments to use when installing rhos-release repos on compute nodes. Not defined by default, and `cifmw_repo_setup_rhos_release_args` is used instead.
 * `cifmw_bm_sno`: (Bool) Enable agent-based bare metal OCP SNO deployment instead of libvirt/dev-scripts. Defaults to `false`.
 
+### Native control for an existing PreMetal environment
+
+`cifmw_reproducer_native_control: true` selects the native preparation path in
+`reproducer.yml` when `cifmw_deploy_reproducer_env: false`. The caller registers
+the existing hypervisor and `controller-0` in the running Ansible inventory and
+supplies these required transport parameters:
+
+* `cifmw_reproducer_native_source_host`: Inventory name of the build node containing the current job's `configs`, `secrets` and `src` directories.
+* `cifmw_reproducer_native_source_home`: Absolute home directory containing those directories on the build node.
+* `cifmw_reproducer_native_source_ssh_config`: Absolute SSH configuration path on that build node, with routes and keys for the hypervisor and `controller-0`.
+
+The source node needs rsync; it pushes current job data to both targets using
+its supplied SSH configuration. The hypervisor needs Python 3 and PyYAML for
+the existing `merge_yaml_override.py` utility. The caller must validate that
+the deployed architecture matches the scenario being requested.
+
+The entire `--rsh` command is quoted as one rsync argument, including when the
+SSH configuration path contains spaces. Transfer output remains protected
+with `no_log`; failures report only destination/directory labels and return
+codes, leaving credential contents and raw transfer output hidden.
+
+The native path preserves the existing parameter-refresh merge: mappings are
+merged recursively, lists/scalars are replaced, current `zuul_vars.yaml` is
+applied before `extra_variable_files`, and excluded parameter keys are removed
+first. File transfers use native modules and private remote temporary files;
+they do not assume that executor paths also exist on managed nodes. Pull-secret
+refresh and deployment argument construction reuse the existing task files.
+
+The merge utility writes its output to a private file on the hypervisor;
+parameter transport does not depend on stdout returned by the command module.
+Existing, merged and published parameter files must be non-empty YAML mappings
+before deployment can proceed. Validation reports file shape and path only.
+If a previous failed run left an empty parameter file, restore a validated
+backup before retrying; the native path does not synthesize missing baseline
+parameters from job overrides alone.
+
+Timestamped copy backups are preserved under
+`{{ cifmw_reproducer_controller_basedir }}/backups/native-parameters`, outside
+the parameter directories loaded by `include_vars`. The native refresh also
+archives matching leftovers from earlier attempts. Archive names encode the
+relative source path to distinguish the two parameter directories.
+
+This flattens reproducer preparation into the caller's Ansible session. The
+deployment and post-deployment wrapper commands remain in `reproducer.yml` and
+are explicit residual subprocess boundaries. The default remains `false`, so
+the local reproducer and legacy PreMetal path retain their existing behavior.
+
 ### Advanced parameters
 Those parameters shouldn't be used, unless the user is able to understand potential issues in their environment.
 
