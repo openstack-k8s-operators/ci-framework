@@ -23,6 +23,7 @@ Execute tests via the [test-operator](https://openstack-k8s-operators.github.io/
 * `cifmw_test_operator_fail_on_test_failure`: (Boolean) Whether the role should fail on any test failure or not. Default value: `true`
 * `cifmw_test_operator_log_pod_definition`: (Object) The CR definition template for creating the test log pod. Default value: See defaults in [main.yml](https://github.com/openstack-k8s-operators/ci-framework/blob/main/roles/test_operator/defaults/main.yml)
 * `cifmw_test_operator_logs_image`: (String) Image that should be used to collect logs from the pods spawned by the test-operator. Default value: `quay.io/quay/busybox`
+* `cifmw_test_operator_log_pod_security_context`: (Dict) Security context for the results reader Pod, with stage overrides supported. Default value: `{}`
 * `cifmw_test_operator_namespace`: (String) Namespace inside which all the resources are created. Default value: `openstack`
 * `cifmw_test_operator_node_selector`: (Dict) `nodeSelector` value that is applied to all pods spawned by the test-operator and to the test-operator-controller-manager and test-operator-logs pods. Default value: `{}`
 * `cifmw_test_operator_privileged`: (Boolean) Spawn the test pods with `allowPrivilegedEscalation: true` and default linux capabilities. This is required for certain test-operator functionalities to work properly (e.g.: `extraRPMs`, certain set of tobiko tests). Default value: `false`
@@ -198,3 +199,15 @@ cifmw_test_operator_stages:
     type: tobiko
     test_vars_file: /path/to/tobiko/override/test/file
 ```
+
+## AnsibleTest stage overrides
+
+The AnsibleTest manifest uses stage-specific `cifmw_test_operator_privileged`,
+`cifmw_test_operator_selinux_level` and `cifmw_test_operator_storage_class`
+values when provided in `test_vars` or `test_vars_file`. The collector also
+uses the stage's `cifmw_test_operator_log_pod_security_context` (default `{}`). This lets a stage
+match the reader Pod's security context to the test Pod without changing
+other stages. With no stage override the existing global values apply.
+
+A terminal Pod phase on the final polling attempt is completion, not a timeout;
+its logs are collected before the normal success/failure decision.
