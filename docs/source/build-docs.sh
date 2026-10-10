@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 DOCS_DIR="./docs"
-VENV_DIR="${DOCS_DIR}/_venv"
+VENV_DIR="${VENV_DIR:-${DOCS_DIR}/_venv}"
 BUILD_TYPE="${BUILD_TYPE:=static}"
 
 # Create a virtual environment and activate it

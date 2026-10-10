@@ -9,6 +9,8 @@ USE_VENV ?= ${USE_VENV:-yes}
 BUILD_VENV_CTX ?= yes
 # CI container name
 CI_CTX_NAME ?= localhost/cifmw:latest
+# Docs/spelling container name
+DOCS_CTX_NAME ?= localhost/cifmw-docs:latest
 # Molecule test configuration file
 MOLECULE_CONFIG ?= ${MOLECULE_CONFIG:-.config/molecule/config_podman.yml}
 # Run molecule against all tests
@@ -238,6 +240,27 @@ spelling: docs ## Run spell check as in CI
 	fi
 
 	pyspelling -c .spellcheck.yml -v -n documentation -S "docs/_build/html/**/*.html"
+
+.PHONY: docs_ctx
+docs_ctx: ## Build the lightweight docs/spelling container
+	podman image exists ${DOCS_CTX_NAME} || \
+		podman build --security-opt label=disable \
+			-t ${DOCS_CTX_NAME} \
+			-f containerfiles/Containerfile.docs \
+			containerfiles
+
+.PHONY: run_ctx_spelling
+run_ctx_spelling: docs_ctx ## Run make spelling in a docs container
+	podman run \
+		--rm \
+		--security-opt label=disable \
+		--userns=keep-id \
+		-u "$$(id -u):$$(id -g)" \
+		-v "${PWD}:/opt/sources" \
+		-e HOME=/tmp \
+		-e VENV_DIR=/tmp/cifmw-docs-venv \
+		${DOCS_CTX_NAME} \
+		make spelling
 
 .PHONY: plugin-development-enable
 plugin-development-enable: # Replace all imports from ansible_collecton to the local git repo and override the PYTHONPATH environment var
