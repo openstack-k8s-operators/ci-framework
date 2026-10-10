@@ -1,0 +1,59 @@
+---
+# Last-resort teardown helper: an OpenStack namespace can stay stuck in
+# "Terminating" forever when CRs still hold finalizers and the operators that
+# would clear them are already (being) removed. The per-kind finalizer removal
+# in `wait_and_cleanup_resource.yaml` only covers the top-level CRs
+# (OpenStackControlPlane, dataplane, RabbitmqCluster); their children
+# (keystone*, nova*, galera, mariadbaccount, keystoneendpoint, ...) and core
+# resources that carry OpenStack finalizers (secrets, configmaps, services) can
+# remain orphaned. Discover every namespaced OpenStack CR kind and strip the
+# finalizers from whatever is left so the namespace can finish terminating.
+- name: Discover namespaced OpenStack CRDs
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: CustomResourceDefinition
+    api_version: apiextensions.k8s.io/v1
+  register: _cifmw_cleanup_crds
+
+- name: Build the list of namespaced OpenStack CR kinds to drain
+  ansible.builtin.set_fact:
+    _cifmw_cleanup_drain_kinds: >-
+      {{
+        _cifmw_cleanup_drain_kinds | default([]) + [{
+          'kind': item.spec.names.kind,
+          'api_version': item.spec.group ~ '/' ~ (
+            item.spec.versions
+            | selectattr('storage', 'defined') | selectattr('storage')
+            | map(attribute='name') | first
+          )
+        }]
+      }}
+  loop: >-
+    {{
+      _cifmw_cleanup_crds.resources
+      | selectattr('spec.scope', 'equalto', 'Namespaced')
+      | selectattr('spec.group', 'search', '(\.openstack\.org$|^rabbitmq\.com$)')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.spec.names.kind }}"
+
+- name: Add core kinds that may carry OpenStack finalizers
+  ansible.builtin.set_fact:
+    _cifmw_cleanup_drain_kinds: >-
+      {{
+        (_cifmw_cleanup_drain_kinds | default([])) + [
+          {'kind': 'Secret', 'api_version': 'v1'},
+          {'kind': 'ConfigMap', 'api_version': 'v1'},
+          {'kind': 'Service', 'api_version': 'v1'}
+        ]
+      }}
+
+- name: Strip finalizers from every remaining resource in the namespace
+  ansible.builtin.include_tasks: strip_finalizers.yaml
+  loop: "{{ _cifmw_cleanup_drain_kinds }}"
+  loop_control:
+    loop_var: cifmw_cleanup_resource
+    label: "{{ cifmw_cleanup_resource.kind }}"

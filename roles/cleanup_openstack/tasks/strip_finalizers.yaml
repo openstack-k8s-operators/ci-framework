@@ -1,0 +1,39 @@
+---
+# Strip finalizers from every remaining resource of a single kind in the
+# OpenStack namespace. Used as a last resort when a resource is stuck because
+# the operator that owns its finalizer is already gone, which would otherwise
+# keep the namespace in "Terminating" forever.
+- name: "List remaining resources of kind - {{ cifmw_cleanup_resource.kind }}"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_openstack_namespace }}"
+    kind: "{{ cifmw_cleanup_resource.kind }}"
+    api_version: "{{ cifmw_cleanup_resource.api_version }}"
+  register: _cifmw_cleanup_remaining
+  failed_when: false
+
+- name: "Force-remove finalizers from stuck resources of kind - {{ cifmw_cleanup_resource.kind }}"
+  kubernetes.core.k8s_json_patch:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    namespace: "{{ cifmw_openstack_namespace }}"
+    kind: "{{ cifmw_cleanup_resource.kind }}"
+    api_version: "{{ cifmw_cleanup_resource.api_version }}"
+    name: "{{ item.metadata.name }}"
+    patch:
+      - op: replace
+        path: /metadata/finalizers
+        value: []
+  loop: >-
+    {{
+      _cifmw_cleanup_remaining.resources | default([])
+      | selectattr('metadata.finalizers', 'defined')
+      | selectattr('metadata.finalizers', 'truthy')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  failed_when: false
