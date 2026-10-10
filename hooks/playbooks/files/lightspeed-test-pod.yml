@@ -1,0 +1,89 @@
+---
+- name: Run the prepared Lightspeed source inside the test Pod
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    cifmw_lightspeed_tests_mount: /lightspeed-source
+    cifmw_lightspeed_tests_checkout: /var/lib/ansible/lightspeed-tests
+    cifmw_lightspeed_tests_results: /var/lib/AnsibleTests/external_files
+  tasks:
+    - name: Check the mounted source archive
+      ansible.builtin.stat:
+        path: "{{ cifmw_lightspeed_tests_mount }}/source.tar.gz"
+        follow: true
+        checksum_algorithm: sha256
+      register: cifmw_lightspeed_tests_archive
+      failed_when: cifmw_lightspeed_tests_archive.stat.checksum | default('') != cifmw_lightspeed_tests_sha256
+
+    - name: Create a writable test checkout
+      ansible.builtin.file:
+        path: "{{ cifmw_lightspeed_tests_checkout }}"
+        state: directory
+        mode: '0755'
+
+    - name: Extract the prepared test source
+      ansible.builtin.unarchive:
+        src: "{{ cifmw_lightspeed_tests_mount }}/source.tar.gz"
+        dest: "{{ cifmw_lightspeed_tests_checkout }}"
+        remote_src: true
+
+    - name: Preserve the source identity in the results PVC
+      ansible.builtin.copy:
+        src: "{{ cifmw_lightspeed_tests_mount }}/source-revision.json"
+        dest: "{{ cifmw_lightspeed_tests_results }}/source-revision.json"
+        remote_src: true
+        mode: '0644'
+
+    - name: Write runner inputs containing only the token path
+      ansible.builtin.copy:
+        content: "{{ cifmw_lightspeed_tests_inputs | to_nice_json }}"
+        dest: "{{ cifmw_lightspeed_tests_results }}/runner-inputs.json"
+        mode: '0644'
+
+    - name: Execute the prepared Lightspeed runner
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - "{{ cifmw_lightspeed_tests_checkout }}/playbooks/run_lightspeed_tests.yaml"
+          - -i
+          - localhost,
+          - -e
+          - "@{{ cifmw_lightspeed_tests_results }}/runner-inputs.json"
+      register: cifmw_lightspeed_tests_run
+      changed_when: true
+      failed_when: false
+
+    - name: Preserve runner output even when setup or tests fail
+      ansible.builtin.copy:
+        dest: "{{ cifmw_lightspeed_tests_results }}/runner.log"
+        content: |
+          {{ cifmw_lightspeed_tests_run.stdout | default('') }}
+          {{ cifmw_lightspeed_tests_run.stderr | default('') }}
+          {{ cifmw_lightspeed_tests_run.msg | default('') }}
+          Exit code: {{ cifmw_lightspeed_tests_run.rc | default(-1) }}
+        mode: '0644'
+
+    - name: Require an executed passing integration report
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - |
+            import json, sys, xml.etree.ElementTree as ET
+            cases = list(ET.parse(sys.argv[1]).iter('testcase'))
+            skipped = sum(case.find('skipped') is not None for case in cases)
+            failed = sum(case.find('failure') is not None or case.find('error') is not None for case in cases)
+            print(json.dumps({'tests': len(cases), 'skipped': skipped, 'failed': failed}))
+            sys.exit(0 if len(cases) > skipped and failed == 0 else 1)
+          - "{{ cifmw_lightspeed_tests_inputs.junit_xml_path }}"
+      register: cifmw_lightspeed_tests_report
+      changed_when: false
+      failed_when: false
+
+    - name: Propagate runner and report failures to the test Pod
+      ansible.builtin.assert:
+        that:
+          - cifmw_lightspeed_tests_run.rc | default(-1) == 0
+          - cifmw_lightspeed_tests_report.rc == 0
+        fail_msg: "Lightspeed tests failed or produced no executed passing tests. Inspect runner.log and baseline.xml on the results PVC."
