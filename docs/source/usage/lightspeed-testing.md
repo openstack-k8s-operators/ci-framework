@@ -36,6 +36,10 @@ ordinary or streamed completions. Readiness remains bounded by 120 retries at
 ten-second intervals, configurable with
 `cifmw_openstack_lightspeed_ready_retries`.
 
+Set `cifmw_openstack_lightspeed_ogx_image` to override only the OGX container
+image through the custom resource. When unset, the operator selects its default
+image. The API container keeps its operator default in either case.
+
 ## Source and authentication
 
 Require `openstack-k8s-operators/lightspeed-tests` in the job. While changes
