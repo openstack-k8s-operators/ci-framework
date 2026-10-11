@@ -141,12 +141,46 @@
                   data:
                     app.py: |
                       import json
+                      import uuid
 
                       from fastapi import FastAPI, Request
                       from fastapi.responses import JSONResponse, StreamingResponse
 
                       app = FastAPI()
                       mock_model = {{ cifmw_openstack_lightspeed_model_name | to_json }}
+
+                      def retrieval_call(body):
+                          # Ask OGX to retrieve real documents once per user turn.
+                          messages = body.get("messages") or []
+                          user_index = next((
+                              i for i in range(len(messages) - 1, -1, -1)
+                              if messages[i].get("role") == "user"
+                          ), None)
+                          if user_index is None or any(
+                              message.get("role") == "tool" for message in messages[user_index + 1:]
+                          ):
+                              return None
+                          tool_choice = body.get("tool_choice", "auto")
+                          if tool_choice == "none":
+                              return None
+                          query = messages[user_index].get("content")
+                          if isinstance(query, list):
+                              query = "\n".join(part["text"] for part in query if part.get("type") == "text")
+                          if not query:
+                              return None
+                          for tool in body.get("tools") or []:
+                              function = tool.get("function", {})
+                              name = function.get("name")
+                              if tool.get("type") != "function" or name not in ("file_search", "knowledge_search"):
+                                  continue
+                              if isinstance(tool_choice, dict) and tool_choice.get("function", {}).get("name") != name:
+                                  continue
+                              return {
+                                  "id": "call_" + uuid.uuid4().hex,
+                                  "type": "function",
+                                  "function": {"name": name, "arguments": json.dumps({"query": query})},
+                              }
+                          return None
 
                       @app.get("/v1/models")
                       async def models_get():
@@ -194,6 +228,13 @@
                               }
                           }
 
+                          choice = response["choices"][0]
+                          tool_call = retrieval_call(body)
+                          if tool_call is not None:
+                              choice["message"]["content"] = None
+                              choice["message"]["tool_calls"] = [tool_call]
+                              choice["finish_reason"] = "tool_calls"
+
                           # The provider adapter requests streaming even for /v1/query.
                           if body.get("stream"):
                               def stream_chunks():
@@ -203,11 +244,13 @@
                                       "created": response["created"],
                                       "model": model,
                                   }
-                                  content = response["choices"][0]["message"]["content"]
+                                  delta = {"content": choice["message"]["content"]}
+                                  if tool_call is not None:
+                                      delta = {"tool_calls": [{"index": 0, **tool_call}]}
                                   for delta, finish_reason in [
                                       ({"role": "assistant"}, None),
-                                      ({"content": content}, None),
-                                      ({}, "stop"),
+                                      (delta, None),
+                                      ({}, choice["finish_reason"]),
                                   ]:
                                       chunk["choices"] = [{
                                           "index": 0,
