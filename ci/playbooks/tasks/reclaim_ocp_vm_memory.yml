@@ -1,0 +1,115 @@
+# Reclaim hypervisor memory from the long-lived OCP VMs before a reuse_ocp
+# deployment.
+#
+# On a reused environment (reuse_ocp: true) the guest memory creeps up to the
+# full allocation over days: the VMs touch all their RAM (page cache, container
+# layers, etcd, ...) and never hand it back, because the virtio memballoon has no
+# freePageReporting. The qemu RSS stays pinned near the max, the hypervisor runs
+# out of memory and swaps, and deployments slow down enough to time out (e.g.
+# `oc wait osdpns ... --for condition=SetupReady` hitting its 90m limit).
+#
+# Inflating the balloon with `virsh setmem` forces the guests to return the
+# unused pages to the host, in-flight, without rebooting the VMs (which would
+# bounce etcd). We measure the per-VM host RSS and the host free/swap before and
+# after, and print them so the effect is visible in the ansible log.
+#
+# NOTE: never set the live memory below a guest's real working set or OCP will
+# start evicting/OOM-killing pods. The floor guard below protects against that.
+---
+- name: Reclaim memory from the reused OCP VMs
+  delegate_to: "{{ cifmw_reclaim_vm_mem_hypervisor | default('hypervisor') }}"
+  become: true
+  block:
+    - name: List running libvirt domains
+      ansible.builtin.command:
+        cmd: virsh list --name --state-running
+      register: _reclaim_running
+      changed_when: false
+
+    - name: Select the OCP VMs to reclaim memory from
+      ansible.builtin.set_fact:
+        _reclaim_targets: >-
+          {{
+            _reclaim_running.stdout_lines
+            | select('match', cifmw_reclaim_vm_mem_pattern | default('.*ocp-master.*'))
+            | list
+          }}
+
+    - name: Skip reclaim when no matching VM is found
+      ansible.builtin.debug:
+        msg: "No running VM matches '{{ cifmw_reclaim_vm_mem_pattern | default('.*ocp-master.*') }}', nothing to reclaim."
+      when: _reclaim_targets | length == 0
+
+    - name: Reclaim block
+      when: _reclaim_targets | length > 0
+      block:
+        - name: Capture host memory before reclaim
+          ansible.builtin.command:
+            cmd: free -h
+          register: _reclaim_host_before
+          changed_when: false
+
+        - name: Capture per-VM memory stats before reclaim
+          ansible.builtin.command:
+            cmd: "virsh dommemstat {{ item }}"
+          register: _reclaim_before
+          changed_when: false
+          loop: "{{ _reclaim_targets }}"
+
+        - name: Read each VM max memory
+          ansible.builtin.command:
+            cmd: "virsh dominfo {{ item }}"
+          register: _reclaim_dominfo
+          changed_when: false
+          loop: "{{ _reclaim_targets }}"
+
+        - name: Inflate the balloon to the configured fraction of max memory
+          vars:
+            _max_kib: "{{ (item.stdout_lines | select('match', '^Max memory:') | first).split()[2] | int }}"
+            _target_kib: "{{ (_max_kib | int * (cifmw_reclaim_vm_mem_percent | default(85) | int) / 100) | int }}"
+          ansible.builtin.command:
+            cmd: "virsh setmem {{ item.item }} {{ _target_kib }} --live"
+          loop: "{{ _reclaim_dominfo.results }}"
+          loop_control:
+            label: "{{ item.item }} -> {{ _target_kib }} KiB"
+          # Guard: never reclaim below the working-set floor (default 20 GiB).
+          when: _target_kib | int >= (cifmw_reclaim_vm_mem_floor_kib | default(20971520) | int)
+          changed_when: true
+
+        - name: Let the guests deflate
+          ansible.builtin.command:
+            cmd: "sleep {{ cifmw_reclaim_vm_mem_settle | default(10) | int }}"
+          changed_when: false
+
+        - name: Capture per-VM memory stats after reclaim
+          ansible.builtin.command:
+            cmd: "virsh dommemstat {{ item }}"
+          register: _reclaim_after
+          changed_when: false
+          loop: "{{ _reclaim_targets }}"
+
+        - name: Capture host memory after reclaim
+          ansible.builtin.command:
+            cmd: free -h
+          register: _reclaim_host_after
+          changed_when: false
+
+        - name: Report per-VM memory reclaimed
+          vars:
+            _rss_before: "{{ (item.0.stdout_lines | select('match', '^rss ') | first).split()[1] | int }}"
+            _rss_after: "{{ (item.1.stdout_lines | select('match', '^rss ') | first).split()[1] | int }}"
+            _actual_after: "{{ (item.1.stdout_lines | select('match', '^actual ') | first).split()[1] | int }}"
+          ansible.builtin.debug:
+            msg: >-
+              {{ item.0.item }}:
+              host RSS {{ (_rss_before | int / 1048576) | round(2) }} GiB ->
+              {{ (_rss_after | int / 1048576) | round(2) }} GiB
+              (freed {{ ((_rss_before | int - _rss_after | int) / 1024) | int }} MiB,
+              balloon now {{ (_actual_after | int / 1048576) | round(2) }} GiB)
+          loop: "{{ _reclaim_before.results | zip(_reclaim_after.results) | list }}"
+          loop_control:
+            label: "{{ item.0.item }}"
+
+        - name: Report total host memory before/after reclaim
+          ansible.builtin.debug:
+            msg: "{{ ['=== host memory BEFORE ==='] + _reclaim_host_before.stdout_lines + ['=== host memory AFTER ==='] + _reclaim_host_after.stdout_lines }}"
