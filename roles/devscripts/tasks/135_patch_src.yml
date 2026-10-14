@@ -59,3 +59,21 @@
     insertbefore: '.*-b -vvv.*setup-playbook.yml'
     firstmatch: true
     line: '    -e "libvirt_domain_type=kvm" \'
+
+# 01_install_requirements.sh already retries dnf upgrades and go downloads, but
+# the PyPI installs are single-shot. Periodic jobs can fail mid make all when
+# files.pythonhosted.org times out on the large ansible wheel.
+- name: Retry transient PyPI failures in 01_install_requirements.sh
+  vars:
+    _pip_flags: "--retries {{ cifmw_devscripts_pip_retries }} --timeout {{ cifmw_devscripts_pip_timeout }}"
+  ansible.builtin.replace:
+    path: "{{ cifmw_devscripts_repo_dir }}/01_install_requirements.sh"
+    regexp: "{{ item.regexp }}"
+    replace: "{{ item.replace }}"
+  loop:
+    - regexp: 'sudo python -m pip install(?: --retries \d+ --timeout \d+)? ''yq>=3,<4'''
+      replace: 'sudo python -m pip install {{ _pip_flags }} ''yq>=3,<4'''
+    - regexp: 'sudo python -m pip install(?: --retries \d+ --timeout \d+)? netaddr lxml'
+      replace: 'sudo python -m pip install {{ _pip_flags }} netaddr lxml'
+    - regexp: 'sudo python -m pip install(?: --retries \d+ --timeout \d+)? ansible=="\$\{ANSIBLE_VERSION\}"'
+      replace: 'sudo python -m pip install {{ _pip_flags }} ansible=="${ANSIBLE_VERSION}"'
