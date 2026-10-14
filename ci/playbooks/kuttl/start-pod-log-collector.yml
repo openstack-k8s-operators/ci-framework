@@ -1,0 +1,80 @@
+---
+# Starts a background collector that streams kuttl pod logs to files for the
+# whole kuttl run. kuttl deletes the service pods at the end of each test, and
+# must-gather only runs afterwards, so without this the pod logs are lost. Hooked
+# into the base kuttl jobs' pre-run so every operator (both the install_yamls and
+# the operator-target kuttl paths) is covered. Stopped by stop-pod-log-collector.yml.
+- hosts: controller
+  gather_facts: true
+  vars:
+    kuttl_basedir: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}"
+    kuttl_pod_logs_dir: "{{ kuttl_basedir }}/logs/kuttl-pod-logs"
+    cifmw_kuttl_log_collector_script: "{{ ansible_user_dir }}/.local/bin/kuttl-pod-log-collector.sh"
+    cifmw_stern_version: "1.34.0"
+  tasks:
+    - name: Ensure collector and log directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ cifmw_kuttl_log_collector_script | dirname }}"
+        - "{{ kuttl_pod_logs_dir }}"
+
+    - name: Install stern from its GitHub release
+      become: true
+      ansible.builtin.unarchive:
+        src: "https://github.com/stern/stern/releases/download/v{{ cifmw_stern_version }}/stern_{{ cifmw_stern_version }}_linux_amd64.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        creates: /usr/local/bin/stern
+        mode: "0755"
+        extra_opts:
+          - --no-same-owner
+
+    - name: Create the collector script
+      ansible.builtin.copy:
+        dest: "{{ cifmw_kuttl_log_collector_script }}"
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # kuttl deletes the service pods at the end of each test and must-gather
+          # only runs afterwards, so their logs would otherwise be lost.
+          set -u
+
+          OUTDIR="${KUTTL_POD_LOGS_DIR:?KUTTL_POD_LOGS_DIR must be set}"
+          declare -A started
+
+          while true; do
+            namespaces="$(oc get namespace -o name 2>/dev/null | sed -n 's#^namespace/\(.*-kuttl-tests\)$#\1#p')"
+            for ns in ${namespaces}; do
+              [ -n "${started[$ns]:-}" ] && continue
+              started[$ns]=1
+              echo "$(date -u +%FT%TZ) tailing ns=${ns}"
+              stern '.*' --namespace "${ns}" --color never --max-log-requests 150 \
+                --template '{% raw %}{{.PodName}} {{.ContainerName}} {{.Message}}{{"\n"}}{% endraw %}' \
+                2> >(while IFS= read -r l; do printf '%s %s\n' "$(date -u +%FT%TZ)" "${l}"; done >> "${OUTDIR}/collector.log") \
+                | awk -v dir="${OUTDIR}" -v ns="${ns}" '
+                    {
+                      file = dir "/" ns "." $1 ".log"
+                      line = $0
+                      sub(/^[^ ]+ /, "", line)
+                      print line >> file
+                      fflush(file)
+                    }' &
+            done
+            sleep 10
+          done
+
+    - name: Start the kuttl pod log collector (detached)
+      # cifmw_path/cifmw_openshift_kubeconfig are set later (run phase), so fall
+      # back to the standard CRC paths for this pre-run play.
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(ansible_user_dir ~ '/.crc/machines/crc/kubeconfig') }}"
+        PATH: "{{ cifmw_path | default(ansible_user_dir ~ '/.crc/bin:' ~ ansible_user_dir ~ '/.crc/bin/oc:' ~ ansible_user_dir ~ '/bin:' ~ ansible_env.PATH) }}"
+        KUTTL_POD_LOGS_DIR: "{{ kuttl_pod_logs_dir }}"
+      ansible.builtin.shell:
+        cmd: >-
+          nohup {{ cifmw_kuttl_log_collector_script }}
+          </dev/null >> {{ kuttl_pod_logs_dir }}/collector.log 2>&1 &
+      changed_when: true
