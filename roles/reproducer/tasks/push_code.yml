@@ -173,6 +173,30 @@
         loop_var: repository
         label: "{{ repository.src | basename }}"
 
+# Some CI-level secrets (e.g. QE credential files written to disk by a Zuul
+# pre-run play on this same node) are only ever visible from here, on the
+# original controller - hooks and roles running later push their execution
+# onto controller-0, which has no network path back to reach this node.
+# This is the last point where "localhost" still means "here", so it's the
+# only place a file like that can be handed over.
+- name: Sync QE secrets onto controller-0
+  when: cifmw_reproducer_sync_qe_secrets | default(false) | bool
+  block:
+    - name: Check if QE secrets directory exists locally
+      delegate_to: localhost
+      ansible.builtin.stat:
+        path: "{{ cifmw_reproducer_qe_secrets_src }}"
+      register: _cifmw_reproducer_qe_secrets_stat
+
+    - name: Push QE secrets onto controller-0
+      when: _cifmw_reproducer_qe_secrets_stat.stat.exists
+      delegate_to: localhost
+      ansible.posix.synchronize:
+        src: "{{ cifmw_reproducer_qe_secrets_src }}/"
+        dest: "{{ cifmw_reproducer_controller_user }}@controller-0:{{ cifmw_reproducer_qe_secrets_dest }}"
+        archive: true
+        recursive: true
+
 # installing the cifmw collection will pull it's dependencies alongside it
 - name: Install collections on controller-0
   delegate_to: controller-0
