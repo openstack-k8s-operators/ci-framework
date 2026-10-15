@@ -37,10 +37,29 @@
             - "{{ cifmw_update_containers_registry }}"
           allowedRegistries: "{{ all_registries }}"
 
+- name: Add disconnected registry
+  when: cifmw_disconnected_containers_registry is defined
+  vars:
+    all_registries: "{{ ([cifmw_disconnected_containers_registry] + cifmw_openshift_setup_allowed_registries + cifmw_openshift_setup_allowed_extra_registries) | unique }}"
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit)}}"
+    context: "{{ cifmw_openshift_context | default(omit)}}"
+    merge_type: "merge"
+    definition:
+      apiVersion: config.openshift.io/v1
+      kind: Image
+      metadata:
+        name: cluster
+      spec:
+        registrySources:
+          allowedRegistries: "{{ all_registries }}"
+
 - name: Create ImageDigestMirrorSet repository digest mirrors
   when:
     - cifmw_openshift_setup_digest_mirrors is defined
     - cifmw_openshift_setup_digest_mirrors | length > 0
+    - cifmw_disconnected_containers_registry is not defined
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
@@ -60,6 +79,7 @@
   when:
     - cifmw_openshift_setup_tag_mirrors is defined
     - cifmw_openshift_setup_tag_mirrors | length > 0
+    - cifmw_disconnected_containers_registry is not defined
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit)}}"
