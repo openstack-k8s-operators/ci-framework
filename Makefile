@@ -1,4 +1,6 @@
 SHELL := /bin/bash -o pipefail -e
+# Match the interpreter used by scripts/setup_env.
+PYTHON ?= $(if $(CIFMW_PYTHON_EXEC),$(CIFMW_PYTHON_EXEC),python3.12)
 # Roles directory location. May point outside of this repository
 ROLE_DIR ?= roles/
 # Code base directory - used for pre-commit check
@@ -46,7 +48,7 @@ create_new_role: ## Please call `new_role ROLE_NAME=your_role` instead.
 
 .PHONY: role_molecule
 role_molecule: ## Regenerate the molecule jobs configuration
-	scripts/create_role_molecule.py
+	$(PYTHON) scripts/create_role_molecule.py
 
 .PHONY: new_role
 new_role: export INTER_CALL=yes

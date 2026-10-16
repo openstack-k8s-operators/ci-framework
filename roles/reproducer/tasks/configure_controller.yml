@@ -88,11 +88,15 @@
           - bash-completion
           - bind-utils
           - git-core
+          - gcc
           - make
           - podman
           - python3-jmespath
           - python3-netaddr
           - python3-pip
+          - python3.12
+          - python3.12-pip
+          - python3.12-devel
           - tmux
           - vim
           - wget
@@ -395,6 +399,7 @@
       poll: 0
       ansible.builtin.pip:
         requirements: "{{ have_controller_reqs | ternary(controller_reqs, remote) }}"
+        executable: /usr/bin/pip3.12
       vars:
         have_controller_reqs: "{{ _controller_common_requirements_check.stat is defined and _controller_common_requirements_check.stat.exists }}"
         controller_reqs: "{{ cifmw_reproducer_controller_user_dir }}/{{ cifmw_repo_relative }}/common-requirements.txt"
@@ -520,6 +525,15 @@
       register: _sync_dep_install_result
       until: _sync_dep_install_result.finished
       retries: 20
+
+    - name: Install Kubernetes dependencies for the system module interpreter
+      ansible.builtin.pip:
+        name:
+          - kubernetes
+          - kubernetes-validate
+          - oauthlib
+        executable: /usr/bin/pip3
+        extra_args: "--user --constraint {{ _sync_dep_install_result.requirements | quote }}"
 
     - name: Configure ntp service
       ansible.builtin.include_role:
