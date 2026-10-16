@@ -33,7 +33,7 @@ class TestApproveCSRCore(ModuleBaseTestCase):
 
             result = rst.exception.args[0]
 
-            self.assertEquals(result["msg"], expected_msg)
+            self.assertEqual(result["msg"], expected_msg)
             self.assertTrue(result["failed"])
 
     def test_negative_approving_cert_requests(self):
@@ -52,7 +52,7 @@ class TestApproveCSRCore(ModuleBaseTestCase):
 
             result = rst.exception.args[0]
 
-            self.assertEquals(result["msg"], _msg)
+            self.assertEqual(result["msg"], _msg)
             self.assertTrue(result["failed"])
 
     def test_one_iteration_on_wait(self):
@@ -92,4 +92,4 @@ class TestApproveCSRCore(ModuleBaseTestCase):
                 approve_csr.run_module()
 
             self.assertTrue(rst.exception.args[0]["changed"])
-            self.assertEquals(rst.exception.args[0]["rc"], 0)
+            self.assertEqual(rst.exception.args[0]["rc"], 0)

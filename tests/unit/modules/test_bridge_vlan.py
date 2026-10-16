@@ -61,7 +61,7 @@ class TestBridgeVLAN(ModuleBaseTestCase):
             result = rst.exception.args[0]
             self.assertFalse(result["changed"])
             self.assertIn("test-net", result["networks"])
-            self.assertEquals(result["networks"]["test-net"]["error"], _msg)
+            self.assertEqual(result["networks"]["test-net"]["error"], _msg)
 
     def test_negative_network_with_no_tap(self):
         """Test when there is no port attached to the network."""
@@ -79,7 +79,7 @@ class TestBridgeVLAN(ModuleBaseTestCase):
 
             result = rst.exception.args[0]
             self.assertFalse(result["changed"])
-            self.assertEquals(result["networks"]["test-net"]["error"], _msg)
+            self.assertEqual(result["networks"]["test-net"]["error"], _msg)
 
     def test_negative_no_vlan_ids(self):
         """Test when there is no VLAN ids associated with the physical interface."""
@@ -103,7 +103,7 @@ class TestBridgeVLAN(ModuleBaseTestCase):
 
                 result = rst.exception.args[0]
                 self.assertFalse(result["changed"])
-                self.assertEquals(result["networks"]["test-net"]["error"], _msg)
+                self.assertEqual(result["networks"]["test-net"]["error"], _msg)
 
     def test_negative_failed_to_apply_vlan(self):
         """Test failure on applying VLANs to TAP."""
