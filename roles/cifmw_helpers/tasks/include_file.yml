@@ -21,6 +21,12 @@
     - name: Create temporary directory
       ansible.builtin.tempfile:
         state: directory
+        path: >-
+          {{ cifmw_helpers_tmp_dir | default(
+               zuul.executor.work_root ~ '/tmp'
+               if (cifmw_reproducer_native_deployment | default(false) | bool) and zuul is defined
+               and (zuul.executor.work_root ~ '/tmp') is exists
+               else omit) }}
       register: _tmp_dir
       delegate_to: localhost
 
@@ -47,6 +53,7 @@
       delegate_to: localhost
   always:
     - name: Remove temporary directory
+      when: _tmp_dir.path is defined
       ansible.builtin.file:
         path: "{{ _tmp_dir.path }}"
         state: absent
