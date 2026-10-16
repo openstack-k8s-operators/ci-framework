@@ -12,23 +12,54 @@
       ansible.builtin.include_role:
         name: run_hook
 
-    - name: run kuttl tests
-      # Run via ci_script so the kuttl output is streamed live to a dedicated,
-      # zuul-collected file ({{ cifmw_basedir }}/logs/ci_script_NNN_run_kuttl_tests.log)
-      # instead of only being returned inline in job-output.txt when the task
-      # finishes. This means partial logs survive a hang/timeout.
-      #
-      # cifmw_zuul_target_host_env lets a job pass extra env vars (e.g.
-      # KUTTL_SUITE) into the operator Make targets. Merge it last so a job
-      # can override the suite selected by the operator Makefile default.
-      environment: >-
-        {{
-          {
-            'KUBECONFIG': cifmw_openshift_kubeconfig,
-            'PATH': cifmw_path | default(ansible_env.PATH),
-          } | combine(cifmw_zuul_target_host_env | default({}))
-        }}
-      cifmw.general.ci_script:
-        output_dir: "{{ cifmw_basedir | default(ansible_user_dir + '/ci-framework-data') }}/artifacts"
-        chdir: "{{ ansible_user_dir }}/{{ operator_basedir }}"
-        script: make kuttl-test-run
+    - name: Run KUTTL tests and collect report files
+      block:
+        - name: run kuttl tests
+          # Run via ci_script so the kuttl output is streamed live to a dedicated,
+          # zuul-collected file ({{ cifmw_basedir }}/logs/ci_script_NNN_run_kuttl_tests.log)
+          # instead of only being returned inline in job-output.txt when the task
+          # finishes. This means partial logs survive a hang/timeout.
+          #
+          # cifmw_zuul_target_host_env lets a job pass extra env vars (e.g.
+          # KUTTL_SUITE) into the operator Make targets. Merge it last so a job
+          # can override the suite selected by the operator Makefile default.
+          environment: >-
+            {{
+              {
+                'KUBECONFIG': cifmw_openshift_kubeconfig,
+                'PATH': cifmw_path | default(ansible_env.PATH),
+              } | combine(cifmw_zuul_target_host_env | default({}))
+            }}
+          cifmw.general.ci_script:
+            output_dir: "{{ cifmw_basedir | default(ansible_user_dir + '/ci-framework-data') }}/artifacts"
+            chdir: "{{ ansible_user_dir }}/{{ operator_basedir }}"
+            script: make kuttl-test-run
+
+      always:
+        - name: Find the generated KUTTL JSON/XML report files
+          ansible.builtin.find:
+            paths: "{{ ansible_user_dir }}/{{ operator_basedir }}/test/kuttl"
+            file_type: file
+            patterns:
+              - '*.json'
+              - '*.xml'
+            recurse: true
+          register: "_cifmw_kuttl_report_files"
+
+        - name: Copy the log results of {{ operator_name }}
+          vars:
+            _kuttl_test_result_dir: "{{ cifmw_basedir }}/tests/kuttl_{{ operator_name }}"
+          block:
+            - name: Create the test results directory
+              ansible.builtin.file:
+                path: "{{ _kuttl_test_result_dir }}"
+                state: directory
+                mode: '0755'
+
+            - name: Copy the generated test results to the test results directory
+              ansible.builtin.copy:
+                src: "{{ item.path }}"
+                dest: "{{ _kuttl_test_result_dir }}"
+                mode: '0644'
+              loop: "{{ _cifmw_kuttl_report_files.files | default([]) }}"
+              ignore_errors: true  # noqa: ignore-errors
