@@ -9,6 +9,26 @@ before you submit a merge request.
 > Python formatting (black), shell scripts (shellcheck).
 > Run `make pre_commit` to catch those locally.
 
+## Review scope
+
+When reviewing code (human or automated), skip these paths:
+
+- `custom/` — Gitignored local overrides, never committed.
+- `docs/` — Sphinx documentation, not runtime code.
+- `containerfiles/` — Podman image definitions.
+- `.github/` — GitHub Actions workflows.
+- Generated files: `zuul.d/molecule.yaml`, `zuul.d/projects.yaml` — these
+  are overwritten by `make role_molecule`, never hand-edit.
+
+Do not apply Ansible-specific rules (FQCN, variable naming, retries,
+`changed_when`, etc.) to `zuul.d/` files — they are Zuul job definitions,
+not Ansible playbooks. However, still review `zuul.d/` for logical issues
+such as incorrect variable overrides, missing parent job settings, or
+wrong job dependencies.
+
+Review `scripts/` for logic and correctness. Do not flag shell style
+issues already caught by shellcheck or Python formatting caught by black.
+
 ---
 
 ## [Critical] Idempotency
@@ -34,13 +54,17 @@ Every task must produce the same result whether run once or ten times.
 ```
 
 Shell/command tasks that mutate state must have `creates:`, `removes:`,
-or a `when:` condition checking current state.
+or a `when:` condition checking current state. Do not flag read-only
+commands that already declare `changed_when: false` — those are not
+mutating and do not need idempotency guards.
 
 ---
 
 ## [Critical] Error Handling
 
 Use `block`/`rescue`/`always` — never `ignore_errors: true`.
+A `# noqa: ignore-errors` comment does not make it acceptable — it only
+suppresses the linter; the code still needs proper error handling.
 Always dump context in the rescue block before failing.
 
 ```yaml
