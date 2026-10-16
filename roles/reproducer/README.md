@@ -41,6 +41,9 @@ Those parameters shouldn't be used, unless the user is able to understand potent
 * `cifmw_reproducer_validate_network`: (Bool) Toggle network validations. Those validations ensure all of listed networks in VMs are defined. Defaults to `true`.
 * `cifmw_reproducer_validate_ocp_layout`: (Bool) Toggle OCP layout validations. Those validations ensure volumes, amounts and resources are properly defined for OCP cluster members (masters and workers). Defaults to `true`.
 * `cifmw_reproducer_validate_network_host`: (String) Specify the hostname that should be pinged in order to validate network connectivity from the ctlplane network. Default value is `controller-0.utility`
+* `cifmw_reproducer_sync_qe_secrets`: (Bool) Sync `cifmw_reproducer_qe_secrets_src` onto controller-0 as `cifmw_reproducer_qe_secrets_dest`, from the original controller node, before execution hands off to controller-0. Needed because controller-0 has no network path back to the original controller, so files written there by a Zuul pre-run (e.g. CI credential files) are otherwise unreachable from any later hook or role. Defaults to `false`.
+* `cifmw_reproducer_qe_secrets_src`: (String) Source directory to sync when `cifmw_reproducer_sync_qe_secrets` is `true`. Defaults to `/var/tmp/qe-secrets`.
+* `cifmw_reproducer_qe_secrets_dest`: (String) Destination directory on controller-0 when `cifmw_reproducer_sync_qe_secrets` is `true`. Defaults to `{{ cifmw_reproducer_controller_user_dir }}/qe-secrets`.
 
 ### run_job and run_content_provider booleans and risks.
 
