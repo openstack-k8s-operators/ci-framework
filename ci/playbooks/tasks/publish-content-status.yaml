@@ -1,0 +1,31 @@
+---
+# Publish the content-provider status document atomically.
+#
+# The status document is served by busybox httpd in a container with the
+# status directory bind-mounted read-only. Callers must define these
+# variables before including this file:
+#
+#   cifmw_content_provider_status_dir - directory served by the status file server
+#   cifmw_content_provider_status     - dict with the full status document
+#
+# The document is staged inside the served directory, labeled so the
+# container can read it (ansible stages through ~/.ansible/tmp, so the
+# staged file carries a host SELinux label; the copy task's setype is
+# equivalent to chcon -t - it changes only the type, keeping the file's
+# user:role:level, and is silently ignored where SELinux is disabled),
+# and moved into place so concurrent readers never observe a partially
+# written document.
+- name: Stage the content status document
+  ansible.builtin.copy:
+    dest: "{{ cifmw_content_provider_status_dir }}/.content.json.tmp"
+    mode: "0644"
+    content: "{{ cifmw_content_provider_status | to_nice_json }}"
+    setype: container_file_t
+
+- name: Publish the content status document atomically
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ cifmw_content_provider_status_dir }}/.content.json.tmp"
+      - "{{ cifmw_content_provider_status_dir }}/content.json"
+  changed_when: true
