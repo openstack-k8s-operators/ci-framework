@@ -104,3 +104,17 @@ instance's
 [this commit](https://softwarefactory-project.io/cgit/config/commit/?id=23517ea396d9f602aec19625224eb71a8cd7642d)
 for an example of how a label like `crc-cloud-ocp-4-20-1-3xl` from the above
 nodeset is defined.
+
+## Content provider output
+
+The content provider jobs (`openstack-k8s-operators-content-provider`
+and its variants) publish their results in two ways: the `zuul_return`
+data consumed by dependent jobs, and a plain HTTP status document
+served next to their registry. Dependent jobs receive the status page
+endpoint as `content_provider_status_url` in the returned data, while
+jobs running in parallel with the provider (no Zuul dependency) can
+discover it through the console stream marker.
+
+See the [content provider status page](zuul-content-provider-status-page.md)
+documentation for the document states, the endpoint discovery, and the
+anchor job requirement for parallel consumers.
