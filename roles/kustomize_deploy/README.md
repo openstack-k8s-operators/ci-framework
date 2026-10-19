@@ -151,6 +151,15 @@ Some tasks uses timeouts when applying or waiting for resources. Those timeouts 
 * `cifmw_kustomize_deploy_delay`: (Int) Ansible `delay` passed to tasks that waits for a resource to reach a target state (default `10`)
 * `cifmw_kustomize_deploy_retries_subscription`: (Int) Ansible `retries` passed to tasks that wait for the Subscription (default `90`)
 * `cifmw_kustomize_deploy_retries_install_plan`: (Int) Ansible `retries` passed to tasks that wait for the InstallPlan (default `60`)
+* `cifmw_kustomize_deploy_ansible_ee_idle_timeout`: (Int) `RUNNER_IDLE_TIMEOUT`
+  in the Ansible Execution Environment ConfigMap for dataplane deployments
+  (default `1800` seconds). Set this to a larger value for long-running
+  dataplane tasks that produce no Ansible output. The setting takes effect
+  immediately before each OpenStackDataPlaneDeployment is applied.
+* `cifmw_kustomize_deploy_ansible_ee_env_configmap_name`: (String) ConfigMap
+  referenced by `OpenStackDataPlaneDeployment.spec.ansibleEEEnvConfigMapName`
+  (default `openstack-aee-default-env`). Override this when the deployment
+  uses a custom Ansible EE environment ConfigMap.
 
 ### Task tagging
 
