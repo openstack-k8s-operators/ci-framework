@@ -18,6 +18,7 @@
   hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
   connection: local
   vars:
+    cifmw_lightspeed_tests_namespace: "{{ cifmw_test_operator_namespace | default('openstack') }}"
     # OpenStack Lightspeed configuration
     # Note: Using openstack-lightspeed namespace per operator's suggested namespace
     openstack_lightspeed_namespace: "{{ cifmw_openstack_lightspeed_namespace | default('openstack-lightspeed') }}"
@@ -114,6 +115,31 @@
           retries: 5
           delay: 10
           until: _result is not failed
+
+        - name: Authorize the test Pod's explicitly projected client token
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              - apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRole
+                metadata:
+                  name: lightspeed-tests-access
+                rules:
+                  - nonResourceURLs: [/ls-access]
+                    verbs: [get]
+              - apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: "lightspeed-tests-access-{{ cifmw_lightspeed_tests_namespace }}"
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: lightspeed-tests-access
+                subjects:
+                  # The current test-operator uses the namespace's default account.
+                  - kind: ServiceAccount
+                    name: default
+                    namespace: "{{ cifmw_lightspeed_tests_namespace }}"
 
         - name: Create OperatorGroup for OpenStack Lightspeed
           kubernetes.core.k8s:

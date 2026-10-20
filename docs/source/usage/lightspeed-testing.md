@@ -1,8 +1,17 @@
 # OpenStack Lightspeed deployment and functional tests
 
-Deploy Lightspeed with the existing hook, then run its integration suite in an
-AnsibleTest Pod through the `test_operator` role. The deployment job retains
-its inherited Tempest stage:
+Deploy Lightspeed with the existing installer, then run its integration playbook
+in an AnsibleTest Pod through the existing `test_operator` role. Keep the test
+configuration in the consuming operator job's `zuul.d/jobs.yaml`.
+
+The direct route requires the runner fixes from
+[lightspeed-tests PR #17](https://github.com/openstack-k8s-operators/lightspeed-tests/pull/17)
+to be merged before using the upstream default branch. Do not submit or recheck
+the operator job against an upstream branch that does not contain those fixes.
+
+## Job configuration
+
+The core settings are:
 
 ```yaml
 pre_tests_01_deploy_lightspeed_operator:
@@ -12,136 +21,135 @@ cifmw_openstack_lightspeed_mock_enabled: true
 cifmw_run_tests: true
 cifmw_test_operator_fail_on_test_failure: true
 cifmw_test_operator_stages:
-  - name: tempest
-    type: tempest
   - name: lightspeed
     type: ansibletest
-    pre_test_stage_hooks:
-      - name: Prepare Lightspeed tests
-        source: prepare-openstack-lightspeed-tests.yml
-        type: playbook
-    test_vars_file: "{{ cifmw_basedir }}/artifacts/lightspeed-test-stage.yml"
+cifmw_test_operator_namespace: openstack
+cifmw_test_operator_ansibletest_ansible_git_repo: https://github.com/openstack-k8s-operators/lightspeed-tests
+cifmw_test_operator_ansibletest_ansible_git_branch: ""
+cifmw_test_operator_ansibletest_ansible_playbook_path: playbooks/run_lightspeed_tests.yaml
+cifmw_test_operator_ansibletest_ansible_inventory: |
+  localhost ansible_connection=local ansible_python_interpreter=python3
+cifmw_test_operator_ansibletest_ansible_var_files: |
+  test_suite_path: /var/lib/ansible/ansible
+  lightspeed_url: https://lightspeed-app-server.openstack-lightspeed.svc.cluster.local:8443
+  lightspeed_timeout: 120
+  lightspeed_token_file: /lightspeed-auth/token
+  pytest_args: "-v --tb=short --color=no tests/integration"
+  junit_xml_path: /var/lib/AnsibleTests/external_files/baseline.xml
+cifmw_test_operator_ansibletest_extra_mounts:
+  - name: lightspeed
+    extraVol:
+      - propagation: [AnsibleTest]
+        extraVolType: Undefined
+        volumes:
+          - name: lightspeed-client-token
+            projected:
+              sources:
+                - serviceAccountToken:
+                    path: token
+                    expirationSeconds: 3600
+        mounts:
+          - name: lightspeed-client-token
+            mountPath: /lightspeed-auth
+            readOnly: true
 ```
 
-The stage list above preserves the default Tempest stage of the Lightspeed
-job's parent. If another caller defines additional stages, retain those too.
-The `cifmw_setup` role runs deployment hooks before entering the test role.
-The preparation hook runs immediately before the Lightspeed stage. It creates
-source and authorization resources and writes stage variables; the existing
-role creates the AnsibleTest, waits for its Pods and collects the results.
+Copy the image, resources, security and result-reader settings from the consuming
+job as well. It uses `openstack-ansible-tests:current-podified`, global privilege,
+SELinux and storage settings for its single Lightspeed stage, and the existing
+`cifmw_test_operator_log_pod_definition` override for the reader. No shared-role
+extensions or preparation hook are required. KUTTL runs separately.
 
 The deployment hook installs the catalog, OLM subscription, credential Secret
 and OpenStackLightspeed resource. The opt-in mock handles model discovery and
 ordinary or streamed completions. Readiness remains bounded by 120 retries at
 ten-second intervals, configurable with
-`cifmw_openstack_lightspeed_ready_retries`.
-
-Set `cifmw_openstack_lightspeed_ogx_image` to override only the OGX container
-image through the custom resource. When unset, the operator selects its default
-image. The API container keeps its operator default in either case.
+`cifmw_openstack_lightspeed_ready_retries`. The operator selects its default
+application images when no image override is supplied by the job.
 
 ## Source and authentication
 
-Require `openstack-k8s-operators/lightspeed-tests` in the job. While changes
-remain unmerged, include both framework and tests PR URLs as `Depends-On:` lines
-in the operator PR description. A required project alone does not select a PR.
+The test image clones the configured Git repository into
+`/var/lib/ansible/ansible` and executes the relative playbook path above. An empty
+branch setting uses the cloned repository's default branch. A nonempty setting
+selects a published remote branch; arbitrary commit IDs and PR references are
+not supported by the inspected image startup script.
 
-The preparation hook packages the tracked working files of the Zuul checkout,
-including tracked local edits for isolated development. Files outside the index are
-excluded; add new test files to the index before a manual run. The immutable
-ConfigMap contains a compressed source archive, its revision metadata and a
-small bootstrap playbook. A size check leaves room below the ConfigMap limit.
-The Pod checks the expected SHA256 before extracting or executing this source.
+This clone does not use the prepared Zuul checkout. `Depends-On` or adding the
+tests repository to `required-projects` does not make its unmerged changes
+available to the Pod's independent clone. Merge the required tests changes
+first, and inspect the actual Git revision recorded by the runner. There is no
+source archive, ConfigMap transport, generated stage file or bootstrap.
 
-The current test image always clones a Git repository on startup. It therefore
-still clones the public tests repository, but the absolute playbook path points
-to the mounted bootstrap. That bootstrap runs the prepared source in a separate
-writable directory. The public clone does not select the pytest revision. The
-image also processes a root `requirements.yaml` if one is present in its clone;
-that startup behavior and network access remain dependencies of the image.
+The test-operator disables automatic token mounting and currently uses the
+`default` ServiceAccount in the test namespace. The job explicitly projects
+that account's token at `/lightspeed-auth/token`; Kubernetes rotates it. The
+installer creates the RBAC resources: the `lightspeed-tests-access` `ClusterRole`
+and its namespace-specific binding grant that identity GET access to
+`/ls-access`. This also grants the permission to other Pods using the same
+account in that namespace. Privileged execution does not supply a token.
+The client token is separate from the mock provider credential; pass its path,
+not its contents, to the runner.
 
-The test-operator disables automatic token mounting and currently uses the `default`
-ServiceAccount in the test namespace. The stage explicitly projects that account's token
-at `/lightspeed-auth/token`; Kubernetes rotates it. A `ClusterRoleBinding` grants
-that identity GET access to `/ls-access`. This also grants that permission to
-other Pods using the same account in the test namespace. The client token is
-separate from the mock provider credential; neither its value nor its contents
-are placed in stage variables, source archives or reports.
-
-Tests run in the existing test namespace, normally `openstack`, and call the
-Lightspeed Service in `openstack-lightspeed` over the cluster network. The hook
-requires the AnsibleTest CRD and the existing OpenStack ConfigMap, configuration
-Secret and compute SSH Secret. It does not install test-operator or create
-placeholder OpenStack resources. Those are supplied by the parent deployment.
+Tests normally run in `openstack` and call the Lightspeed Service in
+`openstack-lightspeed`. `cifmw_test_operator_namespace` selects the test namespace;
+the installer also accepts `cifmw_lightspeed_tests_namespace` for its access
+binding, which defaults to that test namespace and must match it.
+`cifmw_openstack_lightspeed_namespace` selects the application namespace; update
+the runner's `lightspeed_url` accordingly. The consuming job templates this URL.
+The parent deployment supplies test-operator, its AnsibleTest API and the
+existing OpenStack ConfigMap, configuration Secret and compute SSH Secret used
+by the stage. Existing AnsibleTest parameters select those resource names.
 
 ## Results and failures
 
-The prepared runner installs Python 3.12 and locked dependencies, then selects
+The runner installs Python 3.12 and locked dependencies, then runs
 `tests/integration`: metrics, OKP grounding, authenticated queries and missing
-authentication. It writes `baseline.xml` and `baseline.xml.log` on the results
-PVC. The bootstrap also retains `runner.log`, `runner-inputs.json` (paths only)
-and `source-revision.json`. It requires the runner to succeed and the JUnit
-report to contain executed tests with no failures or errors. Empty, missing,
-malformed and entirely skipped reports fail the Pod.
+authentication. It saves `baseline.xml`, `baseline.xml.log` and
+`baseline.xml.runner.log` on the results PVC. It requires pytest exit code zero
+and an executed JUnit case with no failure or error cases. Empty, missing,
+malformed and entirely skipped reports fail.
 
-The role checks actual Pod phases, collects completed Pods' PVC contents even
-when tests failed, and fails the job when a Pod failed or did not complete.
-Completion on the last polling attempt is still collected. The Lightspeed reader
-Pod uses user and group ID 227 and the same SELinux level as the test Pod so it can read
-the PVC. These security settings apply only to the Lightspeed stage. The role's
-usual timeout is 3600 seconds; this is a controller wait, not a Pod termination
-deadline. Investigate unfinished Pods if that wait expires.
+The runner log includes its source path, Git revision and tracked changes when
+Git metadata is available, input paths and setup/test failure details. It is a
+diagnostic summary, not a full Ansible console transcript. Old outputs for the
+report path are cleared before setup. Startup, cloning, fact gathering or
+inaccessible artifact storage can fail before this log is written; inspect
+Pod container logs in those cases.
 
-The existing collector publishes under
-`controller/ci-framework-data/tests/test_operator/`. Inspect the actual nested
-paths for `baseline.xml`, its `.log` companion, `runner.log` and
-`source-revision.json`. Compare the source revision with the Zuul workspace;
-it can be a speculative merge commit. The generated AnsibleTest and reader
-manifests are under `artifacts/test-operator-crs`, and preparation metadata is
-under `artifacts/lightspeed-tests`. The preparation hook log is
-`logs/pre_test_hooks_prepare_lightspeed_tests.log`.
+The existing role waits for Pods, collects results when its wait has not timed
+out, and fails the job when a Pod failed or did not complete. Its usual timeout
+is 3600 seconds; this is a controller wait, not a Pod termination deadline.
+The reader uses user and group ID 227 and the test Pod's SELinux level to read
+the PVC. Its job override retains the reader image, mounts and scheduling settings;
+review it if the upstream reader template changes.
 
-## Isolated role validation
+Find reports under `controller/ci-framework-data/tests/test_operator/`, checking
+the actual nested paths. Read `baseline.xml` for executed cases and failures,
+its `.log` for pytest output and `.runner.log` for revision and failure context.
+Generated AnsibleTest and reader manifests are under
+`artifacts/test-operator-crs`. For application traffic and Pod state, inspect
+must-gather, then `namespaces/openstack-lightspeed/pods/` and each Pod's logs.
+The direct route does not produce the former bootstrap's `source-revision.json`,
+`runner-inputs.json` or outer `runner.log`.
 
-Reuse an already deployed, Ready Lightspeed instance and installed test-operator.
-This avoids another complete OpenStack deployment. Supply a local prepared tests
-checkout, existing OpenStack resource names and the cluster's storage class in
-a variables file, for example:
+## Validation
 
-```yaml
-cifmw_basedir: /home/cloud-user/ci-framework-data
-cifmw_openshift_kubeconfig: /home/cloud-user/.crc/machines/crc/kubeconfig
-cifmw_path: "{{ ansible_env.PATH }}"
-cifmw_lightspeed_tests_source: /home/cloud-user/src/lightspeed-tests
-cifmw_test_operator_namespace: openstack
-cifmw_test_operator_storage_class: crc-csi-hostpath-provisioner
-cifmw_test_operator_stages:
-  - name: lightspeed
-    type: ansibletest
-    test_vars_file: "{{ cifmw_basedir }}/artifacts/lightspeed-test-stage.yml"
-```
+For an isolated run, reuse a Ready Lightspeed deployment and installed
+test-operator. Ensure the installer has granted the test account access. Copy
+the consuming job's test-operator settings into a local variables file, add the
+cluster's kubeconfig and storage class, and run a local play containing
+`roles: [test_operator]`. No preparation playbook is needed. This creates cluster
+resources; preserve reports before removing a completed run's CR and owned
+resources to repeat it. Reapplying an identical completed CR does not rerun it.
 
-First run the preparation hook with that file, then a local play containing
-`roles: [test_operator]` with the same variables. These commands create cluster
-resources; use them only when cluster execution is intended. The preparation
-hook can be rerun safely for source packaging, but a completed AnsibleTest is
-not automatically rerun by reapplying an identical resource. Preserve its
-reports before removing that run's CR and owned resources for another attempt.
-
-`cifmw_lightspeed_tests_timeout` controls API request timeouts (120 seconds).
-`cifmw_openstack_lightspeed_namespace` selects the application namespace;
-`cifmw_lightspeed_tests_namespace` selects the test namespace, defaulting to
-`cifmw_test_operator_namespace`. The existing AnsibleTest parameters select
-OpenStack ConfigMap and Secret names. The stage uses the existing
-`openstack-ansible-tests:current-podified` image and inherits the role's storage
-class. It enables the same privileged setting as the standalone Lightspeed
-example; privilege does not supply a token.
-
-Local syntax, source, manifest and simulated Pod checks do not establish
-cluster execution. Accept the migration after a real Pod run publishes passing
-integration cases and a deliberate failing run retains its reports and fails
-the deployment job. A combined Zuul run must also verify image selection,
-coordinated revisions and publication. Inspect the non-voting deployment job's
-own result; a green buildset can conceal its failure. KUTTL is separate. Mock
-results do not establish real-provider credentials, TLS trust or model quality;
-the current test client disables TLS verification in this disposable setup.
+Local rendering, syntax and runner fixtures do not prove cluster execution.
+After the required tests fixes merge and the coordinated changes are submitted,
+run combined Zuul validation. Verify default images, actual source revision,
+executed application cases and published artifacts, plus deliberate failure
+propagation. Inspect the non-voting deployment job's own result: a green
+buildset can conceal its failure. Mock results establish the tested integration
+path; real-provider credentials and model quality require separate validation.
+Real OpenAI access using Jan's credentials and a separate Lightspeed results
+folder are follow-up work. The current test client disables TLS verification
+in this disposable setup.
