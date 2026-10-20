@@ -47,6 +47,9 @@ data:
                            ansible.utils.ipmath(ip_index) %}
     loopback_ip: {{ loopback_ip }}
     loopback_ipv6: {{ loopback_ipv6 }}
+{%     if original_content.data['node_' ~ ns.ocp_index].octavia_ip is defined %}
+    octavia_ip: {{ original_content.data['node_' ~ ns.ocp_index].octavia_ip }}
+{%     endif %}
 {%     if node_bgp_orig_content.routes | default(false) %}
     routes: {{ node_bgp_orig_content.routes }}
 {%     endif %}
@@ -132,20 +135,27 @@ data:
       {
         "cniVersion": "0.3.1",
         "name": "{{ network.network_name }}",
+{%  if network.network_name == "octavia" %}
+        "type": "macvlan",
+        "master": "{{ network.network_name }}",
+        "isDefaultGateway": true,
+        "isGateway": true,
+{%  else %}
         "type": "bridge",
         "isDefaultGateway": true,
         "isGateway": true,
         "forceAddress": false,
-{%  if network.network_name == "ctlplane" %}
+{%    if network.network_name == "ctlplane" %}
         "ipMasq": true,
-{%  else %}
+{%    else %}
         "ipMasq": false,
-{%  endif %}
+{%    endif %}
         "hairpinMode": true,
-{%  if network.network_name == "ctlplane" %}
+{%    if network.network_name == "ctlplane" %}
         "bridge": "ospbr",
-{%  else %}
+{%    else %}
         "bridge": "{{ network.network_name }}",
+{%    endif %}
 {%  endif %}
         "ipam": {
           "type": "whereabouts",
