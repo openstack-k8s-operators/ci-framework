@@ -1,0 +1,29 @@
+---
+- name: Kustomize ControlPlane for glance over cinder
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_controlplane_kustomizations_path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane"
+    cifmw_nfs_shares_glance: "{{ cifmw_nfs_shares[0] | default('glance') }}"
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_controlplane_kustomizations_path }}"
+        state: directory
+        mode: '755'
+
+    - name: Check if kustomization file for cinder-over-NFS exists
+      ansible.builtin.stat:
+        path: "{{ cifmw_controlplane_kustomizations_path }}/90-cinder-nfs.yaml"
+      register: cinder_nfs_kustomize
+
+    - name: Fail early if the kustomization file for cinder-over-NFS does not exist
+      ansible.builtin.fail:
+        msg: "Cinder-over-NFS kustomization file (90-cinder-nfs.yaml) not found"
+      when: not cinder_nfs_kustomize.stat.exists
+
+    - name: Create kustomization to really enable a cinder/NFS glance backend
+      ansible.builtin.template:
+        dest: "{{ cifmw_controlplane_kustomizations_path }}/90-glance-cindernfs.yaml"
+        src: glance_cindernfs_enable_kustomize.yaml.j2
+        mode: '644'
