@@ -124,6 +124,26 @@
         name: cifmw_cephadm
         tasks_from: install_cephadm
 
+    # See OSPRH-39495.
+    - name: Ensure rpcbind is available for NFSv3
+      when:
+        - cifmw_ceph_daemons_layout.ceph_nfs_enabled | default(false) | bool
+        - cifmw_cephadm_nfsv3 | default(false) | bool
+      block:
+        - name: Install rpcbind
+          ansible.builtin.dnf:
+            name:
+              - rpcbind
+            state: present
+
+        # Make sure the unit is enabled/active
+        - name: Enable and start the rpcbind socket
+          ansible.builtin.systemd_service:
+            name: rpcbind.socket
+            masked: false
+            enabled: true
+            state: started
+
 - name: Create Block Device on target nodes
   tags: block
   hosts: "{{ cifmw_ceph_target | default('computes')  }}"
