@@ -139,6 +139,8 @@ def add_default_if_missing(block, value, var_name):
             value_str = str(value).lower()
         elif value is None:
             value_str = "null"
+        elif value == "":
+            value_str = "''"
         else:
             value_str = str(value)
         block = block.rstrip() + f" Default value: `{value_str}`"
@@ -184,7 +186,7 @@ def build_bullet(var, value, existing_block=None):
             return existing_block
 
         # 3. Update inline default value if it changed
-        m = re.search(r"Default value:\s*`([^`]+)`", existing_block)
+        m = re.search(r"Default value:\s*`([^`]*)`", existing_block)
         if m:
             current_val = m.group(1).strip()
             # Convert Python bool to lowercase for consistency
@@ -192,11 +194,13 @@ def build_bullet(var, value, existing_block=None):
                 value_str = str(value).lower()
             elif value is None:
                 value_str = "null"
+            elif value == "":
+                value_str = "''"
             else:
                 value_str = str(value)
             if current_val != value_str:
                 existing_block = re.sub(
-                    r"Default value:\s*`[^`]+`",
+                    r"Default value:\s*`[^`]*`",
                     f"Default value: `{value_str}`",
                     existing_block,
                     count=1,
@@ -213,6 +217,8 @@ def build_bullet(var, value, existing_block=None):
         value_str = str(value).lower()
     elif value is None:
         value_str = "null"
+    elif value == "":
+        value_str = "''"
     else:
         value_str = str(value)
     return f"* `{var}`: Default value: `{value_str}`"
