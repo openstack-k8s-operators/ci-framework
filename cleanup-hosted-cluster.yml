@@ -1,0 +1,31 @@
+---
+# Entry point allowing to tear down just the KubeVirt hosted control
+# plane (the HostedCluster, its control plane namespace, and its KubeAPI
+# MetalLB resources) while leaving the management cluster -- and the
+# OpenShift Virtualization/MCE/MetalLB operators and storage class
+# hosted_cluster installed on it -- intact. This makes it cheap to
+# iterate: run this, then re-run the deploy (e.g. hosted.sh) to recreate
+# the hosted cluster without reprovisioning the management cluster.
+#
+# cifmw_openshift_kubeconfig must point at the MANAGEMENT cluster, not
+# the hosted one. retarget.yml sets that variable as a cacheable fact
+# pointing at the hosted cluster during a normal deploy, so if you are
+# running this as a separate invocation after a deploy, pass it (and
+# cifmw_openshift_context/_token if needed) explicitly, e.g.:
+#
+#   ansible-playbook cleanup-hosted-cluster.yml -i inventory.yml \
+#     -e cifmw_target_host=localhost \
+#     -e cifmw_openshift_kubeconfig=<path to the management kubeconfig> \
+#     -e @custom/hosted.yml --flush-cache
+#
+# cleanup.yml fails loudly instead of silently no-op'ing if the
+# HostedCluster isn't found where expected, to catch exactly that
+# mistake.
+
+- name: Cleanup KubeVirt hosted control plane
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  tasks:
+    - name: Remove the HostedCluster and its resources
+      ansible.builtin.include_role:
+        name: hosted_cluster
+        tasks_from: cleanup.yml

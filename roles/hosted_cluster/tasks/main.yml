@@ -1,0 +1,92 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Load Networking Environment Definition
+  ansible.builtin.import_role:
+    name: networking_mapper
+    tasks_from: load_env_definition.yml
+
+- name: Validate hosted cluster prerequisites
+  ansible.builtin.assert:
+    that:
+      - cifmw_networking_env_definition is defined
+      - cifmw_hosted_cluster_worker_count | int >= 1
+      - cifmw_hosted_cluster_kubeapi_address_pool | length > 0
+    fail_msg: >-
+      KubeVirt hosted clusters require cifmw_networking_env_definition to be
+      loaded and cifmw_hosted_cluster_kubeapi_address_pool to be set to a
+      MetalLB address range for the hosted cluster's KubeAPI.
+  when: not cifmw_hosted_cluster_render_only | bool
+
+- name: Create hosted cluster artifacts directory
+  ansible.builtin.file:
+    path: "{{ cifmw_hosted_cluster_artifacts_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Render hosted cluster manifests
+  ansible.builtin.include_tasks: render.yml
+
+- name: Deploy KubeVirt hosted cluster and RHOSO control plane
+  when: not cifmw_hosted_cluster_render_only | bool
+  block:
+    - name: Install OpenShift Virtualization, MCE and MetalLB on the management cluster
+      ansible.builtin.include_tasks: operators.yml
+
+    - name: Prepare management cluster networking for the hosted cluster
+      ansible.builtin.include_tasks: management_network.yml
+
+    - name: Create the KubeVirt hosted cluster
+      ansible.builtin.include_tasks: cluster.yml
+
+    - name: Prepare the hosted cluster for RHOSO
+      ansible.builtin.include_tasks: hosted_setup.yml
+
+    - name: Discover hosted worker network interfaces
+      ansible.builtin.include_tasks: worker_network.yml
+
+    - name: Retarget subsequent phases at the hosted cluster
+      ansible.builtin.include_tasks: retarget.yml
+  rescue:
+    - name: Collect hosted cluster failure state
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command:
+        argv:
+          - oc
+          - get
+          - "{{ item.kind }}"
+          - -n
+          - "{{ item.namespace }}"
+          - -o
+          - wide
+      loop:
+        - {kind: hostedclusters, namespace: "{{ cifmw_hosted_cluster_namespace }}"}
+        - {kind: nodepools, namespace: "{{ cifmw_hosted_cluster_namespace }}"}
+        - {kind: virtualmachines, namespace: "{{ cifmw_hosted_cluster_hosted_namespace }}"}
+        - {kind: pods, namespace: "{{ cifmw_hosted_cluster_hosted_namespace }}"}
+      register: _hosted_cluster_failure_state
+      failed_when: false
+      changed_when: false
+
+    - name: Show hosted cluster failure state
+      ansible.builtin.debug:
+        var: _hosted_cluster_failure_state.results
+
+    - name: Stop after hosted cluster failure
+      ansible.builtin.fail:
+        msg: "Hosted cluster {{ cifmw_hosted_cluster_name }} deployment failed; see resource status above."

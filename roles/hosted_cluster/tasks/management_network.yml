@@ -1,0 +1,225 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Hosted cluster routes live under a per-cluster subdomain, so the default
+# ingress controller must accept wildcard route admission.
+- name: Allow wildcard routes on the default ingress controller
+  kubernetes.core.k8s_json_patch:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: operator.openshift.io/v1
+    kind: IngressController
+    name: default
+    namespace: openshift-ingress-operator
+    patch:
+      - op: add
+        path: /spec/routeAdmission
+        value:
+          wildcardPolicy: WildcardsAllowed
+
+# HyperShift reconciles the HostedCluster's control plane into this
+# namespace; it must pre-exist so the NetworkAttachmentDefinitions below,
+# and the `--additional-network` references in cluster.yml, resolve.
+- name: Create the hosted cluster control plane namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    kind: Namespace
+    name: "{{ cifmw_hosted_cluster_hosted_namespace }}"
+
+- name: Load Networking Environment Definition
+  ansible.builtin.import_role:
+    name: networking_mapper
+    tasks_from: load_env_definition.yml
+
+# Needed for the per-network VLAN IDs (cifmw_networking_definition.networks.
+# <net>.vlan) below -- cifmw_networking_env_definition carries the same
+# fields, but loading the raw definition directly avoids depending on
+# load_env_definition.yml's internal shape.
+- name: Load raw Networking Definition if not already available
+  when: cifmw_networking_definition is not defined
+  ansible.builtin.include_vars:
+    file: "{{ cifmw_networking_mapper_networking_def_path }}"
+    name: cifmw_networking_definition
+
+# The hosted worker VMs join the isolated networks the same way the
+# upstream documented architecture does (see roles/hosted_cluster/README.md):
+# a NodeNetworkConfigurationPolicy bridges cifmw_hosted_cluster_management_interface
+# on the management nodes -- untagged for ctlplane, VLAN-tagged (per the
+# networking definition) for internalapi/storage/tenant -- into one Linux
+# bridge per network, named after the network itself. ci_multus then exposes
+# each bridge as its own NetworkAttachmentDefinition with whereabouts IPAM,
+# so KubeVirt assigns and configures the guest's interface automatically at
+# boot; no in-guest nmstate/VLAN configuration is required (or possible --
+# HyperShift, not cifmw, generates the worker VMs' ignition).
+- name: Build the hosted cluster isolated network interfaces
+  ansible.builtin.set_fact:
+    _hosted_cluster_nncp_interfaces: >-
+      {%- set _ifaces = [
+        {
+          'name': cifmw_hosted_cluster_management_interface,
+          'type': 'ethernet',
+          'state': 'up',
+        },
+        {
+          'name': 'ctlplane',
+          'type': 'linux-bridge',
+          'state': 'up',
+          'bridge': {
+            'options': {'stp': {'enabled': false}},
+            'port': [{'name': cifmw_hosted_cluster_management_interface}],
+          },
+        },
+      ] -%}
+      {%- for _net in cifmw_hosted_cluster_networks if _net != 'ctlplane' -%}
+        {%- set _vlan_id = cifmw_networking_definition.networks[_net].vlan -%}
+        {%- set _vlan_iface = cifmw_hosted_cluster_management_interface ~ '.' ~ _vlan_id -%}
+        {%- set _ = _ifaces.append({
+          'name': _vlan_iface,
+          'type': 'vlan',
+          'state': 'up',
+          'vlan': {'base-iface': cifmw_hosted_cluster_management_interface, 'id': _vlan_id},
+        }) -%}
+        {%- set _ = _ifaces.append({
+          'name': _net,
+          'type': 'linux-bridge',
+          'state': 'up',
+          'bridge': {'options': {'stp': {'enabled': false}}, 'port': [{'name': _vlan_iface}]},
+        }) -%}
+      {%- endfor -%}
+      {{ _ifaces }}
+
+- name: Apply the NodeNetworkConfigurationPolicy for the hosted cluster isolated networks
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: nmstate.io/v1
+      kind: NodeNetworkConfigurationPolicy
+      metadata:
+        name: "{{ cifmw_hosted_cluster_name }}-isolated-networks"
+      spec:
+        nodeSelector: "{{ cifmw_hosted_cluster_management_node_selector }}"
+        desiredState:
+          interfaces: "{{ _hosted_cluster_nncp_interfaces }}"
+
+- name: Wait for the NodeNetworkConfigurationPolicy to apply
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: nmstate.io/v1
+    kind: NodeNetworkConfigurationPolicy
+    name: "{{ cifmw_hosted_cluster_name }}-isolated-networks"
+  register: _hosted_cluster_nncp
+  until:
+    - _hosted_cluster_nncp.resources | default([]) | length == 1
+    - >-
+      _hosted_cluster_nncp.resources[0].status.conditions | default([]) |
+      selectattr('type', 'equalto', 'Available') |
+      selectattr('status', 'equalto', 'True') | list | length == 1
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+# ci_multus discovers cifmw_ci_multus_net_info_patch_* by scanning
+# hostvars[inventory_hostname], which only reflects persisted facts, not
+# task/include_role-scoped `vars:` -- so this must be a real set_fact, not a
+# `vars:` on the include_role task below (the latter silently no-ops: the
+# role's own "when patches exist" check never sees it).
+- name: Patch ci_multus to render bridge/linux-bridge NADs for the isolated networks
+  ansible.builtin.set_fact:
+    cifmw_ci_multus_net_info_patch_1: >-
+      {%- set _patch = {} -%}
+      {%- for _net in cifmw_hosted_cluster_networks -%}
+        {%- set _ = _patch.update({
+          _net: {'tools': {'multus': {'multus_type': 'bridge', 'multus_attach': 'linux-bridge'}}},
+        }) -%}
+      {%- endfor -%}
+      {{ _patch }}
+
+# One bridge-type NAD per isolated network, each backed by the matching
+# Linux bridge created above and using whereabouts IPAM -- cifmw_networking_definition
+# already carries a "multus" tool block (IP range) for ctlplane/internalapi/
+# storage/tenant.
+- name: Create per-network NetworkAttachmentDefinitions for the hosted worker VMs
+  vars:
+    cifmw_ci_multus_namespace: "{{ cifmw_hosted_cluster_hosted_namespace }}"
+  ansible.builtin.include_role:
+    name: ci_multus
+
+# OVN's host-device CNI takes this interface into the OVS pod, so the guest
+# needs a separate NIC even though it reaches the same provider trunk as
+# ctlplane. No IPAM is needed on that NIC.
+- name: Create datacentre attachment for hosted worker VMs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: k8s.cni.cncf.io/v1
+      kind: NetworkAttachmentDefinition
+      metadata:
+        name: datacentre
+        namespace: "{{ cifmw_hosted_cluster_hosted_namespace }}"
+      spec:
+        config: >-
+          {{
+            {'cniVersion': '0.3.1', 'name': 'datacentre',
+             'type': 'bridge', 'bridge': 'ctlplane', 'ipam': {}} | to_json
+          }}
+
+- name: Create MetalLB IPAddressPool for the hosted cluster KubeAPI
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: "{{ cifmw_hosted_cluster_name }}-kubeapi"
+        namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+      spec:
+        addresses: "{{ cifmw_hosted_cluster_kubeapi_address_pool }}"
+        # This pool is dedicated to a single hosted cluster's KubeAPI
+        # Service, so auto-assignment cannot collide with another cluster.
+        autoAssign: true
+        avoidBuggyIPs: false
+
+- name: Create MetalLB L2Advertisement for the hosted cluster KubeAPI
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: L2Advertisement
+      metadata:
+        name: "{{ cifmw_hosted_cluster_name }}-kubeapi"
+        namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+      spec:
+        ipAddressPools:
+          - "{{ cifmw_hosted_cluster_name }}-kubeapi"
+        interfaces:
+          - "{{ cifmw_hosted_cluster_kubeapi_interface }}"

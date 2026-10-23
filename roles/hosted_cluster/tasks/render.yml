@@ -1,0 +1,69 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Dumped purely as artifacts for debugging and for the Molecule render-only
+# scenario; operators.yml and management_network.yml apply these same dicts
+# directly via `definition:` rather than reading these files back.
+- name: Save management cluster operator manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}/{{ item.metadata.name }}-{{ item.kind | lower }}.yaml"
+    content: "{{ item | to_nice_yaml }}"
+    mode: "0644"
+  loop:
+    - "{{ cifmw_hosted_cluster_cnv_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_cnv_olm_subscription }}"
+    - "{{ cifmw_hosted_cluster_cnv_hyperconverged }}"
+    - "{{ cifmw_hosted_cluster_mce_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_mce_olm_subscription }}"
+    - "{{ cifmw_hosted_cluster_mce_multiclusterengine }}"
+    - "{{ cifmw_hosted_cluster_metallb_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_metallb_olm_subscription }}"
+    - "{{ cifmw_hosted_cluster_metallb_operator_cr }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+- name: Save hosted cluster KubeAPI MetalLB manifests as artifacts
+  ansible.builtin.copy:
+    dest: "{{ cifmw_hosted_cluster_artifacts_dir }}/{{ item.metadata.name }}-{{ item.kind | lower }}.yaml"
+    content: "{{ item | to_nice_yaml }}"
+    mode: "0644"
+  vars:
+    _kubeapi_pool:
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: "{{ cifmw_hosted_cluster_name }}-kubeapi"
+        namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+      spec:
+        addresses: "{{ cifmw_hosted_cluster_kubeapi_address_pool }}"
+        autoAssign: true
+        avoidBuggyIPs: false
+    _kubeapi_adv:
+      apiVersion: metallb.io/v1beta1
+      kind: L2Advertisement
+      metadata:
+        name: "{{ cifmw_hosted_cluster_name }}-kubeapi"
+        namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+      spec:
+        ipAddressPools:
+          - "{{ cifmw_hosted_cluster_name }}-kubeapi"
+        interfaces:
+          - "{{ cifmw_hosted_cluster_kubeapi_interface }}"
+  loop:
+    - "{{ _kubeapi_pool }}"
+    - "{{ _kubeapi_adv }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"

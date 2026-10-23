@@ -1,0 +1,82 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# retarget.yml points cifmw_openshift_kubeconfig at the hosted cluster
+# itself (cacheable: true), so a stale fact-cache entry from a prior run
+# would make the deletes below silently no-op against the wrong cluster
+# (the HostedCluster CR lives on the MANAGEMENT cluster). Fail loudly
+# instead if it's not found where expected.
+- name: Confirm the HostedCluster exists on the targeted cluster
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    namespace: "{{ cifmw_hosted_cluster_namespace }}"
+    name: "{{ cifmw_hosted_cluster_name }}"
+  register: _hosted_cluster_cleanup_check
+
+- name: Require cifmw_openshift_kubeconfig to target the management cluster
+  ansible.builtin.assert:
+    that:
+      - _hosted_cluster_cleanup_check.resources | default([]) | length == 1
+    fail_msg: >-
+      HostedCluster {{ cifmw_hosted_cluster_name }} was not found in
+      namespace {{ cifmw_hosted_cluster_namespace }} via
+      cifmw_openshift_kubeconfig={{ cifmw_openshift_kubeconfig }}. This
+      usually means that fact is still pointing at the hosted cluster
+      itself (retarget.yml sets it as a cacheable fact) rather than the
+      management cluster -- pass -e cifmw_openshift_kubeconfig=<management
+      kubeconfig> explicitly, or run with --flush-cache.
+
+- name: Delete the HostedCluster
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: absent
+    wait: true
+    wait_timeout: 600
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    namespace: "{{ cifmw_hosted_cluster_namespace }}"
+    name: "{{ cifmw_hosted_cluster_name }}"
+
+- name: Delete the hosted cluster control plane namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: absent
+    wait: true
+    wait_timeout: 600
+    kind: Namespace
+    name: "{{ cifmw_hosted_cluster_hosted_namespace }}"
+
+- name: Delete the hosted cluster KubeAPI MetalLB resources
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: absent
+    api_version: metallb.io/v1beta1
+    kind: "{{ item }}"
+    namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+    name: "{{ cifmw_hosted_cluster_name }}-kubeapi"
+  loop:
+    - L2Advertisement
+    - IPAddressPool

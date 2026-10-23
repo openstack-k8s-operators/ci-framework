@@ -200,7 +200,10 @@
 - name: Configure Storage Class
   ansible.builtin.import_role:
     name: ci_local_storage
-  when: not cifmw_use_lvms | default(false)
+  when: >-
+    not (cifmw_use_lvms | default(false)) or
+    ((cifmw_deploy_hosted_cluster | default(false) | bool) and
+     (cifmw_hosted_cluster_map_infra_storage_class | default(true) | bool))
   tags:
     - storage
     - edpm_bootstrap
@@ -218,6 +221,33 @@
   ansible.builtin.import_role:
     name: kustomize_deploy
     tasks_from: install_operators.yml
+  tags:
+    - operator
+    - edpm_bootstrap
+
+# KubeVirt hosted control plane clusters have no Metal3 operator, so the
+# baremetal data plane is unsupported there -- see hosted_controlplanes.txt
+# "Limitations". install_operators.yml applies a fixed, non-scenario-aware
+# kustomize overlay for the OpenStack init CR, so there is no override hook
+# to request this at generation time; patch it afterwards instead.
+- name: Scale down openstack-baremetal for KubeVirt hosted control planes
+  when:
+    - cifmw_deploy_hosted_cluster is defined
+    - cifmw_deploy_hosted_cluster | bool
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: patched
+    api_version: operator.openstack.org/v1beta1
+    kind: OpenStack
+    name: openstack
+    namespace: "{{ operator_namespace }}"
+    definition:
+      spec:
+        operatorOverrides:
+          - name: openstack-baremetal
+            replicas: 0
   tags:
     - operator
     - edpm_bootstrap
@@ -287,7 +317,10 @@
 - name: Configure LVMS Storage Class
   ansible.builtin.include_role:
     name: ci_lvms_storage
-  when: cifmw_use_lvms | default(false)
+  when: >-
+    (cifmw_use_lvms | default(false)) and not
+    ((cifmw_deploy_hosted_cluster | default(false) | bool) and
+     (cifmw_hosted_cluster_map_infra_storage_class | default(true) | bool))
   tags:
     - storage
     - edpm_bootstrap
@@ -295,6 +328,12 @@
 - name: Execute deployment steps
   tags:
     - edpm_deploy
+  # Hosted workers already have isolated interfaces from the management cluster.
+  when: >-
+    not (
+      (cifmw_deploy_hosted_cluster | default(false) | bool) and
+      (stage.name | default('')) == 'nncp-configuration'
+    )
   ansible.builtin.include_role:
     name: kustomize_deploy
     tasks_from: execute_step.yml

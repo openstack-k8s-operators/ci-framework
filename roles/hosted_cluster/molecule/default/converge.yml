@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_basedir: /tmp/hosted-cluster-molecule
+    cifmw_hosted_cluster_artifacts_dir: /tmp/hosted-cluster-molecule/artifacts/hosted_cluster
+    cifmw_hosted_cluster_render_only: true
+    cifmw_hosted_cluster_kubeapi_address_pool:
+      - 192.168.100.50-192.168.100.60
+    cifmw_networking_env_definition:
+      networks:
+        ctlplane:
+          tools:
+            metallb:
+              ipv4_ranges:
+                - {start: 192.168.122.80, end: 192.168.122.90}
+  tasks:
+    - name: Render hosted cluster manifests
+      ansible.builtin.include_role:
+        name: hosted_cluster
+
+    - name: Read rendered management cluster manifests
+      ansible.builtin.slurp:
+        src: "{{ cifmw_hosted_cluster_artifacts_dir }}/{{ item }}.yaml"
+      loop:
+        - kubevirt-hyperconverged-hyperconverged
+        - multiclusterengine-multiclusterengine
+        - hcp-0-kubeapi-ipaddresspool
+      register: _hosted_cluster_manifests
+
+    - name: Check rendered manifest kinds and MCE components
+      vars:
+        _hco: "{{ _hosted_cluster_manifests.results[0].content | b64decode | from_yaml }}"
+        _mce: "{{ _hosted_cluster_manifests.results[1].content | b64decode | from_yaml }}"
+        _pool: "{{ _hosted_cluster_manifests.results[2].content | b64decode | from_yaml }}"
+        _mce_component_names: "{{ _mce.spec.overrides.components | map(attribute='name') | list }}"
+      ansible.builtin.assert:
+        that:
+          - _hco.kind == 'HyperConverged'
+          - _mce.kind == 'MultiClusterEngine'
+          - "'hypershift' in _mce_component_names"
+          - "'central-infrastructure-management' not in _mce_component_names"
+          - _pool.kind == 'IPAddressPool'
+          - _pool.spec.addresses == cifmw_hosted_cluster_kubeapi_address_pool
