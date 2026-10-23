@@ -335,6 +335,47 @@
               loop: "{{ switch_vars['dcb_configuration']['interfaces'] }}"
               when: item.interface is defined
 
+    - name: Configure BGP
+      when: "'bgp' in switch_vars"
+      vars:
+        bgp_config: |
+          {% if switch_vars['bgp'].local_as is defined %}
+          - set routing-options autonomous-system {{ switch_vars['bgp'].local_as }}
+          {% endif %}
+          {% if switch_vars['bgp'].router_id is defined %}
+          - set routing-options router-id {{ switch_vars['bgp'].router_id }}
+          {% endif %}
+          {% for group in switch_vars['bgp'].groups | default([]) %}
+          - set protocols bgp group {{ group.name }} type {{ group.type | default('internal') }}
+          {% if group.local_address is defined %}
+          - set protocols bgp group {{ group.name }} local-address {{ group.local_address }}
+          {% endif %}
+          {% if group.peer_as is defined %}
+          - set protocols bgp group {{ group.name }} peer-as {{ group.peer_as }}
+          {% endif %}
+          {% if group.cluster is defined %}
+          - set protocols bgp group {{ group.name }} cluster {{ group.cluster }}
+          {% endif %}
+          {% for family in group.families | default([]) %}
+          - set protocols bgp group {{ group.name }} family {{ family }}
+          {% endfor %}
+          {% for neighbor in group.neighbors | default([]) %}
+          {% if neighbor is mapping %}
+          - set protocols bgp group {{ group.name }} neighbor {{ neighbor.address }}
+          {% if neighbor.authentication_key is defined %}
+          - set protocols bgp group {{ group.name }} neighbor {{ neighbor.address }} authentication-key "{{ neighbor.authentication_key }}"
+          {% endif %}
+          {% else %}
+          - set protocols bgp group {{ group.name }} neighbor {{ neighbor }}
+          {% endif %}
+          {% endfor %}
+          {% endfor %}
+          {% for line in switch_vars['bgp'].extra_lines | default([]) %}
+          - {{ line }}
+          {% endfor %}
+      junipernetworks.junos.junos_config:
+        lines: "{{ bgp_config | from_yaml }}"
+
     - name: Save configuration
       junipernetworks.junos.junos_config:
         confirm_commit: true
