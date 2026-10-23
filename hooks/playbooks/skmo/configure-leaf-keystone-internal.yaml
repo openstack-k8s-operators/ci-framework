@@ -53,6 +53,21 @@
       ansible.builtin.meta: end_play
       when: not cifmw_skupper_keystone_enabled | bool
 
+    - name: Get Skupper Keystone listener Service
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: "{{ cifmw_skupper_keystone_listener_host }}"
+        namespace: "{{ cifmw_skupper_leaf_namespace }}"
+      register: _keystone_listener_svc
+      retries: 12
+      delay: 10
+      until:
+        - _keystone_listener_svc.resources is defined
+        - _keystone_listener_svc.resources | length == 1
+        - _keystone_listener_svc.resources[0].spec.ports |
+          selectattr('name', 'equalto', 'keystone-internal') | list | length == 1
+
     - name: Build the Skupper Keystone internal URL
       ansible.builtin.set_fact:
         _skupper_keystone_internal_url: >-
@@ -119,7 +134,8 @@
               - name: keystone-internal
                 port: "{{ cifmw_skupper_keystone_port | int }}"
                 protocol: TCP
-                targetPort: 1024
+                targetPort: "{{ (_keystone_listener_svc.resources[0].spec.ports |
+                  selectattr('name', 'equalto', 'keystone-internal') | first).targetPort }}"
 
     - name: Wait for MetalLB to assign an external IP to the keystone LoadBalancer
       kubernetes.core.k8s_info:
