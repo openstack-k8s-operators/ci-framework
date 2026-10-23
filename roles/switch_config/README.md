@@ -6,6 +6,7 @@ The switches config role performs the following tasks:
 - MTU configuration on the switch port.
 - LACP configuration on interface and members attach.
 - IGMP Snooping configuration
+- BGP configuration (Juniper only)
 
 Supported switch platforms:
 
@@ -133,3 +134,44 @@ cifmw_switch_config_scenarios:
           vlan: "50"
           mtu: "1500"
 ```
+
+### BGP (Juniper only)
+
+An optional `bgp` key renders `set routing-options ...` and `set protocols bgp ...`
+lines. It is intended for simple fabrics such as an EVPN route-reflector. Every
+field is optional; `groups` holds one or more BGP groups, and `extra_lines` is an
+escape hatch for any raw Junos `set` statement not covered by the schema (for
+example `set protocols evpn ...` or `set policy-options ...`).
+
+```yaml
+junos-01-sw:
+  bgp:
+    local_as: 65000             # set routing-options autonomous-system
+    router_id: "10.0.0.1"       # set routing-options router-id
+    groups:
+      - name: "EVPN-RR"
+        type: "internal"        # internal (default) | external
+        local_address: "10.0.0.1"
+        cluster: "10.0.0.1"     # presence makes the group a route-reflector
+        peer_as: 65000          # for external groups
+        families:               # one "family ..." statement per entry
+          - "evpn signaling"
+        neighbors:              # an address, or a mapping with a TCP-MD5 key
+          - "10.0.0.2"
+          - address: "10.0.0.3"
+            authentication_key: "secret"  # must match the peer's password
+    extra_lines:
+      - "set protocols evpn encapsulation vxlan"
+```
+
+The `authentication_key` is sent to the switch in clear text over the management
+connection (the switch stores it encrypted). The Ansible task runs with `no_log`,
+so the value does not reach the job output or the collected logs. That does not
+protect the source: keep the switch vars in an encrypted file (e.g.
+`ansible-vault`), not in plain text in the inventory.
+
+Only `set` lines are pushed, so the rest of the switch configuration is left
+untouched. The flip side is that removing a group, a neighbor or an
+`extra_lines` entry from the vars does not remove it from the switch: deleting
+it automatically would drop the BGP sessions on every run. Remove it by hand, or
+add the matching `delete ...` line to `extra_lines`.
