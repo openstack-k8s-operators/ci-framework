@@ -1,0 +1,64 @@
+---
+- name: Kustomize ControlPlane for glance over S3
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_controlplane_kustomizations_path: "{{ cifmw_basedir }}/artifacts/manifests/kustomizations/controlplane"
+    glance_operator_path: "{{ cifmw_glance_operator_path|default(ansible_user_dir+'/src/github.com/openstack-k8s-operators/glance-operator') }}"
+    glance_s3_secret_file: glance-s3-secrets.yaml
+  tasks:
+    - name: Ensure the kustomizations dir exists
+      ansible.builtin.file:
+        path: "{{ cifmw_controlplane_kustomizations_path }}"
+        state: directory
+        mode: '755'
+
+    - name: Get swift API endpoint
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.shell: >
+        set -xe -o pipefail;
+        oc rsh -n {{ namespace|quote }}
+        openstackclient openstack endpoint list --interface internal --service swift -c URL -f value | cut -d "/" -f 1,2,3
+      register: reg_glance_s3_store_endpoint
+      changed_when: "'stdout' in reg_glance_s3_store_endpoint"
+      failed_when: (reg_glance_s3_store_endpoint.rc | int) >= 1
+
+    # According the AWS documentation, the access key pattern is '[\w+]' (letters, digits and _)
+    - name: Set S3 facts
+      ansible.builtin.set_fact:
+        _glance_s3_store_access_key: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters','digits','_'], length=32) }}"
+        _glance_s3_store_secret_key: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters','digits','/-_'], length=32) }}"
+        _glance_s3_store_bucket: "images"
+        _glance_s3_store_endpoint: "{{ reg_glance_s3_store_endpoint.stdout }}"
+
+    - name: Create EC2 credentials
+      environment:
+        KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+        PATH: "{{ cifmw_path }}"
+      ansible.builtin.command: >
+        oc rsh -n {{ namespace|quote }} openstackclient
+        openstack credential create --type ec2 --project admin admin
+        '{{ {"access": _glance_s3_store_access_key, "secret": _glance_s3_store_secret_key} | to_json }}'
+      no_log: true
+      changed_when: false
+
+    - name: Create the definition of the glance S3 secret
+      ansible.builtin.template:
+        dest: "{{ cifmw_controlplane_kustomizations_path }}/{{ glance_s3_secret_file }}"
+        src: "{{ glance_s3_secret_file }}.j2"
+        mode: '640'
+
+    - name: Apply the glance S3 secret
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        namespace: "{{ namespace }}"
+        src: "{{ cifmw_controlplane_kustomizations_path }}/{{ glance_s3_secret_file }}"
+        state: present
+
+    - name: Create kustomization to enable S3 as glance backends
+      ansible.builtin.template:
+        dest: "{{ cifmw_controlplane_kustomizations_path }}/90-glance-s3.yaml"
+        src: glance_s3_enable_kustomize.yaml.j2
+        mode: '640'
