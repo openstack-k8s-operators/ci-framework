@@ -1,6 +1,11 @@
 ---
 - name: "Run ci/playbooks/content_provider/pre.yml"
   hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  vars:
+    # busybox httpd serves the content provider status page.
+    cifmw_content_provider_status_port: 8080
+    cifmw_content_provider_status_dir: "{{ ansible_user_dir }}/zuul-output/.cifmw-status"
+    cifmw_content_provider_status_image: quay.io/prometheus/busybox:latest
   tasks:
     - name: Filter out host if needed
       when:
@@ -29,3 +34,69 @@
           is match("[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
           else hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
         cacheable: true
+
+    - name: Install podman for the content status server
+      become: true
+      ansible.builtin.package:
+        name: podman
+        state: present
+
+    - name: Create the content status directory
+      ansible.builtin.file:
+        path: "{{ cifmw_content_provider_status_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Publish the initial building status document
+      vars:
+        cifmw_content_provider_status:
+          status: building
+          registry: "{{ cifmw_rp_registry_ip }}:{{ cifmw_rp_registry_port | default('5001') }}"
+          zuul_change: "{{ zuul.change | default('build') }}"
+          zuul_patchset: "{{ zuul.patchset | default('latest') }}"
+      ansible.builtin.include_tasks: ../tasks/publish-content-status.yaml
+
+    - name: Start the content status file server
+      ansible.builtin.command:
+        argv:
+          - podman
+          - run
+          - --detach
+          - --name=cifmw_content_provider_status
+          - --restart=always
+          - --network=host
+          - --volume
+          - "{{ cifmw_content_provider_status_dir }}:/srv:ro,z"
+          - "{{ cifmw_content_provider_status_image }}"
+          - httpd
+          - -f
+          - -p
+          - "{{ cifmw_content_provider_status_port }}"
+          - -h
+          - /srv
+      changed_when: true
+
+    - name: Open firewall port for the status server
+      when: cifmw_rp_registry_firewall | default(true) | bool
+      become: true
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - nft add table ip filter
+        - nft add chain ip filter INPUT { type filter hook input priority 0 \; }
+        - nft insert rule ip filter INPUT tcp dport {{ cifmw_content_provider_status_port }} counter accept
+      changed_when: true
+
+    - name: Wait for the status server to respond
+      ansible.builtin.uri:
+        url: "http://{{ cifmw_rp_registry_ip }}:{{ cifmw_content_provider_status_port }}/content.json"
+        status_code: 200
+      register: cifmw_content_provider_status_health
+      retries: 30
+      delay: 1
+      until: cifmw_content_provider_status_health.status == 200
+
+    - name: Print the content provider status marker for console discovery
+      ansible.builtin.debug:
+        msg: >-
+          CIFMW_CONTENT_PROVIDER_STATUS_URL:
+          http://{{ cifmw_rp_registry_ip }}:{{ cifmw_content_provider_status_port }}/content.json
