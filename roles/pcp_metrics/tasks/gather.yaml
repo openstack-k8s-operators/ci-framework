@@ -45,6 +45,20 @@
         {{ pcp_metrics_metricspec }}
       register: _pcp_metrics_pmrep
       changed_when: false
+      # A corrupted archive on a single host must not fail the whole run:
+      # pmrep still emits the valid rows to stdout before aborting, so we keep
+      # the partial output and only treat other non-zero exits as real errors.
+      failed_when:
+        - _pcp_metrics_pmrep.rc != 0
+        - "'Corrupted record' not in _pcp_metrics_pmrep.stderr"
+
+    - name: Warn when a corrupted archive was encountered
+      ansible.builtin.debug:
+        msg: >-
+          pmrep reported a corrupted PCP archive on {{ ansible_hostname }};
+          only the metrics collected before the corruption were saved
+          ({{ _pcp_metrics_pmrep.stderr }}).
+      when: _pcp_metrics_pmrep.rc != 0
 
     - name: Ensure the output directory exist
       ansible.builtin.file:
@@ -59,3 +73,4 @@
         dest: "{{ pcp_metrics_output_dir }}/{{ ansible_hostname }}.csv"
         mode: "0644"
       delegate_to: localhost
+      when: _pcp_metrics_pmrep.stdout | length > 0
