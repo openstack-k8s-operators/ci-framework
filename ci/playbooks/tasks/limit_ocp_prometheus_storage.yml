@@ -1,0 +1,133 @@
+# Cap the OCP in-cluster Prometheus storage before a reuse_ocp deployment.
+#
+# The platform Prometheus (openshift-monitoring/prometheus-k8s) runs with the
+# defaults: 15d retention, no size limit, and its TSDB on an emptyDir, i.e. on
+# the master root disk. On a long-lived reused cluster it grows to ~40 GiB per
+# replica, which pushes the masters hosting a replica under the kubelet eviction
+# threshold. The node gets the disk-pressure taint and pods get evicted in a
+# loop (e.g. the openstack-edpm provisionserver, so the BMHs never provision and
+# `oc wait osdpns ... --for condition=SetupReady` times out). must-gather also
+# refuses to run above 80% disk usage, so the logs miss the openstack data.
+#
+# Setting retention/retentionSize in cluster-monitoring-config bounds the TSDB.
+# The monitoring operator rolls the prometheus-k8s pods to apply it, and since
+# the TSDB lives on an emptyDir the restart frees the space right away. Any
+# other setting already present in the ConfigMap is preserved.
+---
+- name: Cap the OCP Prometheus storage
+  delegate_to: "{{ cifmw_ocp_prometheus_limit_host | default('controller-0') }}"
+  vars:
+    _oc: "{{ cifmw_ocp_prometheus_limit_oc | default('~/bin/oc') }}"
+    _retention: "{{ cifmw_ocp_prometheus_retention | default('24h') }}"
+    _retention_size: "{{ cifmw_ocp_prometheus_retention_size | default('10GB') }}"
+  block:
+    - name: List the OCP nodes
+      ansible.builtin.command:
+        cmd: "{{ _oc }} get nodes -o name"
+      register: _prom_nodes
+      changed_when: false
+
+    - name: Capture node disk usage before capping Prometheus
+      ansible.builtin.command:
+        cmd: "{{ _oc }} get --raw /api/v1/nodes/{{ item | basename }}/proxy/stats/summary"
+      register: _prom_disk_before
+      changed_when: false
+      loop: "{{ _prom_nodes.stdout_lines }}"
+
+    - name: Read the current cluster-monitoring-config
+      ansible.builtin.command:
+        cmd: "{{ _oc }} -n openshift-monitoring get configmap cluster-monitoring-config -o json --ignore-not-found"
+      register: _prom_cmo_current
+      changed_when: false
+
+    - name: Merge the Prometheus retention into the monitoring config
+      vars:
+        _current_config: >-
+          {{
+            ((_prom_cmo_current.stdout | from_json).data | default({}))['config.yaml'] | default('{}') | from_yaml
+            if _prom_cmo_current.stdout | length > 0 else {}
+          }}
+      ansible.builtin.set_fact:
+        _prom_cmo_config: >-
+          {{
+            _current_config | default({}, true)
+            | combine({'prometheusK8s': {'retention': _retention, 'retentionSize': _retention_size}}, recursive=true)
+          }}
+
+    - name: Apply the cluster-monitoring-config
+      vars:
+        _cmo_manifest:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: cluster-monitoring-config
+            namespace: openshift-monitoring
+          data:
+            config.yaml: "{{ _prom_cmo_config | to_nice_yaml }}"
+      ansible.builtin.command:
+        cmd: "{{ _oc }} apply -f -"
+        stdin: "{{ _cmo_manifest | to_json }}"
+      register: _prom_cmo_apply
+      changed_when: "'unchanged' not in _prom_cmo_apply.stdout"
+
+    - name: Wait for Prometheus to pick up the new retention
+      when: _prom_cmo_apply is changed
+      block:
+        - name: Wait for the monitoring operator to update the Prometheus CR
+          ansible.builtin.command:
+            cmd: >-
+              {{ _oc }} -n openshift-monitoring get prometheus k8s
+              -o jsonpath={.spec.retention}/{.spec.retentionSize}
+          register: _prom_cr
+          changed_when: false
+          until: _prom_cr.stdout == _retention ~ '/' ~ _retention_size
+          retries: 30
+          delay: 10
+
+        - name: Wait for the prometheus-k8s pods to be rolled
+          ansible.builtin.command:
+            cmd: >-
+              {{ _oc }} -n openshift-monitoring rollout status statefulset/prometheus-k8s
+              --timeout={{ cifmw_ocp_prometheus_rollout_timeout | default('15m') }}
+          changed_when: false
+
+    # The kubelet keeps the disk-pressure taint for a few minutes after the
+    # space is freed; pods won't schedule on that node until it is lifted.
+    - name: Wait for the nodes to leave disk pressure
+      ansible.builtin.command:
+        cmd: >-
+          {{ _oc }} wait node --all --for=condition=DiskPressure=False
+          --timeout={{ cifmw_ocp_prometheus_disk_pressure_timeout | default('10m') }}
+      register: _prom_disk_pressure
+      changed_when: false
+      failed_when: false
+
+    - name: Capture node disk usage after capping Prometheus
+      ansible.builtin.command:
+        cmd: "{{ _oc }} get --raw /api/v1/nodes/{{ item | basename }}/proxy/stats/summary"
+      register: _prom_disk_after
+      changed_when: false
+      loop: "{{ _prom_nodes.stdout_lines }}"
+
+    - name: Report node disk usage before/after capping Prometheus
+      vars:
+        _fs_before: "{{ (item.0.stdout | from_json).node.fs }}"
+        _fs_after: "{{ (item.1.stdout | from_json).node.fs }}"
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.0.item | basename }}:
+          available {{ (_fs_before.availableBytes / 1073741824) | round(1) }} GiB ->
+          {{ (_fs_after.availableBytes / 1073741824) | round(1) }} GiB
+          of {{ (_fs_after.capacityBytes / 1073741824) | round(1) }} GiB
+          ({{ (100 - 100 * _fs_before.availableBytes / _fs_before.capacityBytes) | round | int }}% ->
+          {{ (100 - 100 * _fs_after.availableBytes / _fs_after.capacityBytes) | round | int }}% used)
+      loop: "{{ _prom_disk_before.results | zip(_prom_disk_after.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item | basename }}"
+
+    - name: Warn when a node is still under disk pressure
+      when: _prom_disk_pressure.rc != 0
+      ansible.builtin.debug:
+        msg: >-
+          Some OCP node is still under disk pressure after capping Prometheus:
+          {{ _prom_disk_pressure.stderr | default(_prom_disk_pressure.stdout) }}
