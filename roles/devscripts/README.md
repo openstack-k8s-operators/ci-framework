@@ -45,6 +45,14 @@ networks.
   the OpenShift nodes having role as `worker`. Defaults to `false`.
 * `cifmw_devscripts_enable_multipath_on_ocp_nodes` (bool) Enable multipath
   services on the OpenShift nodes. Defaults to `false`.
+* `cifmw_devscripts_limit_ocp_prometheus_storage` (bool) Install OpenShift with
+  a `cluster-monitoring-config` that bounds the platform Prometheus storage. Its
+  TSDB lives on the master root disk and, with the default 15d retention and no
+  size limit, can fill it on long-lived clusters. Defaults to `false`.
+* `cifmw_devscripts_ocp_prometheus_retention` (str) Platform Prometheus
+  retention time. Defaults to `24h`.
+* `cifmw_devscripts_ocp_prometheus_retention_size` (str) Platform Prometheus
+  maximum TSDB size. Defaults to `10GB`.
 * `cifmw_devscripts_create_logical_volume` (bool) Create a logical volume with
   the name cinder-volumes on all OCP nodes. Defaults to `false`.
 * `cifmw_devscripts_host_bm_net_ip_addr` (str) The IP address of the host to be
