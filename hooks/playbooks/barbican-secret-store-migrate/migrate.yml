@@ -1,0 +1,152 @@
+---
+# Live-migrate Barbican secrets across every enabled secret store.
+#
+# Store set and catalogue UUIDs come from GET /v1/secret-stores
+# (openstacksdk in the openstackclient pod) — the same ids the migrate
+# API and microversion 1.3 secret_store_id assert require. Creates on
+# the global-default store (OSC has no preferred-store command), then
+# for each other store runs: OSC round-trip, barbican-manage secret
+# migrate round-trip, dry-run, and (once) a metadata-only conflict
+# against the first destination.
+#
+# Optional: cifmw_barbican_migrate_secret_type (e.g. symmetric) is
+# passed through to openstack secret store when set.
+#
+# Wire as post_tests (after tempest on the default store):
+#
+#   post_tests:
+#     - name: 90 Barbican secret-store migrate
+#       type: playbook
+#       source: "{{ ci_framework_base_src_dir }}/hooks/playbooks/barbican-secret-store-migrate/migrate.yml"
+#
+# Related: OSPRH-35280 / OSPRH-35261 / RHOSSTRAT-1435
+
+- name: Test Barbican secret-store migrate via GET secret_store_id
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_barbican_migrate_namespace: "{{ namespace | default(cifmw_openstack_namespace) | default('openstack') }}"
+    cifmw_barbican_migrate_osc_pod_name: openstackclient
+    cifmw_barbican_migrate_api_label: component=barbican-api
+    cifmw_barbican_migrate_api_container: barbican-api
+    _oc_env:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      PATH: "{{ cifmw_path }}"
+  environment: "{{ _oc_env }}"
+  tasks:
+    - name: Get openstackclient pod
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ cifmw_barbican_migrate_namespace }}"
+        name: "{{ cifmw_barbican_migrate_osc_pod_name }}"
+      register: _osc_pod_info
+
+    - name: Get Barbican API pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ cifmw_barbican_migrate_namespace }}"
+        label_selectors:
+          - "{{ cifmw_barbican_migrate_api_label }}"
+        field_selectors:
+          - status.phase=Running
+      register: _barbican_api_pod_info
+
+    - name: Fail if required pods are missing
+      ansible.builtin.assert:
+        that:
+          - _osc_pod_info.resources | length > 0
+          - _barbican_api_pod_info.resources | length > 0
+        fail_msg: >-
+          Need Running openstackclient and a pod labelled
+          {{ cifmw_barbican_migrate_api_label }} in
+          {{ cifmw_barbican_migrate_namespace }}.
+
+    - name: Set pod names and shared oc-exec argv prefixes
+      ansible.builtin.set_fact:
+        cifmw_barbican_migrate_osc_pod: "{{ _osc_pod_info.resources[0].metadata.name }}"
+        cifmw_barbican_migrate_api_pod: "{{ _barbican_api_pod_info.resources[0].metadata.name }}"
+        cifmw_barbican_migrate_osc_exec: "{{ [
+          'oc', '-n', cifmw_barbican_migrate_namespace,
+          'exec', _osc_pod_info.resources[0].metadata.name, '--',
+        ] }}"
+        cifmw_barbican_migrate_api_exec: "{{ [
+          'oc', '-n', cifmw_barbican_migrate_namespace,
+          'exec', _barbican_api_pod_info.resources[0].metadata.name,
+          '-c', cifmw_barbican_migrate_api_container, '--',
+        ] }}"
+
+    # OSC has no secret-store list command; use openstacksdk in the OSC pod.
+    - name: List secret stores via openstacksdk
+      ansible.builtin.command:
+        argv: "{{ cifmw_barbican_migrate_osc_exec + [
+          'python3', '-c', _list_stores_py,
+        ] }}"
+      vars:
+        _list_stores_py: |
+          import json
+          import openstack
+          conn = openstack.connect()
+          stores = []
+          for s in conn.key_manager.secret_stores():
+              stores.append({
+                  'id': s.id,
+                  'store_plugin': s.secret_store_plugin or '',
+                  'crypto_plugin': s.crypto_plugin or '',
+                  'global_default': bool(s.global_default),
+              })
+          print(json.dumps(stores))
+      register: _stores_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse secret stores
+      ansible.builtin.set_fact:
+        _secret_stores: "{{ _stores_raw.stdout | from_json }}"
+
+    - name: Require at least two stores and one global default
+      vars:
+        _defaults: "{{ _secret_stores | selectattr('global_default', 'in', [true, True, 'True', 'true', 1, '1']) | list }}"
+      ansible.builtin.assert:
+        that:
+          - _secret_stores | length >= 2
+          - _defaults | length == 1
+        fail_msg: >-
+          Need >=2 secret stores and exactly one global_default from
+          GET /v1/secret-stores (got {{ _secret_stores | length }} stores,
+          {{ _defaults | length }} defaults). Stores: {{ _secret_stores }}
+
+    - name: Set global-default source and destinations
+      vars:
+        _defaults: "{{ _secret_stores | selectattr('global_default', 'in', [true, True, 'True', 'true', 1, '1']) | list }}"
+      ansible.builtin.set_fact:
+        _store_src: "{{ _defaults[0] }}"
+        _store_destinations: "{{ _secret_stores | rejectattr('id', 'equalto', _defaults[0].id) | list }}"
+
+    - name: Choose a payload for this run
+      ansible.builtin.set_fact:
+        _payload: "ci-migrate-payload-{{ 999999 | random }}"
+
+    - name: Migrate from global default to each other store
+      ansible.builtin.include_tasks: pair.yml
+      loop: "{{ _store_destinations }}"
+      loop_control:
+        loop_var: _store_dst
+        extended: true
+        label: "{{ _store_src.store_plugin }}/{{ _store_src.crypto_plugin }} → {{ _store_dst.store_plugin }}/{{ _store_dst.crypto_plugin }}"
+      vars:
+        cifmw_barbican_migrate_src_store: "{{ _store_src }}"
+        cifmw_barbican_migrate_dst_store: "{{ _store_dst }}"
+        # Pass-through; pair/scenario use | default('') — do not self-assign
+        # (ansible-lint jinja[invalid] recursive loop).
+        cifmw_barbican_migrate_pair_label: >-
+          {{ (_store_src.crypto_plugin or _store_src.store_plugin) ~ '_to_'
+             ~ (_store_dst.crypto_plugin or _store_dst.store_plugin) }}
+        cifmw_barbican_migrate_run_metaonly: "{{ ansible_loop.first }}"

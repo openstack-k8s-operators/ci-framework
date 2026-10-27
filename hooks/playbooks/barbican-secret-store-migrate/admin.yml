@@ -1,0 +1,30 @@
+---
+# Run barbican-manage secret migrate in the API pod.
+#
+# Operator CLI: reads barbican.conf / DB in-process and calls
+# rewrap_secret. No Keystone token or HTTP to Barbican.
+#
+# Expects: cifmw_barbican_migrate_api_exec, *_admin_store_id,
+# *_admin_secret_id, optional *_admin_dry_run.
+
+- name: "barbican-manage secret migrate ({{ cifmw_barbican_migrate_case }})"
+  ansible.builtin.command:
+    argv: "{{ _manage_argv }}"
+  vars:
+    _manage_argv: "{{
+      cifmw_barbican_migrate_api_exec
+      + [
+          'barbican-manage', 'secret', 'migrate',
+          '--dest-store-id', cifmw_barbican_migrate_admin_store_id,
+          '--secret-id', cifmw_barbican_migrate_admin_secret_id,
+          '--error-file',
+          '/tmp/cifmw-barbican-manage-secret-migrate-errors.jsonl',
+        ]
+      + (
+          ['--dry-run']
+          if (cifmw_barbican_migrate_admin_dry_run | default(false) | bool)
+          else []
+        )
+    }}"
+  register: _migrate_admin
+  changed_when: false

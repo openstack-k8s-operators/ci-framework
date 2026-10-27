@@ -1,0 +1,21 @@
+---
+# Move _migrate_secret_href/_id onto cifmw_barbican_migrate_target_store
+# via OSC or barbican-manage, per cifmw_barbican_migrate_via.
+
+- name: "OSC migrate ({{ cifmw_barbican_migrate_case }})"
+  when: cifmw_barbican_migrate_via | default('osc') == 'osc'
+  ansible.builtin.command:
+    argv: "{{ cifmw_barbican_migrate_osc_exec + [
+      'openstack', 'secret', 'migrate',
+      _migrate_secret_href,
+      '--secret-store', cifmw_barbican_migrate_target_store.id,
+    ] }}"
+  changed_when: false
+
+- name: "barbican-manage migrate ({{ cifmw_barbican_migrate_case }})"
+  when: cifmw_barbican_migrate_via | default('osc') == 'admin'
+  ansible.builtin.include_tasks: admin.yml
+  vars:
+    cifmw_barbican_migrate_admin_store_id: "{{ cifmw_barbican_migrate_target_store.id }}"
+    cifmw_barbican_migrate_admin_secret_id: "{{ _migrate_secret_id }}"
+    cifmw_barbican_migrate_admin_dry_run: "{{ cifmw_barbican_migrate_dry_run | default(false) | bool }}"

@@ -1,0 +1,107 @@
+---
+# One migrate scenario: create on src, migrate (and optional round-trip),
+# assert secret_store_id, decrypt, delete.
+#
+# cifmw_barbican_migrate_via: osc | admin
+# cifmw_barbican_migrate_dry_run: admin only; no rewrap
+# cifmw_barbican_migrate_roundtrip: migrate back to src
+#
+# Expects migrate.yml facts (osc_exec, src/dst stores, …).
+
+- name: "{{ cifmw_barbican_migrate_case }} migrate scenario"
+  block:
+    - name: "Create secret for {{ cifmw_barbican_migrate_case }}"
+      ansible.builtin.command:
+        argv: "{{ _create_argv }}"
+      vars:
+        _create_argv: "{{
+          cifmw_barbican_migrate_osc_exec
+          + [
+              'openstack', 'secret', 'store',
+              '--name', 'ci-migrate-' ~ cifmw_barbican_migrate_case,
+              '--payload', cifmw_barbican_migrate_payload,
+              '--payload-content-type', 'text/plain',
+            ]
+          + (
+              ['--secret-type', cifmw_barbican_migrate_secret_type]
+              if (cifmw_barbican_migrate_secret_type | default('') | length) > 0
+              else []
+            )
+          + ['-f', 'value', '-c', 'Secret href']
+        }}"
+      register: _create_secret
+      changed_when: false
+      no_log: true
+
+    - name: "Parse created secret for {{ cifmw_barbican_migrate_case }}"
+      ansible.builtin.set_fact:
+        _migrate_secret_href: "{{ _create_secret.stdout | trim }}"
+        _migrate_secret_id: "{{ _create_secret.stdout | trim | regex_replace('.*/', '') }}"
+
+    - name: "Assert source store before migrate ({{ cifmw_barbican_migrate_case }})"
+      ansible.builtin.include_tasks: assert.yml
+      vars:
+        cifmw_barbican_migrate_assert_label: "{{ cifmw_barbican_migrate_case }} before"
+        cifmw_barbican_migrate_assert_secret_id: "{{ _migrate_secret_id }}"
+        cifmw_barbican_migrate_assert_store: "{{ cifmw_barbican_migrate_src_store }}"
+
+    - name: "Migrate to destination ({{ cifmw_barbican_migrate_case }})"
+      ansible.builtin.include_tasks: move.yml
+      vars:
+        cifmw_barbican_migrate_target_store: "{{ cifmw_barbican_migrate_dst_store }}"
+
+    - name: "Assert store after migrate ({{ cifmw_barbican_migrate_case }})"
+      ansible.builtin.include_tasks: assert.yml
+      vars:
+        cifmw_barbican_migrate_assert_label: "{{ cifmw_barbican_migrate_case }} after"
+        cifmw_barbican_migrate_assert_secret_id: "{{ _migrate_secret_id }}"
+        cifmw_barbican_migrate_assert_store: >-
+          {{ cifmw_barbican_migrate_src_store
+             if (cifmw_barbican_migrate_dry_run | default(false) | bool)
+             else cifmw_barbican_migrate_dst_store }}
+
+    - name: "Migrate back to source ({{ cifmw_barbican_migrate_case }})"
+      when:
+        - cifmw_barbican_migrate_roundtrip | default(false) | bool
+        - not (cifmw_barbican_migrate_dry_run | default(false) | bool)
+      ansible.builtin.include_tasks: move.yml
+      vars:
+        cifmw_barbican_migrate_target_store: "{{ cifmw_barbican_migrate_src_store }}"
+        cifmw_barbican_migrate_dry_run: false
+
+    - name: "Assert source store after roundtrip ({{ cifmw_barbican_migrate_case }})"
+      when:
+        - cifmw_barbican_migrate_roundtrip | default(false) | bool
+        - not (cifmw_barbican_migrate_dry_run | default(false) | bool)
+      ansible.builtin.include_tasks: assert.yml
+      vars:
+        cifmw_barbican_migrate_assert_label: "{{ cifmw_barbican_migrate_case }} roundtrip"
+        cifmw_barbican_migrate_assert_secret_id: "{{ _migrate_secret_id }}"
+        cifmw_barbican_migrate_assert_store: "{{ cifmw_barbican_migrate_src_store }}"
+
+    - name: "Decrypt payload after migrate ({{ cifmw_barbican_migrate_case }})"
+      ansible.builtin.command:
+        argv: "{{ cifmw_barbican_migrate_osc_exec + [
+          'openstack', 'secret', 'get', '--payload',
+          _migrate_secret_href, '-f', 'value', '-c', 'Payload',
+        ] }}"
+      register: _payload_after
+      changed_when: false
+      no_log: true
+
+    - name: "Assert payload unchanged ({{ cifmw_barbican_migrate_case }})"
+      ansible.builtin.assert:
+        that:
+          - _payload_after.stdout | trim == cifmw_barbican_migrate_payload
+        fail_msg: >-
+          {{ cifmw_barbican_migrate_case }}: payload mismatch after migrate.
+  always:
+    - name: "Delete secret for {{ cifmw_barbican_migrate_case }}"
+      when: _migrate_secret_href is defined
+      ansible.builtin.command:
+        argv: "{{ cifmw_barbican_migrate_osc_exec + [
+          'openstack', 'secret', 'delete', _migrate_secret_href,
+        ] }}"
+      changed_when: false
+      failed_when: false
+      no_log: true
