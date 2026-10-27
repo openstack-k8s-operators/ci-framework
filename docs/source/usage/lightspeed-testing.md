@@ -92,9 +92,10 @@ The client token is separate from the mock provider credential; pass its path,
 not its contents, to the runner.
 
 Tests normally run in `openstack` and call the Lightspeed Service in
-`openstack-lightspeed`. `cifmw_test_operator_namespace` selects the test namespace;
-the installer also accepts `cifmw_lightspeed_tests_namespace` for its access
-binding, which defaults to that test namespace and must match it.
+`openstack-lightspeed`. `cifmw_test_operator_namespace` selects the test namespace
+and the ServiceAccount namespace used by the installer's access binding; it
+defaults to `openstack` for standalone installation. Test access and dummy
+prerequisites are grouped after the service reaches Ready.
 `cifmw_openstack_lightspeed_namespace` selects the application namespace; update
 the runner's `lightspeed_url` accordingly. The consuming job templates this URL.
 The parent deployment supplies test-operator, its AnsibleTest API and the
