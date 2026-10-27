@@ -1,0 +1,114 @@
+---
+# Fortanix KMIP — create client-data Secret (ClientDataSpec).
+# Cert-only auth (no username/password). Client PEMs come from lookaside
+# URLs on the store, same pattern as Luna/Proteccio client material.
+#
+# Required store fields:
+#   host
+#   ca_certs_src   — URL to CA bundle / CA cert PEM
+#   certfile_src   — URL to client certificate PEM
+#   keyfile_src    — URL to client private key PEM
+# Optional:
+#   port (default 5696), client_data_secret, client_data_path
+#
+# Opaque/passphrase KMIP mapping (SecretData):
+#   https://review.opendev.org/c/openstack/barbican/+/1011705
+
+- name: Require Fortanix lookaside fields on store {{ store.id }}
+  ansible.builtin.assert:
+    that:
+      - store.host is defined
+      - store.host | length > 0
+      - store.ca_certs_src is defined
+      - store.ca_certs_src | length > 0
+      - store.certfile_src is defined
+      - store.certfile_src | length > 0
+      - store.keyfile_src is defined
+      - store.keyfile_src | length > 0
+    fail_msg: >-
+      Fortanix store {{ store.id }} needs host, ca_certs_src, certfile_src,
+      and keyfile_src (lookaside HTTPS URLs for PEM files).
+
+- name: Create temp dir for Fortanix PEMs ({{ store.id }})
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: "-fortanix-{{ store.id }}"
+  register: _fortanix_tmpdir
+
+- name: Fetch Fortanix PEMs from lookaside for {{ store.id }}
+  no_log: true
+  block:
+    - name: Download Fortanix CA certs
+      ansible.builtin.get_url:
+        url: "{{ store.ca_certs_src }}"
+        dest: "{{ _fortanix_tmpdir.path }}/CACert.pem"
+        mode: "0600"
+
+    - name: Download Fortanix client certificate
+      ansible.builtin.get_url:
+        url: "{{ store.certfile_src }}"
+        dest: "{{ _fortanix_tmpdir.path }}/Client.pem"
+        mode: "0600"
+
+    - name: Download Fortanix client key
+      ansible.builtin.get_url:
+        url: "{{ store.keyfile_src }}"
+        dest: "{{ _fortanix_tmpdir.path }}/Client.key"
+        mode: "0600"
+
+    - name: Slurp Fortanix PEMs
+      ansible.builtin.slurp:
+        src: "{{ _fortanix_tmpdir.path }}/{{ item }}"
+      loop:
+        - CACert.pem
+        - Client.pem
+        - Client.key
+      register: _fortanix_pem_slurp
+
+    - name: Map slurped Fortanix PEMs
+      ansible.builtin.set_fact:
+        _kmip_ca_certs: "{{ (_fortanix_pem_slurp.results | selectattr('item', 'equalto', 'CACert.pem') | first).content | b64decode }}"
+        _kmip_certfile: "{{ (_fortanix_pem_slurp.results | selectattr('item', 'equalto', 'Client.pem') | first).content | b64decode }}"
+        _kmip_keyfile: "{{ (_fortanix_pem_slurp.results | selectattr('item', 'equalto', 'Client.key') | first).content | b64decode }}"
+      no_log: true
+
+  always:
+    - name: Remove Fortanix PEM temp dir
+      ansible.builtin.file:
+        path: "{{ _fortanix_tmpdir.path }}"
+        state: absent
+
+- name: Set Fortanix connection defaults for {{ store.id }}
+  ansible.builtin.set_fact:
+    _kmip_host: "{{ store.host }}"
+    _kmip_port: "{{ store.port | default('5696') }}"
+    _kmip_client_data_secret: "{{ store.client_data_secret | default('barbican-kmip-client-data') }}"
+    _kmip_client_data_path: "{{ store.client_data_path | default('/etc/kmip-client') }}"
+
+- name: Create or update KMIP client-data Secret for {{ store.id }}
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _kmip_client_data_secret }}"
+        namespace: "{{ namespace }}"
+      type: Opaque
+      stringData:
+        # Key names match barbican-operator config/samples/pods_with_kmip.yaml.
+        CACert.pem: "{{ _kmip_ca_certs }}"
+        Client.pem: "{{ _kmip_certfile }}"
+        Client.key: "{{ _kmip_keyfile }}"
+  no_log: true
+
+- name: Stash Fortanix prepare results for {{ store.id }}
+  ansible.builtin.set_fact:
+    _bss_fortanix_prep:
+      host: "{{ _kmip_host }}"
+      port: "{{ _kmip_port }}"
+      client_data_secret: "{{ _kmip_client_data_secret }}"
+      client_data_path: "{{ _kmip_client_data_path }}"

@@ -1,0 +1,47 @@
+---
+# Proteccio PKCS11 → pkcs11 CRD fragment + [p11_crypto_plugin] customServiceConfig.
+# Plugin settings come from the store dict.
+#
+# Required store fields: partition, mkek_label, hmac_label
+# Optional: library_path (default libnethsm path),
+#           key_wrap_mechanism (default CKM_AES_CBC_PAD)
+# Uses _bss_proteccio_prep from prepare/proteccio.yml.
+
+- name: Require Proteccio config fields on store {{ store.id }}
+  ansible.builtin.assert:
+    that:
+      - store.partition is defined
+      - store.partition | length > 0
+      - store.mkek_label is defined
+      - store.mkek_label | length > 0
+      - store.hmac_label is defined
+      - store.hmac_label | length > 0
+    fail_msg: >-
+      Proteccio store {{ store.id }} needs partition, mkek_label, and hmac_label.
+
+- name: Build Proteccio p11_crypto_plugin section for {{ store.id }}
+  ansible.builtin.set_fact:
+    _proteccio_ini: |
+      [p11_crypto_plugin]
+      plugin_name = PKCS11
+      library_path = {{ store.library_path | default('/usr/lib64/libnethsm.so') }}
+      token_labels = {{ store.partition }}
+      mkek_label = {{ store.mkek_label }}
+      hmac_label = {{ store.hmac_label }}
+      encryption_mechanism = CKM_AES_CBC
+      hmac_key_type = CKK_GENERIC_SECRET
+      hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
+      hmac_mechanism = CKM_SHA256_HMAC
+      key_wrap_mechanism = {{ store.key_wrap_mechanism | default('CKM_AES_CBC_PAD') }}
+      key_wrap_generate_iv = true
+      always_set_cka_sensitive = true
+      os_locking_ok = false
+
+- name: Record Proteccio pkcs11 fragments for {{ store.id }}
+  ansible.builtin.set_fact:
+    _bss_enabled_types: "{{ _bss_enabled_types + ['pkcs11'] }}"
+    _bss_pkcs11_spec:
+      loginSecret: "{{ _bss_proteccio_prep.login_secret }}"
+      clientDataSecret: "{{ _bss_proteccio_prep.client_data_secret }}"
+      clientDataPath: "{{ _bss_proteccio_prep.client_data_path }}"
+    _bss_ini_sections: "{{ _bss_ini_sections + [_proteccio_ini] }}"

@@ -1,0 +1,26 @@
+---
+# Fortanix KMIP → kmip CRD fragment + [kmip_plugin] customServiceConfig.
+# Cert-only auth; PEMs mounted from ClientDataSpec under clientDataPath.
+# Uses _bss_fortanix_prep from prepare/fortanix.yml.
+
+- name: Build kmip_plugin section for {{ store.id }}
+  ansible.builtin.set_fact:
+    _kmip_ini: |
+      [kmip_plugin]
+      host = {{ _bss_fortanix_prep.host }}
+      port = {{ _bss_fortanix_prep.port }}
+      ca_certs = {{ _bss_fortanix_prep.client_data_path }}/CACert.pem
+      certfile = {{ _bss_fortanix_prep.client_data_path }}/Client.pem
+      keyfile = {{ _bss_fortanix_prep.client_data_path }}/Client.key
+      # pkcs1_only is deprecated (Barbican 1011705); prefer
+      # public_key_format / private_key_format if Fortanix rejects
+      # the default public-key encoding.
+      pkcs1_only = false
+
+- name: Record kmip fragments for {{ store.id }}
+  ansible.builtin.set_fact:
+    _bss_enabled_types: "{{ _bss_enabled_types + ['kmip'] }}"
+    _bss_kmip_spec:
+      clientDataSecret: "{{ _bss_fortanix_prep.client_data_secret }}"
+      clientDataPath: "{{ _bss_fortanix_prep.client_data_path }}"
+    _bss_ini_sections: "{{ _bss_ini_sections + [_kmip_ini] }}"
