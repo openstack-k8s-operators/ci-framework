@@ -55,8 +55,11 @@ are shared among multiple roles:
   Defaults to false.
 - `cifmw_run_test_role`: (String) Specifies which ci-framework role will be used to run tests. Allowed options are `test_operator` and `shiftstack`. Defaults to `test_operator`.
 - `cifmw_edpm_deploy_nfs`: (Bool) Specifies whether an nfs server should be deployed.
-- `cifmw_nfs_target`: (String) The Ansible inventory group where the nfs server is deployed. Defaults to `computes`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
+- `cifmw_nfs_target`: (String) The Ansible inventory group or host where the nfs server is deployed. Defaults to `computes`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_nfs_network`: (String) The network the deployed nfs server will be accessible from. Defaults to `storage`. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
+- `cifmw_nfs_server_ip`: (String) Optional explicit NFS listener address. If unset, it is resolved from the target's IPSet reservation.
+- `cifmw_nfs_clients_cidr`: (String) Optional explicit client CIDR for NFS exports. If unset, it is resolved from the target's IPSet reservation.
+- `cifmw_nfs_debug`: (Bool) Log NFS target networking and server state. Defaults to `false`.
 - `cifmw_nfs_shares`: (List) List of the shares that will be setup in the nfs server. Only has an effect if `cifmw_edpm_deploy_nfs` is set to `true`.
 - `cifmw_fips_enabled`: (Bool) Specifies whether FIPS should be enabled in the deployment. Note that not all deployment methods support this functionality. Defaults to `false`.
 - `cifmw_baremetal_hosts`: (Dict) Baremetal nodes environment details. More details [here](../baremetal/01_baremetal_hosts_data.md)
