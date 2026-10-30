@@ -1,0 +1,65 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Mirrors the override pattern used by the hive role
+# (roles/hive/tasks/baremetal_gather_access.yml): point
+# cifmw_openshift_kubeconfig at the cluster this role just created so that
+# every later cifmw_setup phase (deploy_architecture.yml, deploy_edpm.yml)
+# targets the hosted cluster instead of the management cluster.
+- name: Load the hosted cluster kubeconfig
+  ansible.builtin.set_fact:
+    _hosted_cluster_kubeconfig_dict: >-
+      {{
+        lookup('file', cifmw_hosted_cluster_artifacts_dir ~ '/kubeconfig-' ~
+               cifmw_hosted_cluster_name) | from_yaml
+      }}
+
+- name: Retarget OpenShift access at the hosted cluster
+  ansible.builtin.set_fact:
+    cifmw_openshift_kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    cifmw_openshift_api: "{{ _hosted_cluster_kubeconfig_dict.clusters[0].cluster.server }}"
+    cifmw_openshift_context: "{{ _hosted_cluster_kubeconfig_dict.contexts[0].name }}"
+    cifmw_openshift_user: "{{ _hosted_cluster_kubeconfig_dict.users[0].name }}"
+    # The admin kubeconfig HyperShift generates authenticates with an
+    # embedded client certificate, not a bearer token. Replace any token
+    # left over from logging into the management cluster -- kept as-is it
+    # would be passed as `api_key` on every later kubernetes.core.k8s call
+    # and override that certificate auth with an invalid "Bearer" header
+    # for the hosted cluster. Explicit `None` (not "") is required: the
+    # module only skips `api_key` when the value `is not None`.
+    cifmw_openshift_token: "{{ _hosted_cluster_kubeconfig_dict.users[0].user.get('token') }}"
+    cacheable: true
+
+# cifmw_helpers/include_dir.yml and the `include_vars: dir=...` calls in
+# deploy_edpm.yml load artifacts/parameters/*.yml sorted by filename, last
+# file wins. This filename sorts after openshift-login-params.yml, so it
+# overrides the management cluster credentials written there for any phase
+# re-loaded from a separate ansible-playbook invocation.
+- name: Persist the hosted cluster kubeconfig
+  vars:
+    _hosted_cluster_params_content: |
+      cifmw_openshift_kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+      cifmw_openshift_api: "{{ cifmw_openshift_api }}"
+      cifmw_openshift_context: "{{ cifmw_openshift_context }}"
+      cifmw_openshift_user: "{{ cifmw_openshift_user }}"
+      cifmw_hosted_cluster_datacentre_interface: "{{ cifmw_hosted_cluster_datacentre_interface }}"
+      {% if cifmw_openshift_token %}
+      cifmw_openshift_token: "{{ cifmw_openshift_token }}"
+      {% endif %}
+  ansible.builtin.copy:
+    dest: "{{ cifmw_basedir }}/artifacts/parameters/zz-hosted-cluster-params.yml"
+    content: "{{ _hosted_cluster_params_content | from_yaml | to_nice_yaml }}"
+    mode: "0600"

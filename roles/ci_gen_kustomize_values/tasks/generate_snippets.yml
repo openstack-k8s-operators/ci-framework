@@ -102,6 +102,51 @@
       }}
     cacheable: false
 
+# Hosted workers use dedicated guest NICs, but the subnet VLANs must remain
+# in NetConfig for EDPM computes. Remove only the network-level NNCP fields.
+- name: Remove hosted worker VLAN interface settings
+  when:
+    - cifmw_deploy_hosted_cluster | default(false) | bool
+    - cifmw_architecture_scenario == 'hci'
+    - values_datatype == 'network-values'
+  vars:
+    _network_data: >-
+      {%- set _data = {} -%}
+      {%- for _name, _value in _cifmw_gen_kustomize_values_base_cm_content.data.items() -%}
+        {%- set _fields = (
+          _value | dict2items |
+          rejectattr('key', 'in', ['vlan', 'base_iface']) | items2dict
+          if _name in cifmw_networking_env_definition.networks and _value is mapping
+          else _value
+        ) -%}
+        {%- set _ = _data.update({_name: _fields}) -%}
+      {%- endfor -%}
+      {{ _data }}
+  ansible.builtin.set_fact:
+    _cifmw_gen_kustomize_values_base_cm_content: >-
+      {{
+        _cifmw_gen_kustomize_values_base_cm_content |
+        combine({'data': _network_data})
+      }}
+
+- name: Require hosted workers in the networking environment definition
+  when:
+    - cifmw_deploy_hosted_cluster | default(false) | bool
+    - cifmw_architecture_scenario == 'hci'
+    - values_datatype == 'network-values'
+  vars:
+    _hosted_node_pattern: >-
+      ^{{ cifmw_hosted_cluster_name | default('hcp-0') | regex_escape }}-
+  ansible.builtin.assert:
+    that:
+      - >-
+        cifmw_networking_env_definition.instances.keys() |
+        select('match', _hosted_node_pattern) | list | length > 0
+      - cifmw_hosted_cluster_datacentre_interface | default('') | length > 0
+    fail_msg: >-
+      Hosted deployments require worker instances matching
+      {{ _hosted_node_pattern }} and a discovered datacentre interface.
+
 - name: Ensure we get the needed data depending on the values type
   when:
     - ((role_path, 'tasks', _tasks) | path_join) is file

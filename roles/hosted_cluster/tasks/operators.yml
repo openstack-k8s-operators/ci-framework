@@ -1,0 +1,212 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Create OpenShift Virtualization, MCE, MetalLB and NMState namespaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    kind: Namespace
+    name: "{{ item }}"
+  loop:
+    - "{{ cifmw_hosted_cluster_cnv_namespace }}"
+    - "{{ cifmw_hosted_cluster_mce_namespace }}"
+    - "{{ cifmw_hosted_cluster_metallb_namespace }}"
+    - "{{ cifmw_hosted_cluster_nmstate_namespace }}"
+
+- name: Subscribe OpenShift Virtualization, MCE, MetalLB and NMState
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition: "{{ item }}"
+  loop:
+    - "{{ cifmw_hosted_cluster_cnv_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_cnv_olm_subscription }}"
+    - "{{ cifmw_hosted_cluster_mce_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_mce_olm_subscription }}"
+    - "{{ cifmw_hosted_cluster_metallb_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_metallb_olm_subscription }}"
+    - "{{ cifmw_hosted_cluster_nmstate_olm_operator_group }}"
+    - "{{ cifmw_hosted_cluster_nmstate_olm_subscription }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Wait for OpenShift Virtualization, MCE, MetalLB and NMState operators to install
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.command:
+    cmd: >-
+      oc get ClusterServiceVersion
+      -n "{{ item.namespace }}"
+      -l "operators.coreos.com/{{ item.name }}.{{ item.namespace }}"
+      -o jsonpath='{.items[*].status.phase}'
+  changed_when: false
+  register: _hosted_cluster_csv_out
+  loop:
+    - {name: kubevirt-hyperconverged, namespace: "{{ cifmw_hosted_cluster_cnv_namespace }}"}
+    - {name: multicluster-engine, namespace: "{{ cifmw_hosted_cluster_mce_namespace }}"}
+    - {name: metallb-operator, namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"}
+    - {name: kubernetes-nmstate-operator, namespace: "{{ cifmw_hosted_cluster_nmstate_namespace }}"}
+  loop_control:
+    label: "{{ item.name }}"
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+  until:
+    - _hosted_cluster_csv_out.stdout_lines | default([]) | length > 0
+    - "(_hosted_cluster_csv_out.stdout_lines[0] | lower) == 'succeeded'"
+
+- name: Trigger operators to install their operands
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition: "{{ item }}"
+  loop:
+    - "{{ cifmw_hosted_cluster_cnv_hyperconverged }}"
+    - "{{ cifmw_hosted_cluster_metallb_operator_cr }}"
+    - "{{ cifmw_hosted_cluster_nmstate_cr }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Wait for HyperConverged to become available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: hco.kubevirt.io/v1beta1
+    kind: HyperConverged
+    namespace: "{{ cifmw_hosted_cluster_cnv_namespace }}"
+    name: kubevirt-hyperconverged
+  register: _hosted_cluster_hco
+  until:
+    - _hosted_cluster_hco.resources | default([]) | length == 1
+    - >-
+      _hosted_cluster_hco.resources[0].status.conditions | default([]) |
+      selectattr('type', 'equalto', 'Available') |
+      selectattr('status', 'equalto', 'True') | list | length == 1
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Enable hosted control planes and local hosting in MCE
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    state: present
+    definition: "{{ cifmw_hosted_cluster_mce_multiclusterengine }}"
+
+- name: Wait for MCE to become available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: multicluster.openshift.io/v1
+    kind: MultiClusterEngine
+    name: multiclusterengine
+  register: _hosted_cluster_mce
+  until:
+    - _hosted_cluster_mce.resources | default([]) | length == 1
+    - _hosted_cluster_mce.resources[0].status.phase | default('') == 'Available'
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Wait for MetalLB speaker pods
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Pod
+    namespace: "{{ cifmw_hosted_cluster_metallb_namespace }}"
+    label_selectors:
+      - component = speaker
+    wait: true
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 300
+  register: _hosted_cluster_metallb_speaker
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+  until: _hosted_cluster_metallb_speaker is success
+
+- name: Wait for NMState handler pods
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    kind: Pod
+    namespace: "{{ cifmw_hosted_cluster_nmstate_namespace }}"
+    label_selectors:
+      - component = kubernetes-nmstate-handler
+    wait: true
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 300
+  register: _hosted_cluster_nmstate_handler
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+  until: _hosted_cluster_nmstate_handler is success
+
+- name: Install LVMS for hosted etcd and root volume storage
+  when: >-
+    cifmw_hosted_cluster_etcd_storage_class | length == 0 or
+    cifmw_hosted_cluster_root_volume_storage_class | length == 0
+  vars:
+    # Scoped to this call only: the management cluster's OCP nodes and the
+    # hosted cluster's own KubeVirt worker nodes (configured later, by the
+    # generic deploy_architecture.yml flow under cifmw_use_lvms) rarely
+    # have the same free block devices, so this must not fall back to the
+    # global cifmw_lvms_disk_list.
+    cifmw_lvms_disk_list: "{{ cifmw_hosted_cluster_lvms_disk_list }}"
+  ansible.builtin.include_role:
+    name: ci_lvms_storage
+
+- name: Resolve hosted cluster storage classes
+  ansible.builtin.set_fact:
+    cifmw_hosted_cluster_resolved_etcd_storage_class: >-
+      {{ cifmw_hosted_cluster_etcd_storage_class | default('', true) or
+         'lvms-' ~ (cifmw_lvms_storage_class | default('local-storage')) }}
+    cifmw_hosted_cluster_resolved_root_volume_storage_class: >-
+      {{ cifmw_hosted_cluster_root_volume_storage_class | default('', true) or
+         'lvms-' ~ (cifmw_lvms_storage_class | default('local-storage')) }}
+
+- name: Check hosted cluster storage classes
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ item }}"
+  loop:
+    - "{{ cifmw_hosted_cluster_resolved_etcd_storage_class }}"
+    - "{{ cifmw_hosted_cluster_resolved_root_volume_storage_class }}"
+  register: _hosted_cluster_storage_classes
+
+- name: Require RWO etcd and root volume storage classes
+  ansible.builtin.assert:
+    that:
+      - item.resources | length == 1
+    fail_msg: "Storage class {{ item.item }} was not found."
+  loop: "{{ _hosted_cluster_storage_classes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
