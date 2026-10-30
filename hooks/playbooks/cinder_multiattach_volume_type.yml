@@ -16,13 +16,24 @@
         PATH: "{{ cifmw_path }}"
       ansible.builtin.shell: |
         set -xe -o pipefail
+        vol_type={{ cifmw_volume_multiattach_type }}
         oc -n {{ namespace }} rsh openstackclient \
-            openstack volume type show {{ cifmw_volume_multiattach_type }} &>/dev/null || \
+            openstack volume type show "${vol_type}" &>/dev/null || \
             oc -n {{ namespace }} rsh openstackclient \
-            openstack volume type create {{ cifmw_volume_multiattach_type }}
-        oc -n {{ namespace }} rsh openstackclient \
-            openstack volume type set --property multiattach="<is> True" \
-            {{ cifmw_volume_multiattach_type }}
+            openstack volume type create "${vol_type}"
+        # Idempotent: volume type set fails with HTTP 400 "currently in use"
+        # once volumes (e.g. amphora/glance) already reference the type.
+        # Only skip set when multiattach is exactly "<is> True" - a bare
+        # substring match would accept multiattach=<is> False.
+        type_json=$(oc -n {{ namespace }} rsh openstackclient \
+            openstack volume type show "${vol_type}" -f json)
+        if echo "${type_json}" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("extra_specs") or d.get("properties") or {}; sys.exit(0 if s.get("multiattach") == "<is> True" else 1)'; then
+          echo "multiattach=<is> True already set on volume type ${vol_type}"
+        else
+          oc -n {{ namespace }} rsh openstackclient \
+              openstack volume type set --property multiattach="<is> True" \
+              "${vol_type}"
+        fi
 
     # This block is needed for octavia because the Amphora image needs to be created on a multiattach volume
     - name: Block to configure cinder_volume_type when needed
