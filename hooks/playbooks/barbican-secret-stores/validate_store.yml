@@ -1,0 +1,80 @@
+---
+# Validate one cifmw_barbican_secret_stores entry (loop_var: store).
+# Updates _bss_store_ids, type counts, and collected clientDataPath values.
+
+- name: Require id and type on store entry
+  ansible.builtin.assert:
+    that:
+      - store.id is defined
+      - store.id | length > 0
+      - store.type is defined
+      - store.type in ['simple_crypto', 'kmip', 'pkcs11']
+    fail_msg: >-
+      Each store needs id and type in {simple_crypto, kmip, pkcs11}. Got: {{ store }}
+
+- name: Resolve provider for {{ store.id }}
+  ansible.builtin.set_fact:
+    _bss_provider: >-
+      {{ store.provider
+         | default('software' if store.type == 'simple_crypto' else '') }}
+
+- name: Require provider for non-software stores
+  ansible.builtin.assert:
+    that:
+      - _bss_provider | length > 0
+    fail_msg: >-
+      Store {{ store.id }} (type={{ store.type }}) needs provider
+      (e.g. fortanix, luna, proteccio).
+
+- name: Check provider is known and consistent with type
+  vars:
+    _allowed:
+      simple_crypto: ['software']
+      kmip: ['fortanix']
+      pkcs11: ['luna', 'proteccio']
+  ansible.builtin.assert:
+    that:
+      - _bss_provider in _allowed[store.type]
+    fail_msg: >-
+      Store {{ store.id }}: provider={{ _bss_provider }} is not valid for
+      type={{ store.type }} (allowed: {{ _allowed[store.type] }}).
+
+- name: Record store id
+  ansible.builtin.set_fact:
+    _bss_store_ids: "{{ _bss_store_ids + [store.id] }}"
+
+- name: Count kmip instances
+  when: store.type == 'kmip'
+  ansible.builtin.set_fact:
+    _bss_kmip_count: "{{ (_bss_kmip_count | int) + 1 }}"
+
+- name: Count pkcs11 instances
+  when: store.type == 'pkcs11'
+  ansible.builtin.set_fact:
+    _bss_pkcs11_count: "{{ (_bss_pkcs11_count | int) + 1 }}"
+
+- name: Collect clientDataPath when set on the store entry
+  when: store.client_data_path is defined
+  ansible.builtin.set_fact:
+    _bss_client_data_paths: "{{ _bss_client_data_paths + [store.client_data_path] }}"
+
+- name: Collect default KMIP clientDataPath
+  when:
+    - store.type == 'kmip'
+    - store.client_data_path is not defined
+  ansible.builtin.set_fact:
+    _bss_client_data_paths: "{{ _bss_client_data_paths + ['/etc/kmip-client'] }}"
+
+- name: Collect default Luna clientDataPath
+  when:
+    - store.provider | default('') == 'luna'
+    - store.client_data_path is not defined
+  ansible.builtin.set_fact:
+    _bss_client_data_paths: "{{ _bss_client_data_paths + ['/usr/local/luna/config'] }}"
+
+- name: Collect default Proteccio clientDataPath
+  when:
+    - store.provider | default('') == 'proteccio'
+    - store.client_data_path is not defined
+  ansible.builtin.set_fact:
+    _bss_client_data_paths: "{{ _bss_client_data_paths + ['/etc/proteccio'] }}"

@@ -1,0 +1,143 @@
+---
+# Enable Barbican secret stores from a job-declared instance list.
+#
+# Defaults (usual Barbican jobs need no vars):
+#   cifmw_barbican_secret_stores:
+#     - id: software
+#       type: simple_crypto
+#   cifmw_barbican_global_default_secret_store: software   # first store id if unset
+#
+# Multi-store example (instance-oriented; supports multiple providers of the
+# same type once the operator allows it). Provider settings live on each
+# store dict — there are no job-level cifmw_hsm_* / cifmw_barbican_kmip_*
+# fallbacks for plugin or client config:
+#
+#   cifmw_barbican_secret_stores:
+#     - id: software
+#       type: simple_crypto
+#     - id: fortanix
+#       type: kmip
+#       provider: fortanix
+#       host: amer.smartkey.io
+#       ca_certs_src: https://…/CACert.pem    # lookaside
+#       certfile_src: https://…/Client.pem
+#       keyfile_src: https://…/Client.key
+#     - id: luna
+#       type: pkcs11
+#       provider: luna
+#       client_name: …
+#       partition: …
+#       mkek_label: …
+#       hmac_label: …
+#       key_wrap_mechanism: …
+#       # plus prepare fields: minclient_src, certs, …
+#   cifmw_barbican_global_default_secret_store: fortanix   # id
+#
+# Today the barbican-operator CRD allows at most one kmip and one pkcs11
+# entry (MaxItems=1). This playbook enforces that and will relax when the
+# CRD grows. clientDataPath values must already be unique across instances.
+#
+# Provider modules: prepare/<provider>.yml and config/<provider>.yml.
+# Image bake tag overrides (cifmw_update_containers_*, cifmw_set_containers_images)
+# remain job-level.
+
+- name: Enable Barbican secret stores from job instance list
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  vars:
+    _oc_env:
+      KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+      PATH: "{{ cifmw_path }}"
+    _bss_default_store_list:
+      - id: software
+        type: simple_crypto
+  environment: "{{ _oc_env }}"
+  tasks:
+    - name: Apply default secret-store list (simple_crypto only)
+      ansible.builtin.set_fact:
+        _bss_stores: "{{ cifmw_barbican_secret_stores | default(_bss_default_store_list) }}"
+
+    - name: Apply default global-default id (first store when unset)
+      ansible.builtin.set_fact:
+        _bss_default_id: >-
+          {{ cifmw_barbican_global_default_secret_store
+             | default(_bss_stores[0].id) }}
+
+    - name: Require a non-empty store list
+      ansible.builtin.assert:
+        that:
+          - _bss_stores | length > 0
+          - _bss_default_id | length > 0
+        fail_msg: >-
+          cifmw_barbican_secret_stores must be a non-empty list of
+          {id, type[, provider]} (default is software/simple_crypto).
+
+    - name: Init fragment collectors
+      ansible.builtin.set_fact:
+        _bss_enabled_types: []
+        _bss_ini_sections: []
+        _bss_kmip_spec: {}
+        _bss_pkcs11_spec: {}
+        _bss_client_data_paths: []
+        _bss_store_ids: []
+        _bss_kmip_count: 0
+        _bss_pkcs11_count: 0
+
+    - name: Validate each store entry
+      ansible.builtin.include_tasks: validate_store.yml
+      loop: "{{ _bss_stores }}"
+      loop_control:
+        loop_var: store
+        label: "{{ store.id | default('?') }}"
+
+    - name: Assert unique store ids
+      ansible.builtin.assert:
+        that:
+          - _bss_store_ids | length == (_bss_store_ids | unique | list | length)
+        fail_msg: >-
+          Duplicate store id in cifmw_barbican_secret_stores: {{ _bss_store_ids }}
+
+    - name: Assert unique clientDataPath values
+      ansible.builtin.assert:
+        that:
+          - _bss_client_data_paths | length == (_bss_client_data_paths | unique | list | length)
+        fail_msg: >-
+          clientDataPath values must be unique across secret-store instances
+          (got {{ _bss_client_data_paths }}).
+
+    - name: Assert operator MaxItems limits (one kmip, one pkcs11 for now)
+      ansible.builtin.assert:
+        that:
+          - (_bss_kmip_count | int) <= 1
+          - (_bss_pkcs11_count | int) <= 1
+        fail_msg: >-
+          barbican-operator currently allows at most one kmip and one pkcs11
+          store (MaxItems=1). Got kmip={{ _bss_kmip_count }},
+          pkcs11={{ _bss_pkcs11_count }}. Drop the assert when the CRD
+          supports multiple providers of the same type.
+
+    - name: Resolve global default id to store type
+      vars:
+        _default_matches: "{{ _bss_stores | selectattr('id', 'equalto', _bss_default_id) | list }}"
+      block:
+        - name: Require default id to match exactly one store
+          ansible.builtin.assert:
+            that:
+              - _default_matches | length == 1
+            fail_msg: >-
+              cifmw_barbican_global_default_secret_store={{ _bss_default_id }}
+              must match exactly one store id in cifmw_barbican_secret_stores
+              (ids={{ _bss_stores | map(attribute='id') | list }}).
+
+        - name: Set resolved global default type
+          ansible.builtin.set_fact:
+            _bss_global_default_type: "{{ _default_matches[0].type }}"
+
+    - name: Prepare and configure each store
+      ansible.builtin.include_tasks: process_store.yml
+      loop: "{{ _bss_stores }}"
+      loop_control:
+        loop_var: store
+        label: "{{ store.id }} ({{ store.type }}/{{ store.provider | default('software') }})"
+
+    - name: Assemble control-plane kustomization
+      ansible.builtin.include_tasks: assemble_kustomization.yml
