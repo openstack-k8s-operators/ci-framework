@@ -455,67 +455,23 @@
 
     - name: Prepare test-operator access and prerequisites
       block:
-        - name: Create ClusterRole for Lightspeed tests
-          kubernetes.core.k8s:
-            state: present
-            definition:
-              apiVersion: rbac.authorization.k8s.io/v1
-              kind: ClusterRole
-              metadata:
-                name: "lightspeed-test-role"
-              rules:
-                - nonResourceURLs: ["/ls-access"]
-                  verbs: ["get"]
-          register: _result
-          retries: 5
-          delay: 10
-          until: _result is not failed
-
-        - name: Create ClusterRoleBinding for Lightspeed tests
+        - name: Authorize the test Pod's explicitly projected client token
           kubernetes.core.k8s:
             state: present
             definition:
               apiVersion: rbac.authorization.k8s.io/v1
               kind: ClusterRoleBinding
               metadata:
-                name: "lightspeed-test-role-binding"
+                name: "lightspeed-access-{{ cifmw_test_operator_namespace | default('openstack') }}"
               roleRef:
                 apiGroup: rbac.authorization.k8s.io
                 kind: ClusterRole
-                name: "lightspeed-test-role"
+                name: lightspeed-access
               subjects:
+                # The current test-operator uses the namespace's default account.
                 - kind: ServiceAccount
-                  name: "default"
-                  namespace: "{{ openstack_lightspeed_namespace }}"
-          register: _result
-          retries: 5
-          delay: 10
-          until: _result is not failed
-
-        - name: Authorize the test Pod's explicitly projected client token
-          kubernetes.core.k8s:
-            state: present
-            definition:
-              - apiVersion: rbac.authorization.k8s.io/v1
-                kind: ClusterRole
-                metadata:
-                  name: lightspeed-tests-access
-                rules:
-                  - nonResourceURLs: [/ls-access]
-                    verbs: [get]
-              - apiVersion: rbac.authorization.k8s.io/v1
-                kind: ClusterRoleBinding
-                metadata:
-                  name: "lightspeed-tests-access-{{ cifmw_test_operator_namespace | default('openstack') }}"
-                roleRef:
-                  apiGroup: rbac.authorization.k8s.io
-                  kind: ClusterRole
-                  name: lightspeed-tests-access
-                subjects:
-                  # The current test-operator uses the namespace's default account.
-                  - kind: ServiceAccount
-                    name: default
-                    namespace: "{{ cifmw_test_operator_namespace | default('openstack') }}"
+                  name: default
+                  namespace: "{{ cifmw_test_operator_namespace | default('openstack') }}"
 
         - name: Create test-operator dummy config ConfigMap
           kubernetes.core.k8s:

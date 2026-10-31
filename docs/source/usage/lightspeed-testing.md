@@ -84,9 +84,9 @@ source archive, ConfigMap transport, generated stage file or bootstrap.
 The test-operator disables automatic token mounting and currently uses the
 `default` ServiceAccount in the test namespace. The job explicitly projects
 that account's token at `/lightspeed-auth/token`; Kubernetes rotates it. The
-installer creates the RBAC resources: the `lightspeed-tests-access` `ClusterRole`
-and its namespace-specific binding grant that identity GET access to
-`/ls-access`. This also grants the permission to other Pods using the same
+operator creates the `lightspeed-access` `ClusterRole`, granting GET access to
+`/ls-access`. The installer binds that role to the test ServiceAccount with a
+namespace-specific `ClusterRoleBinding`. This also grants access to other Pods using the same
 account in that namespace. Privileged execution does not supply a token.
 The client token is separate from the mock provider credential; pass its path,
 not its contents, to the runner.
