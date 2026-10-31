@@ -377,6 +377,15 @@
         ternary(_path, [_path, 'ci-framework'] | path_join)
       }}
 
+# In the native creation flow the control node is the executor: the
+# freshly created VMs are reachable only through the hypervisor, and
+# the source build node still owns the job repositories. Stage the
+# access material before any controller-0 delegated task runs.
+- name: Stage VM access for the native control contexts
+  when:
+    - cifmw_reproducer_native_creation | default(false) | bool
+  ansible.builtin.include_tasks: native_stage_vm_access.yml
+
 - name: Run only on hypervisor with controller-0
   when:
     - (
@@ -392,6 +401,24 @@
         - bootstrap_repositories
         - bootstrap
       ansible.builtin.include_tasks: push_code.yml
+
+    - name: Stage current-job variables on controller-0 for native creation
+      # The legacy wrapper passed the variable manifest as global CLI
+      # extra-vars; the native session loads it as hypervisor facts, which
+      # controller-0 delegated tasks cannot see. Mirror the manifest onto
+      # controller-0 before its blocks run.
+      when:
+        - cifmw_reproducer_native_creation | default(false) | bool
+        - cifmw_reproducer_native_creation_var_files | default([]) | length > 0
+      ansible.builtin.include_vars:
+        file: "{{ cifmw_reproducer_native_creation_file }}"
+      delegate_to: controller-0
+      delegate_facts: true
+      loop: "{{ cifmw_reproducer_native_creation_var_files }}"
+      loop_control:
+        loop_var: cifmw_reproducer_native_creation_file
+        label: "{{ cifmw_reproducer_native_creation_file | basename }}"
+      no_log: true
 
     - name: Group tasks on controller-0
       delegate_to: controller-0

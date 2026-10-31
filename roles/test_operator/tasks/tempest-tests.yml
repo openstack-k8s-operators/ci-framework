@@ -14,6 +14,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
+# NOTE: the CR config comes from a role default whose values are lazy Jinja
+# templates. The legacy wrapper runs with the repository ansible.cfg, which
+# sets jinja2_native=True, so nested integer results stay integers. In
+# sessions without jinja2_native (e.g. a Zuul executor), resolving the whole
+# mapping stringifies nested results, turning integer CR fields into strings
+# the API server rejects. Re-cast those fields after the initial CR set_fact,
+# the same way numProcesses is handled for tobiko.
+- name: Normalize integer CR fields after deep templating
+  ansible.builtin.set_fact:
+    test_operator_cr: >-
+      {{ test_operator_cr | combine({'spec': {'tempestRun': {'concurrency':
+           test_operator_cr.spec.tempestRun.concurrency | int}}}, recursive=True) }}
+
 - name: Configuring tests to be executed via skiplist
   when: >
    stage_vars_dict.cifmw_test_operator_tempest_include_list is not defined or

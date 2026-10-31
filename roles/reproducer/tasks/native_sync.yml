@@ -1,0 +1,31 @@
+---
+- name: Synchronize current job directories with protected transfer output
+  block:
+    - name: Synchronize job directories using the source-node SSH configuration
+      delegate_to: "{{ cifmw_reproducer_native_source_host }}"
+      become: false
+      ansible.posix.synchronize:
+        src: "{{ cifmw_reproducer_native_source_home }}/{{ item.1 }}/"
+        dest: "{{ cifmw_reproducer_controller_user }}@{{ item.0 }}:{{ ansible_user_dir }}/{{ item.1 }}/"
+        archive: true
+        recursive: true
+        set_remote_user: false
+        rsync_opts:
+          # synchronize joins rsync_opts into a command string. Quote the
+          # complete rsh value as well as the config path inside that value.
+          - "--rsh={{ ('ssh -F ' ~ (cifmw_reproducer_native_source_ssh_config | quote)) | quote }}"
+      loop: "{{ [inventory_hostname, 'controller-0'] | product(['configs', 'secrets', 'src']) | list }}"
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+      register: cifmw_reproducer_native_sync_result
+      no_log: true
+  rescue:
+    - name: Report failed transfer endpoints and return codes
+      ansible.builtin.fail:
+        msg: >-
+          Native synchronization from {{ cifmw_reproducer_native_source_host }} failed.
+          {% for transfer in cifmw_reproducer_native_sync_result.results | default([])
+             if transfer.failed | default(false) %}
+          {{ transfer.item.0 }}/{{ transfer.item.1 }}: rc={{ transfer.rc | default('unavailable') }}.
+          {% endfor %}
+          Check the source-node SSH configuration and directory prerequisites.
