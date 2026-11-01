@@ -14,7 +14,9 @@ from ansible_collections.cifmw.general.plugins.filter.osp_pod_pick import (
 
 class TestOspPodPick(unittest.TestCase):
     def setUp(self):
-        self.osp_pod_pick = FilterModule().filters()["osp_pod_pick"]
+        filters = FilterModule().filters()
+        self.osp_pod_pick = filters["osp_pod_pick"]
+        self.osp_pod_sort = filters["osp_pod_sort"]
 
     def test_picks_sorted_index_zero(self):
         # Already label-filtered lists may mix hashed and bare names across envs
@@ -31,6 +33,26 @@ class TestOspPodPick(unittest.TestCase):
             ),
             "cinder-a4403-api-1",
         )
+
+    def test_numeric_ordinal_not_lexical(self):
+        # Lexical sort would put -10 before -2; ordinal sort must not.
+        names = [
+            "cinder-a4403-api-10",
+            "cinder-a4403-api-2",
+            "cinder-a4403-api-0",
+            "cinder-a4403-api-1",
+        ]
+        self.assertEqual(
+            self.osp_pod_sort(names),
+            [
+                "cinder-a4403-api-0",
+                "cinder-a4403-api-1",
+                "cinder-a4403-api-2",
+                "cinder-a4403-api-10",
+            ],
+        )
+        self.assertEqual(self.osp_pod_pick(names, index=2), "cinder-a4403-api-2")
+        self.assertEqual(self.osp_pod_pick(names, index=3), "cinder-a4403-api-10")
 
     def test_k8s_resources(self):
         pods = [

@@ -55,6 +55,7 @@
   kubernetes.core.k8s_info:
     api_version: v1
     kind: Pod
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     namespace: "{{ cifmw_discover_osp_pod_namespace }}"
     label_selectors: "{{ _cifmw_discover_osp_pod_label_selectors }}"
     wait: "{{ cifmw_discover_osp_pod_wait | bool }}"
@@ -73,15 +74,13 @@
       Use lib-common labels (component=/service=) instead of hardcoded names
       such as cinder-api-0; uniquePodNames may hash the pod name.
 
-- name: Sort matching pod names for stable ordinal selection
+- name: Order matching pods by StatefulSet ordinal
   ansible.builtin.set_fact:
     cifmw_discover_osp_pod_resources: "{{ _cifmw_discover_osp_pod_query.resources }}"
     cifmw_discover_osp_pod_names: >-
       {{
         _cifmw_discover_osp_pod_query.resources
-        | map(attribute='metadata.name')
-        | list
-        | sort
+        | cifmw.general.osp_pod_sort
       }}
 
 - name: Fail when requested index is out of range
@@ -98,4 +97,7 @@
 - name: Export selected pod name
   ansible.builtin.set_fact:
     cifmw_discover_osp_pod_name: >-
-      {{ cifmw_discover_osp_pod_names[cifmw_discover_osp_pod_index | int] }}
+      {{
+        _cifmw_discover_osp_pod_query.resources
+        | cifmw.general.osp_pod_pick(index=cifmw_discover_osp_pod_index | int)
+      }}
