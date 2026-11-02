@@ -1,0 +1,46 @@
+---
+# Move _migrate_secret_href/_id onto cifmw_barbican_migrate_target_store
+# via the openstack CLI, the migrate REST API, or barbican-manage, per
+# cifmw_barbican_migrate_via (cli | api | admin).
+#
+# cli path: `openstack secret migrate <URI> --secret-store <uuid>` —
+# landed downstream (python-barbicanclient backport of review 1002401,
+# on trunk-patches); older openstackclient images lack the command, so
+# the scenario is gated on the capability check in migrate.yml.
+#
+# api path: PUT /v1/secrets/{id}/secret-store/{ss-id} with key-manager
+# microversion 1.3 (python-barbicanclient 5.5.0 has no migrate
+# command). The helper prints the HTTP status (and keystoneauth error
+# detail on 4xx/5xx); a successful migrate is 204 No Content.
+
+- name: "CLI migrate ({{ cifmw_barbican_migrate_case }})"
+  when: cifmw_barbican_migrate_via | default('api') == 'cli'
+  ansible.builtin.command:
+    argv: "{{ cifmw_barbican_migrate_osc_exec + [
+      'openstack', 'secret', 'migrate',
+      _migrate_secret_href,
+      '--secret-store', cifmw_barbican_migrate_target_store.id,
+    ] }}"
+  changed_when: false
+
+- name: "REST migrate ({{ cifmw_barbican_migrate_case }})"
+  when: cifmw_barbican_migrate_via | default('api') == 'api'
+  ansible.builtin.command:
+    argv: "{{ cifmw_barbican_migrate_osc_exec + [
+      'python3', '-c', cifmw_barbican_migrate_rest_migrate_py,
+      _migrate_secret_id,
+      cifmw_barbican_migrate_target_store.id,
+    ] }}"
+  register: _migrate_api
+  changed_when: false
+  failed_when: >-
+    _migrate_api.rc != 0
+    or (_migrate_api.stdout_lines | first | default('')) != '204'
+
+- name: "barbican-manage migrate ({{ cifmw_barbican_migrate_case }})"
+  when: cifmw_barbican_migrate_via | default('api') == 'admin'
+  ansible.builtin.include_tasks: admin.yml
+  vars:
+    cifmw_barbican_migrate_admin_store_id: "{{ cifmw_barbican_migrate_target_store.id }}"
+    cifmw_barbican_migrate_admin_secret_id: "{{ _migrate_secret_id }}"
+    cifmw_barbican_migrate_admin_dry_run: "{{ cifmw_barbican_migrate_dry_run | default(false) | bool }}"
