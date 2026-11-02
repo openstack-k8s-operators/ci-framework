@@ -1,0 +1,111 @@
+---
+# Luna PKCS11 — bake Luna-client images and create client-data + login Secrets.
+# All instance settings come from the store dict (see job cifmw_barbican_secret_stores).
+#
+# Required store fields:
+#   client_name, chrystoki_conf_src, minclient_src, server_cert_src,
+#   client_cert_src, and partition_password (or pin_file + pin_file_key)
+#
+# PIN resolution uses resolve_from_param_or_file.yml:
+#   partition_password: "{{ luna_hsm_password.password }}"
+#   # — or —
+#   pin_file: /var/tmp/qe-secrets/luna_pin.yaml
+#   pin_file_key: rdu2Pin
+#
+# Optional: ansible_role_repo, ansible_role_version, client_data_secret,
+#   login_secret, client_data_path, pin_file
+# Image bake uses job-level cifmw_update_containers_* /
+# cifmw_hsm_barbican_* overrides when set.
+
+- name: Resolve Luna partition password for {{ store.id }}
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/resolve_from_param_or_file.yml"
+  vars:
+    rpf_name: "Luna store {{ store.id }} partition_password"
+    rpf_fact: _luna_password
+    rpf_value: "{{ store.partition_password | default('') }}"
+    rpf_file: "{{ store.pin_file | default('/var/tmp/qe-secrets/luna_pin.yaml') }}"
+    rpf_file_key: "{{ store.pin_file_key | default('') }}"
+    rpf_required: true
+
+- name: Require Luna prepare fields on store {{ store.id }}
+  ansible.builtin.assert:
+    that:
+      - store.client_name is defined
+      - store.client_name | length > 0
+      - store.chrystoki_conf_src is defined
+      - store.chrystoki_conf_src | length > 0
+      - store.minclient_src is defined
+      - store.minclient_src | length > 0
+      - store.server_cert_src is defined
+      - store.server_cert_src | length > 0
+      - store.client_cert_src is defined
+      - store.client_cert_src | length > 0
+    fail_msg: >-
+      Luna store {{ store.id }} needs client_name, chrystoki_conf_src,
+      minclient_src, server_cert_src, and client_cert_src.
+
+- name: Check out the Luna HSM role git repo for {{ store.id }}
+  ansible.builtin.git:
+    dest: "./rhoso_luna_hsm"
+    repo: "{{ store.ansible_role_repo | default('https://github.com/openstack-k8s-operators/ansible-role-rhoso-luna-hsm.git') }}"
+    version: "{{ store.ansible_role_version | default('main') }}"
+
+- name: Create and upload Luna-baked barbican images for {{ store.id }}
+  ansible.builtin.include_role:
+    name: rhoso_luna_hsm
+    tasks_from: create_image
+  vars:
+    barbican_src_image_registry: >-
+      {{ cifmw_hsm_barbican_src_image_registry |
+         default(content_provider_registry_ip ~ ':5001') }}
+    barbican_src_image_namespace: >-
+      {{ cifmw_hsm_barbican_src_image_namespace |
+         default(cifmw_update_containers_org |
+                 default(cifmw_default_container_image_namespace)) }}
+    barbican_src_image_tag: >-
+      {{ cifmw_hsm_barbican_src_image_tag |
+         default(cifmw_update_containers_tag | default('component-ci-testing')) }}
+    barbican_src_api_image_name: >-
+      {{ cifmw_hsm_barbican_src_api_image_name |
+         default('openstack-barbican-api') }}
+    barbican_src_worker_image_name: >-
+      {{ cifmw_hsm_barbican_src_worker_image_name |
+         default('openstack-barbican-worker') }}
+    barbican_dest_image_registry: >-
+      {{ cifmw_hsm_barbican_dest_image_registry |
+         default(content_provider_registry_ip ~ ':5001') }}
+    barbican_dest_image_namespace: >-
+      {{ cifmw_hsm_barbican_dest_image_namespace |
+         default(cifmw_update_containers_org |
+                 default(cifmw_default_container_image_namespace)) }}
+    barbican_dest_image_tag: "{{ cifmw_update_containers_barbican_custom_tag }}"
+    barbican_dest_api_image_name: >-
+      {{ cifmw_hsm_barbican_dest_api_image_name |
+         default('openstack-barbican-api') }}
+    barbican_dest_worker_image_name: >-
+      {{ cifmw_hsm_barbican_dest_worker_image_name |
+         default('openstack-barbican-worker') }}
+    image_registry_verify_tls: "{{ cifmw_image_registry_verify_tls | default('false', true) }}"
+    luna_minclient_src: "{{ store.minclient_src }}"
+
+- name: Create Luna client-data and login secrets for {{ store.id }}
+  ansible.builtin.include_role:
+    name: rhoso_luna_hsm
+    tasks_from: create_secrets
+  vars:
+    luna_client_name: "{{ store.client_name }}"
+    chrystoki_conf_src: "{{ store.chrystoki_conf_src }}"
+    luna_server_cert_src: "{{ store.server_cert_src }}"
+    luna_client_cert_src: "{{ store.client_cert_src }}"
+    luna_partition_password: "{{ _luna_password }}"
+    kubeconfig_path: "{{ cifmw_openshift_kubeconfig }}"
+    oc_dir: "{{ cifmw_path }}"
+    luna_data_secret: "{{ store.client_data_secret | default('barbican-luna-client-data') }}"
+    login_secret: "{{ store.login_secret | default('barbican-luna-login') }}"
+
+- name: Stash Luna prepare results for {{ store.id }}
+  ansible.builtin.set_fact:
+    _bss_luna_prep:
+      client_data_secret: "{{ store.client_data_secret | default('barbican-luna-client-data') }}"
+      login_secret: "{{ store.login_secret | default('barbican-luna-login') }}"
+      client_data_path: "{{ store.client_data_path | default('/usr/local/luna/config') }}"

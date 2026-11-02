@@ -1,0 +1,81 @@
+---
+# Resolve a secret value from a direct parameter or a YAML file key.
+#
+# Used by provider prepare modules (Luna/Proteccio partition PIN).
+# The job chooses the source per store field.
+#
+# Required caller vars:
+#   rpf_name     — label for error messages (e.g. "Luna partition_password")
+#   rpf_fact     — fact name to set with the resolved string
+#
+# Optional caller vars:
+#   rpf_value    — direct value (store.password, store.partition_password, …)
+#   rpf_file     — path to YAML file written by a pre-run playbook
+#   rpf_file_key — key inside that YAML file
+#   rpf_required — if true (default), fail when neither source yields a value
+#
+# Prefer rpf_value when non-empty; otherwise load rpf_file[rpf_file_key].
+
+- name: Init resolve for {{ rpf_name }}
+  ansible.builtin.set_fact:
+    _rpf_resolved: "{{ rpf_value | default('') }}"
+
+- name: Load {{ rpf_name }} from file when parameter unset
+  when:
+    - (_rpf_resolved | length) == 0
+    - (rpf_file_key | default('') | length) > 0
+  block:
+    - name: Require rpf_file path for {{ rpf_name }}
+      ansible.builtin.assert:
+        that:
+          - rpf_file is defined
+          - rpf_file | length > 0
+        fail_msg: >-
+          {{ rpf_name }}: rpf_file_key={{ rpf_file_key }} set but rpf_file
+          path is empty.
+
+    - name: Check secret file exists for {{ rpf_name }}
+      ansible.builtin.stat:
+        path: "{{ rpf_file }}"
+      register: _rpf_stat
+
+    - name: Require secret file for {{ rpf_name }}
+      ansible.builtin.assert:
+        that:
+          - _rpf_stat.stat.exists
+        fail_msg: >-
+          {{ rpf_name }}: file {{ rpf_file }} not found
+          (key={{ rpf_file_key }}).
+
+    - name: Read secret file for {{ rpf_name }}
+      ansible.builtin.include_vars:
+        file: "{{ rpf_file }}"
+        name: _rpf_file_data
+
+    - name: Require key in secret file for {{ rpf_name }}
+      ansible.builtin.assert:
+        that:
+          - rpf_file_key in _rpf_file_data
+          - _rpf_file_data[rpf_file_key] | length > 0
+        fail_msg: >-
+          {{ rpf_name }}: key {{ rpf_file_key }} missing or empty in
+          {{ rpf_file }} (keys={{ _rpf_file_data.keys() | list }}).
+
+    - name: Set {{ rpf_name }} from file key {{ rpf_file_key }}
+      ansible.builtin.set_fact:
+        _rpf_resolved: "{{ _rpf_file_data[rpf_file_key] }}"
+      no_log: true
+
+- name: Require resolved value for {{ rpf_name }}
+  when: (rpf_required | default(true) | bool)
+  ansible.builtin.assert:
+    that:
+      - _rpf_resolved | length > 0
+    fail_msg: >-
+      {{ rpf_name }} could not be resolved. Set the parameter, or
+      rpf_file + rpf_file_key for a materialised secret file.
+
+- name: Publish resolved {{ rpf_name }} as {{ rpf_fact }}
+  ansible.builtin.set_fact:
+    "{{ rpf_fact }}": "{{ _rpf_resolved }}"
+  no_log: true
