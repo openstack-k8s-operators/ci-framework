@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Same as components-integration-config
+# playbooks/crc/bootstrap-ci-network-fetch-provider-dns.yml.
+- name: Read the provider DNS servers on the hub
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: _cifmw_vxlan_overlay_resolv
+  delegate_to: "{{ cifmw_vxlan_overlay_hub }}"
+  run_once: true
+
+- name: Record the provider DNS servers
+  ansible.builtin.set_fact:
+    crc_ci_bootstrap_provider_dns: >-
+      {{ _cifmw_vxlan_overlay_resolv.content | b64decode | regex_findall('nameserver\s(.*)') }}
+    cacheable: true
+  run_once: true
+
+- name: Write the networking information file
+  become: true
+  vars:
+    content:
+      crc_ci_bootstrap_networks_out: "{{ crc_ci_bootstrap_networks_out }}"
+      crc_ci_bootstrap_provider_dns: "{{ crc_ci_bootstrap_provider_dns }}"
+  ansible.builtin.copy:
+    dest: "{{ cifmw_vxlan_overlay_info_file }}"
+    content: "{{ content | to_nice_yaml }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Check again once the profiles are up and NetworkManager has run the
+# dispatcher for them, so a missing rule fails here rather than in a later
+# test.
+- name: Check the underlay routing rules are still in place
+  when: cifmw_vxlan_overlay_policy_routing | bool
+  become: true
+  ansible.builtin.shell: |
+    ip -4 rule show priority {{ cifmw_vxlan_overlay_rule_priority }}
+    ip -4 route show table {{ cifmw_vxlan_overlay_route_table }}
+  register: _cifmw_vxlan_overlay_rules_end
+  changed_when: false
+  failed_when: >-
+    ('default via' not in _cifmw_vxlan_overlay_rules_end.stdout)
+    or (_cifmw_vxlan_overlay_tunnels | map(attribute='remote')
+        | reject('in', _cifmw_vxlan_overlay_rules_end.stdout) | list | length > 0)
