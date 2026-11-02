@@ -1,0 +1,194 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Work out the overlay MTU
+  vars:
+    _min_underlay: >-
+      {{ cifmw_vxlan_overlay_hosts | map('extract', hostvars, '_cifmw_vxlan_overlay_underlay_mtu') | map('int') | min }}
+    _auto: "{{ _min_underlay | int - cifmw_vxlan_overlay_overhead | int }}"
+    _cap: "{{ cifmw_vxlan_overlay_networking.networks.default.mtu | default(_auto) | int }}"
+  ansible.builtin.set_fact:
+    _cifmw_vxlan_overlay_mtu: >-
+      {{ cifmw_vxlan_overlay_mtu | int if cifmw_vxlan_overlay_mtu | int > 0 else ([_auto | int, _cap | int] | min) }}
+  run_once: true
+
+- name: Check the overlay MTU is usable
+  ansible.builtin.assert:
+    that: _cifmw_vxlan_overlay_mtu | int >= cifmw_vxlan_overlay_min_mtu | int
+    msg: "Overlay MTU {{ _cifmw_vxlan_overlay_mtu }} is below {{ cifmw_vxlan_overlay_min_mtu }}"
+    quiet: true
+  run_once: true
+
+# What policy routing cannot fix:
+#   - an overlay network overlapping a host's underlay interface subnet (the
+#     underlay gateway itself would be captured)
+#   - an underlay address, or the address Ansible connects from, equal to an
+#     overlay host address: the local table is consulted before any rule
+# Without policy routing, no underlay address may be inside an overlay network.
+- name: Check the overlay networks against the underlay
+  vars:
+    _ranges: "{{ cifmw_vxlan_overlay_networking.networks.values() | map(attribute='range') | list }}"
+    _dnet: "{{ cifmw_vxlan_overlay_networking.networks.default }}"
+    _overlay_addrs: >-
+      {%- set out = [_dnet.gw | default(_dnet.range | ansible.utils.ipaddr('net') | ansible.utils.ipmath(1))] -%}
+      {%- for inst in cifmw_vxlan_overlay_networking.instances.values() -%}
+      {%-   for net in inst.networks.values() if net.ip is defined -%}
+      {%-     set _ = out.append(net.ip) -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ out }}
+    _underlay_ips: >-
+      {{
+        (cifmw_vxlan_overlay_hosts | map('extract', hostvars, '_cifmw_vxlan_overlay_underlay_ip') | list)
+        + (cifmw_vxlan_overlay_hosts | map('extract', hostvars, '_cifmw_vxlan_overlay_ansible_src')
+           | select | ansible.utils.ipv4 | list)
+      }}
+    _underlay_nets: >-
+      {{
+        (cifmw_vxlan_overlay_hosts | map('extract', hostvars, '_cifmw_vxlan_overlay_underlay_subnet') | list)
+        + cifmw_vxlan_overlay_underlay_cidrs
+      }}
+    _conflicts: >-
+      {%- set out = [] -%}
+      {%- for r in _ranges -%}
+      {%-   for n in _underlay_nets | unique
+             if (r | ansible.utils.network_in_network(n)) or (n | ansible.utils.network_in_network(r)) -%}
+      {%-     set _ = out.append(r ~ ' overlaps underlay network ' ~ n) -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {%- for ip in _underlay_ips | unique -%}
+      {%-   if ip in _overlay_addrs -%}
+      {%-     set _ = out.append('underlay address ' ~ ip ~ ' is also an overlay host address') -%}
+      {%-   elif not cifmw_vxlan_overlay_policy_routing | bool -%}
+      {%-     for r in _ranges if ip | ansible.utils.ipaddr(r) -%}
+      {%-       set _ = out.append('underlay address ' ~ ip ~ ' is inside overlay network ' ~ r ~ ' and policy routing is off') -%}
+      {%-     endfor -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ out }}
+  ansible.builtin.assert:
+    that: _conflicts | length == 0
+    msg: "{{ _conflicts }}"
+    quiet: true
+  run_once: true
+
+- name: Report underlay addresses that rely on policy routing
+  when: cifmw_vxlan_overlay_policy_routing | bool
+  vars:
+    _ranges: "{{ cifmw_vxlan_overlay_networking.networks.values() | map(attribute='range') | list }}"
+    _addrs: >-
+      {{
+        dict(cifmw_vxlan_overlay_hosts | zip(cifmw_vxlan_overlay_hosts | map('extract', hostvars, '_cifmw_vxlan_overlay_underlay_ip')))
+        | combine({'ansible (' ~ inventory_hostname ~ ')': _cifmw_vxlan_overlay_ansible_src | default('')})
+      }}
+  ansible.builtin.debug:
+    msg: >-
+      {%- set out = [] -%}
+      {%- for name, ip in _addrs.items() if ip -%}
+      {%-   for r in _ranges if ip | ansible.utils.ipaddr(r) -%}
+      {%-     set _ = out.append(name ~ ' ' ~ ip ~ ' is inside overlay network ' ~ r) -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ out if out else 'no underlay address inside an overlay network' }}
+  run_once: true
+
+# Same keys and values the Neutron backend builds from its ports
+# (components-integration-config
+# playbooks/crc/bootstrap-ci-network-instance-create-attach-port.yml).
+- name: Build crc_ci_bootstrap_networks_out
+  vars:
+    _nets: "{{ cifmw_vxlan_overlay_networking.networks }}"
+    _dnet: "{{ cifmw_vxlan_overlay_networking.networks.default }}"
+    _mtu: "{{ _cifmw_vxlan_overlay_mtu | int }}"
+    _seed: "{{ zuul.build | default('cifmw-vxlan-overlay') }}"
+    _out: >-
+      {%- set out = {} -%}
+      {%- for host in cifmw_vxlan_overlay_hosts -%}
+      {%-   set inst = cifmw_vxlan_overlay_networking.instances[host] -%}
+      {%-   set h = (_seed ~ host ~ 'default') | hash('md5') -%}
+      {%-   set mac = '52:54:00:' ~ h[0:2] ~ ':' ~ h[2:4] ~ ':' ~ h[4:6] -%}
+      {%-   set gw = _dnet.gw | default(_dnet.range | ansible.utils.ipaddr('net') | ansible.utils.ipmath(1)) -%}
+      {%-   set entry = {
+              'iface': cifmw_vxlan_overlay_iface,
+              'mac': mac,
+              'mtu': _mtu | int,
+              'connection': 'ci-private-network',
+              'ip': inst.networks.default.ip ~ '/' ~ (_dnet.range | ansible.utils.ipaddr('prefix') | string),
+              'gw': gw,
+            } -%}
+      {%-   if _dnet.dns is defined -%}
+      {%-     set _ = entry.update({'dns': _dnet.dns}) -%}
+      {%-   endif -%}
+      {%-   set host_out = {'default': entry} -%}
+      {%-   for net, val in inst.networks.items() if net != 'default' -%}
+      {%-     set ncfg = _nets[net] -%}
+      {%-     set hv = (_seed ~ host ~ (ncfg.vlan | string)) | hash('md5') -%}
+      {%-     set ventry = {
+                'iface': cifmw_vxlan_overlay_iface ~ '.' ~ (ncfg.vlan | string),
+                'vlan': ncfg.vlan,
+                'parent_iface': cifmw_vxlan_overlay_iface,
+                'mac': '52:54:00:' ~ hv[0:2] ~ ':' ~ hv[2:4] ~ ':' ~ hv[4:6],
+                'mtu': _mtu | int - 4,
+                'ip': val.ip ~ '/' ~ (ncfg.range | ansible.utils.ipaddr('prefix') | string),
+              } -%}
+      {%-     if val.config_nm | default(true) | bool -%}
+      {%-       set _ = ventry.update({'connection': 'ci-private-network-' ~ (ncfg.vlan | string)}) -%}
+      {%-     endif -%}
+      {%-     if ncfg.dns is defined -%}
+      {%-       set _ = ventry.update({'dns': ncfg.dns}) -%}
+      {%-     endif -%}
+      {%-     set _ = host_out.update({net: ventry}) -%}
+      {%-   endfor -%}
+      {%-   set _ = out.update({host: host_out}) -%}
+      {%- endfor -%}
+      {{ out }}
+  ansible.builtin.set_fact:
+    crc_ci_bootstrap_networks_out: "{{ _out }}"
+    cacheable: true
+  run_once: true
+
+# ansible-lint cannot render the list expressions with its placeholder values.
+- name: Build this host's tunnel list  # noqa: jinja[invalid]
+  vars:
+    _spokes: "{{ cifmw_vxlan_overlay_hosts | reject('equalto', cifmw_vxlan_overlay_hub) | list }}"
+    _hub_tunnels: >-
+      {%- set out = [] -%}
+      {%- for s in _spokes -%}
+      {%-   set _ = out.append({
+              'name': cifmw_vxlan_overlay_tunnel_prefix ~ 's' ~ loop.index0,
+              'vni': cifmw_vxlan_overlay_vni_base | int + loop.index0,
+              'remote': hostvars[s]._cifmw_vxlan_overlay_underlay_ip,
+              'peer': s,
+            }) -%}
+      {%- endfor -%}
+      {{ out }}
+    _spoke_tunnel:
+      - name: "{{ cifmw_vxlan_overlay_tunnel_prefix }}hub"
+        vni: "{{ cifmw_vxlan_overlay_vni_base | int + (_spokes.index(inventory_hostname) if inventory_hostname in _spokes else 0) }}"
+        remote: "{{ hostvars[cifmw_vxlan_overlay_hub]._cifmw_vxlan_overlay_underlay_ip }}"
+        peer: "{{ cifmw_vxlan_overlay_hub }}"
+  ansible.builtin.set_fact:
+    _cifmw_vxlan_overlay_tunnels: >-
+      {{ _hub_tunnels if inventory_hostname == cifmw_vxlan_overlay_hub else _spoke_tunnel }}
+    _cifmw_vxlan_overlay_is_hub: "{{ inventory_hostname == cifmw_vxlan_overlay_hub }}"
+    _cifmw_vxlan_overlay_is_edpm: "{{ inventory_hostname in cifmw_vxlan_overlay_edpm_hosts }}"
+    _cifmw_vxlan_overlay_profiles: >-
+      {{
+        crc_ci_bootstrap_networks_out[inventory_hostname] | dict2items
+        | selectattr('value.connection', 'defined')
+        | rejectattr('value.connection', 'equalto', '')
+        | list
+      }}
