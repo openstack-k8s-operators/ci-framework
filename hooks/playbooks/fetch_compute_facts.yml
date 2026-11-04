@@ -223,36 +223,105 @@
                         {% set _ = mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) %}
                         {%- endfor %}
                         {% set min_viable_mtu = mtu_list | max %}
-                        network_config:
-                        - type: interface
-                          name: nic1
-                          use_dhcp: true
+                        dns-resolver:
+                          config:
+                            search: {{ dns_search_domains }}
+                            server: {{ ctlplane_dns_nameservers }}
+                        interfaces:
+                        - name: nic1
+                          type: ethernet
+                          state: up
                           mtu: {{ min_viable_mtu }}
-                        - type: ovs_bridge
-                          name: {{ neutron_physical_bridge_name }}
+                          ipv4:
+                            enabled: true
+                            dhcp: true
+                            auto-dns: false
+
+                        - name: nic2
+                          type: ethernet
+                          state: up
                           mtu: {{ min_viable_mtu }}
-                          use_dhcp: false
-                          dns_servers: {{ ctlplane_dns_nameservers }}
-                          domain: {{ dns_search_domains }}
-                          addresses:
-                          - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_cidr }}
-                          routes: {{ ctlplane_host_routes }}
-                          members:
-                          - type: interface
-                            name: nic2
-                            mtu: {{ min_viable_mtu }}
-                            # force the MAC address of the bridge to this interface
-                            primary: true
+                          ipv4:
+                            enabled: false
+
+                        # os-net-config "primary: true" on nic2 -> copy MAC onto the bridge iface
+                        - name: {{ neutron_physical_bridge_name }}
+                          type: ovs-interface
+                          state: up
+                          mtu: {{ min_viable_mtu }}
+                          copy-mac-from: nic2
+                          ipv4:
+                            enabled: true
+                            dhcp: false
+                            address:
+                            - ip: {{ ctlplane_ip }}
+                              prefix-length: {{ ctlplane_cidr }}
+
                         {% for network in nodeset_networks %}
-                          - type: vlan
-                            mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
-                            vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
-                            addresses:
-                            - ip_netmask:
-                                {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
-                            routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
+                        - name: {{ "vlan" ~ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                          type: ovs-interface
+                          state: up
+                          mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
+                          ipv4:
+                            enabled: true
+                            dhcp: false
+                            address:
+                            - ip: {{ lookup('vars', networks_lower[network] ~ '_ip') }}
+                              prefix-length: {{ lookup('vars', networks_lower[network] ~ '_cidr') }}
                         {% endfor %}
+
+                        - name: {{ neutron_physical_bridge_name }}
+                          type: ovs-bridge
+                          state: up
+                          bridge:
+                            options:
+                              fail-mode: standalone
+                              stp: false
+                              rstp: false
+                            port:
+                            - name: nic2
+                            - name: {{ neutron_physical_bridge_name }}
+                        {% for network in nodeset_networks %}
+                            - name: {{ "vlan" ~ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                              vlan:
+                                mode: access
+                                tag: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                        {% endfor %}
+                        {% set routes = [] %}
+                        {% for route in ctlplane_host_routes | default([], true) %}
+                        {% set _ = routes.append((route, neutron_physical_bridge_name)) %}
+                        {% endfor %}
+                        {% for network in nodeset_networks %}
+                        {% for route in lookup('vars', networks_lower[network] ~ '_host_routes') | default([], true) %}
+                        {% set _ = routes.append((route, "vlan" ~ lookup('vars', networks_lower[network] ~ '_vlan_id'))) %}
+                        {% endfor %}
+                        {% endfor %}
+                        {% if routes %}
+                        routes:
+                          config:
+                        {% for route, iface in routes %}
+                          - destination: {{ route.destination | default(route.ip_netmask, true) }}
+                            next-hop-address: {{ route.nexthop | default(route.next_hop, true) }}
+                            next-hop-interface: {{ iface }}
+                        {% endfor %}
+                        {% endif %}
                         {% endraw %}
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_tool
+                    value: nmstate
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_manage_service
+                    value: true
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_update
+                    value: true
+
+                  - op: replace
+                    path: /spec/nodeTemplate/ansible/ansibleVars/edpm_network_config_nonconfigured_cleanup
+                    value: false
               {% endif %}
 
                   - op: replace
@@ -277,6 +346,10 @@
                         {% set _ = mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) %}
                         {%- endfor %}
                         {% set min_viable_mtu = mtu_list | max %}
+                        dns-resolver:
+                          config:
+                            search: {{ dns_search_domains }}
+                            server: {{ ctlplane_dns_nameservers }}
                         interfaces:
                         - name: nic1
                           type: ethernet
@@ -286,16 +359,12 @@
                             enabled: true
                             dhcp: true
                             auto-dns: false
-                          ipv6:
-                            enabled: false
 
                         - name: nic2
                           type: ethernet
                           state: up
                           mtu: {{ min_viable_mtu }}
                           ipv4:
-                            enabled: false
-                          ipv6:
                             enabled: false
 
                         # os-net-config "primary: true" on nic2 -> copy MAC onto the bridge iface
@@ -310,11 +379,9 @@
                             address:
                             - ip: {{ ctlplane_ip }}
                               prefix-length: {{ ctlplane_cidr }}
-                          ipv6:
-                            enabled: false
 
                         {% for network in nodeset_networks %}
-                        - name: {{ networks_lower[network] }}
+                        - name: {{ "vlan" ~ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
                           type: ovs-interface
                           state: up
                           mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
@@ -324,8 +391,6 @@
                             address:
                             - ip: {{ lookup('vars', networks_lower[network] ~ '_ip') }}
                               prefix-length: {{ lookup('vars', networks_lower[network] ~ '_cidr') }}
-                          ipv6:
-                            enabled: false
                         {% endfor %}
 
                         - name: {{ neutron_physical_bridge_name }}
@@ -340,31 +405,29 @@
                             - name: nic2
                             - name: {{ neutron_physical_bridge_name }}
                         {% for network in nodeset_networks %}
-                            - name: {{ networks_lower[network] }}
+                            - name: {{ "vlan" ~ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
                               vlan:
                                 mode: access
                                 tag: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
                         {% endfor %}
-
-                        routes:
-                          config:
-                        {% for route in ctlplane_host_routes | default([]) %}
-                          - destination: {{ route.destination | default(route.ip_netmask) }}
-                            next-hop-address: {{ route['next-hop'] | default(route.next_hop) | default(route.nexthop) }}
-                            next-hop-interface: {{ neutron_physical_bridge_name }}
+                        {% set routes = [] %}
+                        {% for route in ctlplane_host_routes | default([], true) %}
+                        {% set _ = routes.append((route, neutron_physical_bridge_name)) %}
                         {% endfor %}
                         {% for network in nodeset_networks %}
-                        {% for route in lookup('vars', networks_lower[network] ~ '_host_routes') | default([]) %}
-                          - destination: {{ route.destination | default(route.ip_netmask) }}
-                            next-hop-address: {{ route['next-hop'] | default(route.next_hop) | default(route.nexthop) }}
-                            next-hop-interface: {{ networks_lower[network] }}
+                        {% for route in lookup('vars', networks_lower[network] ~ '_host_routes') | default([], true) %}
+                        {% set _ = routes.append((route, "vlan" ~ lookup('vars', networks_lower[network] ~ '_vlan_id'))) %}
                         {% endfor %}
                         {% endfor %}
-
-                        dns-resolver:
+                        {% if routes %}
+                        routes:
                           config:
-                            server: {{ ctlplane_dns_nameservers }}
-                            search: {{ dns_search_domains }}
+                        {% for route, iface in routes %}
+                          - destination: {{ route.destination | default(route.ip_netmask, true) }}
+                            next-hop-address: {{ route.nexthop | default(route.next_hop, true) }}
+                            next-hop-interface: {{ iface }}
+                        {% endfor %}
+                        {% endif %}
                         {% endraw %}
 
                   - op: replace
