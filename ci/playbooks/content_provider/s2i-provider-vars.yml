@@ -1,0 +1,85 @@
+---
+- name: Require the S2I project in the Zuul workspace
+  ansible.builtin.assert:
+    that:
+      - >-
+        s2i_ci_container_project in (zuul.projects | default({}))
+    fail_msg: The S2I container project is not available in the Zuul workspace
+
+- name: Locate the S2I checkout and Ansible roles
+  ansible.builtin.set_fact:
+    s2i_provider_container_repo: >-
+      {{ ansible_user_dir }}/{{ zuul.projects[s2i_ci_container_project].src_dir }}
+    s2i_provider_roles_path: >-
+      {{ [
+           ansible_user_dir ~ '/' ~ zuul.projects['opendev.org/zuul/zuul-jobs'].src_dir ~ '/roles',
+           ansible_user_dir ~ '/ci-framework-data/artifacts/roles',
+           ansible_user_dir ~ '/src/github.com/openstack-k8s-operators/ci-framework/roles',
+           '/usr/share/ansible/roles',
+           '/etc/ansible/roles',
+           ansible_user_dir ~ '/.ansible/roles'
+         ] | join(':') }}
+
+- name: Configure S2I to reuse the operator provider registry
+  ansible.builtin.set_fact:
+    s2i_ci_external_registry:
+      endpoint: >-
+        {{ cifmw_rp_registry_ip | trim }}:{{ cifmw_rp_registry_port | default(5001) }}
+      public_host: "{{ cifmw_rp_registry_ip | trim }}"
+      public_port: "{{ cifmw_rp_registry_port | default(5001) | int }}"
+      insecure: true
+
+- name: Verify the S2I build entry point
+  ansible.builtin.stat:
+    path: "{{ s2i_provider_container_repo }}/build.sh"
+  register: s2i_provider_build_entry_point
+
+- name: Require the S2I build entry point
+  ansible.builtin.assert:
+    that:
+      - s2i_provider_build_entry_point.stat.isreg | default(false)
+    fail_msg: The S2I project checkout does not contain build.sh
+
+- name: Ensure the S2I provider variables directory exists
+  ansible.builtin.file:
+    path: "{{ cifmw_artifacts_basedir }}/artifacts/parameters"
+    state: directory
+    mode: "0700"
+
+- name: Map the provider host to the S2I builder group
+  ansible.builtin.copy:
+    dest: "{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-inventory.yml"
+    mode: "0600"
+    content: |
+      {{ {
+           'all': {
+             'children': {
+               'builder': {
+                 'hosts': {
+                   inventory_hostname: {'ansible_connection': 'local'}
+                 }
+               }
+             }
+           }
+         } | to_nice_yaml }}
+
+- name: Write runtime variables for the S2I playbooks
+  ansible.builtin.copy:
+    dest: "{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-provider.yml"
+    mode: "0600"
+    content: |
+      {{ {
+           'ansible_user_dir': ansible_user_dir,
+           'zuul_user_dir': zuul_user_dir | default(ansible_user_dir),
+           's2i_ci_workspace_root': zuul_user_dir | default(ansible_user_dir),
+           's2i_ci_container_project': s2i_ci_container_project,
+           's2i_ci_images': s2i_ci_images | default([]),
+           's2i_ci_stream': s2i_ci_stream | default('master'),
+           's2i_ci_external_registry': s2i_ci_external_registry,
+           's2i_ci_use_provider_pip_mirror':
+             s2i_ci_use_provider_pip_mirror | default(true) | bool,
+           's2i_ci_enable_rpm_cache':
+             s2i_ci_enable_rpm_cache | default(true) | bool,
+           's2i_ci_rpm_cache_use_provider_mirror':
+             s2i_ci_rpm_cache_use_provider_mirror | default(false) | bool
+         } | to_nice_yaml }}
