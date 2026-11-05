@@ -1,0 +1,42 @@
+#!/bin/bash
+set -eu
+
+if [ "${3:-}" = ci/playbooks/edpm_baremetal_deployment/configure_registry.yml ]; then
+    test "$#" -eq 7
+    test "$1 $4 $5 $6" = '-i -e @group_vars/all.yml -e'
+    parameters="${7#@}"
+    artifacts="$(dirname "$(dirname "$parameters")")"
+    test "$2" = "$artifacts/zuul_inventory.yml"
+    test -f "$PWD/controller-only-context"
+    grep -q 'ansible_host: api.crc.testing' "$2"
+    grep -q 'ansible_ssh_private_key_file:' "$2"
+    grep -q '^content_provider_registry_ip:' "$parameters"
+    touch "$artifacts/registry-config-called"
+    exit 0
+fi
+
+test "$#" -eq 9
+test "$1 $2 $3 $4 $5 $6 $7 $8" = '-i localhost, -c local ci/playbooks/edpm_build_images/bootc_package.yml -e @group_vars/all.yml -e'
+input="${9#@}"
+artifacts="$(dirname "$input")"
+grep -qx 'cifmw_edpm_build_images_bootc_source_image: registry.test:5000/openstack/openstack-edpm-bootc:test-s2i' "$input"
+grep -qx 'cifmw_edpm_build_images_tag: test-s2i' "$input"
+grep -qx 'cifmw_edpm_build_images_bootc_source_tls_verify: false' "$input"
+grep -qx 'cifmw_edpm_build_images_base_image: quay.io/centos/centos:stream10-minimal' "$input"
+if grep -q 'crc_ssh_key' "$input"; then
+    echo 'Controller-local packaging must not receive CRC SSH keys.' >&2
+    exit 1
+fi
+registry_ip="$(sed -n 's/^cifmw_rp_registry_ip: //p' "$input")"
+test -n "$registry_ip"
+cat > "$artifacts/bootc-images.yml" <<EOF
+cifmw_build_images_output:
+  images:
+    edpm-bootc:
+      image: oci://$registry_ip:5001/edpm-bootc:test-s2i
+    edpm-bootc-qcow2:
+      image: $registry_ip:5001/edpm-bootc:test-s2i-qcow2
+content_provider_registry_ip: $registry_ip
+content_provider_registry_ip_port: $registry_ip:5001
+content_provider_registry_available: true
+EOF

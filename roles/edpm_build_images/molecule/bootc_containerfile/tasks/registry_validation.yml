@@ -1,0 +1,98 @@
+---
+- name: Validate the nested registry playbook on the Ansible controller
+  delegate_to: localhost
+  run_once: true
+  block:
+    - name: Create an isolated registry validation workspace
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ lookup('env', 'TMPDIR') | default('/tmp', true) }}"
+        prefix: cifmw-registry-validation-
+      register: cifmw_edpm_build_images_test_registry_workspace
+
+    - name: Create isolated playbook and helper directories
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_build_images_test_registry_workspace.path }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - ci/playbooks/edpm_baremetal_deployment
+        - ci/playbooks/tasks
+
+    - name: Copy the production registry playbook for isolated validation
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../../../ci/playbooks/edpm_baremetal_deployment/configure_registry.yml"
+        dest: "{{ cifmw_edpm_build_images_test_registry_workspace.path }}/ci/playbooks/edpm_baremetal_deployment/configure_registry.yml"
+        mode: "0644"
+
+    - name: Prevent validation tests from applying registry configuration
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_registry_workspace.path }}/ci/playbooks/tasks/set_crc_insecure_registry.yml"
+        mode: "0644"
+        content: |
+          - name: Registry configuration must not run during validation tests
+            ansible.builtin.fail:
+              msg: Validation attempted to configure the registry.
+
+    - name: Write complete and incomplete nested inventories
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_registry_workspace.path }}/{{ item.name }}.yml"
+        mode: "0644"
+        content: "{{ {'all': {'hosts': item.hosts}} | to_nice_yaml }}"
+      loop:
+        - name: complete
+          hosts:
+            localhost:
+              ansible_connection: local
+            crc:
+              ansible_connection: ssh
+              ansible_host: api.crc.testing
+              ansible_ssh_private_key_file: /controller-only/id_test
+        - name: missing-crc
+          hosts:
+            localhost:
+              ansible_connection: local
+
+    - name: Execute production prerequisites using real nested Ansible
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -m
+          - ansible.cli.playbook
+          - -i
+          - "{{ cifmw_edpm_build_images_test_registry_workspace.path }}/{{ item.inventory }}.yml"
+          - "{{ cifmw_edpm_build_images_test_registry_workspace.path }}/ci/playbooks/edpm_baremetal_deployment/configure_registry.yml"
+          - -e
+          - '@group_vars/all.yml'
+          - -e
+          - "{{ item.parameters | to_json }}"
+          - --tags
+          - validate
+        chdir: "{{ playbook_dir }}/../../../.."
+      environment:
+        ANSIBLE_CONFIG: "{{ playbook_dir }}/../../../../ansible.cfg"
+      register: cifmw_edpm_build_images_test_registry_validation
+      changed_when: false
+      failed_when: false
+      loop:
+        - inventory: complete
+          parameters: {content_provider_registry_ip: '192.0.2.10'}
+          expected_rc: 0
+          expected_error: ''
+        - inventory: complete
+          parameters: {}
+          expected_rc: 2
+          expected_error: Consumer registry address is missing from deployment parameters.
+        - inventory: missing-crc
+          parameters: {content_provider_registry_ip: '192.0.2.10'}
+          expected_rc: 2
+          expected_error: CRC inventory is missing or incomplete.
+
+    - name: Require successful validation and clear prerequisite failures
+      ansible.builtin.assert:
+        that:
+          - item.rc == item.item.expected_rc
+          - item.item.expected_error in item.stdout
+      loop: "{{ cifmw_edpm_build_images_test_registry_validation.results }}"
+      loop_control:
+        label: "{{ item.item.inventory }} (rc={{ item.item.expected_rc }})"
