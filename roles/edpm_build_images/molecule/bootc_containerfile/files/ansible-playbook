@@ -1,0 +1,24 @@
+#!/bin/bash
+set -eu
+
+test "$#" -eq 9
+test "$1 $2 $3 $4 $5 $6 $7 $8" = '-i localhost, -c local ci/playbooks/edpm_build_images/bootc_package.yml -e @group_vars/all.yml -e'
+input="${9#@}"
+artifacts="$(dirname "$input")"
+grep -qx 'cifmw_edpm_build_images_bootc_source_image: registry.test:5000/openstack/openstack-edpm-bootc:test-s2i' "$input"
+grep -qx 'cifmw_edpm_build_images_tag: test-s2i' "$input"
+grep -qx 'cifmw_edpm_build_images_bootc_source_tls_verify: false' "$input"
+grep -qx 'cifmw_edpm_build_images_base_image: quay.io/centos/centos:stream10-minimal' "$input"
+registry_ip="$(sed -n 's/^cifmw_rp_registry_ip: //p' "$input")"
+test -n "$registry_ip"
+cat > "$artifacts/bootc-images.yml" <<EOF
+cifmw_build_images_output:
+  images:
+    edpm-bootc:
+      image: oci://$registry_ip:5001/edpm-bootc:test-s2i
+    edpm-bootc-qcow2:
+      image: $registry_ip:5001/edpm-bootc:test-s2i-qcow2
+content_provider_registry_ip: $registry_ip
+content_provider_registry_ip_port: $registry_ip:5001
+content_provider_registry_available: true
+EOF

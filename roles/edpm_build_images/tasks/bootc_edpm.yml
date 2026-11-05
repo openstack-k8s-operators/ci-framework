@@ -1,0 +1,40 @@
+---
+- name: Detect bootc Containerfile
+  ansible.builtin.import_tasks: bootc_containerfile.yml
+
+- name: Discover repo files for bootc build
+  ansible.builtin.find:
+    paths: /etc/yum.repos.d
+    file_type: file
+    recurse: false
+  register: cifmw_edpm_build_images_bootc_repo_files
+
+- name: Copy repo files for bootc build
+  become: "{{ cifmw_edpm_build_images_via_rpm }}"
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ cifmw_edpm_build_images_bootc_repo_path }}/output/yum.repos.d/{{ item.path | basename }}"
+    remote_src: true
+    mode: "0644"
+  loop: "{{ cifmw_edpm_build_images_bootc_repo_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Build bootc container image
+  become: true
+  args:
+    chdir: "{{ cifmw_edpm_build_images_bootc_repo_path }}"
+  ansible.builtin.shell: >-
+    buildah bud
+    --network host
+    --format oci
+    --build-arg EDPM_BASE_IMAGE={{ cifmw_edpm_build_images_bootc_base_image }}
+    --build-arg RHSM_SCRIPT={{ cifmw_edpm_build_images_bootc_rhsm_script }}
+    --build-arg FIPS={{ cifmw_edpm_build_images_bootc_fips }}
+    --build-arg USER_PACKAGES={{ cifmw_edpm_build_images_bootc_user_packages }}
+    --volume /etc/pki/ca-trust:/etc/pki/ca-trust:ro,Z
+    --volume {{ cifmw_edpm_build_images_bootc_repo_path }}/output/yum.repos.d:/etc/yum.repos.d:rw,Z
+    -f ./{{ cifmw_edpm_build_images_bootc_containerfile }}
+    -t localhost/edpm-bootc:{{ cifmw_edpm_build_images_tag }}
+    . > {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_image_build.log
+    2> {{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/edpm_bootc_image_build_err.log

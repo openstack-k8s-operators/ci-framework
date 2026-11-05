@@ -100,3 +100,142 @@
               - ansible_failed_result is defined
               - "'No bootc Containerfile found' in ansible_failed_result.msg"
             fail_msg: "Expected Containerfile detection to fail on empty repository"
+
+    - name: Create s2i build fixture directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ cifmw_edpm_build_images_test_base }}/s2i/bin"
+        - "{{ cifmw_edpm_build_images_test_base }}/logs/edpm_images"
+
+    - name: Install mock s2i build commands
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ cifmw_edpm_build_images_test_base }}/s2i/{{ item.dest }}"
+        mode: "0755"
+      loop:
+        - {src: build.sh, dest: build.sh}
+        - {src: git, dest: bin/git}
+        - {src: buildah, dest: bin/buildah}
+        - {src: podman, dest: bin/podman}
+
+    - name: Exercise the s2i bootc build and local image handoff
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_s2i.yml
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/s2i/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_become: false
+        cifmw_edpm_build_images_bootc_s2i_repo_path: "{{ cifmw_edpm_build_images_test_base }}/s2i"
+        cifmw_edpm_build_images_basedir: "{{ cifmw_edpm_build_images_test_base }}"
+        cifmw_edpm_build_images_tag: test-s2i
+        cifmw_edpm_build_images_bootc_base_image: quay.io/centos-bootc/centos-bootc:stream10
+        cifmw_edpm_build_images_bootc_user_packages: extra-package another-package
+
+    - name: Check mock s2i build and tag results
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: cifmw_edpm_build_images_test_s2i_results
+      loop:
+        - "{{ cifmw_edpm_build_images_test_base }}/logs/edpm_images/s2i-build-passed"
+        - "{{ cifmw_edpm_build_images_test_base }}/s2i/s2i-tag-passed"
+
+    - name: Assert s2i build and image handoff completed
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_s2i_results.results | rejectattr('stat.exists') | list | length == 0
+
+    - name: Exercise published bootc image import without rebuilding
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_import.yml
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/s2i/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_become: false
+        cifmw_edpm_build_images_bootc_source_image: registry.test:5000/openstack/openstack-edpm-bootc:test-s2i
+        cifmw_edpm_build_images_bootc_source_tls_verify: false
+        cifmw_edpm_build_images_tag: test-s2i
+
+    - name: Check published image import results
+      ansible.builtin.stat:
+        path: "{{ cifmw_edpm_build_images_test_base }}/s2i/{{ item }}"
+      register: cifmw_edpm_build_images_test_import_results
+      loop:
+        - prebuilt-pull-passed
+        - prebuilt-tag-passed
+
+    - name: Assert the exact published image was imported and retagged
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_import_results.results | rejectattr('stat.exists') | list | length == 0
+
+    - name: Create isolated consumer orchestration fixtures
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_build_images_test_base }}/consumer/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - bin
+        - .ssh
+        - framework
+        - artifacts/parameters
+
+    - name: Install mock consumer orchestration commands
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/bin/{{ item }}"
+        mode: "0755"
+      loop:
+        - ansible-playbook
+        - ssh-keyscan
+
+    - name: Write existing deployment parameters to preserve
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts/parameters/zuul-params.yml"
+        mode: "0644"
+        content: |
+          unrelated_parameter: keep-me
+          cifmw_build_images_output:
+            images:
+              ironic-python-agent:
+                image: registry.test/ipa:original
+
+    - name: Exercise the generic consumer orchestration without builds or network access
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../../../../ci/playbooks/edpm_build_images/bootc_prepare_tasks.yml"
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/consumer/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_user_dir: "{{ cifmw_edpm_build_images_test_base }}/consumer"
+        cifmw_edpm_build_images_ci_repo: "{{ cifmw_edpm_build_images_test_base }}/consumer/framework"
+        cifmw_edpm_build_images_ci_artifacts: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts"
+        cifmw_edpm_build_images_crc_ssh_key: "{{ cifmw_edpm_build_images_test_base }}/consumer/id_test"
+        cifmw_edpm_build_images_bootc_source_image: registry.test:5000/openstack/openstack-edpm-bootc:test-s2i
+        cifmw_edpm_build_images_bootc_source_tls_verify: false
+        cifmw_edpm_build_images_tag: test-s2i
+        cifmw_edpm_build_images_base_image: quay.io/centos/centos:stream10-minimal
+
+    - name: Read prepared deployment parameters
+      ansible.builtin.slurp:
+        src: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts/parameters/zuul-params.yml"
+      register: cifmw_edpm_build_images_test_consumer_parameters
+
+    - name: Assert the disk handoff preserves other deployment inputs
+      vars:
+        cifmw_edpm_build_images_test_parameters: >-
+          {{ cifmw_edpm_build_images_test_consumer_parameters.content | b64decode | from_yaml }}
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_parameters.unrelated_parameter == 'keep-me'
+          - cifmw_edpm_build_images_test_parameters.cifmw_build_images_output.images['ironic-python-agent'].image == 'registry.test/ipa:original'
+          - >-
+            cifmw_edpm_build_images_test_parameters.cifmw_build_images_output.images['edpm-bootc-qcow2'].image ==
+            cifmw_edpm_build_images_test_parameters.content_provider_registry_ip ~ ':5001/edpm-bootc:test-s2i-qcow2'
+          - cifmw_edpm_build_images_test_parameters.content_provider_registry_available
