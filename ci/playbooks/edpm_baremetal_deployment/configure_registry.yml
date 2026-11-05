@@ -1,0 +1,29 @@
+---
+- name: Configure CRC registry access from the controller
+  hosts: localhost
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig | default(ansible_user_dir ~ '/.crc/machines/crc/kubeconfig') }}"
+  tasks:
+    - name: Require the consumer registry address before configuring CRC
+      tags: always
+      ansible.builtin.assert:
+        that:
+          - content_provider_registry_ip | default('') is string
+          - content_provider_registry_ip | default('') | length > 0
+        fail_msg: Consumer registry address is missing from deployment parameters.
+
+    - name: Require the existing controller-local CRC inventory
+      tags: always
+      ansible.builtin.assert:
+        that:
+          - hostvars[inventory_hostname].ansible_connection | default('') == 'local'
+          - "'crc' in hostvars"
+          - hostvars['crc'].ansible_host | default('') | length > 0
+          - hostvars['crc'].ansible_ssh_private_key_file | default('') | length > 0
+        fail_msg: CRC inventory is missing or incomplete.
+
+    - name: Configure registry trust using the existing CRC connection
+      vars:
+        cifmw_crc_registry_config_host: crc
+      ansible.builtin.include_tasks: ../tasks/set_crc_insecure_registry.yml

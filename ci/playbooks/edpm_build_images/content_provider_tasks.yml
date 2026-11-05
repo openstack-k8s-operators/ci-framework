@@ -12,7 +12,9 @@
 - name: Build EDPM content provider images
   when:
     - (cifmw_edpm_build_images_force | default(false) | bool) or
-      ('edpm-image-builder' in (zuul_change_list | default([])))
+      ('edpm-image-builder' in (zuul_change_list | default([]))) or
+      ((cifmw_edpm_build_images_bootc_use_s2i | default(false) | bool) and
+       ('s2i-openstack-containers' in (zuul_change_list | default([]))))
   block:
     - name: Call repo setup
       ansible.builtin.import_role:
@@ -24,7 +26,11 @@
       ansible.builtin.command:  # noqa: command-instead-of-module
         cmd: git show-ref --head --hash head
       args:
-        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/edpm-image-builder"
+        chdir: >-
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/{{
+            's2i-openstack-containers'
+            if (cifmw_edpm_build_images_bootc_use_s2i | default(false) | bool)
+            else 'edpm-image-builder' }}
       register: git_head_out
 
     - name: Set pr_sha to be used as image tag
@@ -101,6 +107,8 @@
   when:
     - not (cifmw_edpm_build_images_force | default(false) | bool)
     - "'edpm-image-builder' not in (zuul_change_list | default([]))"
+    - not ((cifmw_edpm_build_images_bootc_use_s2i | default(false) | bool) and
+           ('s2i-openstack-containers' in (zuul_change_list | default([]))))
   ansible.builtin.set_fact:
     cifmw_build_images_output: {}
     cacheable: true

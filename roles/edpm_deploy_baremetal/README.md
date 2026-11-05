@@ -21,6 +21,7 @@ This role doesn't need privilege escalation.
 * `cifmw_edpm_deploy_baremetal_nova_compute_extra_config`: (String) Oslo config snippet defining extra configuration for the nova-compute services. Defaults to an empty string.
 * `cifmw_edpm_deploy_baremetal_custom_bootstrap`: (Boolean) When true, skips the inline `edpm_bootstrap_command` kustomization patch so that a file-based kustomization can provide a custom bootstrap command instead. Default: `false`
 * `cifmw_edpm_deploy_baremetal_bootc`: (Boolean) Disables the inline `edpm_bootstrap_command` patch and `dnf update` for bootc-based immutable nodes. Default: `false`
+* `cifmw_edpm_deploy_baremetal_selinux_mode`: (String) Override the `edpm_bootstrap_selinux_mode` (`enforcing`, `permissive`, or `disabled`) of the NodeSet. Default: `null` (leave the bootstrap mode unchanged).
 
 ## Examples
 
