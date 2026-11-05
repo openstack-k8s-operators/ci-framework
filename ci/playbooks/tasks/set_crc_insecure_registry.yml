@@ -30,16 +30,34 @@
     }
     }' image.config.openshift.io/cluster
 
+- name: Read current cluster registry configuration
+  when: cifmw_crc_additional_allowed_registries | default([]) | length > 0
+  ansible.builtin.command:
+    cmd: oc get image.config.openshift.io/cluster -o json
+  register: _crc_image_config
+  changed_when: false
+
 - name: Add additional allowed registries
-  when: cifmw_crc_additional_allowed_registries is defined
-  ansible.builtin.shell: |
-    oc patch --type=json \
-    --patch='[{"op": "add", "path": "/spec/registrySources/allowedRegistries/-", "value": "{{ item }}"}]' \
-    image.config.openshift.io/cluster
-  loop: "{{ cifmw_crc_additional_allowed_registries }}"
+  when: cifmw_crc_additional_allowed_registries | default([]) | length > 0
+  vars:
+    _crc_allowed_registries: >-
+      {{ (_crc_image_config.stdout | from_json).spec.registrySources.allowedRegistries |
+         default(['quay.io', 'gcr.io', 'registry.redhat.io',
+                  'image-registry.openshift-image-registry.svc:5000']) }}
+  ansible.builtin.command:
+    argv:
+      - oc
+      - patch
+      - --type=merge
+      - image.config.openshift.io/cluster
+      - --patch
+      - >-
+        {{ {'spec': {'registrySources': {
+             'allowedRegistries': (_crc_allowed_registries + cifmw_crc_additional_allowed_registries) | unique | list
+           }}} | to_json }}
 
 - name: Add additional insecure registries
-  when: cifmw_crc_additional_insecure_registries is defined
+  when: cifmw_crc_additional_insecure_registries is defined or (cifmw_crc_additional_insecure_registries | default([]) | length > 0)
   ansible.builtin.shell: |
     oc patch --type=json \
     --patch='[{"op": "add", "path": "/spec/registrySources/insecureRegistries/-", "value": "{{ item }}"}]' \
