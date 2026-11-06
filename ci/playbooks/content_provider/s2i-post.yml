@@ -1,0 +1,37 @@
+---
+- name: Clean up local S2I build artifacts
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: true
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Prepare S2I runtime variables
+      ansible.builtin.include_tasks: s2i-provider-vars.yml
+
+    - name: Clean up S2I build host without removing the shared registry
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - -i
+          - "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          - -i
+          - "{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-inventory.yml"
+          - -c
+          - local
+          - "{{ s2i_provider_container_repo }}/playbooks/container-ci/zuul/post.yaml"
+          - -e
+          - "@{{ cifmw_artifacts_basedir }}/artifacts/parameters/zuul-params.yml"
+          - -e
+          - "@{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-provider.yml"
+      args:
+        chdir: "{{ s2i_provider_container_repo }}"
+      environment:
+        ANSIBLE_CONFIG: >-
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg
+        ANSIBLE_ROLES_PATH: "{{ s2i_provider_roles_path }}"
+      changed_when: true
