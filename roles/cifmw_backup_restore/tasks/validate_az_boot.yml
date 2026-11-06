@@ -1,0 +1,192 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Boots a new instance in every compute availability zone after the restore.
+# New instances are scheduled and written to the target cell DB by the Nova
+# super-conductor, a path that stop/start of an existing instance never
+# exercises. The image, flavor and network are reused from the test workload
+# instance created before the backup.
+#
+# Availability zones are used as a proxy for cells, so this assumes one cell
+# per zone. If several cells share a zone, only one of them is exercised; a
+# warning is printed when there are more cells than zones.
+
+- name: Validate instance creation in every availability zone
+  vars:
+    _os_exec: >-
+      oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace }} --
+    _workload_instance_jq: >-
+      [.[] | select(.Name | startswith("instance_"))][0].Name
+    _boot_params_jq: >-
+      def ref: if type == "object" then (.original_name // .id)
+      else (capture("\\((?<id>[^)]+)\\)$") // {id: .}).id end;
+      {image: (.image | ref), flavor: (.flavor | ref),
+      network: (.addresses | if type == "object" then keys[0] else split("=")[0] end)}
+    _az_server_ids: >-
+      {{
+        _az_create.results | default([])
+        | selectattr('stdout', 'defined')
+        | map(attribute='stdout')
+        | map('regex_search', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+        | select('string') | list
+      }}
+  block:
+    - name: Get compute availability zones
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ _os_exec }} openstack availability zone list --compute -f json | \
+          jq -r '.[] | select(.["Zone Status"] == "available" and .["Zone Name"] != "internal") | .["Zone Name"]'
+      register: _az_list
+      changed_when: false
+
+    - name: Fail if no availability zones were found
+      ansible.builtin.fail:
+        msg: "No available compute availability zones found."
+      when: _az_list.stdout_lines | length == 0
+
+    - name: Count the Nova cells that can host instances
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} -o json | \
+          jq '[.items[0].spec.nova.template.cellTemplates // {} | keys[] | select(. != "cell0")] | length'
+      register: _az_cell_count
+      changed_when: false
+
+    - name: Warn if there are more cells than availability zones
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ _az_cell_count.stdout | trim }} Nova cell(s) (excluding cell0) but only
+          {{ _az_list.stdout_lines | length }} availability zone(s) ({{ _az_list.stdout_lines | join(', ') }}).
+          Some cells share a zone, so only one cell per zone is exercised and the
+          validation covers the cells only partially.
+      when: (_az_cell_count.stdout | trim | int) > (_az_list.stdout_lines | length)
+
+    - name: Get workload instance details
+      ansible.builtin.shell: |
+        set -o pipefail
+        INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '{{ _workload_instance_jq }}')
+        [ -n "$INSTANCE" ] && [ "$INSTANCE" != null ] || { echo "no workload instance (instance_*) found" >&2; exit 1; }
+        {{ _os_exec }} openstack server show "${INSTANCE}" -f json | \
+          jq -c '{{ _boot_params_jq }}'
+      register: _workload_instance
+      changed_when: false
+
+    - name: Set boot parameters from the workload instance
+      ansible.builtin.set_fact:
+        _az_boot_image: "{{ (_workload_instance.stdout | from_json).image }}"
+        _az_boot_flavor: "{{ (_workload_instance.stdout | from_json).flavor }}"
+        _az_boot_network: "{{ (_workload_instance.stdout | from_json).network }}"
+
+    - name: Fail if the workload instance boot parameters are incomplete
+      ansible.builtin.assert:
+        that:
+          - _az_boot_image | length > 0
+          - _az_boot_flavor | length > 0
+          - _az_boot_network | length > 0
+        fail_msg: >-
+          Could not derive image/flavor/network from the workload instance
+          (image='{{ _az_boot_image }}', flavor='{{ _az_boot_flavor }}',
+          network='{{ _az_boot_network }}'). A volume-backed instance has no image.
+
+    - name: Create an instance in each availability zone
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack server create \
+          --image {{ _az_boot_image | quote }} \
+          --flavor {{ _az_boot_flavor | quote }} \
+          --network {{ _az_boot_network | quote }} \
+          --availability-zone {{ item | quote }} \
+          -f value -c id \
+          {{ ('cifmw-backup-restore-' ~ item) | quote }}
+      loop: "{{ _az_list.stdout_lines }}"
+      register: _az_create
+      changed_when: true
+
+    # A short or empty list would make the wait and success tasks below pass
+    # without validating every zone.
+    - name: Assert that one instance was created per availability zone
+      ansible.builtin.assert:
+        that:
+          - _az_server_ids | length == _az_list.stdout_lines | length
+        fail_msg: >-
+          Expected one server id per availability zone
+          ({{ _az_list.stdout_lines | length }}: {{ _az_list.stdout_lines | join(', ') }})
+          but extracted {{ _az_server_ids | length }} ({{ _az_server_ids | join(', ') }}).
+          Check the 'openstack server create' output above.
+
+    - name: Wait for the instances to become active
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ _os_exec }} openstack server show {{ item | quote }} -f value -c status
+      loop: "{{ _az_server_ids }}"
+      register: _az_instance_status
+      changed_when: false
+      retries: "{{ cifmw_backup_restore_service_retry_count }}"
+      delay: "{{ cifmw_backup_restore_service_retry_delay }}"
+      until: _az_instance_status.stdout | trim in ['ACTIVE', 'ERROR']
+      failed_when: _az_instance_status.stdout | trim != 'ACTIVE'
+
+    - name: Instance creation validated in every availability zone
+      ansible.builtin.debug:
+        msg: >-
+          Instances reached ACTIVE:
+          {{ _az_list.stdout_lines | zip(_az_server_ids) | map('join', '=') | join(', ') }}
+  rescue:
+    - name: Show why the test instances did not become ACTIVE
+      ansible.builtin.shell: |
+        echo {{ item | quote }}
+        {{ _os_exec }} openstack server show {{ item | quote }} -f value -c status -c fault
+      loop: "{{ _az_server_ids }}"
+      register: _az_fault
+      changed_when: false
+      failed_when: false
+
+    - name: Report the failure
+      ansible.builtin.fail:
+        msg: >-
+          AZ boot validation failed in task '{{ ansible_failed_task.name }}'.
+          {{ ansible_failed_result.msg | default('') }}
+          Test instances (id, status, fault):
+          {{ _az_fault.results | default([]) | map(attribute='stdout') | list }}
+  always:
+    # Only servers created by this run are deleted, by ID. A server that is
+    # already gone is fine; any other deletion error is retried and then fails.
+    # The delete is bounded because it usually runs on the failure path, where
+    # a broken cell can make --wait block until the job timeout.
+    - name: Delete the per-availability-zone test instances
+      ansible.builtin.shell: |
+        timeout 180 {{ _os_exec }} openstack server delete --wait {{ item | quote }}
+      loop: "{{ _az_server_ids }}"
+      register: _az_delete
+      changed_when: true
+      retries: 3
+      delay: 10
+      until: >-
+        _az_delete.rc in [0, 124] or
+        'No server with a name or ID' in (_az_delete.stdout ~ _az_delete.stderr)
+      failed_when:
+        - _az_delete.rc not in [0, 124]
+        - "'No server with a name or ID' not in (_az_delete.stdout ~ _az_delete.stderr)"
+
+    - name: Report test instances that could not be deleted
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: deleting {{ item.item }} timed out after 180s, the instance
+          may be left behind. Check that its cell and compute are healthy.
+      loop: >-
+        {{ _az_delete.results | default([])
+           | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 124) | list }}
+      loop_control:
+        label: "{{ item.item }}"

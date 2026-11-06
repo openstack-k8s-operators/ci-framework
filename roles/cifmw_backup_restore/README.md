@@ -52,6 +52,7 @@ OpenShift cluster.
 * `cifmw_backup_restore_restore_content`: (String) Content flag passed to `restore_galera` (`--content`). Defaults to `data`.
 * `cifmw_backup_restore_edpm_deploy_timeout`: (String) Timeout for `oc wait` on the post-restore EDPM deployment. Defaults to `40m`.
 * `cifmw_backup_restore_pin_pvcs`: (Boolean) Enable PVC-to-node pinning during restore for WaitForFirstConsumer storage classes. Defaults to `false`.
+* `cifmw_backup_restore_restart_nova`: (Boolean) After the control plane is `Ready`, delete the Nova control plane pods (`nova-api`, `nova-scheduler`, `nova-metadata`, `nova-conductor`, `nova-novncproxy`) so they re-read the reconciled `cell_mappings`; otherwise the super-conductor can keep cached connections that use deleted cell DB users (OSPRH-39976). Defaults to `true`.
 * **Neutron–OVN** sync runs after the control plane is ready but before EDPM deployment, following [user guide Step 10](https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-10-verify-and-sync-neutron-to-ovn): `neutron-ovn-db-sync-util` runs in `log` mode first (`neutron-dist.conf`, `neutron.conf`, `neutron.conf.d`). **Repair** runs if `cifmw_backup_restore_ovn_db` is `false` (no OVN NB/SB file backup was taken), or if log-mode stdout/stderr contains a `WARNING` line—Neutron reports drift that way while still exiting 0. If OVN file backup/restore was enabled and log output has no `WARNING` lines, repair is skipped as redundant.
 
 ### End-to-end orchestration (e2e.yml)
@@ -62,6 +63,7 @@ OpenShift cluster.
 * `cifmw_backup_restore_run_cleanup`: (Boolean) Run the cleanup step. Defaults to `true`.
 * `cifmw_backup_restore_run_restore`: (Boolean) Run the restore step. Defaults to `true`.
 * `cifmw_backup_restore_run_post_tempest`: (Boolean) Run tempest validation after restore. Defaults to `false`.
+* `cifmw_backup_restore_validate_az_boot`: (Boolean) After restore, boot a new instance in every compute availability zone (reusing the test workload's image, flavor and network) to verify cross-cell scheduling through the Nova super-conductor (OSPRH-39976). Availability zones are used as a proxy for cells, so one cell per zone is assumed; if several cells share a zone, only one of them is exercised, and a warning is printed when the `OpenStackControlPlane` defines more cells (excluding `cell0`) than there are availability zones. Only runs when `cifmw_backup_restore_create_workload` is `true`. Defaults to `true`.
 * `cifmw_backup_restore_test_swift_data`: (Boolean) Upload a random file to Swift before backup and verify it can be downloaded after restore. Catches Swift data loss caused by xattr issues (OSPRH-29818). Defaults to `true`.
 * `cifmw_backup_restore_swift_test_container`: (String) Swift container name for the test object. Defaults to `backup-test-container`.
 * `cifmw_backup_restore_swift_test_object`: (String) Object name for the test file. Defaults to `backup-test-object`.

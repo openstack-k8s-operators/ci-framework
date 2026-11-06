@@ -413,6 +413,73 @@
       --timeout={{ cifmw_backup_restore_ctlplane_ready_timeout }}
   changed_when: false
 
+# The restored nova_api.cell_mappings carry the pre-rotation cell DB
+# credentials until the operator rewrites them. Pods that started in that
+# window (notably the super-conductor) cache the stale connections in
+# nova's CELL_CACHE, so they must be restarted to re-read the mappings.
+- name: Restart Nova control plane services
+  when: cifmw_backup_restore_restart_nova | bool
+  vars:
+    _cifmw_backup_restore_nova_pod_selector: >-
+      service in (nova-api,nova-scheduler,nova-metadata,nova-conductor,nova-novncproxy)
+  block:
+    # The nova-conductor label is also carried by the DB purge CronJob pods,
+    # which stay Completed and are never Ready, so only Running pods are used.
+    # Counts are kept per service and cell (e.g. {"nova-conductor/cell1": 1}),
+    # so extra replicas of one service cannot hide a missing one.
+    - name: Count Nova control plane pods per service and cell before restart
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get pod -n {{ cifmw_backup_restore_namespace }} \
+          -l '{{ _cifmw_backup_restore_nova_pod_selector }}' \
+          --field-selector=status.phase=Running -o json | \
+          jq -c '[.items[] | .metadata.labels | "\(.service)/\(.cell // "")"]
+            | group_by(.) | map({(.[0]): length}) | add // {}'
+      register: _nova_pod_counts
+      changed_when: false
+
+    - name: Fail if no Nova control plane pods match the selector
+      ansible.builtin.fail:
+        msg: >-
+          No Running pods match '{{ _cifmw_backup_restore_nova_pod_selector }}' in
+          namespace {{ cifmw_backup_restore_namespace }}; cannot restart Nova.
+      when: (_nova_pod_counts.stdout | trim | from_json | length) == 0
+
+    - name: Delete Nova control plane pods
+      ansible.builtin.shell: |
+        oc delete pod -n {{ cifmw_backup_restore_namespace }} \
+          -l '{{ _cifmw_backup_restore_nova_pod_selector }}' \
+          --field-selector=status.phase=Running --ignore-not-found=true
+      changed_when: true
+
+    # Prints true once every service/cell has at least its original number of
+    # Ready, non-terminating pods, so a partially recreated set does not pass.
+    - name: Wait for Nova control plane pods to be recreated and ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get pod -n {{ cifmw_backup_restore_namespace }} \
+          -l '{{ _cifmw_backup_restore_nova_pod_selector }}' -o json | \
+          jq -r --argjson expected {{ _nova_pod_counts.stdout | trim | quote }} '
+            ([.items[]
+              | select(.metadata.deletionTimestamp == null)
+              | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))
+              | .metadata.labels | "\(.service)/\(.cell // "")"]
+              | group_by(.) | map({(.[0]): length}) | add // {}) as $ready
+            | $expected | to_entries | all(.[]; ($ready[.key] // 0) >= .value)'
+      register: _nova_pods_ready
+      changed_when: false
+      retries: "{{ cifmw_backup_restore_service_retry_count }}"
+      delay: "{{ cifmw_backup_restore_service_retry_delay }}"
+      until: _nova_pods_ready.rc == 0 and _nova_pods_ready.stdout | trim == 'true'
+
+    - name: Wait for OpenStackControlPlane to be ready after Nova restart
+      ansible.builtin.shell: |
+        oc wait openstackcontrolplane {{ _ctlplane_name.stdout }} \
+          -n {{ cifmw_backup_restore_namespace }} \
+          --for=condition=Ready \
+          --timeout={{ cifmw_backup_restore_ctlplane_ready_timeout }}
+      changed_when: false
+
 # ========================================
 # Step 9a: Restore BaremetalHosts (optional — baremetal-provisioned only)
 # ========================================
