@@ -21,19 +21,20 @@
             name: python-openstackclient
             state: present
 
-      - name: Wait for cinder-backup services to be up in all availability zones
+      - name: "Wait for cinder-backup services to be up in availability zones az1 and az2"
         block:
             - name: Check cinder-backup service status
               ansible.builtin.command: >-
                 openstack volume service list
                 --service cinder-backup
-                -c Host -c State
+                -c Host -c State -c Zone
                 -f json
               register: cinder_backup_service_status
               until: >-
                 (cinder_backup_service_status.stdout | from_json | length > 0)
                 and ((cinder_backup_service_status.stdout | from_json)
                 | selectattr('State', 'equalto', 'down')
+                | selectattr('Zone', 'in', [az1, az2])
                 | list
                 | length == 0)
               retries: 30
@@ -47,7 +48,7 @@
             - name: Fail because cinder-backup services are missing or still down
               ansible.builtin.fail:
                   msg: >-
-                    Timed out waiting for cinder-backup services to be up in all
+                    Timed out waiting for cinder-backup services to be up in {{ az1 }}/{{ az2 }}
                     availability zones (or no cinder-backup services were found
                     at all). See the debug output above for the last observed
                     Host/State values.
@@ -86,7 +87,7 @@
         ansible.builtin.command: >-
           openstack volume backup show vol-az1-backup-az1 -f value -c availability_zone
         register: vol_az1_backup_az1_zone
-        failed_when: "'az1' not in vol_az1_backup_az1_zone.stdout"
+        failed_when: (vol_az1_backup_az1_zone.stdout | trim) != az1
 
       - name: "Scenario 1: Restore volume backup to AZ1"
         ansible.builtin.command: >-
@@ -108,7 +109,7 @@
         ansible.builtin.command: >-
           openstack volume show vol-az1-backup-az1-restore-az1 -f value -c availability_zone
         register: vol_az1_backup_az1_restore_az1_zone
-        failed_when: "'az1' not in vol_az1_backup_az1_restore_az1_zone.stdout"
+        failed_when: (vol_az1_backup_az1_restore_az1_zone.stdout | trim) != az1
 
       # ==================================================================================
       # Scenario 2: AZ1 backs up to AZ2 and restores to AZ1
@@ -133,7 +134,7 @@
         ansible.builtin.command: >-
           openstack volume backup show vol-az1-backup-az2 -f value -c availability_zone
         register: vol_az1_backup_az2_zone
-        failed_when: "'az2' not in vol_az1_backup_az2_zone.stdout"
+        failed_when: (vol_az1_backup_az2_zone.stdout | trim) != az2
 
       - name: "Scenario 2: Restore backup from AZ2 back to AZ1"
         ansible.builtin.command: >-
@@ -155,7 +156,7 @@
         ansible.builtin.command: >-
           openstack volume show vol-az1-backup-az2-restore-az1 -f value -c availability_zone
         register: vol_az1_backup_az2_restore_az1_zone
-        failed_when: "'az1' not in vol_az1_backup_az2_restore_az1_zone.stdout"
+        failed_when: (vol_az1_backup_az2_restore_az1_zone.stdout | trim) != az1
 
       # ==================================================================================
       # Scenario 3: AZ1 backs up to AZ2 and restores to AZ2
@@ -181,7 +182,7 @@
         ansible.builtin.command: >-
           openstack volume show vol-az1-backup-az2-restore-az2 -f value -c availability_zone
         register: vol_az1_backup_az2_restore_az2_zone
-        failed_when: "'az2' not in vol_az1_backup_az2_restore_az2_zone.stdout"
+        failed_when: (vol_az1_backup_az2_restore_az2_zone.stdout | trim) != az2
 
       # ==================================================================================
       # Cleanup — only reached when all three scenarios pass
