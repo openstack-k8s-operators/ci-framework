@@ -332,6 +332,29 @@
       ansible.builtin.fail:
         msg: "Failing on demand {{ cifmw_deploy_architecture_stopper }}"
 
+    - name: Configure Ansible EE idle timeout for dataplane deployments
+      when:
+        - not cifmw_kustomize_deploy_generate_crs_only | bool
+        - >-
+          _wait_conditions |
+          select('search', 'openstackdataplanedeployment') |
+          list |
+          length > 0
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        merge_type: merge
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ cifmw_kustomize_deploy_ansible_ee_env_configmap_name }}"
+            namespace: "{{ cifmw_openstack_namespace }}"
+          data:
+            RUNNER_IDLE_TIMEOUT: "{{ cifmw_kustomize_deploy_ansible_ee_idle_timeout | string }}"
+
     # We have to use plain `oc apply -f` here due to the
     # way kubernetes.core.k8s module works: we can't use
     # - `state: present` and expect it to update the resource;
