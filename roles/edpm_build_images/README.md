@@ -7,7 +7,39 @@ the variables `cifmw_edpm_build_images_ironic_python_agent_package` and
 `cifmw_edpm_build_images_hardened_uefi_package`.
 
 ## Privilege escalation
-None
+Bootc container builds, qcow2 generation, and publication use root's container
+storage. Host package installation also requires privilege escalation.
+
+## CS9 and CS10 bootc providers
+
+CS9 builds use the `bootc/` Containerfile in `edpm-image-builder`.
+`cifmw-content-provider-bootc-cs10` instead checks out
+`s2i-openstack-containers` and invokes its `build.sh build-parallel` entry point
+for `base,edpm/edpm-bootc`. The base image supplies the CS10 RPM repositories.
+Both paths then generate and package a qcow2 disk and publish the existing
+`edpm-bootc` and `edpm-bootc-qcow2` image references for deployment consumers.
+The CS10 provider also builds IPA and tags its artifacts with the speculative
+s2i checkout's commit. Consumers that already depend on an s2i provider can
+instead set `cifmw_edpm_build_images_bootc_source_image` and reuse the conversion
+and packaging tasks without another host-image build or paused provider.
+
+### Deployment consumer job
+
+`cifmw-crc-podified-edpm-baremetal-bootc-prebuilt` is an abstract CRC job for
+that case. A child job selects the exact published image in its `pre-run` and
+sets `cifmw_edpm_build_images_bootc_source_image` and
+`cifmw_edpm_build_images_tag` as cacheable facts so they survive Zuul's separate
+Ansible invocations. Static job variables can be used instead. The child also
+declares its provider dependency.
+The parent's first `run` playbook, `ci/playbooks/edpm_build_images/bootc_prepare.yml`,
+converts and publishes the disk on the controller, configures CRC registry
+trust, and merges the image references into the deployment parameters.
+The second `run` playbook performs the normal bare-metal deployment.
+
+Set `cifmw_edpm_build_images_base_image` for the desired disk-wrapper base
+and `cifmw_edpm_build_images_bootc_source_tls_verify: false` only when using
+a trusted insecure provider registry. The consumer uses the default IPA
+image; it does not rebuild IPA or allocate a second paused provider.
 
 ## Parameters
 * `cifmw_edpm_build_images_basedir`: Base directory. Defaults to `cifmw_basedir` which  defaults to `~/ci-framework`.
@@ -18,6 +50,10 @@ None
 * `cifmw_edpm_build_images_hardened_uefi`: (Boolean) Build `edpm-hardened-uefi` image when it true. Default to false.
 * `cifmw_edpm_build_images_ironic_python_agent`: (Boolean) Build `ironic-python-agent-builder` image when it true. Default to false.
 * `cifmw_edpm_build_images_bootc`: (Boolean) Build the bootc image workflow. Default to false.
+* `cifmw_edpm_build_images_bootc_use_s2i`: (Boolean) Build the CS10 bootc host image with s2i's `build.sh`, including its `base` dependency. Default: false (CS9 uses `edpm-image-builder`). Both paths reuse the qcow2 packaging and output image contract.
+* `cifmw_edpm_build_images_bootc_source_image`: (String) Existing bootc container image to pull into root's storage and convert to qcow2 without rebuilding the host image. Default: empty (build the host image). Takes precedence over `cifmw_edpm_build_images_bootc_use_s2i`.
+* `cifmw_edpm_build_images_bootc_source_tls_verify`: (Boolean) Verify TLS when pulling the source image. Default: true. Set false only for a trusted insecure CI provider registry.
+* `cifmw_edpm_build_images_bootc_s2i_repo_path`: (String) Path to the speculative `s2i-openstack-containers` checkout. Defaults to `~/src/github.com/openstack-k8s-operators/s2i-openstack-containers`. Jobs enabling s2i must include that repository in `required-projects`.
 * `cifmw_edpm_build_images_hardened_uefi_package`: (Boolean) Packaged `edpm-hardened-uefi` image inside a container image for distribution. Default to false.
 * `cifmw_edpm_build_images_ironic_python_agent_package`: (Boolean) Packaged  `ironic-python-agent-builder` image inside a container image for distribution. Default to false.
 * `cifmw_edpm_build_images_bootc_repo`: (String) Repository used to push the bootc container image. Default: `{{ cifmw_edpm_build_images_push_registry }}/[{{ cifmw_edpm_build_images_push_registry_namespace }}/]edpm-bootc`.

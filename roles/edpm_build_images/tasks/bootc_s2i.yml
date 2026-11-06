@@ -1,0 +1,52 @@
+---
+- name: Record the speculative s2i revision for image labels
+  ansible.builtin.command:
+    argv: [git, rev-parse, HEAD]
+    chdir: "{{ cifmw_edpm_build_images_bootc_s2i_repo_path }}"
+  register: cifmw_edpm_build_images_bootc_s2i_revision
+  changed_when: false
+
+- name: Write s2i bootc build arguments
+  ansible.builtin.copy:
+    dest: "{{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/bootc-build-flags"
+    mode: "0644"
+    content: |
+      --network
+      host
+      --format
+      oci
+      --build-arg
+      EDPM_BASE_IMAGE={{ cifmw_edpm_build_images_bootc_base_image }}
+      --build-arg
+      FIPS={{ cifmw_edpm_build_images_bootc_fips }}
+      --build-arg
+      USER_PACKAGES={{ cifmw_edpm_build_images_bootc_user_packages }}
+
+# Keep the build in root's storage for bootc-image-builder's --local input.
+- name: Build s2i base and bootc container images
+  become: true
+  ansible.builtin.command:
+    argv:
+      - ./build.sh
+      - build-parallel
+      - base,edpm/edpm-bootc
+    chdir: "{{ cifmw_edpm_build_images_bootc_s2i_repo_path }}"
+  environment:
+    STREAM: master
+    REGISTRY: localhost
+    NAMESPACE: openstack
+    TAG: "{{ cifmw_edpm_build_images_tag }}"
+    SOURCE_CACHE: "false"
+    GIT_REVISION: "{{ cifmw_edpm_build_images_bootc_s2i_revision.stdout }}"
+    BUILD_LOGS_DIR: "{{ cifmw_edpm_build_images_basedir }}/logs/edpm_images"
+    BUILD_FLAGS: ""
+    BUILD_FLAGS_FILE: "{{ cifmw_edpm_build_images_basedir }}/logs/edpm_images/bootc-build-flags"
+
+- name: Tag s2i bootc image for qcow2 generation and publication
+  become: true
+  ansible.builtin.command:
+    argv:
+      - buildah
+      - tag
+      - "localhost/openstack/openstack-edpm-bootc:{{ cifmw_edpm_build_images_tag }}"
+      - "localhost/edpm-bootc:{{ cifmw_edpm_build_images_tag }}"

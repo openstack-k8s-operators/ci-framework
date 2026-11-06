@@ -1,0 +1,68 @@
+---
+- name: Convert the published bootc image into a deployable disk
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cifmw_edpm_build_images_via_rpm: false
+    cifmw_edpm_build_images_all: false
+    cifmw_edpm_build_images_hardened_uefi: false
+    cifmw_edpm_build_images_ironic_python_agent: false
+    cifmw_edpm_build_images_bootc: true
+    cifmw_edpm_build_images_host_packages:
+      - buildah
+    cifmw_edpm_build_images_push_registry: "{{ cifmw_rp_registry_ip }}:5001"
+    cifmw_edpm_build_images_push_registry_namespace: ""
+    cifmw_repo_setup_promotion: current
+
+  tasks:
+    - name: Require an explicit speculative source image
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_bootc_source_image | default('') | length > 0
+
+    - name: Deploy a disk registry on this consumer rather than another paused provider
+      ansible.builtin.include_role:
+        name: registry_deploy
+
+    - name: Install bootc packaging dependencies
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: install.yml
+
+    - name: Convert the published bootc image and package the qcow2 disk
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc.yml
+
+    - name: Publish and smoke test the packaged disk
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: post.yaml
+
+    - name: Write disk references and registry configuration for deployment
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir }}/artifacts/bootc-images.yml"
+        mode: "0644"
+        content: >-
+          {{ {
+               'cifmw_build_images_output': cifmw_edpm_build_images_bootc_output,
+               'content_provider_registry_ip': cifmw_rp_registry_ip,
+               'content_provider_registry_ip_port': cifmw_rp_registry_ip ~ ':5001',
+               'content_provider_registry_available': true
+             } | to_nice_yaml }}
+
+    - name: Add CRC to the packaging inventory for registry configuration
+      ansible.builtin.add_host:
+        name: crc
+        ansible_host: api.crc.testing
+        ansible_user: core
+        ansible_ssh_private_key_file: "{{ cifmw_edpm_build_images_crc_ssh_key }}"
+
+- name: Allow CRC to pull the packaged disk from the consumer registry
+  hosts: crc
+  gather_facts: false
+  vars:
+    content_provider_registry_ip: "{{ cifmw_rp_registry_ip }}"
+  tasks:
+    - name: Configure CRC registry trust using the framework's deployment helper
+      ansible.builtin.include_tasks: "{{ cifmw_repo }}/ci/playbooks/tasks/set_crc_insecure_registry.yml"
