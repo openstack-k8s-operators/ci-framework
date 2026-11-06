@@ -1,0 +1,35 @@
+---
+# Run the external renderer where oc and architecture files are installed.
+# Write to a file instead of transporting manifest data through command stdout.
+- name: Create a temporary remote kustomize output
+  ansible.builtin.tempfile:
+    state: file
+    path: "{{ cifmw_kustomize_deploy_native_render_dest | dirname }}"
+    prefix: native-render-
+  register: cifmw_kustomize_deploy_native_render_tmp
+
+- name: Render and publish kustomize content from the native target
+  block:
+    - name: Render kustomize content directly into the remote output file
+      environment:
+        PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
+      ansible.builtin.shell:
+        cmd: >-
+          oc kustomize {{ cifmw_kustomize_deploy_native_render_source | quote }}
+          > {{ cifmw_kustomize_deploy_native_render_tmp.path | quote }}
+      changed_when: false
+      no_log: true
+
+    - name: Publish the rendered manifest without parsing it in the control process
+      ansible.builtin.copy:
+        src: "{{ cifmw_kustomize_deploy_native_render_tmp.path }}"
+        dest: "{{ cifmw_kustomize_deploy_native_render_dest }}"
+        remote_src: true
+        backup: true
+        mode: "0644"
+      no_log: true
+  always:
+    - name: Remove temporary native manifest output
+      ansible.builtin.file:
+        path: "{{ cifmw_kustomize_deploy_native_render_tmp.path }}"
+        state: absent

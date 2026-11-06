@@ -239,6 +239,7 @@
         # leading to a risk to either NOT have kustomize, or an old,
         # deprecated version.
         - name: "Build kustomized content for {{ stage.path }}"
+          when: not cifmw_reproducer_native_deployment | default(false) | bool
           register: _kustomize_output
           environment:
             PATH: "{{ cifmw_path | default(ansible_env.PATH) }}"
@@ -247,15 +248,25 @@
             cmd: "oc kustomize"
 
         - name: Output kustomize build in final file
+          when: not cifmw_reproducer_native_deployment | default(false) | bool
           ansible.builtin.copy:
             backup: true
             dest: "{{ _output }}"
             content: "{{ _kustomize_output.stdout }}"
             mode: "0644"
 
+        - name: Render the architecture stage directly on the native target
+          when: cifmw_reproducer_native_deployment | default(false) | bool
+          vars:
+            cifmw_kustomize_deploy_native_render_source: "{{ _chdir }}"
+            cifmw_kustomize_deploy_native_render_dest: "{{ _output }}"
+          ansible.builtin.include_tasks: render_remote.yml
+
 
         - name: "Uniquify OpenStackDataPlaneDeployment names in {{ stage.path }}"
-          when: _cifmw_kustomize_deploy_run_suffix | default('') | string | length > 0
+          when:
+            - _cifmw_kustomize_deploy_run_suffix | default('') | string | length > 0
+            - not cifmw_reproducer_native_deployment | default(false) | bool
           ansible.builtin.script:
             executable: python3
             cmd: >-
@@ -264,6 +275,29 @@
               {{ _cifmw_kustomize_deploy_run_suffix | string | quote }}
           register: _rename_osdpd
           changed_when: "'Renamed:' in _rename_osdpd.stdout"
+
+        - name: Uniquify native deployment names through a result file
+          when:
+            - _cifmw_kustomize_deploy_run_suffix | default('') | string | length > 0
+            - cifmw_reproducer_native_deployment | default(false) | bool
+          vars:
+            cifmw_kustomize_deploy_native_capture_argv:
+              - python3
+              - "{{ cifmw_kustomize_deploy_script_dir }}/uniquify_osdpd.py"
+              - "{{ _output }}"
+              - "{{ _cifmw_kustomize_deploy_run_suffix | string }}"
+          block:
+            - name: Capture native deployment rename results
+              ansible.builtin.include_tasks: capture_private.yml
+
+            - name: Require successful native deployment rename
+              ansible.builtin.assert:
+                that: cifmw_kustomize_deploy_native_capture_result.rc == 0
+
+            - name: Expose native deployment renames to wait conditions
+              ansible.builtin.set_fact:
+                _rename_osdpd: "{{ cifmw_kustomize_deploy_native_capture_result }}"
+              changed_when: "'Renamed:' in cifmw_kustomize_deploy_native_capture_result.stdout"
 
         - name: "Update wait conditions with uniquified OSDPD names"
           when:

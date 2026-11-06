@@ -1,0 +1,41 @@
+---
+# Context setup rejects optional multi-host flows not migrated in this PoC.
+- name: Run native architecture post-deployment and test orchestration
+  hosts: native_post_deployment_targets
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require a completed native deployment stage
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'controller-0'
+          - cifmw_reproducer_native_deployment | bool
+          - cifmw_post_deployment | default(true) | bool
+
+    - name: Run native administrative setup
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: admin_setup.yml
+
+    - name: Run native test orchestration according to scenario flags
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: run_tests.yml
+
+    - name: Run pre_end hooks
+      vars:
+        step: pre_end
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Mark successful native deployment and post-deployment
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/cifmw-success"
+        state: touch
+        mode: "0644"
+
+    - name: Run native log collection when requested
+      when: cifmw_reproducer_native_run_logs | default(true) | bool
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: run_logs.yml

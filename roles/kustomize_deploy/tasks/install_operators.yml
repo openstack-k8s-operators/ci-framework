@@ -58,6 +58,7 @@
   register: _cifmw_kustomize_deploy_olm_values_content
 
 - name: Copy generated values.yaml for OLM resources to localhost
+  when: not cifmw_reproducer_native_deployment | default(false) | bool
   ansible.builtin.copy:
     content: "{{ _cifmw_kustomize_deploy_olm_values_content.content | b64decode }}"
     dest: >-
@@ -71,6 +72,7 @@
   delegate_to: localhost
 
 - name: Generate the OLM kustomization file
+  when: not cifmw_reproducer_native_deployment | default(false) | bool
   ansible.builtin.copy:
     content: >-
       {{
@@ -107,6 +109,21 @@
     content: "{{ _cifmw_kustomize_deploy_olm_kept_docs | map('to_nice_yaml') | join('---\n') }}"
     dest: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
     mode: "0644"
+
+- name: Copy generated OLM values into the native target architecture tree
+  when: cifmw_reproducer_native_deployment | default(false) | bool
+  ansible.builtin.copy:
+    src: "{{ cifmw_kustomize_deploy_basedir }}/artifacts/ci_gen_kustomize_values/olm-values/values.yaml"
+    dest: "{{ cifmw_kustomize_deploy_olm_source_files }}/values.yaml"
+    remote_src: true
+    mode: "0644"
+
+- name: Render OLM kustomization on the native target
+  when: cifmw_reproducer_native_deployment | default(false) | bool
+  vars:
+    cifmw_kustomize_deploy_native_render_source: "{{ cifmw_kustomize_deploy_olm_source_files }}"
+    cifmw_kustomize_deploy_native_render_dest: "{{ cifmw_kustomize_deploy_olm_dest_file }}"
+  ansible.builtin.include_tasks: render_remote.yml
 
 - name: OLM resources
   when: not cifmw_kustomize_deploy_generate_crs_only
@@ -405,6 +422,7 @@
       until: _nmstate_operator_pods is success
 
 - name: Generate MetalLB kustomization file
+  when: not cifmw_reproducer_native_deployment | default(false) | bool
   ansible.builtin.copy:
     content: >-
       {{
@@ -415,6 +433,13 @@
       }}
     dest: "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
     mode: "0644"
+
+- name: Render MetalLB kustomization on the native target
+  when: cifmw_reproducer_native_deployment | default(false) | bool
+  vars:
+    cifmw_kustomize_deploy_native_render_source: "{{ cifmw_kustomize_deploy_metallb_source_files }}"
+    cifmw_kustomize_deploy_native_render_dest: "{{ cifmw_kustomize_deploy_metallb_dest_file }}"
+  ansible.builtin.include_tasks: render_remote.yml
 
 - name: MetalLB resources
   when: not cifmw_kustomize_deploy_generate_crs_only
@@ -455,6 +480,7 @@
       until: _metallb_speaker_pods is success
 
 - name: Generate NMstate kustomization file
+  when: not cifmw_reproducer_native_deployment | default(false) | bool
   ansible.builtin.copy:
     content: >-
       {{
@@ -465,6 +491,13 @@
       }}
     dest: "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
     mode: "0644"
+
+- name: Render NMstate kustomization on the native target
+  when: cifmw_reproducer_native_deployment | default(false) | bool
+  vars:
+    cifmw_kustomize_deploy_native_render_source: "{{ cifmw_kustomize_deploy_nmstate_source_files }}"
+    cifmw_kustomize_deploy_native_render_dest: "{{ cifmw_kustomize_deploy_nmstate_dest_file }}"
+  ansible.builtin.include_tasks: render_remote.yml
 
 - name: NMstate resources
   when: not cifmw_kustomize_deploy_generate_crs_only
@@ -527,6 +560,7 @@
   when: (_cifmw_kustomize_deploy_olm_osp_operator_openstack_crd_out.resources | length) > 0
   block:
     - name: Generate OpenStack initialization kustomization file
+      when: not cifmw_reproducer_native_deployment | default(false) | bool
       ansible.builtin.copy:
         content: >-
           {{
@@ -537,6 +571,13 @@
           }}
         dest: "{{ cifmw_kustomize_deploy_openstack_dest_file }}"
         mode: "0644"
+
+    - name: Render OpenStack initialization on the native target
+      when: cifmw_reproducer_native_deployment | default(false) | bool
+      vars:
+        cifmw_kustomize_deploy_native_render_source: "{{ cifmw_kustomize_deploy_openstack_source_files }}"
+        cifmw_kustomize_deploy_native_render_dest: "{{ cifmw_kustomize_deploy_openstack_dest_file }}"
+      ansible.builtin.include_tasks: render_remote.yml
 
     - name: Openstack initialization resources
       when: not cifmw_kustomize_deploy_generate_crs_only

@@ -8,7 +8,7 @@
          truncate(30, true, '') }}
     _play: >-
       {%- if hook.source is not ansible.builtin.abs -%}
-      {{ role_path }}/../../hooks/playbooks/{{ hook.source }}
+      {{ cifmw_run_hook_playbook_dir | default(role_path ~ '/../../hooks/playbooks') }}/{{ hook.source }}
       {%- else -%}
       {{ hook.source }}
       {%- endif -%}
@@ -26,7 +26,8 @@
   ansible.builtin.set_fact:
     cifmw_basedir: "{{ _bdir }}"
     hook_name: "{{ _hook_name }}"
-    playbook_path: "{{ _play | realpath }}"
+    playbook_path: >-
+      {{ _play | trim if cifmw_reproducer_native_deployment | default(false) | bool else _play | realpath }}
     log_path: >-
       {{ _bdir }}/logs/{{ step }}_{{ _hook_name }}.log
     extra_vars: >-
@@ -95,7 +96,7 @@
     extra_args: >-
       {{
         {
-          'ANSIBLE_CONFIG': hook.config_file | default(ansible_config_file),
+          'ANSIBLE_CONFIG': hook.config_file | default(cifmw_run_hook_default_config | default(ansible_config_file)),
           'ANSIBLE_LOG_PATH': log_path
         } | combine(
           {'ANSIBLE_GATHERING': hook.gathering} if hook.gathering is defined else {}
@@ -103,7 +104,7 @@
       }}
     creates: "{{ hook.creates | default(omit) }}"
     script: >-
-      ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
+      ansible-playbook -i {{ hook.inventory | default(cifmw_run_hook_default_inventory | default(inventory_file)) }}
       {% if hook.connection is defined -%}
       -c {{ hook.connection }}
       {% endif -%}
@@ -112,6 +113,9 @@
       -e "step={{ step }}"
       -e "hook_name={{ hook_name }}"
       -e "playbook_dir={{ playbook_path | dirname }}"
+      {% if cifmw_reproducer_native_deployment | default(false) | bool %}
+      -e cifmw_reproducer_native_deployment=false
+      {% endif %}
       {{ playbook_path }}
 
 - name: "Run hook with retry - {{ hook.name }}"
@@ -122,7 +126,7 @@
     extra_args: >-
       {{
         {
-          'ANSIBLE_CONFIG': hook.config_file | default(ansible_config_file),
+          'ANSIBLE_CONFIG': hook.config_file | default(cifmw_run_hook_default_config | default(ansible_config_file)),
           'ANSIBLE_LOG_PATH': log_path
         } | combine(
           {'ANSIBLE_GATHERING': hook.gathering} if hook.gathering is defined else {}
@@ -130,7 +134,7 @@
       }}
     creates: "{{ hook.creates | default(omit) }}"
     script: >-
-      ansible-playbook -i {{ hook.inventory | default(inventory_file) }}
+      ansible-playbook -i {{ hook.inventory | default(cifmw_run_hook_default_inventory | default(inventory_file)) }}
       {% if hook.connection is defined -%}
       -c {{ hook.connection }}
       {% endif -%}
@@ -139,6 +143,9 @@
       -e "step={{ step }}"
       -e "hook_name={{ hook_name }}"
       -e "playbook_dir={{ playbook_path | dirname }}"
+      {% if cifmw_reproducer_native_deployment | default(false) | bool %}
+      -e cifmw_reproducer_native_deployment=false
+      {% endif %}
       {{ playbook_path }}
   register: hook_result
   retries: 3
@@ -152,6 +159,18 @@
       ansible.builtin.stat:
         path: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
     - name: Load generated content in main playbook
-      when: hook_callback.stat.exists
       ansible.builtin.include_vars:
         file: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+      when:
+        - hook_callback.stat.exists
+        - not cifmw_reproducer_native_deployment | default(false) | bool
+
+    - name: Load the residual hook callback from the remote native target
+      when:
+        - hook_callback.stat.exists
+        - cifmw_reproducer_native_deployment | default(false) | bool
+      vars:
+        included_file: "{{ cifmw_basedir }}/artifacts/{{ step }}_{{ hook_name }}.yml"
+      ansible.builtin.include_role:
+        name: cifmw_helpers
+        tasks_from: include_file.yml

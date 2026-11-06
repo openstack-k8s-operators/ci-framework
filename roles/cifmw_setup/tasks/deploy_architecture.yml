@@ -6,6 +6,13 @@
     name: networking_mapper
     tasks_from: load_env_definition.yml
 
+- name: Require the IPv4 architecture contract for this native deployment slice
+  when: cifmw_reproducer_native_deployment | default(false) | bool
+  ansible.builtin.assert:
+    that:
+      - cifmw_networking_env_definition.networks.ctlplane.network_v6 | default('', true) | length == 0
+    fail_msg: Native IPv6 controller ranges require a dedicated scenario migration.
+
 - name: Fetch network facts
   tags:
     - always
@@ -19,7 +26,9 @@
     gather_subset: network
   delegate_facts: true
   delegate_to: "{{ item }}"
-  loop: "{{ groups['all'] }}"
+  loop: >-
+    {{ ['controller-0', 'hypervisor'] + (groups['computes'] | default([]))
+       if cifmw_reproducer_native_deployment | default(false) | bool else groups['all'] }}
   loop_control:
     label: "{{ item }}"
 
@@ -62,6 +71,8 @@
         # host exists in inventory, which is the case for bare metal SNO.
         _ctl_data: >-
           {{
+            hostvars[inventory_hostname]
+            if cifmw_reproducer_native_deployment | default(false) | bool else
             hostvars | dict2items |
             selectattr('key', 'match', '^(controller-0.*|controller)') |
             map(attribute='value') | first |
@@ -74,12 +85,15 @@
           }}
         _controller_host: >-
           {{
+            _ctl_data.ansible_default_ipv4.address
+            if cifmw_reproducer_native_deployment | default(false) | bool else
             _ctl_data.ansible_host |
             default(_ctl_data.ansible_default_ipv4.address |
                     default(inventory_hostname))
           }}
       block:
         - name: Generate needed facts out of local files
+          when: not cifmw_reproducer_native_deployment | default(false) | bool
           vars:
             _ctl_ifaces_vars: >-
               {{
@@ -138,6 +152,36 @@
               {{
                 _ipv4_sshd_ranges + _ipv6_sshd_ranges
               }}
+
+        - name: Read controller SSH and migration keys from the native remote target
+          when: cifmw_reproducer_native_deployment | default(false) | bool
+          ansible.builtin.slurp:
+            src: "{{ item }}"
+          loop:
+            - "{{ ansible_user_dir }}/.ssh/id_cifw.pub"
+            - "{{ ansible_user_dir }}/.ssh/id_cifw"
+            - "{{ _ssh_file }}.pub"
+            - "{{ _ssh_file }}"
+          register: cifmw_setup_native_ssh_key_material
+          no_log: true
+
+        - name: Expose the remote key material to native kustomize rendering
+          when: cifmw_reproducer_native_deployment | default(false) | bool
+          vars:
+            cifmw_setup_native_controller_ipv4: >-
+              {{ _ctl_data.get('ansible_' ~ _ctl_data.ansible_default_ipv4.interface, {}).get('ipv4', {}) }}
+          ansible.builtin.set_fact:
+            cifmw_ci_gen_kustomize_values_ssh_authorizedkeys: "{{ cifmw_setup_native_ssh_key_material.results[0].content | b64decode }}"
+            cifmw_ci_gen_kustomize_values_ssh_public_key: "{{ cifmw_setup_native_ssh_key_material.results[0].content | b64decode }}"
+            cifmw_ci_gen_kustomize_values_ssh_private_key: "{{ cifmw_setup_native_ssh_key_material.results[1].content | b64decode }}"
+            cifmw_ci_gen_kustomize_values_migration_pub_key: "{{ cifmw_setup_native_ssh_key_material.results[2].content | b64decode }}"
+            cifmw_ci_gen_kustomize_values_migration_priv_key: "{{ cifmw_setup_native_ssh_key_material.results[3].content | b64decode }}"
+            cifmw_ci_gen_kustomize_values_sshd_ranges: >-
+              {{ ([cifmw_networking_env_definition.networks.ctlplane.network_v4]
+                  if cifmw_networking_env_definition.networks.ctlplane.network_v4 is defined else []) +
+                 ([cifmw_setup_native_controller_ipv4.network ~ '/' ~ cifmw_setup_native_controller_ipv4.prefix]
+                  if cifmw_setup_native_controller_ipv4.network is defined else []) }}
+          no_log: true
       rescue:
         - name: Debug _ctl_data
           ansible.builtin.debug:

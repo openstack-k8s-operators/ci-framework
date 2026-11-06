@@ -1,0 +1,39 @@
+---
+# copy's timestamped backup suffix is rejected by include_vars(dir=...).
+# Preserve these backups, including leftovers from prior native attempts,
+# outside both parameter directories. Do not touch unrelated files.
+- name: Create the private native parameter backup archive
+  delegate_to: controller-0
+  ansible.builtin.file:
+    path: "{{ cifmw_reproducer_controller_basedir }}/backups/native-parameters"
+    state: directory
+    mode: "0700"
+
+- name: Find timestamped reproducer parameter backups
+  delegate_to: controller-0
+  ansible.builtin.find:
+    paths:
+      - "{{ cifmw_reproducer_controller_basedir }}/parameters"
+      - "{{ cifmw_reproducer_controller_basedir }}/artifacts/parameters"
+    patterns:
+      - 'reproducer-variables.yml.*~'
+      - 'custom-params.yml.*~'
+    file_type: file
+    recurse: false
+  register: cifmw_reproducer_native_parameter_backups
+
+- name: Move parameter backups to the private archive
+  delegate_to: controller-0
+  ansible.builtin.command:
+    argv:
+      - mv
+      - --
+      - "{{ cifmw_reproducer_native_backup.path }}"
+      - >-
+        {{ cifmw_reproducer_controller_basedir }}/backups/native-parameters/{{
+           cifmw_reproducer_native_backup.path | relpath(cifmw_reproducer_controller_basedir) | replace('/', '__') }}
+  loop: "{{ cifmw_reproducer_native_parameter_backups.files }}"
+  loop_control:
+    loop_var: cifmw_reproducer_native_backup
+    label: "{{ cifmw_reproducer_native_backup.path | basename }}"
+  changed_when: true

@@ -1,0 +1,47 @@
+---
+# Stage the freshly generated VM access material for the native control
+# contexts. The reproducer key is created on the hypervisor during the
+# run, and the VM hostnames (controller-0.<hypervisor>) resolve only
+# through the hypervisor's dnsmasq. The executor and the source build
+# node reach the VMs through a ProxyCommand route written into their
+# SSH configuration, so delegated tasks and synchronize pick it up
+# without explicit arguments.
+- name: Read the generated VM access key
+  ansible.builtin.slurp:
+    src: "{{ ansible_user_dir }}/.ssh/cifmw_reproducer_key"
+  register: cifmw_reproducer_native_vm_key
+  no_log: true
+
+- name: Stage the VM access key on the native control contexts
+  delegate_to: "{{ item }}"
+  ansible.builtin.copy:
+    content: "{{ cifmw_reproducer_native_vm_key.content | b64decode }}"
+    dest: "{{ ansible_user_dir }}/.ssh/id_cifmw_reproducer"
+    mode: "0600"
+  loop:
+    - localhost
+    - "{{ cifmw_reproducer_native_source_host }}"
+  loop_control:
+    label: "{{ item }}"
+  no_log: true
+
+- name: Add the VM access routes to the native control contexts
+  delegate_to: "{{ item }}"
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_user_dir }}/.ssh/config"
+    create: true
+    mode: "0600"
+    insertbefore: BOF
+    marker: "# {mark} native creation VM routes"
+    block: |
+      Host controller-0 *.{{ inventory_hostname }} *.utility
+        User zuul
+        IdentityFile ~/.ssh/id_cifmw_reproducer
+        StrictHostKeyChecking no
+        UserKnownHostsFile /dev/null
+        ProxyCommand ssh -W %h:%p zuul@{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}
+  loop:
+    - localhost
+    - "{{ cifmw_reproducer_native_source_host }}"
+  loop_control:
+    label: "{{ item }}"

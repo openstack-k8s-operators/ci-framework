@@ -1,0 +1,103 @@
+---
+# Architecture-only counterpart of deploy-edpm.yml's active stage chain.
+# NFS/HCI multi-host plays are excluded by the native context contract.
+- name: Deploy an existing architecture through native CI-Framework roles
+  hosts: native_deployment_targets
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require controller phase execution and native architecture mode
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'controller-0'
+          - cifmw_reproducer_native_deployment | bool
+          - cifmw_deploy_architecture | bool
+          - cifmw_architecture_scenario is defined
+
+    - name: Remove the previous deployment success flag
+      ansible.builtin.file:
+        path: "{{ ansible_user_dir }}/cifmw-success"
+        state: absent
+
+    - name: Inherit parent scenarios in the shared framework context
+      ansible.builtin.include_tasks: ci/playbooks/tasks/inherit_parent_scenario.yml
+
+    - name: Bootstrap the native deployment target
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: bootstrap.yml
+
+    - name: Run pre_infra hooks
+      vars:
+        step: pre_infra
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Prepare host virtualization
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: host_virtualization.yml
+
+    - name: Prepare platform and OpenShift integration
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: infra.yml
+
+    - name: Run package build orchestration
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: build_packages.yml
+
+    - name: Run container build orchestration
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: build_containers.yml
+
+    - name: Run operator build orchestration
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: build_operators.yml
+        apply:
+          environment:
+            PATH: "{{ cifmw_path }}"
+
+    - name: Resolve S2I content when requested
+      when: cifmw_s2i_content_set | default(false) | bool
+      ansible.builtin.include_role:
+        name: s2i_content_set
+
+    - name: Run the shared architecture-aware EDPM entrypoint
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: deploy_edpm.yml
+
+    - name: Run post_ceph hooks with architecture semantics
+      vars:
+        step: post_ceph
+        _deploy_ceph: false
+        storage_network_range: 172.18.0.0/24
+        storage_mgmt_network_range: 172.20.0.0/24
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Run pre_deploy hooks
+      vars:
+        step: pre_deploy
+      ansible.builtin.include_role:
+        name: run_hook
+
+    - name: Deploy architecture stages as native tasks
+      ansible.builtin.include_role:
+        name: cifmw_setup
+        tasks_from: deploy_architecture.yml
+
+    - name: Run architecture validations when requested
+      when: cifmw_execute_validations | default(false) | bool
+      ansible.builtin.include_role:
+        name: validations
+
+    - name: Register post-deployment only after successful deployment
+      when: cifmw_post_deployment | default(true) | bool
+      ansible.builtin.add_host:
+        name: "{{ inventory_hostname }}"
+        groups: native_post_deployment_targets
