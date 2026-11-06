@@ -1,0 +1,102 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check the VXLAN UDP destination port
+  ansible.builtin.assert:
+    that:
+      - cifmw_vxlan_overlay_dstport is integer
+      - cifmw_vxlan_overlay_dstport >= 1
+      - cifmw_vxlan_overlay_dstport <= 65535
+    msg: "cifmw_vxlan_overlay_dstport must be an integer between 1 and 65535"
+    quiet: true
+  run_once: true
+
+- name: Check the network layout has networks and instances
+  ansible.builtin.assert:
+    that:
+      - cifmw_vxlan_overlay_networking is mapping
+      - "'networks' in cifmw_vxlan_overlay_networking"
+      - "'instances' in cifmw_vxlan_overlay_networking"
+      - "'default' in cifmw_vxlan_overlay_networking.networks"
+      - "'vlan' not in cifmw_vxlan_overlay_networking.networks.default"
+    msg: >-
+      cifmw_vxlan_overlay_networking needs networks (with an untagged default)
+      and instances
+    quiet: true
+  run_once: true
+
+- name: Check the play hosts match the overlay hosts and the hub is one of them
+  ansible.builtin.assert:
+    that:
+      - cifmw_vxlan_overlay_hub in cifmw_vxlan_overlay_hosts
+      - (ansible_play_hosts_all | sort) == (cifmw_vxlan_overlay_hosts | sort)
+      - cifmw_vxlan_overlay_hosts | length >= 2
+      - cifmw_vxlan_overlay_edpm_hosts | difference(cifmw_vxlan_overlay_hosts) | length == 0
+      - cifmw_vxlan_overlay_underlay_ips is mapping
+      - cifmw_vxlan_overlay_underlay_ips.keys() | difference(cifmw_vxlan_overlay_hosts) | length == 0
+    msg: >-
+      Play hosts {{ ansible_play_hosts_all | sort }} must equal overlay hosts
+      {{ cifmw_vxlan_overlay_hosts | sort }}, and the hub
+      ({{ cifmw_vxlan_overlay_hub }}), the EDPM hosts
+      ({{ cifmw_vxlan_overlay_edpm_hosts }}) and the hosts in
+      cifmw_vxlan_overlay_underlay_ips ({{ cifmw_vxlan_overlay_underlay_ips.keys() | list }})
+      must be among them
+    quiet: true
+  run_once: true
+
+- name: Check every non-default network has a valid VLAN tag
+  vars:
+    _bad: >-
+      {%- set out = [] -%}
+      {%- for name, net in cifmw_vxlan_overlay_networking.networks.items() if name != 'default' -%}
+      {%-   if net.vlan is not integer or net.vlan < 1 or net.vlan > 4094 -%}
+      {%-     set _ = out.append(name) -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ out }}
+  ansible.builtin.assert:
+    that: _bad | length == 0
+    msg: "Networks without a VLAN tag between 1 and 4094: {{ _bad | join(', ') }}"
+    quiet: true
+  run_once: true
+
+- name: Check every instance has a default IP and only declared networks
+  vars:
+    _inst: "{{ cifmw_vxlan_overlay_networking.instances[item] }}"
+    _unknown: >-
+      {{ _inst.networks.keys() | reject('in', cifmw_vxlan_overlay_networking.networks.keys()) | list }}
+  ansible.builtin.assert:
+    that:
+      - _inst.networks.default.ip is defined
+      - _unknown | length == 0
+    msg: "{{ item }}: missing default IP or unknown networks {{ _unknown }}"
+    quiet: true
+  loop: "{{ cifmw_vxlan_overlay_hosts }}"
+  run_once: true
+
+- name: Check interface names fit in 15 characters
+  vars:
+    _names: >-
+      {{
+        [cifmw_vxlan_overlay_iface ~ '.4094', cifmw_vxlan_overlay_peer_iface,
+         cifmw_vxlan_overlay_bridge, cifmw_vxlan_overlay_tunnel_prefix ~ 'hub',
+         cifmw_vxlan_overlay_tunnel_prefix ~ 's' ~ (cifmw_vxlan_overlay_hosts | length)]
+      }}
+  ansible.builtin.assert:
+    that: _names | map('length') | max <= 15
+    msg: "Interface names too long: {{ _names }}"
+    quiet: true
+  run_once: true
