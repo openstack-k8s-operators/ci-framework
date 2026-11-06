@@ -1,0 +1,61 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Prove label-based discovery works against the live control plane (including
+# uniquePodNames hashed pod names). Skips targets with no matching pods so
+# scenarios without Cinder/Glance stay green.
+
+- name: Initialize discovery verification results
+  ansible.builtin.set_fact:
+    cifmw_discover_osp_pod_verify_results: {}
+
+- name: Probe whether target pods exist before discovering
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    namespace: "{{ cifmw_discover_osp_pod_namespace }}"
+    label_selectors: >-
+      {{
+        ['component=' ~ item.component]
+        + (
+          ['service=' ~ item.service]
+          if (item.service | default('') | length) > 0
+          else []
+        )
+        + (
+          item.labels | default({}) | dict2items
+          | map(attribute='key')
+          | zip(
+            item.labels | default({}) | dict2items
+            | map(attribute='value') | list
+          )
+          | map('join', '=')
+          | list
+        )
+      }}
+    wait: false
+  loop: "{{ cifmw_discover_osp_pod_verify_targets }}"
+  loop_control:
+    label: "{{ item.component }}"
+  register: _cifmw_discover_osp_pod_probes
+
+- name: Discover each component that has matching pods
+  ansible.builtin.include_tasks: verify_one.yml
+  loop: "{{ _cifmw_discover_osp_pod_probes.results }}"
+  loop_control:
+    label: "{{ item.item.component | default('unknown') }}"
+    loop_var: _cifmw_discover_osp_pod_probe

@@ -1,0 +1,64 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Skip discover when no pods for this component
+  when: (_cifmw_discover_osp_pod_probe.resources | default([]) | length) == 0
+  ansible.builtin.debug:
+    msg: >-
+      Skipping discover_osp_pod for component={{ _cifmw_discover_osp_pod_probe.item.component }}
+      in {{ cifmw_discover_osp_pod_namespace }} (no matching pods).
+
+- name: Discover pod via lib-common labels
+  when: (_cifmw_discover_osp_pod_probe.resources | default([]) | length) > 0
+  ansible.builtin.include_tasks: main.yml
+  vars:
+    cifmw_discover_osp_pod_component: "{{ _cifmw_discover_osp_pod_probe.item.component }}"
+    cifmw_discover_osp_pod_service: "{{ _cifmw_discover_osp_pod_probe.item.service | default('') }}"
+    cifmw_discover_osp_pod_labels: "{{ _cifmw_discover_osp_pod_probe.item.labels | default({}) }}"
+    cifmw_discover_osp_pod_index: "{{ _cifmw_discover_osp_pod_probe.item.index | default(0) }}"
+    cifmw_discover_osp_pod_wait: false
+
+- name: Record and show discovered pod name
+  when: (_cifmw_discover_osp_pod_probe.resources | default([]) | length) > 0
+  block:
+    - name: Assert discovery returned a pod name
+      ansible.builtin.assert:
+        that:
+          - cifmw_discover_osp_pod_name is defined
+          - cifmw_discover_osp_pod_name | length > 0
+        fail_msg: >-
+          discover_osp_pod returned an empty name for
+          component={{ _cifmw_discover_osp_pod_probe.item.component }}
+
+    - name: Show uniquePodNames-safe discovery result
+      ansible.builtin.debug:
+        msg: >-
+          Discovered {{ _cifmw_discover_osp_pod_probe.item.component }} pod
+          via labels: {{ cifmw_discover_osp_pod_name }}
+          (all matches: {{ cifmw_discover_osp_pod_names }})
+
+    - name: Accumulate discovery results
+      ansible.builtin.set_fact:
+        cifmw_discover_osp_pod_verify_results: >-
+          {{
+            (cifmw_discover_osp_pod_verify_results | default({}))
+            | combine({
+                _cifmw_discover_osp_pod_probe.item.component: {
+                  'name': cifmw_discover_osp_pod_name,
+                  'names': cifmw_discover_osp_pod_names
+                }
+              })
+          }}
