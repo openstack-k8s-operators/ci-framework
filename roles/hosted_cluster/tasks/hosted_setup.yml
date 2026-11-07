@@ -1,0 +1,46 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# NMState, MetalLB, cert-manager, the MetalLB/NAD resources for the isolated
+# networks, storage classes and the OpenStack operator (with its init CR)
+# are all applied generically by the existing deploy_architecture.yml /
+# kustomize_deploy flow once retarget.yml points cifmw_openshift_kubeconfig
+# at this hosted cluster. The only thing genuinely specific to a KubeVirt
+# hosted control plane is enabling global IP forwarding so traffic between
+# the isolated networks and the pods consuming them flows correctly -- see
+# hosted_controlplanes.txt "Configuring the hosted control plane clusters
+# infrastructure for RHOSO".
+- name: Read hosted cluster network operator configuration
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    api_version: operator.openshift.io/v1
+    kind: Network
+    name: cluster
+  register: _hosted_cluster_network
+
+- name: Enable global IP forwarding on the hosted cluster
+  when: >-
+    _hosted_cluster_network.resources | map(attribute='spec.defaultNetwork.type') |
+    first | default('') == 'OVNKubernetes'
+  kubernetes.core.k8s_json_patch:
+    kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    api_version: operator.openshift.io/v1
+    kind: Network
+    name: cluster
+    patch:
+      - op: replace
+        path: /spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/ipForwarding
+        value: Global
