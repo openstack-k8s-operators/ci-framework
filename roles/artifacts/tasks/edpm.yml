@@ -90,6 +90,46 @@
           systemctl list-units | awk '/virt|edpm|ovs/ {print $1}' | egrep -v "sys|ovs-delete-transient-ports" | xargs -I {} sudo bash -c 'journalctl -u {} > /tmp/{{ host_ip }}/service_logs/{}.log'
           sudo ausearch -i | grep denied > /tmp/{{ host_ip }}/selinux-denials.log || true
           sudo journalctl -p warning -t kernel -o short -g DROPPING --no-pager &> /tmp/{{ host_ip }}/firewall-drops.txt || true
+          sudo getenforce > /tmp/{{ host_ip }}/selinux-enforce.txt 2>&1 || true
+          sudo sestatus > /tmp/{{ host_ip }}/selinux-status.txt 2>&1 || true
+          sudo cat /sys/fs/selinux/enforce > /tmp/{{ host_ip }}/selinux-enforce-file.txt 2>&1 || true
+          if command -v semanage >/dev/null 2>&1; then
+            sudo semanage permissive -l > /tmp/{{ host_ip }}/selinux-permissive-domains.txt 2>&1 || true
+            sudo semanage port -l > /tmp/{{ host_ip }}/selinux-ports.txt 2>&1 || true
+            sudo semanage fcontext -l -C > /tmp/{{ host_ip }}/selinux-custom-fcontexts.txt 2>&1 || true
+          else
+            printf 'semanage is not installed\n' > /tmp/{{ host_ip }}/selinux-semanage-unavailable.txt
+          fi
+          if command -v semodule >/dev/null 2>&1; then
+            sudo semodule -lfull > /tmp/{{ host_ip }}/selinux-modules.txt 2>&1 || true
+          else
+            printf 'semodule is not installed\n' > /tmp/{{ host_ip }}/selinux-semodule-unavailable.txt
+          fi
+          if command -v sesearch >/dev/null 2>&1; then
+            sudo sesearch -A -s virtqemud_t -t virt_port_t -c tcp_socket -p name_connect \
+              > /tmp/{{ host_ip }}/selinux-virtqemud-connect.txt 2>&1 || true
+          else
+            printf 'sesearch is not installed\n' > /tmp/{{ host_ip }}/selinux-sesearch-unavailable.txt
+          fi
+          sudo rpm -q openstack-selinux selinux-policy selinux-policy-targeted \
+            libvirt-daemon libvirt-daemon-common libvirt-daemon-proxy \
+            > /tmp/{{ host_ip }}/selinux-libvirt-packages.txt 2>&1 || true
+          sudo ls -lZ /usr/sbin/virtqemud /usr/sbin/virtproxyd /run/libvirt \
+            > /tmp/{{ host_ip }}/libvirt-labels.txt 2>&1 || true
+          if command -v matchpathcon >/dev/null 2>&1; then
+            sudo matchpathcon /usr/sbin/virtqemud /usr/sbin/virtproxyd \
+              /run/libvirt/virtqemud-sock /run/libvirt/virtproxyd-sock \
+              > /tmp/{{ host_ip }}/libvirt-expected-labels.txt 2>&1 || true
+          fi
+          sudo systemctl cat virtqemud virtproxyd virtproxyd-tls.socket \
+            > /tmp/{{ host_ip }}/libvirt-unit-files.txt 2>&1 || true
+          sudo systemctl status virtqemud virtproxyd virtproxyd-tls.socket \
+            --no-pager > /tmp/{{ host_ip }}/libvirt-service-status.txt 2>&1 || true
+          sudo ss -ltnp > /tmp/{{ host_ip }}/listening-tcp-sockets.txt 2>&1 || true
+          sudo firewall-cmd --list-all > /tmp/{{ host_ip }}/firewall-zones.txt 2>&1 || true
+          sudo nft list ruleset > /tmp/{{ host_ip }}/nftables-ruleset.txt 2>&1 || true
+          sudo ausearch -i | grep -E 'virtqemud|virtproxyd|16514|name_connect|denied' \
+            > /tmp/{{ host_ip }}/selinux-libvirt-denials.txt || true
           EOF
       loop: "{{ edpm_vms }}"
       loop_control:
