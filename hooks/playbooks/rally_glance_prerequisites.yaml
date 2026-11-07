@@ -1,0 +1,147 @@
+---
+- name: Prepare local images for custom Rally Glance workloads
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  gather_facts: false
+  vars:
+    cifmw_rally_glance_artifacts_basedir: >-
+      {{ cifmw_rally_artifacts_basedir | default(cifmw_basedir ~ '/tests/rally') }}
+    # Verified against https://download.cirros-cloud.net/0.6.2/MD5SUMS.
+    cifmw_rally_glance_cirros_sha256: "07e44a73e54c94d988028515403c1ed762055e01b83a767edf3c2b387f78ce00"
+    cifmw_rally_glance_images:
+      - name: dummy_image.qcow2
+        format: qcow2
+        virtual_size: 104857600
+      - name: dummy_image.raw
+        format: raw
+        virtual_size: 104857600
+      - name: cirros.qcow2
+        format: qcow2
+  tasks:
+    - name: Initialize Glance image destinations
+      ansible.builtin.set_fact:
+        cifmw_rally_glance_image_dirs: []
+
+    - name: Select Glance image destinations
+      ansible.builtin.set_fact:
+        cifmw_rally_glance_image_dirs: >-
+          {{ cifmw_rally_glance_image_dirs +
+             [cifmw_rally_glance_artifacts_basedir ~
+              ('/' ~ item.name if item.name | length > 0 else '') ~ '/tasks/images'] }}
+      loop: "{{ cifmw_rally_runs | default([{'name': ''}], true) }}"
+      loop_control:
+        label: "{{ item.name | default('single run', true) }}"
+      when: item.name in ['', 'glance']
+
+    - name: Prepare images for selected Glance runs
+      when: cifmw_rally_glance_image_dirs | length > 0
+      block:
+        - name: Install image preparation tools
+          become: true
+          ansible.builtin.package:
+            name: qemu-img
+            state: present
+
+        - name: Create Glance image directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop: "{{ cifmw_rally_glance_image_dirs }}"
+
+        - name: Create missing dummy images
+          ansible.builtin.command:
+            argv:
+              - qemu-img
+              - create
+              - -f
+              - "{{ item.1.format }}"
+              - "{{ item.0 }}/{{ item.1.name }}"
+              - 100M
+            creates: "{{ item.0 }}/{{ item.1.name }}"
+          loop: >-
+            {{ cifmw_rally_glance_image_dirs |
+               product(cifmw_rally_glance_images | selectattr('virtual_size', 'defined')) | list }}
+          loop_control:
+            label: "{{ item.0 }}/{{ item.1.name }}"
+
+        - name: Inspect cached CirrOS checksums
+          ansible.builtin.stat:
+            path: "{{ item }}/cirros.qcow2"
+            checksum_algorithm: sha256
+          loop: "{{ cifmw_rally_glance_image_dirs }}"
+          register: cifmw_rally_glance_cirros_stats
+
+        - name: Reject invalid cached CirrOS images
+          ansible.builtin.assert:
+            that:
+              - >-
+                not item.stat.exists or
+                (item.stat.isreg | default(false) and
+                 item.stat.checksum | default('') == cifmw_rally_glance_cirros_sha256)
+            fail_msg: >-
+              Invalid or unreadable cached image: {{ item.item }}/cirros.qcow2.
+              Expected the verified CirrOS 0.6.2 x86_64 disk image.
+              Move the invalid file aside before rerunning this hook.
+          loop: "{{ cifmw_rally_glance_cirros_stats.results }}"
+          loop_control:
+            label: "{{ item.item }}/cirros.qcow2"
+
+        - name: Cache verified CirrOS boot images
+          ansible.builtin.get_url:
+            url: "https://github.com/cirros-dev/cirros/releases/download/0.6.2/cirros-0.6.2-x86_64-disk.img"
+            dest: "{{ item }}/cirros.qcow2"
+            checksum: "sha256:{{ cifmw_rally_glance_cirros_sha256 }}"
+            mode: "0644"
+            timeout: 60
+          loop: "{{ cifmw_rally_glance_image_dirs }}"
+
+        - name: Make Glance image files readable inside the container
+          ansible.builtin.file:
+            path: "{{ item.0 }}/{{ item.1.name }}"
+            mode: "0644"
+            state: file
+          loop: "{{ cifmw_rally_glance_image_dirs | product(cifmw_rally_glance_images) | list }}"
+          loop_control:
+            label: "{{ item.0 }}/{{ item.1.name }}"
+
+        - name: Inspect Glance image formats and sizes
+          ansible.builtin.command:
+            argv:
+              - qemu-img
+              - info
+              - --output=json
+              - "{{ item.0 }}/{{ item.1.name }}"
+          loop: "{{ cifmw_rally_glance_image_dirs | product(cifmw_rally_glance_images) | list }}"
+          loop_control:
+            label: "{{ item.0 }}/{{ item.1.name }}"
+          register: cifmw_rally_glance_image_info
+          changed_when: false
+          failed_when: false
+          check_mode: false
+
+        - name: Validate Glance image formats and sizes
+          vars:
+            cifmw_rally_glance_image_metadata: "{{ item.stdout | default('{}', true) | from_json }}"
+          ansible.builtin.assert:
+            that:
+              - item.rc == 0
+              - cifmw_rally_glance_image_metadata.format == item.item.1.format
+              - >-
+                item.item.1.virtual_size is not defined or
+                cifmw_rally_glance_image_metadata['virtual-size'] == item.item.1.virtual_size
+            fail_msg: >-
+              Invalid or unreadable image: {{ item.item.0 }}/{{ item.item.1.name }}.
+              Expected format {{ item.item.1.format }}{{
+              ' and virtual size 100 MiB' if item.item.1.virtual_size is defined else '' }}.
+              {{ item.stderr | default('') }}
+          loop: "{{ cifmw_rally_glance_image_info.results }}"
+          loop_control:
+            label: "{{ item.item.0 }}/{{ item.item.1.name }}"
+      rescue:
+        - name: Warn about incomplete Glance image preparation
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Glance image preparation failed at '{{ ansible_failed_task.name }}':
+              {{ ansible_failed_result.msg | default('See the failed task output for details.') }}
+              Continuing to Rally execution. Scenarios that need the unavailable or invalid
+              images may fail; other workloads can still run.
