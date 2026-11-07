@@ -56,18 +56,107 @@
     mode: "{{ (cifmw_nfs_share_ownership[item] | default({})).mode | default(cifmw_nfs_share_default_mode) }}"
   loop: "{{ cifmw_nfs_shares }}"
 
-- name: Set nfs network vars
+- name: Log NFS target network facts
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    msg:
+      inventory_host: "{{ inventory_hostname }}"
+      target: "{{ cifmw_nfs_target }}"
+      ansible_host: "{{ ansible_host | default('unknown') }}"
+      default_ipv4: "{{ ansible_default_ipv4 | default({}) }}"
+      all_ipv4_addresses: "{{ ansible_all_ipv4_addresses | default([]) }}"
+
+- name: Capture NFS target interfaces
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -brief
+      - address
+  register: cifmw_nfs_target_interfaces
+  changed_when: false
+  failed_when: false
+
+- name: Log NFS target interfaces
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    var: cifmw_nfs_target_interfaces.stdout
+
+- name: Capture NFS target routes
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.command:
+    argv:
+      - ip
+      - route
+  register: cifmw_nfs_target_routes
+  changed_when: false
+  failed_when: false
+
+- name: Log NFS target routes
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    var: cifmw_nfs_target_routes.stdout
+
+- name: Capture route from NFS target to CRC
+  when:
+    - cifmw_nfs_debug | bool
+    - "'crc' in hostvars"
+    - hostvars['crc'].ansible_host is defined
+  ansible.builtin.command:
+    argv:
+      - ip
+      - route
+      - get
+      - "{{ hostvars['crc'].ansible_host }}"
+  register: cifmw_nfs_crc_route
+  changed_when: false
+  failed_when: false
+
+- name: Log route from NFS target to CRC
+  when:
+    - cifmw_nfs_debug | bool
+    - "'crc' in hostvars"
+    - cifmw_nfs_crc_route is defined
+  ansible.builtin.debug:
+    var: cifmw_nfs_crc_route.stdout
+
+- name: Read NFS network reservation from IPSet
+  when:
+    - cifmw_nfs_server_ip | default('') | length == 0 or cifmw_nfs_clients_cidr | default('') | length == 0
   delegate_to: controller
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
     PATH: "{{ cifmw_path }}"
   vars:
     _nfs_network_name: "{{ cifmw_nfs_network }}"
-    _nfs_host: "{{ [groups[cifmw_nfs_target][0], ansible_domain] | select() | join('.') | default('') }}"
+    _nfs_target_host: "{{ groups.get(cifmw_nfs_target, [cifmw_nfs_target]) | first }}"
+    _nfs_host: "{{ [_nfs_target_host, ansible_domain] | select() | join('.') | default('') }}"
     _ipset_namespace: "{{ cifmw_install_yamls_defaults['NAMESPACE'] | default('openstack') }}"
   ansible.builtin.command:
     cmd: oc get ipset {{ _nfs_host }} -n {{ _ipset_namespace }} -o jsonpath='{.status.reservations[?(@.network=="{{ _nfs_network_name }}")]}'
   register: cifmw_nfs_network_out
+  changed_when: false
+
+- name: Resolve NFS server address and client network
+  ansible.builtin.set_fact:
+    _cifmw_nfs_ip: >-
+      {{ cifmw_nfs_server_ip | default(
+           cifmw_nfs_network_out.stdout | default('{}') | from_json | json_query('address'),
+           true
+         ) }}
+    _cifmw_nfs_clients_cidr: >-
+      {{ cifmw_nfs_clients_cidr | default(
+           cifmw_nfs_network_out.stdout | default('{}') | from_json | json_query('cidr'),
+           true
+         ) }}
+
+- name: Log selected NFS endpoint and export network
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    msg:
+      nfs_server_ip: "{{ _cifmw_nfs_ip }}"
+      nfs_clients_cidr: "{{ _cifmw_nfs_clients_cidr }}"
+      target: "{{ cifmw_nfs_target }}"
 
 - name: Store nfs network vars
   delegate_to: controller
@@ -76,18 +165,74 @@
     content: >-
       {{
         {
-        'cifmw_nfs_ip': cifmw_nfs_network_out.stdout | from_json | json_query('address'),
-        'cifmw_nfs_network_range': cifmw_nfs_network_out.stdout | from_json | json_query('cidr')
+          'cifmw_nfs_ip': _cifmw_nfs_ip,
+          'cifmw_nfs_network_range': _cifmw_nfs_clients_cidr
         } | to_nice_yaml
       }}
     mode: "0644"
 
-# NOTE: This represents a workaround because there's an edpm-nftables role
-#       in edpm-ansible already. That role should contain the implementation
-#       of the firewall rules for NFS, and they should be included in the
-#       main edpm-rules.nft file. The following firewall config assumes that
-#       the EDPM node has been configured in terms of networks and firewall.
-- name: Configure firewall
+- name: Gather controller firewall services
+  when: cifmw_nfs_target == 'controller'
+  ansible.builtin.service_facts:
+
+- name: Log controller firewall service state
+  when:
+    - cifmw_nfs_debug | bool
+    - cifmw_nfs_target == 'controller'
+  ansible.builtin.debug:
+    msg: >-
+      firewalld={{ ansible_facts.services.get('firewalld.service', {}).get('state', 'not-installed') }}
+
+- name: Open NFS port in controller firewalld
+  when:
+    - cifmw_nfs_target == 'controller'
+    - ansible_facts.services.get('firewalld.service', {}).get('state', 'stopped') == 'running'
+  ansible.posix.firewalld:
+    port: 2049/tcp
+    state: enabled
+    immediate: true
+    permanent: true
+
+- name: Check controller INPUT firewall for NFS
+  when:
+    - cifmw_nfs_target == 'controller'
+    - ansible_facts.services.get('firewalld.service', {}).get('state', 'stopped') != 'running'
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -C
+      - INPUT
+      - -p
+      - tcp
+      - --dport
+      - "2049"
+      - -j
+      - ACCEPT
+  register: cifmw_nfs_controller_iptables_check
+  changed_when: false
+  failed_when: false
+
+- name: Allow NFS through controller INPUT firewall
+  when:
+    - cifmw_nfs_target == 'controller'
+    - ansible_facts.services.get('firewalld.service', {}).get('state', 'stopped') != 'running'
+    - cifmw_nfs_controller_iptables_check.rc != 0
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -I
+      - INPUT
+      - "1"
+      - -p
+      - tcp
+      - --dport
+      - "2049"
+      - -j
+      - ACCEPT
+  changed_when: true
+
+- name: Configure EDPM firewall for NFS
+  when: cifmw_nfs_target != 'controller'
   become: true
   tags:
     - nft
@@ -115,7 +260,7 @@
     path: /etc/nfs.conf
     section: nfsd
     option: host
-    value: "{{ cifmw_nfs_network_out.stdout | from_json | json_query('address') }}"
+    value: "{{ _cifmw_nfs_ip }}"
     backup: true
     mode: "0644"
 
@@ -128,7 +273,7 @@
 - name: Add shares to /etc/exports
   ansible.builtin.lineinfile:
     path: /etc/exports
-    line: "/data/{{ item }} {{ cifmw_nfs_network_out.stdout | from_json | json_query('cidr') }}(rw,sync,no_root_squash)"
+    line: "/data/{{ item }} {{ _cifmw_nfs_clients_cidr }}(rw,sync,no_root_squash)"
   loop: "{{ cifmw_nfs_shares }}"
   register: _export_shares
 
@@ -136,3 +281,72 @@
   when:
     - _export_shares.changed
   ansible.builtin.command: exportfs -a
+
+- name: Capture NFS listener
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.command:
+    argv:
+      - ss
+      - -lntp
+      - sport
+      - "="
+      - :2049
+  register: cifmw_nfs_listener
+  changed_when: false
+  failed_when: false
+
+- name: Log NFS listener
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    var: cifmw_nfs_listener.stdout
+
+- name: Capture NFS exports
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.command:
+    argv:
+      - exportfs
+      - -v
+  register: cifmw_nfs_exports
+  changed_when: false
+  failed_when: false
+
+- name: Log NFS exports
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    var: cifmw_nfs_exports.stdout
+
+- name: Capture NFS service state
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - nfs-server
+  register: cifmw_nfs_service_state
+  changed_when: false
+  failed_when: false
+
+- name: Log NFS service state
+  when: cifmw_nfs_debug | bool
+  ansible.builtin.debug:
+    var: cifmw_nfs_service_state.stdout
+
+- name: Capture controller INPUT firewall rules
+  when:
+    - cifmw_nfs_debug | bool
+    - cifmw_nfs_target == 'controller'
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -S
+      - INPUT
+  register: cifmw_nfs_controller_firewall
+  changed_when: false
+  failed_when: false
+
+- name: Log controller INPUT firewall rules
+  when:
+    - cifmw_nfs_debug | bool
+    - cifmw_nfs_target == 'controller'
+  ansible.builtin.debug:
+    var: cifmw_nfs_controller_firewall.stdout

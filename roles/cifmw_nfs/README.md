@@ -15,8 +15,21 @@ sudo privilege is required for this role.
   `cifmw_nfs_share_default_mode`.
 * `cifmw_nfs_share_default_mode`: mode applied to shares without a `mode`
   override (default: `0755`).
+* `cifmw_nfs_server_ip`: optional explicit address for the NFS listener. When
+  omitted, the role resolves it from the target's IPSet reservation.
+* `cifmw_nfs_clients_cidr`: optional explicit client CIDR for NFS exports. When
+  omitted, the role resolves it from the target's IPSet reservation.
+* `cifmw_nfs_debug`: log target interfaces, routes, selected endpoint, listener,
+  and exports. Defaults to `false`.
+* `cifmw_nfs_target`: inventory group or host to run NFS on. Defaults to
+  `computes`.
 * `nftables_path`: path to nftables files
 * `nftables_conf`: path to nftables config file
+
+When the target is the `controller` host, provide both `cifmw_nfs_server_ip` and
+`cifmw_nfs_clients_cidr` to bypass the EDPM IPSet lookup. The role opens TCP
+2049 through firewalld when it is active, or adds a runtime INPUT rule otherwise.
+Other target groups retain the EDPM nftables behavior.
 
 ### Per-share ownership example
 ```yaml
@@ -39,7 +52,9 @@ cifmw_nfs_share_ownership:
 ```
 - name: Deploy NFS server on target nodes
   become: true
-  hosts: "{{ groups[cifmw_nfs_target | default('computes')][0] | default([]) }}"
+  hosts: >-
+    {{ groups.get(cifmw_nfs_target | default('computes'),
+                   [cifmw_nfs_target | default('computes')]) | first }}
   vars:
     nftables_path: /etc/nftables
     nftables_conf: /etc/sysconfig/nftables.conf
