@@ -13,7 +13,17 @@
 #
 # Optional: ansible_role_repo, ansible_role_version, client_iso,
 #   client_data_secret, client_data_secret_namespace, login_secret,
-#   login_secret_field, client_data_path, pin_file
+#   login_secret_field, client_data_path, pin_file, host
+#
+# host (staging only): rewrites IPaddr= in the staged proteccio.rc to
+#   this address. Single-HSM rc files only; HA rc files come
+#   pre-pointed from lookaside, so do not set host on those stores.
+#
+# Staging mode (pre-adoption): when bss_stage_dir is defined, the
+# client-data Secret is written to
+# {{ bss_stage_dir }}/proteccio_data_secret.yml instead of applied
+# with oc (the CRC cluster does not exist yet). The login secret is
+# not staged - data-plane-adoption creates it. See stage.yml.
 
 - name: Resolve Proteccio partition password for {{ store.id }}
   ansible.builtin.include_tasks: "{{ playbook_dir }}/resolve_from_param_or_file.yml"
@@ -91,7 +101,12 @@
     proteccio_client_src: "{{ store.client_src }}"
     proteccio_client_iso: "{{ store.client_iso | default('Proteccio3.06.05.iso') }}"
 
+- name: Stage Proteccio client-data Secret to {{ bss_stage_dir }} for {{ store.id }}
+  when: bss_stage_dir is defined
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/prepare/proteccio_stage.yml"
+
 - name: Create Proteccio client-data and login secrets for {{ store.id }}
+  when: bss_stage_dir is not defined
   ansible.builtin.include_role:
     name: rhoso_proteccio_hsm
     tasks_from: create_secrets
@@ -114,3 +129,7 @@
       client_data_secret: "{{ store.client_data_secret | default('barbican-proteccio-client-data') }}"
       login_secret: "{{ store.login_secret | default('barbican-proteccio-login') }}"
       client_data_path: "{{ store.client_data_path | default('/etc/proteccio') }}"
+      # Publish the resolved PIN for callers writing DPA extra vars
+      # (proteccio_login_password) in staging flows.
+      partition_password: "{{ _proteccio_password }}"
+  no_log: true
