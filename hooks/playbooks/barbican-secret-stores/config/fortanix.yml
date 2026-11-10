@@ -1,7 +1,34 @@
 ---
 # Fortanix KMIP → kmip CRD fragment + [kmip_plugin] customServiceConfig.
 # Cert-only auth; PEMs mounted from ClientDataSpec under clientDataPath.
-# Uses _bss_fortanix_prep from prepare/fortanix.yml.
+# Connection wiring (host, port, PEMs) comes from _bss_fortanix_prep
+# (prepare/fortanix.yml; port defaults to 5696 there).
+# Optional store.config: kmip_plugin setting overrides (unknown keys are
+# rejected). Uses _bss_fortanix_prep from prepare/fortanix.yml.
+
+- name: Fortanix kmip_plugin defaults
+  ansible.builtin.set_fact:
+    _bss_fortanix_defaults:
+      # Fortanix SDKMS rejects PublicKey registration wrapped as X.509
+      # (KEY_FORMAT_TYPE_NOT_SUPPORTED), so store and retrieve public
+      # keys as PKCS#1. (pkcs1_only is deprecated - Barbican 1011705.)
+      public_key_format: pkcs1
+
+- name: Reject unknown Fortanix config overrides on {{ store.id }}
+  ansible.builtin.assert:
+    that:
+      - store.config | default({}) | list
+        | difference(_bss_fortanix_defaults | list) | length == 0
+    fail_msg: >-
+      Fortanix store {{ store.id }}: unknown config override(s)
+      {{ store.config | default({}) | list
+         | difference(_bss_fortanix_defaults | list) }};
+      known keys: {{ _bss_fortanix_defaults | list | join(', ') }}.
+
+- name: Merge Fortanix config overrides for {{ store.id }}
+  ansible.builtin.set_fact:
+    _fortanix_cfg: >-
+      {{ _bss_fortanix_defaults | combine(store.config | default({})) }}
 
 - name: Build kmip_plugin section for {{ store.id }}
   ansible.builtin.set_fact:
@@ -12,10 +39,7 @@
       ca_certs = {{ _bss_fortanix_prep.client_data_path }}/CACert.pem
       certfile = {{ _bss_fortanix_prep.client_data_path }}/Client.pem
       keyfile = {{ _bss_fortanix_prep.client_data_path }}/Client.key
-      # Fortanix SDKMS rejects PublicKey registration wrapped as X.509
-      # (KEY_FORMAT_TYPE_NOT_SUPPORTED), so store and retrieve public
-      # keys as PKCS#1. (pkcs1_only is deprecated - Barbican 1011705.)
-      public_key_format = pkcs1
+      public_key_format = {{ _fortanix_cfg.public_key_format }}
 
 - name: Record kmip fragments for {{ store.id }}
   ansible.builtin.set_fact:
