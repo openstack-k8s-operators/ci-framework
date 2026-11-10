@@ -1,11 +1,43 @@
 ---
 # Proteccio PKCS11 → pkcs11 CRD fragment + [p11_crypto_plugin] customServiceConfig.
-# Plugin settings come from the store dict.
 #
 # Required store fields: partition, mkek_label, hmac_label
-# Optional: library_path (default libnethsm path),
-#           key_wrap_mechanism (default CKM_AES_CBC_PAD)
+# Optional store.config: p11_crypto_plugin setting overrides (unknown keys
+# are rejected). Environment wiring (partition, labels, PIN, certs, client
+# sources) stays flat on the store dict.
 # Uses _bss_proteccio_prep from prepare/proteccio.yml.
+
+- name: Proteccio p11_crypto_plugin defaults
+  ansible.builtin.set_fact:
+    _bss_proteccio_defaults:
+      # The vendor install.sh copies libnethsm.so to /usr/lib, /usr/lib64
+      # and /opt/tw_proteccio/lib (identical bytes); /opt/tw_proteccio
+      # matches the data-plane-adoption barbican_hsm_patch default.
+      library_path: /opt/tw_proteccio/lib/libnethsm.so
+      encryption_mechanism: CKM_AES_CBC
+      hmac_key_type: CKK_GENERIC_SECRET
+      hmac_keygen_mechanism: CKM_GENERIC_SECRET_KEY_GEN
+      hmac_mechanism: CKM_SHA256_HMAC
+      key_wrap_mechanism: CKM_AES_CBC_PAD
+      key_wrap_generate_iv: true
+      always_set_cka_sensitive: true
+      os_locking_ok: false
+
+- name: Reject unknown Proteccio config overrides on {{ store.id }}
+  ansible.builtin.assert:
+    that:
+      - store.config | default({}) | list
+        | difference(_bss_proteccio_defaults | list) | length == 0
+    fail_msg: >-
+      Proteccio store {{ store.id }}: unknown config override(s)
+      {{ store.config | default({}) | list
+         | difference(_bss_proteccio_defaults | list) }};
+      known keys: {{ _bss_proteccio_defaults | list | join(', ') }}.
+
+- name: Merge Proteccio config overrides for {{ store.id }}
+  ansible.builtin.set_fact:
+    _proteccio_cfg: >-
+      {{ _bss_proteccio_defaults | combine(store.config | default({})) }}
 
 - name: Require Proteccio config fields on store {{ store.id }}
   ansible.builtin.assert:
@@ -24,18 +56,18 @@
     _proteccio_ini: |
       [p11_crypto_plugin]
       plugin_name = PKCS11
-      library_path = {{ store.library_path | default('/usr/lib64/libnethsm.so') }}
+      library_path = {{ _proteccio_cfg.library_path }}
       token_labels = {{ store.partition }}
       mkek_label = {{ store.mkek_label }}
       hmac_label = {{ store.hmac_label }}
-      encryption_mechanism = CKM_AES_CBC
-      hmac_key_type = CKK_GENERIC_SECRET
-      hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
-      hmac_mechanism = CKM_SHA256_HMAC
-      key_wrap_mechanism = {{ store.key_wrap_mechanism | default('CKM_AES_CBC_PAD') }}
-      key_wrap_generate_iv = true
-      always_set_cka_sensitive = true
-      os_locking_ok = false
+      encryption_mechanism = {{ _proteccio_cfg.encryption_mechanism }}
+      hmac_key_type = {{ _proteccio_cfg.hmac_key_type }}
+      hmac_keygen_mechanism = {{ _proteccio_cfg.hmac_keygen_mechanism }}
+      hmac_mechanism = {{ _proteccio_cfg.hmac_mechanism }}
+      key_wrap_mechanism = {{ _proteccio_cfg.key_wrap_mechanism }}
+      key_wrap_generate_iv = {{ _proteccio_cfg.key_wrap_generate_iv | lower }}
+      always_set_cka_sensitive = {{ _proteccio_cfg.always_set_cka_sensitive | lower }}
+      os_locking_ok = {{ _proteccio_cfg.os_locking_ok | lower }}
 
 - name: Record Proteccio pkcs11 fragments for {{ store.id }}
   ansible.builtin.set_fact:
