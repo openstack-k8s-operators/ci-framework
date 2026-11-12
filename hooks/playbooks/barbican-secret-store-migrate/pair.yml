@@ -1,0 +1,46 @@
+---
+# Run migrate scenarios for one (src → dst) pair.
+# Expects cifmw_barbican_migrate_src_store / dst_store, _payload,
+# cifmw_barbican_migrate_pair_label, cifmw_barbican_migrate_secret_type,
+# and cifmw_barbican_migrate_run_metaonly (metaonly once across all pairs).
+
+- name: "Round-trip migrate via REST API ({{ cifmw_barbican_migrate_pair_label }})"
+  ansible.builtin.include_tasks: scenario.yml
+  vars:
+    cifmw_barbican_migrate_case: "api_roundtrip_{{ cifmw_barbican_migrate_pair_label }}"
+    cifmw_barbican_migrate_via: api
+    cifmw_barbican_migrate_roundtrip: true
+    cifmw_barbican_migrate_dry_run: false
+    cifmw_barbican_migrate_payload: "{{ _payload }}-api-{{ cifmw_barbican_migrate_pair_label }}"
+
+- name: "Round-trip migrate via openstack CLI ({{ cifmw_barbican_migrate_pair_label }})"
+  when: cifmw_barbican_migrate_cli_available | default(false) | bool
+  ansible.builtin.include_tasks: scenario.yml
+  vars:
+    cifmw_barbican_migrate_case: "cli_roundtrip_{{ cifmw_barbican_migrate_pair_label }}"
+    cifmw_barbican_migrate_via: cli
+    cifmw_barbican_migrate_roundtrip: true
+    cifmw_barbican_migrate_dry_run: false
+    cifmw_barbican_migrate_payload: "{{ _payload }}-cli-{{ cifmw_barbican_migrate_pair_label }}"
+
+- name: "Round-trip migrate via barbican-manage ({{ cifmw_barbican_migrate_pair_label }})"
+  ansible.builtin.include_tasks: scenario.yml
+  vars:
+    cifmw_barbican_migrate_case: "admin_roundtrip_{{ cifmw_barbican_migrate_pair_label }}"
+    cifmw_barbican_migrate_via: admin
+    cifmw_barbican_migrate_roundtrip: true
+    cifmw_barbican_migrate_dry_run: false
+    cifmw_barbican_migrate_payload: "{{ _payload }}-admin-{{ cifmw_barbican_migrate_pair_label }}"
+
+- name: "Dry-run barbican-manage secret migrate ({{ cifmw_barbican_migrate_pair_label }})"
+  ansible.builtin.include_tasks: scenario.yml
+  vars:
+    cifmw_barbican_migrate_case: "admin_dry_run_{{ cifmw_barbican_migrate_pair_label }}"
+    cifmw_barbican_migrate_via: admin
+    cifmw_barbican_migrate_roundtrip: false
+    cifmw_barbican_migrate_dry_run: true
+    cifmw_barbican_migrate_payload: "{{ _payload }}-dry-{{ cifmw_barbican_migrate_pair_label }}"
+
+- name: Metadata-only secret must fail migrate
+  when: cifmw_barbican_migrate_run_metaonly | default(false) | bool
+  ansible.builtin.include_tasks: metaonly.yml
