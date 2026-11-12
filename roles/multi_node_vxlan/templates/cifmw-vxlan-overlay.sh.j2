@@ -1,0 +1,83 @@
+#!/bin/bash
+# Managed by Ansible (multi_node_vxlan). Run at boot by {{ cifmw_multi_node_vxlan_unit }}.service.
+#
+# Emulates a VLAN trunk port: {{ cifmw_multi_node_vxlan_iface }} is a veth whose peer
+# sits on a plain (non VLAN-filtering) bridge with the VXLAN tunnel(s), so
+# untagged and 802.1Q-tagged frames reach every other node unchanged.
+set -euo pipefail
+
+BRIDGE="{{ cifmw_multi_node_vxlan_bridge }}"
+IFACE="{{ cifmw_multi_node_vxlan_iface }}"
+PEER="{{ cifmw_multi_node_vxlan_peer_iface }}"
+MAC="{{ cifmw_multi_node_vxlan_mac }}"
+MTU="{{ cifmw_multi_node_vxlan_mtu }}"
+DSTPORT="{{ cifmw_multi_node_vxlan_dstport }}"
+{% if cifmw_multi_node_vxlan_marker %}
+OVS_MARKER="{{ cifmw_multi_node_vxlan_marker }}"
+
+ovs_mode() { [ -e "$OVS_MARKER" ]; }
+{% else %}
+
+ovs_mode() { false; }
+{% endif %}
+
+tunnels() {
+{% for t in cifmw_multi_node_vxlan_tunnels %}
+    echo "{{ t.name }} {{ t.vni }} {{ t.remote }}"{{ ('  # ' ~ t.peer) if t.peer | default('') else '' }}
+{% else %}
+    :
+{% endfor %}
+}
+
+start() {
+    modprobe vxlan 2>/dev/null || true
+
+    if ! ovs_mode; then
+        if ! ip link show "$BRIDGE" >/dev/null 2>&1; then
+            ip link add "$BRIDGE" type bridge stp_state 0
+        fi
+        # br_netfilter is loaded on OCP nodes; keep bridged overlay frames out of iptables.
+        ip link set "$BRIDGE" type bridge nf_call_iptables 0 nf_call_ip6tables 0 nf_call_arptables 0 2>/dev/null || true
+    fi
+
+    # Tunnels are leaf ports; recreate them so a changed remote is picked up.
+    tunnels | while read -r name vni remote; do
+        ip link del "$name" 2>/dev/null || true
+        # Receive by VNI, not source; keep the configured remote despite source NAT.
+        ip link add "$name" type vxlan id "$vni" remote "$remote" dstport "$DSTPORT" nolearning
+        ip link set dev "$name" mtu "$MTU" up
+        ovs_mode || ip link set dev "$name" master "$BRIDGE"
+    done
+
+    # Never delete or re-parent IFACE once it exists: NetworkManager, NNCP or
+    # OVS (os-net-config br-ex) may own it.
+    if ! ip link show "$IFACE" >/dev/null 2>&1; then
+        ip link add "$IFACE" address "$MAC" mtu "$MTU" type veth peer name "$PEER" mtu "$MTU"
+    fi
+    ip link set dev "$PEER" up
+    if ! ovs_mode; then
+        ip link set dev "$PEER" master "$BRIDGE"
+        ip link set dev "$BRIDGE" mtu "$MTU" up
+    fi
+    ip link set dev "$IFACE" up
+{% if cifmw_multi_node_vxlan_start_commands | trim %}
+
+{{ cifmw_multi_node_vxlan_start_commands.rstrip('\n') }}
+{% endif %}
+}
+
+stop() {
+    tunnels | while read -r name _vni _remote; do
+        ip link del "$name" 2>/dev/null || true
+    done
+{% if cifmw_multi_node_vxlan_stop_commands | trim %}
+{{ cifmw_multi_node_vxlan_stop_commands.rstrip('\n') }}
+{% endif %}
+}
+
+case "${1:-start}" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac
