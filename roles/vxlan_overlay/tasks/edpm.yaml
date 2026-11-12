@@ -1,0 +1,81 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Prepare the overlay for EDPM
+  when: _cifmw_vxlan_overlay_is_edpm | bool
+  become: true
+  block:
+    # edpm_nftables replaces the ruleset. Without this snippet its first
+    # apply drops the overlay and cuts the node off its ctlplane.
+    - name: Create the EDPM firewall snippet directory
+      ansible.builtin.file:
+        path: /var/lib/edpm-config/firewall
+        state: directory
+        mode: "0750"
+
+    - name: Write the EDPM firewall snippet
+      ansible.builtin.copy:
+        dest: /var/lib/edpm-config/firewall/cifmw-vxlan-overlay.yaml
+        mode: "0644"
+        content: |
+          - rule_name: 005 allow cifmw-vxlan-overlay
+            rule:
+              proto: udp
+              dport: {{ cifmw_vxlan_overlay_dstport }}
+
+    - name: Install the OVS transport bridge unit
+      ansible.builtin.template:
+        src: cifmw-vxlan-overlay-ovs.service.j2
+        dest: "/etc/systemd/system/{{ cifmw_vxlan_overlay_ovs_unit }}.service"
+        mode: "0644"
+
+    # Enabled, not started: openvswitch.service usually does not exist yet.
+    # EDPM's edpm_ovs starts it before os-net-config, which pulls this in.
+    - name: Enable the OVS transport bridge unit
+      ansible.builtin.systemd:
+        name: "{{ cifmw_vxlan_overlay_ovs_unit }}"
+        daemon_reload: true
+        enabled: true
+
+    - name: Check whether Open vSwitch is already running  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: systemctl is-active openvswitch.service
+      register: _cifmw_vxlan_overlay_ovs_active
+      changed_when: false
+      failed_when: false
+
+    - name: Convert the transport bridge now
+      when: _cifmw_vxlan_overlay_ovs_active.stdout == 'active'
+      ansible.builtin.systemd:
+        name: "{{ cifmw_vxlan_overlay_ovs_unit }}"
+        state: started
+
+- name: Write the EDPM dataplane kustomization
+  when: cifmw_vxlan_overlay_edpm_kustomize | bool
+  delegate_to: "{{ cifmw_vxlan_overlay_edpm_kustomize_host }}"
+  run_once: true
+  block:
+    - name: Create the dataplane kustomization directory
+      ansible.builtin.file:
+        path: "{{ cifmw_vxlan_overlay_edpm_kustomize_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write the dataplane kustomization
+      ansible.builtin.template:
+        src: edpm-dataplane-kustomization.yaml.j2
+        dest: "{{ cifmw_vxlan_overlay_edpm_kustomize_dir }}/{{ cifmw_vxlan_overlay_edpm_kustomize_file }}"
+        mode: "0644"

@@ -1,0 +1,76 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Record the underlay addresses
+  ansible.builtin.set_fact:
+    _cifmw_vxlan_overlay_underlay_ip: >-
+      {{ cifmw_vxlan_overlay_underlay_ips[inventory_hostname] | default(ansible_host) }}
+
+- name: Check the underlay addresses are valid and distinct
+  vars:
+    _ips: "{{ cifmw_vxlan_overlay_hosts | map('extract', hostvars, '_cifmw_vxlan_overlay_underlay_ip') | list }}"
+  ansible.builtin.assert:
+    that:
+      - _ips | ansible.utils.ipv4 | length == _ips | length
+      - _ips | unique | length == _ips | length
+    msg: "Underlay addresses invalid or not distinct: {{ dict(cifmw_vxlan_overlay_hosts | zip(_ips)) }}"
+    quiet: true
+  run_once: true
+
+# The address Ansible connects from, as this host sees it. Replies to it are
+# routed by this host, so it must not be an overlay host address.
+- name: Record the address Ansible connects from
+  ansible.builtin.shell:
+    cmd: printf 'SSH_CONNECTION=%s\n' "$SSH_CONNECTION"
+  register: _cifmw_vxlan_overlay_ansible_conn
+  changed_when: false
+
+# Zuul's command module merges stderr into stdout, so match the marker line.
+- name: Record the Ansible source address
+  vars:
+    _line: >-
+      {{ _cifmw_vxlan_overlay_ansible_conn.stdout_lines | select('match', '^SSH_CONNECTION=') | last | default('SSH_CONNECTION=') }}
+  ansible.builtin.set_fact:
+    _cifmw_vxlan_overlay_ansible_src: "{{ (_line.split('=', 1)[1].split() + [''])[0] }}"
+
+# The hub's peer is the first spoke; every spoke's peer is the hub.
+- name: Find the interface that reaches this host's tunnel peer
+  vars:
+    _spokes: "{{ cifmw_vxlan_overlay_hosts | reject('equalto', cifmw_vxlan_overlay_hub) | list }}"
+    _peer: "{{ _spokes[0] if inventory_hostname == cifmw_vxlan_overlay_hub else cifmw_vxlan_overlay_hub }}"
+  ansible.builtin.command:
+    cmd: ip -j -4 route get {{ hostvars[_peer]._cifmw_vxlan_overlay_underlay_ip }}
+  register: _cifmw_vxlan_overlay_route
+  changed_when: false
+
+- name: Record the underlay interface
+  ansible.builtin.set_fact:
+    _cifmw_vxlan_overlay_underlay_dev: >-
+      {{ (_cifmw_vxlan_overlay_route.stdout_lines | select('match', '[[]') | first | from_json)[0].dev }}
+
+- name: Read the underlay interface address and MTU
+  ansible.builtin.command:
+    cmd: ip -j -4 addr show dev {{ _cifmw_vxlan_overlay_underlay_dev }}
+  register: _cifmw_vxlan_overlay_addr
+  changed_when: false
+
+- name: Record the underlay MTU and subnet
+  vars:
+    _link: "{{ (_cifmw_vxlan_overlay_addr.stdout_lines | select('match', '[[]') | first | from_json)[0] }}"
+    _ai: "{{ _link.addr_info | selectattr('family', 'equalto', 'inet') | first }}"
+  ansible.builtin.set_fact:
+    _cifmw_vxlan_overlay_underlay_mtu: "{{ _link.mtu | int }}"
+    _cifmw_vxlan_overlay_underlay_subnet: "{{ (_ai.local ~ '/' ~ _ai.prefixlen) | ansible.utils.ipaddr('network/prefix') }}"
