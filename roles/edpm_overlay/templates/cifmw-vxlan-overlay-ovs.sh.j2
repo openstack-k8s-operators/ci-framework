@@ -1,0 +1,52 @@
+#!/bin/bash
+# Managed by Ansible (edpm_overlay). Run by {{ cifmw_edpm_overlay_unit }}.service.
+#
+# The transport bridge starts as a Linux bridge. When Open vSwitch starts,
+# {{ cifmw_edpm_overlay_unit }}.service runs '$0 ovs', which replaces it with an
+# OVS bridge of the same name plus a patch port that os-net-config's br-ex
+# peers with. The marker file then makes the transport unit only create the
+# leaf devices; OVS attaches them from its database.
+set -euo pipefail
+
+BRIDGE="{{ cifmw_edpm_overlay_bridge }}"
+PEER="{{ cifmw_edpm_overlay_peer_iface }}"
+OVS_MARKER="{{ cifmw_edpm_overlay_marker }}"
+PATCH="{{ cifmw_edpm_overlay_patch_port }}"
+PATCH_PEER="{{ cifmw_edpm_overlay_patch_peer }}"
+
+tunnels() {
+{% for t in cifmw_edpm_overlay_tunnels %}
+    echo "{{ t.name }} {{ t.vni }} {{ t.remote }}"  # {{ t.peer }}
+{% else %}
+    :
+{% endfor %}
+}
+
+# Run by {{ cifmw_edpm_overlay_unit }}.service each time openvswitch.service starts.
+# The first run (EDPM's edpm_ovs installing and starting OVS, before
+# os-net-config) swaps the Linux bridge for an OVS one: about a second
+# without ctlplane. Later runs only re-assert the ports.
+ovs() {
+    if [ -d "/sys/class/net/$BRIDGE/bridge" ]; then
+        tunnels | while read -r name _vni _remote; do
+            ip link set dev "$name" nomaster 2>/dev/null || true
+        done
+        ip link set dev "$PEER" nomaster 2>/dev/null || true
+        ip link del "$BRIDGE"
+    fi
+    local args=(-- --may-exist add-br "$BRIDGE" -- set bridge "$BRIDGE" fail_mode=standalone)
+    local name
+    for name in $(tunnels | awk '{ print $1 }') "$PEER"; do
+        args+=(-- --may-exist add-port "$BRIDGE" "$name")
+    done
+    args+=(-- --may-exist add-port "$BRIDGE" "$PATCH"
+           -- set interface "$PATCH" type=patch options:peer="$PATCH_PEER")
+    ovs-vsctl --timeout=30 "${args[@]}"
+    touch "$OVS_MARKER"
+    logger -t cifmw-vxlan-overlay "transport bridge $BRIDGE is an OVS bridge, $PATCH peers with $PATCH_PEER"
+}
+
+case "${1:-ovs}" in
+    ovs) ovs ;;
+    *) echo "Usage: $0 ovs" >&2; exit 1 ;;
+esac

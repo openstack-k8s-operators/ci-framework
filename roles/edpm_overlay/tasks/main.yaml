@@ -1,0 +1,119 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Check host and delegated inputs before changing either.
+- name: Check the required inputs
+  ansible.builtin.assert:
+    that:
+      - cifmw_edpm_overlay_enabled is defined
+      - cifmw_edpm_overlay_bridge is defined
+      - cifmw_edpm_overlay_peer_iface is defined
+      - cifmw_edpm_overlay_tunnels is defined
+      - cifmw_edpm_overlay_patch_port is defined
+      - cifmw_edpm_overlay_patch_peer is defined
+      - cifmw_edpm_overlay_dstport is defined
+      - cifmw_edpm_overlay_transport_unit is defined
+      - cifmw_edpm_overlay_unit is defined
+      - cifmw_edpm_overlay_script is defined
+      - cifmw_edpm_overlay_marker is defined
+      - cifmw_edpm_overlay_kustomize is defined
+      - cifmw_edpm_overlay_kustomize_host is defined
+      - cifmw_edpm_overlay_kustomize_dir is defined
+      - cifmw_edpm_overlay_kustomize_file is defined
+      - cifmw_edpm_overlay_kustomize_nodesets is defined
+    fail_msg: >-
+      Missing input for edpm_overlay. The calling play must map every
+      cifmw_edpm_overlay_* variable; the failed condition names the undefined
+      one.
+    quiet: true
+
+- name: Prepare the overlay for EDPM
+  when: cifmw_edpm_overlay_enabled | bool
+  become: true
+  block:
+    # edpm_nftables replaces the ruleset. Without this snippet its first
+    # apply drops the overlay and cuts the node off its ctlplane.
+    - name: Create the EDPM firewall snippet directory
+      ansible.builtin.file:
+        path: /var/lib/edpm-config/firewall
+        state: directory
+        mode: "0750"
+
+    - name: Write the EDPM firewall snippet
+      ansible.builtin.copy:
+        dest: /var/lib/edpm-config/firewall/cifmw-vxlan-overlay.yaml
+        mode: "0644"
+        content: |
+          - rule_name: 005 allow cifmw-vxlan-overlay
+            rule:
+              proto: udp
+              dport: {{ cifmw_edpm_overlay_dstport }}
+
+    - name: Create the overlay configuration directory
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_overlay_script | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Install the OVS transport bridge script
+      ansible.builtin.template:
+        src: cifmw-vxlan-overlay-ovs.sh.j2
+        dest: "{{ cifmw_edpm_overlay_script }}"
+        mode: "0755"
+
+    - name: Install the OVS transport bridge unit
+      ansible.builtin.template:
+        src: cifmw-vxlan-overlay-ovs.service.j2
+        dest: "/etc/systemd/system/{{ cifmw_edpm_overlay_unit }}.service"
+        mode: "0644"
+
+    # Enabled, not started: openvswitch.service usually does not exist yet.
+    # EDPM's edpm_ovs starts it before os-net-config, which pulls this in.
+    - name: Enable the OVS transport bridge unit
+      ansible.builtin.systemd:
+        name: "{{ cifmw_edpm_overlay_unit }}"
+        daemon_reload: true
+        enabled: true
+
+    - name: Check whether Open vSwitch is already running  # noqa: command-instead-of-module
+      ansible.builtin.command:
+        cmd: systemctl is-active openvswitch.service
+      register: _cifmw_edpm_overlay_ovs_active
+      changed_when: false
+      failed_when: false
+
+    - name: Convert the transport bridge now
+      when: _cifmw_edpm_overlay_ovs_active.stdout == 'active'
+      ansible.builtin.systemd:
+        name: "{{ cifmw_edpm_overlay_unit }}"
+        state: started
+
+- name: Write the EDPM dataplane kustomization
+  when: cifmw_edpm_overlay_kustomize | bool
+  delegate_to: "{{ cifmw_edpm_overlay_kustomize_host }}"
+  run_once: true
+  block:
+    - name: Create the dataplane kustomization directory
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_overlay_kustomize_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write the dataplane kustomization
+      ansible.builtin.template:
+        src: edpm-dataplane-kustomization.yaml.j2
+        dest: "{{ cifmw_edpm_overlay_kustomize_dir }}/{{ cifmw_edpm_overlay_kustomize_file }}"
+        mode: "0644"
