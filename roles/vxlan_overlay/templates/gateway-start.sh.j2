@@ -1,0 +1,11 @@
+    # Router analogue: NAT the default network out of the underlay.
+    sysctl -qw net.ipv4.ip_forward=1
+    nft delete table ip cifmw_vxlan_overlay 2>/dev/null || true
+    nft -f - <<'EOF'
+table ip cifmw_vxlan_overlay {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        ip saddr {{ cifmw_vxlan_overlay_networking.networks.default.range }} ip daddr != {{ cifmw_vxlan_overlay_networking.networks.default.range }} oifname "{{ _cifmw_vxlan_overlay_underlay_dev }}" masquerade
+    }
+}
+EOF
