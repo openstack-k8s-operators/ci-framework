@@ -61,6 +61,10 @@ are shared among multiple roles:
 - `cifmw_fips_enabled`: (Bool) Specifies whether FIPS should be enabled in the deployment. Note that not all deployment methods support this functionality. Defaults to `false`.
 - `cifmw_baremetal_hosts`: (Dict) Baremetal nodes environment details. More details [here](../baremetal/01_baremetal_hosts_data.md)
 - `cifmw_deploy_obs` (Bool) Specifies whether to deploy Cluster Observability operator.
+- `cifmw_deploy_hosted_cluster` (Bool) Deploys a KubeVirt hosted control plane
+  cluster on the management cluster and directs the RHOSO deployment to it.
+  Defaults to `false`. See the `hosted_cluster` role README for prerequisites
+  and limitations.
 - `cifmw_openshift_api_ip_address` (String) contains the OpenShift API IP address. Note: it is computed internally and should not be user defined.
 - `cifmw_openshift_ingress_ip_address` (String) contains the OpenShift Ingress IP address. Note: it is computed internally and should not be user defined.
 - `cifmw_nolog`: (Bool) Toggle `no_log` value for selected tasks. Defaults to `true` (hiding those logs by default).
