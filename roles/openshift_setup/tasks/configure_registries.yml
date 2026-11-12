@@ -55,6 +55,163 @@
         registrySources:
           allowedRegistries: "{{ all_registries }}"
 
+- name: Add catalog registry credentials to cluster pull-secret
+  when:
+    - cifmw_openshift_setup_catalog_registry_credentials is defined
+    - cifmw_openshift_setup_catalog_registry_credentials | length > 0
+  no_log: true
+  block:
+    - name: Get current cluster pull-secret
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Secret
+        name: pull-secret
+        namespace: openshift-config
+      register: _cluster_pull_secret
+
+    - name: Normalize credentials to list format
+      ansible.builtin.set_fact:
+        _creds_list: >-
+          {{
+            cifmw_openshift_setup_catalog_registry_credentials
+            if cifmw_openshift_setup_catalog_registry_credentials is iterable and
+               cifmw_openshift_setup_catalog_registry_credentials is not mapping
+            else [cifmw_openshift_setup_catalog_registry_credentials]
+          }}
+
+    - name: Build catalog registry auth dict
+      vars:
+        _auth_entry: >-
+          {{
+            {
+              item.registry: {
+                'auth': (item.username ~ ':' ~ item.password) | b64encode
+              }
+            }
+          }}
+      ansible.builtin.set_fact:
+        _catalog_auths: "{{ (_catalog_auths | default({})) | combine(_auth_entry) }}"
+      loop: "{{ _creds_list }}"
+      loop_control:
+        label: "{{ item.registry }}"
+
+    - name: Merge catalog registry auth into cluster pull-secret
+      vars:
+        _current_auths: >-
+          {{
+            (_cluster_pull_secret.resources[0].data['.dockerconfigjson']
+             | b64decode | from_json).auths
+          }}
+        _merged:
+          auths: "{{ _current_auths | combine(_catalog_auths) }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: pull-secret
+            namespace: openshift-config
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: "{{ _merged | to_json | b64encode }}"
+      register: _pull_secret_update
+
+- name: Add catalog registries to insecure and allowed registries
+  when:
+    - cifmw_openshift_setup_catalog_registry_credentials is defined
+    - cifmw_openshift_setup_catalog_registry_credentials | length > 0
+  block:
+    - name: Get current Image cluster configuration
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        kind: Image
+        name: cluster
+        api_version: config.openshift.io/v1
+      register: _current_image_config
+
+    - name: Extract catalog registry hostnames
+      vars:
+        _creds_list: >-
+          {{
+            cifmw_openshift_setup_catalog_registry_credentials
+            if cifmw_openshift_setup_catalog_registry_credentials is iterable and
+               cifmw_openshift_setup_catalog_registry_credentials is not mapping
+            else [cifmw_openshift_setup_catalog_registry_credentials]
+          }}
+      ansible.builtin.set_fact:
+        _catalog_registries: "{{ _creds_list | map(attribute='registry') | list }}"
+
+    - name: Build merged insecure and allowed registries lists
+      vars:
+        _current_insecure: >-
+          {{
+            _current_image_config.resources[0].spec.registrySources.insecureRegistries
+            | default([])
+          }}
+        _current_allowed: >-
+          {{
+            _current_image_config.resources[0].spec.registrySources.allowedRegistries
+            | default([])
+          }}
+        # Extract mirror destinations from IDMS to include in allowedRegistries
+        _idms_mirror_destinations: >-
+          {{
+            (cifmw_openshift_setup_digest_mirrors | default([]))
+            | map(attribute='mirrors', default=[])
+            | flatten
+            | map('regex_replace', '^https?://', '')
+            | map('regex_replace', '/.*$', '')
+            | list
+          }}
+        # Include internal registry and common OCP registries
+        _internal_registries:
+          - image-registry.openshift-image-registry.svc:5000
+          - image-registry.openshift-image-registry.svc.cluster.local:5000
+      ansible.builtin.set_fact:
+        _merged_insecure_registries: >-
+          {{
+            (_current_insecure +
+             _catalog_registries +
+             ([cifmw_update_containers_registry] if cifmw_update_containers_registry is defined else []))
+            | unique
+          }}
+        _merged_allowed_registries: >-
+          {{
+            (_current_allowed +
+             _catalog_registries +
+             _idms_mirror_destinations +
+             _internal_registries +
+             ([cifmw_update_containers_registry] if cifmw_update_containers_registry is defined else []) +
+             cifmw_openshift_setup_allowed_registries +
+             cifmw_openshift_setup_allowed_extra_registries)
+            | unique
+          }}
+
+    - name: Update Image cluster configuration with catalog registry
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit)}}"
+        context: "{{ cifmw_openshift_context | default(omit)}}"
+        merge_type: "merge"
+        definition:
+          apiVersion: config.openshift.io/v1
+          kind: Image
+          metadata:
+            name: cluster
+          spec:
+            registrySources:
+              insecureRegistries: "{{ _merged_insecure_registries }}"
+              allowedRegistries: "{{ _merged_allowed_registries }}"
+      register: _image_config_update
+
 - name: Create ImageDigestMirrorSet repository digest mirrors
   when:
     - cifmw_openshift_setup_digest_mirrors is defined
@@ -71,6 +228,7 @@
         name: registry-digest-mirrors
       spec:
         imageDigestMirrors: "{{ cifmw_openshift_setup_digest_mirrors }}"
+  register: _idms_update
 
 #  If both ImageDigestMirrorSet and ImageTagMirrorSet are applied to the registries,
 # ITMS acts as a fallback for tag-based pulls, while IDMS provides the primary
@@ -91,3 +249,57 @@
         name: registry-tag-mirrors
       spec:
         imageTagMirrors: "{{ cifmw_openshift_setup_tag_mirrors }}"
+  register: _itms_update
+
+- name: Wait for MachineConfigPools to settle after registry/mirror changes
+  when: >-
+    (_pull_secret_update is defined and _pull_secret_update is changed) or
+    (_image_config_update is defined and _image_config_update is changed) or
+    (_idms_update is defined and _idms_update is changed) or
+    (_itms_update is defined and _itms_update is changed)
+  environment:
+    KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
+    PATH: "{{ cifmw_path }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -eo pipefail
+      MCP_JSON=$(oc get mcp -o json)
+
+      # Check if any pool is currently updating
+      UPDATING=$(echo "$MCP_JSON" | jq -r '
+        .items[] |
+        select(
+          .status.conditions // [] |
+          map(select(.type == "Updating" and .status == "True")) |
+          length > 0
+        ) | .metadata.name')
+
+      # Check if all pools are ready (Updated=True, Degraded=False)
+      NOT_READY=$(echo "$MCP_JSON" | jq -r '
+        .items[] |
+        select(
+          (.status.conditions // [] |
+           map(select(.type == "Updated" and .status == "True")) |
+           length == 0) or
+          (.status.conditions // [] |
+           map(select(.type == "Degraded" and .status == "True")) |
+           length > 0)
+        ) | .metadata.name')
+
+      if [ -n "$UPDATING" ]; then
+        echo "MCPs still updating: $UPDATING"
+        exit 1
+      fi
+
+      if [ -n "$NOT_READY" ]; then
+        echo "MCPs not ready: $NOT_READY"
+        exit 1
+      fi
+
+      echo "All MCPs settled and ready."
+      exit 0
+  register: _mcp_settle
+  until: _mcp_settle.rc == 0
+  retries: 60
+  delay: 30
+  changed_when: false
