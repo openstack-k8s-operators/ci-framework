@@ -1,0 +1,60 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Check the required inputs are defined
+  ansible.builtin.assert:
+    that:
+      - cifmw_multi_node_routing_remotes is defined
+      - cifmw_multi_node_routing_overlay_ranges is defined
+      - cifmw_multi_node_routing_iface is defined
+      - cifmw_multi_node_routing_bridge is defined
+      - cifmw_multi_node_routing_route_table is defined
+      - cifmw_multi_node_routing_rule_priority is defined
+    fail_msg: >-
+      multi_node_routing requires the caller to define
+      cifmw_multi_node_routing_remotes, cifmw_multi_node_routing_overlay_ranges,
+      cifmw_multi_node_routing_iface, cifmw_multi_node_routing_bridge,
+      cifmw_multi_node_routing_route_table and
+      cifmw_multi_node_routing_rule_priority.
+    quiet: true
+
+# Installed and applied before the tunnels come up, so the tunnel packets
+# never follow an overlay route.
+- name: Install the routing dispatcher script
+  become: true
+  ansible.builtin.template:
+    src: nm-dispatcher.sh.j2
+    dest: /etc/NetworkManager/dispatcher.d/90-cifmw-vxlan-overlay
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Apply the routing rules
+  become: true
+  ansible.builtin.command:
+    cmd: /bin/bash /etc/NetworkManager/dispatcher.d/90-cifmw-vxlan-overlay
+  changed_when: true
+
+- name: Check the underlay routing rules are in place
+  become: true
+  ansible.builtin.command:
+    cmd: ip -4 rule show priority {{ cifmw_multi_node_routing_rule_priority }}
+  register: _cifmw_multi_node_routing_rules_initial
+  changed_when: false
+  failed_when: >-
+    cifmw_multi_node_routing_remotes
+    | reject('in', _cifmw_multi_node_routing_rules_initial.stdout)
+    | list | length > 0
