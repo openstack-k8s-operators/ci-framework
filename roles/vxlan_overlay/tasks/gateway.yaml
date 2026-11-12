@@ -1,0 +1,35 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# The NAT rule itself is in the overlay script (survives reboots). firewalld,
+# when running, rejects forwarded traffic unless the ingress zone allows it;
+# the overlay profiles put the overlay interface in a trusted zone, and
+# masquerade is enabled on the underlay zone as well.
+- name: Let firewalld forward and masquerade the default network
+  become: true
+  ansible.builtin.shell: |
+    set -e
+    if systemctl is-active --quiet firewalld; then
+      zone=$(firewall-cmd --get-zone-of-interface={{ _cifmw_vxlan_overlay_underlay_dev }} 2>/dev/null || firewall-cmd --get-default-zone)
+      firewall-cmd --zone="$zone" --add-masquerade
+      firewall-cmd --permanent --zone="$zone" --add-masquerade
+      firewall-cmd --zone={{ cifmw_vxlan_overlay_firewall_zone }} --change-interface={{ cifmw_vxlan_overlay_iface }}
+      echo "firewalld: masquerade on $zone, {{ cifmw_vxlan_overlay_iface }} in {{ cifmw_vxlan_overlay_firewall_zone }}"
+    else
+      echo "firewalld not active"
+    fi
+  register: _cifmw_vxlan_overlay_gw_fw
+  changed_when: "'masquerade on' in _cifmw_vxlan_overlay_gw_fw.stdout"

@@ -1,0 +1,99 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Network layout, in the structure the Neutron backend takes. Neutron-only
+# keys (router_net, transparent, ...) are ignored.
+cifmw_vxlan_overlay_networking: "{{ crc_ci_bootstrap_networking }}"
+cifmw_vxlan_overlay_hosts: "{{ cifmw_vxlan_overlay_networking.instances.keys() | list }}"
+
+# Host that switches frames between the others and owns the default network
+# gateway address.
+cifmw_vxlan_overlay_hub: controller
+
+# Underlay (tunnel endpoint) IPv4 address of each host: the address its
+# peers reach it on. Hosts not listed use their ansible_host, which is right
+# where Ansible connects over the same network the peers use. Pass the
+# addresses in where it is not (NAT, load balancers, mixed providers).
+cifmw_vxlan_overlay_underlay_ips: {}
+
+# UDP destination port
+cifmw_vxlan_overlay_dstport: 4789
+
+cifmw_vxlan_overlay_vni_base: 5000
+
+# 0 means auto: min(underlay MTU across hosts) - overhead, capped by
+# cifmw_vxlan_overlay_networking.networks.default.mtu when set.
+cifmw_vxlan_overlay_mtu: 0
+# Outer IPv4 (20) + UDP (8) + VXLAN (8) + inner Ethernet (14) + inner 802.1Q (4).
+cifmw_vxlan_overlay_overhead: 54
+cifmw_vxlan_overlay_min_mtu: 1280
+
+# Interface names (at most 15 characters).
+cifmw_vxlan_overlay_iface: nic2
+cifmw_vxlan_overlay_peer_iface: nic2-p
+cifmw_vxlan_overlay_bridge: br-ovl
+cifmw_vxlan_overlay_tunnel_prefix: ovl-
+
+# The hub keeps the default network gateway address and NATs the default
+# network out of its underlay interface (Neutron router analogue).
+cifmw_vxlan_overlay_gateway: true
+
+# Policy routing for underlay addresses that fall inside an overlay network:
+#   priority P:   to <each tunnel remote>               lookup TABLE
+#   priority P+1: from <underlay address> to <overlay>  lookup TABLE
+#   TABLE:        default via <underlay gateway>
+# Applied by a NetworkManager dispatcher script, so it follows reboots,
+# os-net-config and OpenShift moving the underlay address onto br-ex. All
+# tunnel traffic then leaves through the default gateway, so only enable it
+# where peers are reached that way. Without it, overlaps fail validation.
+cifmw_vxlan_overlay_policy_routing: false
+cifmw_vxlan_overlay_route_table: 6082
+cifmw_vxlan_overlay_rule_priority: 1082
+
+# Extra CIDRs the overlay networks must not overlap. The subnet of each
+# host's underlay interface is always checked.
+cifmw_vxlan_overlay_underlay_cidrs: []
+
+# firewalld zone for the overlay NM profiles (ignored where firewalld is off).
+cifmw_vxlan_overlay_firewall_zone: trusted
+
+# Hosts that later become EDPM data plane nodes, with os-net-config building
+# br-ex on top of the overlay. For them the role:
+#   - pre-seeds an edpm_nftables snippet that allows the overlay port
+#   - installs a unit, pulled in by openvswitch.service, that turns the
+#     transport bridge into an OVS bridge with a patch port for br-ex when
+#     EDPM starts Open vSwitch (just before os-net-config). os-net-config's
+#     nmstate provider cannot verify a veth as a 'type: interface' member.
+cifmw_vxlan_overlay_edpm_hosts: "{{ groups['computes'] | default([]) }}"
+
+# Dataplane kustomization written on cifmw_vxlan_overlay_edpm_kustomize_host
+# for those hosts. It gives the os-net-config template (the RHEL 9 template
+# from ci-framework fetch_compute_facts) a patch port member instead of nic2,
+# and keeps EDPM bootstrap from enabling global bridge netfilter, which would
+# expose the tunnelled frames to host filtering. edpm_deploy applies dataplane
+# kustomizations in descending name order, so the lowest name wins.
+cifmw_vxlan_overlay_edpm_kustomize: "{{ cifmw_vxlan_overlay_edpm_hosts | length > 0 }}"
+cifmw_vxlan_overlay_edpm_kustomize_host: controller
+cifmw_vxlan_overlay_edpm_kustomize_dir: "~/ci-framework-data/artifacts/manifests/kustomizations/dataplane"
+cifmw_vxlan_overlay_edpm_kustomize_file: 90-kustomize-cifmw-vxlan-overlay.yaml
+# Name regex of the OpenStackDataPlaneNodeSets to patch. Each must contain
+# only hosts from cifmw_vxlan_overlay_edpm_hosts.
+cifmw_vxlan_overlay_edpm_kustomize_nodesets: ".*"
+
+cifmw_vxlan_overlay_unit: cifmw-vxlan-overlay
+cifmw_vxlan_overlay_ovs_unit: cifmw-vxlan-overlay-ovs
+cifmw_vxlan_overlay_script: /etc/ci/env/cifmw-vxlan-overlay.sh
+cifmw_vxlan_overlay_info_file: /etc/ci/env/networking-info.yml

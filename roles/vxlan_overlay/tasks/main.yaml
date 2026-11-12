@@ -1,0 +1,122 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Run in a play whose hosts are exactly cifmw_vxlan_overlay_hosts.
+- name: Validate the input
+  ansible.builtin.import_tasks: validate.yaml
+
+- name: Discover the underlay
+  ansible.builtin.import_tasks: underlay.yaml
+
+- name: Plan the overlay
+  ansible.builtin.import_tasks: plan.yaml
+
+- name: Configure and start the transport
+  vars:
+    cifmw_multi_node_vxlan_bridge: "{{ cifmw_vxlan_overlay_bridge }}"
+    cifmw_multi_node_vxlan_iface: "{{ cifmw_vxlan_overlay_iface }}"
+    cifmw_multi_node_vxlan_peer_iface: "{{ cifmw_vxlan_overlay_peer_iface }}"
+    cifmw_multi_node_vxlan_mac: "{{ crc_ci_bootstrap_networks_out[inventory_hostname].default.mac }}"
+    cifmw_multi_node_vxlan_mtu: "{{ _cifmw_vxlan_overlay_mtu }}"
+    cifmw_multi_node_vxlan_dstport: "{{ cifmw_vxlan_overlay_dstport }}"
+    cifmw_multi_node_vxlan_tunnels: "{{ _cifmw_vxlan_overlay_tunnels }}"
+    cifmw_multi_node_vxlan_tunnel_prefix: "{{ cifmw_vxlan_overlay_tunnel_prefix }}"
+    cifmw_multi_node_vxlan_unmanaged_interfaces: "{{ [_cifmw_vxlan_overlay_patch_port] }}"
+    cifmw_multi_node_vxlan_marker: "{{ (cifmw_vxlan_overlay_script ~ '.ovs') if _cifmw_vxlan_overlay_is_edpm | bool else '' }}"
+    cifmw_multi_node_vxlan_unit: "{{ cifmw_vxlan_overlay_unit }}"
+    cifmw_multi_node_vxlan_script: "{{ cifmw_vxlan_overlay_script }}"
+    cifmw_multi_node_vxlan_start_commands: >-
+      {{ lookup('ansible.builtin.template', 'gateway-start.sh.j2')
+         if (_cifmw_vxlan_overlay_is_hub | bool and cifmw_vxlan_overlay_gateway | bool) else '' }}
+    cifmw_multi_node_vxlan_stop_commands: >-
+      {{ lookup('ansible.builtin.template', 'gateway-stop.sh.j2')
+         if (_cifmw_vxlan_overlay_is_hub | bool and cifmw_vxlan_overlay_gateway | bool) else '' }}
+  block:
+    - name: Configure transport device management
+      ansible.builtin.include_role:
+        name: multi_node_vxlan
+        tasks_from: configure.yaml
+
+    - name: Write the NetworkManager profiles
+      ansible.builtin.import_tasks: networkmanager.yaml
+
+    - name: Install the underlay policy routing
+      when: cifmw_vxlan_overlay_policy_routing | bool
+      ansible.builtin.include_role:
+        name: multi_node_routing
+      vars:
+        cifmw_multi_node_routing_remotes: "{{ _cifmw_vxlan_overlay_tunnels | map(attribute='remote') | list }}"
+        cifmw_multi_node_routing_overlay_ranges: "{{ cifmw_vxlan_overlay_networking.networks.values() | map(attribute='range') | list }}"
+        cifmw_multi_node_routing_iface: "{{ cifmw_vxlan_overlay_iface }}"
+        cifmw_multi_node_routing_bridge: "{{ cifmw_vxlan_overlay_bridge }}"
+        cifmw_multi_node_routing_route_table: "{{ cifmw_vxlan_overlay_route_table }}"
+        cifmw_multi_node_routing_rule_priority: "{{ cifmw_vxlan_overlay_rule_priority }}"
+
+    - name: Install the transport persistence
+      ansible.builtin.include_role:
+        name: multi_node_vxlan
+        tasks_from: install.yaml
+
+    - name: Allow the overlay port in firewalld
+      ansible.builtin.import_tasks: firewall.yaml
+
+    - name: Start transport devices
+      ansible.builtin.include_role:
+        name: multi_node_vxlan
+        tasks_from: start.yaml
+
+    - name: Bring the overlay profiles up
+      ansible.builtin.import_tasks: activate.yaml
+
+- name: Prepare EDPM hosts
+  ansible.builtin.include_role:
+    name: edpm_overlay
+  vars:
+    cifmw_edpm_overlay_enabled: "{{ _cifmw_vxlan_overlay_is_edpm }}"
+    cifmw_edpm_overlay_bridge: "{{ cifmw_vxlan_overlay_bridge }}"
+    cifmw_edpm_overlay_peer_iface: "{{ cifmw_vxlan_overlay_peer_iface }}"
+    cifmw_edpm_overlay_tunnels: "{{ _cifmw_vxlan_overlay_tunnels }}"
+    cifmw_edpm_overlay_patch_port: "{{ _cifmw_vxlan_overlay_patch_port }}"
+    cifmw_edpm_overlay_patch_peer: "{{ _cifmw_vxlan_overlay_patch_peer }}"
+    cifmw_edpm_overlay_dstport: "{{ cifmw_vxlan_overlay_dstport }}"
+    cifmw_edpm_overlay_transport_unit: "{{ cifmw_vxlan_overlay_unit }}"
+    cifmw_edpm_overlay_unit: "{{ cifmw_vxlan_overlay_ovs_unit }}"
+    cifmw_edpm_overlay_script: "{{ cifmw_vxlan_overlay_script | splitext | first }}-ovs.sh"
+    cifmw_edpm_overlay_marker: "{{ cifmw_vxlan_overlay_script }}.ovs"
+    cifmw_edpm_overlay_kustomize: "{{ cifmw_vxlan_overlay_edpm_kustomize }}"
+    cifmw_edpm_overlay_kustomize_host: "{{ cifmw_vxlan_overlay_edpm_kustomize_host }}"
+    cifmw_edpm_overlay_kustomize_dir: "{{ cifmw_vxlan_overlay_edpm_kustomize_dir }}"
+    cifmw_edpm_overlay_kustomize_file: "{{ cifmw_vxlan_overlay_edpm_kustomize_file }}"
+    cifmw_edpm_overlay_kustomize_nodesets: "{{ cifmw_vxlan_overlay_edpm_kustomize_nodesets }}"
+
+- name: Configure the hub gateway
+  when:
+    - inventory_hostname == cifmw_vxlan_overlay_hub
+    - cifmw_vxlan_overlay_gateway | bool
+  ansible.builtin.import_tasks: gateway.yaml
+
+- name: Write the networking information file
+  ansible.builtin.import_tasks: networking_info.yaml
+
+- name: Check routing after profile activation
+  when: cifmw_vxlan_overlay_policy_routing | bool
+  ansible.builtin.include_role:
+    name: multi_node_routing
+    tasks_from: check.yaml
+  vars:
+    cifmw_multi_node_routing_remotes: "{{ _cifmw_vxlan_overlay_tunnels | map(attribute='remote') | list }}"
+    cifmw_multi_node_routing_route_table: "{{ cifmw_vxlan_overlay_route_table }}"
+    cifmw_multi_node_routing_rule_priority: "{{ cifmw_vxlan_overlay_rule_priority }}"
