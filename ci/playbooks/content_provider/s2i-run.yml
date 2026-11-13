@@ -1,0 +1,151 @@
+---
+- name: Build selected S2I service images into the operator provider registry
+  hosts: "{{ cifmw_zuul_target_host | default('all') }}"
+  gather_facts: true
+  tasks:
+    - name: Filter out host if needed
+      when:
+        - cifmw_zuul_target_host is defined
+        - cifmw_zuul_target_host != 'all'
+        - inventory_hostname != cifmw_zuul_target_host
+      ansible.builtin.meta: end_host
+
+    - name: Require a non-empty S2I image selection
+      ansible.builtin.assert:
+        that:
+          - s2i_ci_images is defined
+          - s2i_ci_images | default([], true) | length > 0
+        fail_msg: >-
+          Set s2i_ci_images to 'auto', 'all', or a non-empty list of service
+          image targets. Operator-only changes require explicit image targets.
+
+    # Resolve before passing extra vars, which override the resolver's set_fact.
+    - name: Resolve S2I images from the Zuul changes
+      when: s2i_ci_images == 'auto'
+      vars:
+        # Required by the included S2I resolver to locate build.sh on the builder.
+        s2i_ci_container_repo: >-
+          {{ ansible_user_dir }}/{{ zuul.projects[s2i_ci_container_project].src_dir }}
+      ansible.builtin.include_tasks: >-
+        {{ zuul.executor.work_root }}/{{ zuul.projects[s2i_ci_container_project].src_dir }}/playbooks/container-ci/shared/resolve-auto-images.yaml
+
+    # Keep the parent provider defaults; cifmw_extras applies the CS10 overrides.
+    - name: Deploy the shared registry and build operator images
+      environment:
+        ANSIBLE_CONFIG: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg"
+      ansible.builtin.command:
+        chdir: "{{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework"
+        cmd: >-
+          ansible-playbook -i localhost,
+          -c local ci/playbooks/content_provider/content_provider.yml
+          -e @group_vars/all.yml
+          -e @scenarios/centos-9/base.yml
+          -e @scenarios/centos-9/content_provider.yml
+          -e "@{{ ansible_user_dir }}/ci-framework-data/artifacts/parameters/zuul-params.yml"
+          -e "cifmw_rp_registry_ip={{ cifmw_rp_registry_ip }}"
+          {%- if cifmw_extras is defined %}
+          {%-   for extra_vars in cifmw_extras %}
+          -e "{{ extra_vars }}"
+          {%-   endfor %}
+          {%- endif %}
+
+    - name: Read operator provider results
+      ansible.builtin.slurp:
+        src: "{{ cifmw_artifacts_basedir }}/artifacts/ansible-vars.yml"
+      register: inner_ansible
+
+    - name: Decode operator provider results
+      ansible.builtin.set_fact:
+        inner_ansible_vars: "{{ inner_ansible.content | b64decode | from_yaml }}"
+
+    - name: Prepare S2I runtime variables
+      ansible.builtin.include_tasks: s2i-provider-vars.yml
+
+    - name: Prepare S2I build host and reuse the provider registry
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - -i
+          - "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          - -i
+          - "{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-inventory.yml"
+          - -c
+          - local
+          - "{{ s2i_provider_container_repo }}/playbooks/container-ci/zuul/pre.yaml"
+          - -e
+          - "@{{ cifmw_artifacts_basedir }}/artifacts/parameters/zuul-params.yml"
+          - -e
+          - "@{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-provider.yml"
+      args:
+        chdir: "{{ s2i_provider_container_repo }}"
+      environment:
+        ANSIBLE_CONFIG: >-
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg
+        ANSIBLE_ROLES_PATH: "{{ s2i_provider_roles_path }}"
+      changed_when: true
+
+    - name: Build and publish the selected S2I images
+      ansible.builtin.command:
+        argv:
+          - ansible-playbook
+          - -i
+          - "{{ ansible_user_dir }}/ci-framework-data/artifacts/zuul_inventory.yml"
+          - -i
+          - "{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-inventory.yml"
+          - -c
+          - local
+          - "{{ s2i_provider_container_repo }}/playbooks/container-ci/shared/run.yaml"
+          - -e
+          - "@{{ cifmw_artifacts_basedir }}/artifacts/parameters/zuul-params.yml"
+          - -e
+          - "@{{ cifmw_artifacts_basedir }}/artifacts/parameters/s2i-provider.yml"
+      args:
+        chdir: "{{ s2i_provider_container_repo }}"
+      environment:
+        ANSIBLE_CONFIG: >-
+          {{ ansible_user_dir }}/src/github.com/openstack-k8s-operators/ci-framework/ansible.cfg
+        ANSIBLE_ROLES_PATH: "{{ s2i_provider_roles_path }}"
+      changed_when: true
+
+    - name: Read S2I publication metadata
+      ansible.builtin.slurp:
+        src: >-
+          {{ ansible_user_dir }}/zuul-output/logs/container-build/published-images.json
+      register: s2i_provider_published_images_data
+
+    - name: Decode S2I publication metadata
+      ansible.builtin.set_fact:
+        s2i_provider_published_images: >-
+          {{ s2i_provider_published_images_data.content | b64decode | from_json }}
+
+    - name: Return operator and S2I provider metadata to dependent jobs
+      zuul_return:
+        data:
+          zuul:
+            pause: true
+          # Preserve the operator provider outputs for dependent jobs.
+          cifmw_operator_build_output: "{{ inner_ansible_vars.cifmw_operator_build_output }}"
+          cifmw_build_images_output: "{{ inner_ansible_vars.cifmw_build_images_output | default({}) }}"
+          content_provider_registry_available: true
+          content_provider_registry_ip: "{{ s2i_ci_external_registry.public_host }}"
+          content_provider_registry_ip_port: "{{ s2i_ci_external_registry.endpoint }}"
+          # Return S2I outputs separately from the operator provider outputs.
+          s2i_ci_content: >-
+            {{ s2i_provider_published_images | combine({
+                 'registry_host': s2i_ci_external_registry.public_host,
+                 'registry_port': s2i_ci_external_registry.public_port
+               }) }}
+          s2i_content_provider_os_custom_container_images: >-
+            {{ s2i_provider_published_images.custom_container_images }}
+          s2i_content_provider_os_registry_url: "null"
+          s2i_content_provider_os_registry_namespace: ""
+          s2i_content_provider_os_registry_tag: ""
+          s2i_content_provider_dlrn_md5_hash: ""
+          s2i_content_provider_gating_repo_available: false
+          s2i_content_provider_gating_repo_url: ""
+          s2i_content_provider_registry_available: true
+          s2i_content_provider_registry_ip: >-
+            {{ s2i_ci_external_registry.public_host }}
+          s2i_content_provider_registry_ip_port: >-
+            {{ s2i_ci_external_registry.endpoint }}
+          s2i_cifmw_build_images_output: {}
