@@ -1,5 +1,7 @@
 ---
 # noqa: schema[playbook]
+# API calls run on the current host. Optionally configure CRI-O on another host
+# using its existing inventory connection instead of copying API credentials.
 - name: Patch the image.config.openshift.io resource to include insecure registry
   when: content_provider_registry_ip is defined
   ansible.builtin.shell: >-
@@ -47,6 +49,7 @@
   loop: "{{ cifmw_crc_additional_insecure_registries }}"
 
 - name: Ensure registries.conf.d exists
+  delegate_to: "{{ cifmw_crc_registry_config_host | default(inventory_hostname) }}"
   become: true
   when: cifmw_crc_registry_mirror_content is defined or content_provider_registry_ip is defined
   ansible.builtin.file:
@@ -54,6 +57,7 @@
     state: directory
 
 - name: Set Insecure registry for content provider
+  delegate_to: "{{ cifmw_crc_registry_config_host | default(inventory_hostname) }}"
   become: true
   when: content_provider_registry_ip is defined
   ansible.builtin.blockinfile:
@@ -70,6 +74,7 @@
       prefix = ""
 
 - name: Set insecure registry in crio for additional registries
+  delegate_to: "{{ cifmw_crc_registry_config_host | default(inventory_hostname) }}"
   become: true
   when: cifmw_crc_additional_insecure_registries is defined
   ansible.builtin.blockinfile:
@@ -88,6 +93,7 @@
   loop: "{{ cifmw_crc_additional_insecure_registries }}"
 
 - name: Set registry mirror override
+  delegate_to: "{{ cifmw_crc_registry_config_host | default(inventory_hostname) }}"
   when: cifmw_crc_registry_mirror_content is defined
   become: true
   ansible.builtin.blockinfile:
@@ -98,6 +104,7 @@
     content: "{{ cifmw_crc_registry_mirror_content }}"
 
 - name: Restart crio
+  delegate_to: "{{ cifmw_crc_registry_config_host | default(inventory_hostname) }}"
   when: >-
     cifmw_crc_registry_mirror_content is defined or
     content_provider_registry_ip is defined or
