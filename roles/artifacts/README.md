@@ -3,7 +3,7 @@ This role allow to gather data from the environment. It will then output files
 in the defined base directory.
 
 ## Privilege escalation
-None - writes happen only in the user home.
+Optional compute journal collection uses Ansible privilege escalation on compute nodes to run `journalctl`.
 
 ## Parameters
 * `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
@@ -13,6 +13,7 @@ None - writes happen only in the user home.
 * `cifmw_artifacts_crc_sshkey_ed25519`: (String) Path to the private SSH key to connect to CRC (newer CRC images). Defaults to `~/.crc/machines/crc/id_ed25519`.
 * `cifmw_artifacts_gather_logs`: (Boolean) Enables must-gather logs fetching. Defaults to `true`
 * `cifmw_artifacts_gather_edpm_logs`: (Boolean) Enables edpm logs fetching. Defaults to `true`
+* `cifmw_artifacts_gather_nova_compute_logs`: (Boolean) Collect the `edpm_nova_compute.service` journal on `compute-*` inventory hosts during CI log collection. Defaults to `false`. Writes `~/zuul-output/logs/nova-compute.log`, published as `<compute-node>/nova-compute.log` in Zuul.
 * `cifmw_artifacts_mask_logs`: (Boolean) Enables artifacts and logs masking. Defaults to `true`
 
 ## Examples
