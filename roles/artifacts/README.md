@@ -3,7 +3,7 @@ This role allow to gather data from the environment. It will then output files
 in the defined base directory.
 
 ## Privilege escalation
-None - writes happen only in the user home.
+Optional service journal collection uses Ansible privilege escalation on selected nodes to run `journalctl`.
 
 ## Parameters
 * `cifmw_artifacts_basedir`: (String) Base directory. Defaults to `cifmw_basedir` which defaults to `~/ci-framework-data`.
@@ -13,9 +13,18 @@ None - writes happen only in the user home.
 * `cifmw_artifacts_crc_sshkey_ed25519`: (String) Path to the private SSH key to connect to CRC (newer CRC images). Defaults to `~/.crc/machines/crc/id_ed25519`.
 * `cifmw_artifacts_gather_logs`: (Boolean) Enables must-gather logs fetching. Defaults to `true`
 * `cifmw_artifacts_gather_edpm_logs`: (Boolean) Enables edpm logs fetching. Defaults to `true`
+* `cifmw_artifacts_service_logs`: (List) Systemd unit names whose journals to collect during CI log collection. Defaults to `[]`. Writes `~/zuul-output/logs/<unit>.log`, published as `<node>/<unit>.log` in Zuul. Set in Zuul job variables for all nodes. Collects journals only, not service log files.
 * `cifmw_artifacts_mask_logs`: (Boolean) Enables artifacts and logs masking. Defaults to `true`
 
 ## Examples
+Set the list in a Zuul job's `vars` to collect journals on all nodes:
+```yaml
+vars:
+  cifmw_artifacts_service_logs:
+    - edpm_nova_compute.service
+    - ovs-vswitchd.service
+```
+
 Usually we'll import the role as-is at the very start of the playbook, and
 import the tasks from `packages.yml` at the very end:
 ```YAML
