@@ -73,6 +73,34 @@
           - libguestfs
           - guestfs-tools
 
+    - name: Check if libvirt default storage pool exists
+      become: true
+      ansible.builtin.command:
+        cmd: virsh -c qemu:///system pool-info default
+      failed_when: false
+      changed_when: false
+      register: _default_pool_info
+
+    - name: Define libvirt default storage pool
+      become: true
+      when: _default_pool_info.rc != 0
+      ansible.builtin.command:
+        cmd: >-
+          virsh -c qemu:///system pool-define-as
+          --name default --type dir --target /var/lib/libvirt/images
+
+    - name: Start libvirt default storage pool
+      become: true
+      when: _default_pool_info.rc != 0
+      ansible.builtin.command:
+        cmd: virsh -c qemu:///system pool-start default
+
+    - name: Set libvirt default storage pool to autostart
+      become: true
+      when: _default_pool_info.rc != 0
+      ansible.builtin.command:
+        cmd: virsh -c qemu:///system pool-autostart default
+
     - name: Allow qemu user on user home directory for VM storage accesses
       become: true
       ansible.posix.acl:
