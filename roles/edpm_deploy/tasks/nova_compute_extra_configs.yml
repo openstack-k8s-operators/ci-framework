@@ -1,0 +1,187 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Split the single rendered OpenStackDataPlaneNodeSet into one NodeSet per
+# entry of cifmw_edpm_deploy_nova_compute_extra_configs. Every entry gets its
+# own nova OpenStackDataPlaneService backed by its own nova-extra-config
+# ConfigMap, so groups of computes can run with different nova.conf options,
+# e.g. different [compute] cpu_dedicated_set values needed by whitebox CPU
+# pinning tests. The map keys become the new NodeSet names, the nova service
+# of each NodeSet is renamed to nova-<NodeSet name>, and the same value is
+# set as the edpm_nova_service_name ansibleVar so that edpm-ansible reads
+# the ConfigMap of that NodeSet.
+
+- name: Validate the per-nodeset nova extra config host mapping
+  vars:
+    _cifmw_edpm_deploy_entries: >-
+      {{ cifmw_edpm_deploy_nova_compute_extra_configs | dict2items }}
+    _cifmw_edpm_deploy_nodeset: >-
+      {{ cifmw_edpm_deploy_crs_kustomize_result.result
+         | selectattr('kind', 'defined')
+         | selectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet')
+         | first }}
+    _cifmw_edpm_deploy_rendered_hosts: >-
+      {{ _cifmw_edpm_deploy_nodeset.spec.nodes | dict2items
+         | map(attribute='value.hostName') | list }}
+    _cifmw_edpm_deploy_mapped_hosts: >-
+      {{ _cifmw_edpm_deploy_entries | selectattr('value.hosts', 'defined')
+         | map(attribute='value.hosts') | flatten | list }}
+  ansible.builtin.assert:
+    that:
+      - >-
+        _cifmw_edpm_deploy_entries | selectattr('value.hosts', 'defined') | list | length
+        == _cifmw_edpm_deploy_entries | length
+      - >-
+        _cifmw_edpm_deploy_entries | selectattr('value.hosts', 'defined')
+        | map(attribute='value.hosts') | map('length') | select('equalto', 0) | list | length == 0
+      - >-
+        _cifmw_edpm_deploy_entries | selectattr('value.nova_compute_extra_config', 'defined') | list | length
+        == _cifmw_edpm_deploy_entries | length
+      - _cifmw_edpm_deploy_mapped_hosts | length == _cifmw_edpm_deploy_mapped_hosts | unique | length
+      - _cifmw_edpm_deploy_rendered_hosts | difference(_cifmw_edpm_deploy_mapped_hosts) | length == 0
+      - _cifmw_edpm_deploy_mapped_hosts | difference(_cifmw_edpm_deploy_rendered_hosts) | length == 0
+      - "'nova' in _cifmw_edpm_deploy_nodeset.spec.services"
+    fail_msg: >-
+      Every host of the rendered OpenStackDataPlaneNodeSet
+      ({{ _cifmw_edpm_deploy_rendered_hosts | join(', ') }}) must be listed
+      exactly once across the hosts lists of
+      cifmw_edpm_deploy_nova_compute_extra_configs: a host must not be
+      repeated between entries, unknown hosts are not allowed, every entry
+      must define a non-empty hosts list and a nova_compute_extra_config
+      string, and the rendered NodeSet must reference the nova service so
+      that it can be replaced by a per-Nodeset service.
+
+- name: Reset the list of split dataplane resources
+  ansible.builtin.set_fact:
+    cifmw_edpm_deploy_split_docs: []
+
+- name: Build the per-nodeset dataplane resources
+  ansible.builtin.set_fact:
+    cifmw_edpm_deploy_split_docs: >-
+      {{ cifmw_edpm_deploy_split_docs
+         + [_cifmw_edpm_deploy_configmap, _cifmw_edpm_deploy_service,
+            _cifmw_edpm_deploy_split_nodeset] }}
+  loop: "{{ cifmw_edpm_deploy_nova_compute_extra_configs | dict2items }}"
+  loop_control:
+    loop_var: _cifmw_edpm_deploy_entry
+  vars:
+    _cifmw_edpm_deploy_nodeset: >-
+      {{ cifmw_edpm_deploy_crs_kustomize_result.result
+         | selectattr('kind', 'defined')
+         | selectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet')
+         | first }}
+    _cifmw_edpm_deploy_service_name: "nova-{{ _cifmw_edpm_deploy_entry.key }}"
+    _cifmw_edpm_deploy_split_nodes: >-
+      {{ _cifmw_edpm_deploy_nodeset.spec.nodes | dict2items
+         | selectattr('value.hostName', 'in', _cifmw_edpm_deploy_entry.value.hosts)
+         | items2dict }}
+    _cifmw_edpm_deploy_split_services: >-
+      {{ _cifmw_edpm_deploy_nodeset.spec.services
+         | map('regex_replace', '^nova$', _cifmw_edpm_deploy_service_name)
+         | list }}
+    _cifmw_edpm_deploy_split_nodeset: >-
+      {{
+        _cifmw_edpm_deploy_nodeset
+        | combine({'metadata': {'name': _cifmw_edpm_deploy_entry.key}}, recursive=true)
+        | combine({'spec': _cifmw_edpm_deploy_new_spec})
+      }}
+    # nodes is a dict and must be replaced, not merged, so it is combined
+    # into spec without recursive=true.
+    _cifmw_edpm_deploy_new_spec: >-
+      {{
+        _cifmw_edpm_deploy_nodeset.spec
+        | combine({'nodes': _cifmw_edpm_deploy_split_nodes})
+        | combine({'services': _cifmw_edpm_deploy_split_services})
+        | combine({
+             'nodeTemplate': {
+               'ansible': {
+                 'ansibleVars': {
+                   'edpm_nova_service_name': _cifmw_edpm_deploy_service_name
+                 }
+               }
+             }
+           }, recursive=true)
+      }}
+    _cifmw_edpm_deploy_configmap:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "nova-extra-config-{{ _cifmw_edpm_deploy_entry.key }}"
+        namespace: "{{ _cifmw_edpm_deploy_nodeset.metadata.namespace }}"
+      data:
+        "25-nova-extra.conf": "{{ _cifmw_edpm_deploy_entry.value.nova_compute_extra_config }}"
+    _cifmw_edpm_deploy_service:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneService
+      metadata:
+        name: "{{ _cifmw_edpm_deploy_service_name }}"
+        namespace: "{{ _cifmw_edpm_deploy_nodeset.metadata.namespace }}"
+      spec:
+        playbook: osp.edpm.nova
+        dataSources:
+          - secretRef:
+              name: nova-cell1-compute-config
+          - secretRef:
+              name: nova-migration-ssh-key
+        configMaps:
+          - "nova-extra-config-{{ _cifmw_edpm_deploy_entry.key }}"
+        caCerts: combined-ca-bundle
+        edpmServiceType: "{{ _cifmw_edpm_deploy_service_name }}"
+        containerImageFields:
+          - NovaComputeImage
+          - EdpmIscsidImage
+
+- name: Point the DataPlaneDeployment at the split NodeSets
+  vars:
+    _cifmw_edpm_deploy_deployment: >-
+      {{ cifmw_edpm_deploy_crs_kustomize_result.result
+         | selectattr('kind', 'defined')
+         | selectattr('kind', 'equalto', 'OpenStackDataPlaneDeployment')
+         | first }}
+    _cifmw_edpm_deploy_unchanged_docs: >-
+      {{ cifmw_edpm_deploy_crs_kustomize_result.result
+         | selectattr('kind', 'defined')
+         | rejectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet')
+         | rejectattr('kind', 'equalto', 'OpenStackDataPlaneDeployment')
+         | list }}
+    _cifmw_edpm_deploy_split_nodeset_names: >-
+      {{ cifmw_edpm_deploy_nova_compute_extra_configs.keys() | list }}
+    _cifmw_edpm_deploy_split_deployment: >-
+      {{ _cifmw_edpm_deploy_deployment
+         | combine({'spec': {'nodeSets': _cifmw_edpm_deploy_split_nodeset_names}},
+                   recursive=true) }}
+  ansible.builtin.set_fact:
+    cifmw_edpm_deploy_split_docs: >-
+      {{ _cifmw_edpm_deploy_unchanged_docs + cifmw_edpm_deploy_split_docs
+         + [_cifmw_edpm_deploy_split_deployment] }}
+
+- name: Write the split dataplane resources
+  vars:
+    # The separator must be a YAML double-quoted scalar: Jinja string
+    # literals do not process the \n escape in this ansible-core version.
+    _cifmw_edpm_deploy_doc_separator: "\n---\n"
+  ansible.builtin.copy:
+    mode: "0644"
+    dest: "{{ cifmw_edpm_deploy_crs_kustomize_result.output_path }}"
+    content: >-
+      {{ cifmw_edpm_deploy_split_docs | map('to_yaml')
+         | join(_cifmw_edpm_deploy_doc_separator) }}
+
+- name: Use the split resources for the rest of the deployment
+  ansible.builtin.set_fact:
+    cifmw_edpm_deploy_crs_kustomize_result: >-
+      {{ cifmw_edpm_deploy_crs_kustomize_result
+         | combine({'result': cifmw_edpm_deploy_split_docs}) }}
