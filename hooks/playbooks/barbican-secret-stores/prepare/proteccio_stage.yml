@@ -1,0 +1,131 @@
+---
+# Stage the Proteccio client-data Secret as a YAML manifest (no cluster).
+# Included from prepare/proteccio.yml when bss_stage_dir is defined.
+#
+# data-plane-adoption's barbican_adoption role hardcodes
+# /tmp/hsm-prep-working-dir/proteccio_data_secret.yml: it applies the
+# staged manifest once the CRC cluster exists and creates the login
+# secret itself, so only the client-data manifest is staged here.
+#
+# All file I/O is target-side (find/slurp/copy) - no controller-side
+# lookups, so staging works wherever the play targets.
+
+- name: Create staging directory {{ bss_stage_dir }}
+  ansible.builtin.file:
+    path: "{{ bss_stage_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Remove stale staged client-data Secret for {{ store.id }}
+  ansible.builtin.file:
+    path: "{{ bss_stage_dir }}/proteccio_data_secret.yml"
+    state: absent
+
+- name: Reset staging certs directory for {{ store.id }}
+  ansible.builtin.file:
+    path: "{{ bss_stage_dir }}/certs"
+    state: absent
+
+- name: Create staging certs directory for {{ store.id }}
+  ansible.builtin.file:
+    path: "{{ bss_stage_dir }}/certs"
+    state: directory
+    mode: "0700"
+
+- name: Stage Proteccio client certificate for {{ store.id }}
+  ansible.builtin.get_url:
+    url: "{{ store.client_crt_src }}"
+    dest: "{{ bss_stage_dir }}/certs/"
+    mode: "0600"
+
+- name: Stage Proteccio client key for {{ store.id }}
+  ansible.builtin.get_url:
+    url: "{{ store.client_key_src }}"
+    dest: "{{ bss_stage_dir }}/certs/"
+    mode: "0600"
+  no_log: true
+
+- name: Stage Proteccio server certificates for {{ store.id }}
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: "{{ bss_stage_dir }}/certs/"
+    mode: "0600"
+  loop: "{{ store.server_crt_src }}"
+
+- name: Stage proteccio.rc for {{ store.id }}
+  ansible.builtin.get_url:
+    url: "{{ store.conf_src }}"
+    dest: "{{ bss_stage_dir }}/proteccio.rc"
+    mode: "0600"
+
+- name: Point staged proteccio.rc at the store host for {{ store.id }}
+  when: store.host is defined
+  ansible.builtin.replace:
+    path: "{{ bss_stage_dir }}/proteccio.rc"
+    regexp: 'IPaddr=.*'
+    replace: 'IPaddr={{ store.host }}'
+  # Replaces every IPaddr= line: single-HSM rc files only. HA rc files
+  # come pre-pointed from lookaside - do not set host on those stores.
+
+- name: Find staged certificate files for {{ store.id }}
+  ansible.builtin.find:
+    paths: "{{ bss_stage_dir }}/certs"
+    patterns: "*"
+    file_type: file
+  register: _proteccio_staged_certs
+
+- name: Slurp staged Proteccio material for {{ store.id }}
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: "{{ (_proteccio_staged_certs.files | map(attribute='path') | list)
+            + [bss_stage_dir ~ '/proteccio.rc'] }}"
+  register: _proteccio_staged_slurp
+  no_log: true
+
+- name: Assemble staged client-data Secret for {{ store.id }}
+  vars:
+    _proteccio_staged_keys: "{{ _proteccio_staged_slurp.results
+                                | map(attribute='item') | map('basename') | list }}"
+    _proteccio_staged_values: "{{ _proteccio_staged_slurp.results
+                                  | map(attribute='content') | list }}"
+  ansible.builtin.set_fact:
+    _proteccio_staged_secret:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: "{{ store.client_data_secret | default('barbican-proteccio-client-data') }}"
+        namespace: "{{ store.client_data_secret_namespace | default('openstack') }}"
+      data: "{{ dict(_proteccio_staged_keys | zip(_proteccio_staged_values)) }}"
+  no_log: true
+
+- name: Write staged client-data Secret for {{ store.id }}
+  ansible.builtin.copy:
+    content: "{{ _proteccio_staged_secret | to_nice_yaml }}"
+    dest: "{{ bss_stage_dir }}/proteccio_data_secret.yml"
+    mode: "0600"
+
+- name: Read back staged client-data Secret for {{ store.id }}
+  ansible.builtin.slurp:
+    src: "{{ bss_stage_dir }}/proteccio_data_secret.yml"
+  register: _proteccio_staged_readback
+
+- name: Require staged client-data Secret to be complete
+  vars:
+    _readback: "{{ _proteccio_staged_readback.content | b64decode | from_yaml }}"
+  ansible.builtin.assert:
+    that:
+      - _readback.apiVersion == 'v1'
+      - _readback.kind == 'Secret'
+      - "'proteccio.rc' in _readback.data"
+      - (store.client_crt_src | basename) in _readback.data
+      - (store.client_key_src | basename) in _readback.data
+      - _readback.data | length == (_proteccio_staged_certs.files | length + 1)
+      - _readback.data | dict2items | selectattr('value', 'equalto', '') | list | length == 0
+    fail_msg: >-
+      Staged Proteccio Secret for {{ store.id }} at
+      {{ bss_stage_dir }}/proteccio_data_secret.yml is incomplete
+      (expected proteccio.rc, {{ store.client_crt_src | basename }},
+      {{ store.client_key_src | basename }} and every staged server
+      certificate). data-plane-adoption would silently fall back to an
+      empty proteccio-data Secret and fail much later, so refusing here.
