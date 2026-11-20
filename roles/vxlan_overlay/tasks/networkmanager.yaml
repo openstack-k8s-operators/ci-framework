@@ -1,0 +1,72 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Write the NetworkManager configuration
+  become: true
+  vars:
+    _my_nets: "{{ crc_ci_bootstrap_networks_out[inventory_hostname] }}"
+    _gw_prefix: >-
+      {{
+        crc_ci_bootstrap_networks_out[inventory_hostname].default.gw ~ '/' ~
+        (cifmw_vxlan_overlay_networking.networks.default.range | ansible.utils.ipaddr('prefix') | string)
+      }}
+  block:
+    - name: Keep the overlay plumbing out of NetworkManager
+      ansible.builtin.template:
+        src: nm-unmanaged.conf.j2
+        dest: /etc/NetworkManager/conf.d/99-cifmw-vxlan-overlay.conf
+        mode: "0644"
+      notify: Reload NetworkManager configuration
+
+    # NetworkManager's 85-nm-unmanaged.rules marks veth devices not named
+    # eth* as unmanaged. An explicit 'nmcli connection up' overrides that,
+    # but autoconnect at boot does not, so the overlay interface comes back
+    # without its address after a reboot (and NNCP cannot use it).
+    - name: Let NetworkManager manage the overlay veth
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/86-cifmw-vxlan-overlay.rules
+        mode: "0644"
+        content: |
+          # Managed by Ansible (cifmw_vxlan_overlay). Overrides 85-nm-unmanaged.rules.
+          SUBSYSTEM=="net", ENV{INTERFACE}=="{{ cifmw_vxlan_overlay_iface }}", ENV{NM_UNMANAGED}="0"
+      notify: Reload udev rules
+
+    - name: Apply the NetworkManager and udev configuration
+      ansible.builtin.meta: flush_handlers
+
+    # Written before the interface exists so NetworkManager never attaches an
+    # auto-default DHCP profile to it (the Neutron backend sets
+    # no-auto-default for the same reason).
+    - name: Write the NetworkManager profiles
+      vars:
+        iface_info: "{{ item.value }}"
+        extra_addresses: >-
+          {{ [_gw_prefix] if (item.key == 'default' and _cifmw_vxlan_overlay_is_hub | bool
+                              and cifmw_vxlan_overlay_gateway | bool) else [] }}
+      ansible.builtin.template:
+        src: "{{ 'nm-vlan-connection.nmconnection.j2' if 'vlan' in item.value else 'nm-connection.nmconnection.j2' }}"
+        dest: "/etc/NetworkManager/system-connections/{{ item.value.connection }}.nmconnection"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ _cifmw_vxlan_overlay_profiles }}"
+      loop_control:
+        label: "{{ item.key }}: {{ item.value.connection }}"
+
+    - name: Load the profiles
+      ansible.builtin.command:
+        cmd: nmcli connection reload
+      changed_when: true

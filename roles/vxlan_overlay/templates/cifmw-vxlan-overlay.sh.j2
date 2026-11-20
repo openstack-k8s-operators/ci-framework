@@ -1,0 +1,132 @@
+#!/bin/bash
+# Managed by Ansible (cifmw_vxlan_overlay). Run at boot by {{ cifmw_vxlan_overlay_unit }}.service.
+#
+# Emulates a VLAN trunk port: {{ cifmw_vxlan_overlay_iface }} is a veth whose peer
+# sits on a plain (non VLAN-filtering) bridge with the VXLAN tunnel(s), so
+# untagged and 802.1Q-tagged frames reach every other node unchanged.
+# {{ 'Hub: one tunnel per spoke.' if _cifmw_vxlan_overlay_is_hub | bool else 'Spoke: one tunnel to the hub.' }}
+{% set _ovs = _cifmw_vxlan_overlay_is_edpm | bool %}
+{% if _ovs %}
+#
+# The bridge starts as a Linux bridge. When Open vSwitch starts,
+# {{ cifmw_vxlan_overlay_ovs_unit }}.service runs '$0 ovs', which replaces it with an
+# OVS bridge of the same name plus a patch port that os-net-config's br-ex
+# peers with. From then on (marker file present) 'start' only creates the
+# leaf devices and OVS attaches them from its database.
+{% endif %}
+set -euo pipefail
+
+BRIDGE="{{ cifmw_vxlan_overlay_bridge }}"
+IFACE="{{ cifmw_vxlan_overlay_iface }}"
+PEER="{{ cifmw_vxlan_overlay_peer_iface }}"
+MAC="{{ crc_ci_bootstrap_networks_out[inventory_hostname].default.mac }}"
+MTU="{{ _cifmw_vxlan_overlay_mtu }}"
+DSTPORT="{{ cifmw_vxlan_overlay_dstport }}"
+{% if _ovs %}
+OVS_MARKER="{{ cifmw_vxlan_overlay_script }}.ovs"
+PATCH="{{ _cifmw_vxlan_overlay_patch_port }}"
+PATCH_PEER="{{ _cifmw_vxlan_overlay_patch_peer }}"
+
+ovs_mode() { [ -e "$OVS_MARKER" ]; }
+{% else %}
+
+ovs_mode() { false; }
+{% endif %}
+
+tunnels() {
+{% for t in _cifmw_vxlan_overlay_tunnels %}
+    echo "{{ t.name }} {{ t.vni }} {{ t.remote }}"  # {{ t.peer }}
+{% endfor %}
+}
+
+start() {
+    modprobe vxlan 2>/dev/null || true
+
+    if ! ovs_mode; then
+        if ! ip link show "$BRIDGE" >/dev/null 2>&1; then
+            ip link add "$BRIDGE" type bridge stp_state 0
+        fi
+        # br_netfilter is loaded on OCP nodes; keep bridged overlay frames out of iptables.
+        ip link set "$BRIDGE" type bridge nf_call_iptables 0 nf_call_ip6tables 0 nf_call_arptables 0 2>/dev/null || true
+    fi
+
+    # Tunnels are leaf ports; recreate them so a changed remote is picked up.
+    tunnels | while read -r name vni remote; do
+        ip link del "$name" 2>/dev/null || true
+        # Receive by VNI, not source; keep the configured remote despite source NAT.
+        ip link add "$name" type vxlan id "$vni" remote "$remote" dstport "$DSTPORT" nolearning
+        ip link set dev "$name" mtu "$MTU" up
+        ovs_mode || ip link set dev "$name" master "$BRIDGE"
+    done
+
+    # Never delete or re-parent IFACE once it exists: NetworkManager, NNCP or
+    # OVS (os-net-config br-ex) may own it.
+    if ! ip link show "$IFACE" >/dev/null 2>&1; then
+        ip link add "$IFACE" address "$MAC" mtu "$MTU" type veth peer name "$PEER" mtu "$MTU"
+    fi
+    ip link set dev "$PEER" up
+    if ! ovs_mode; then
+        ip link set dev "$PEER" master "$BRIDGE"
+        ip link set dev "$BRIDGE" mtu "$MTU" up
+    fi
+    ip link set dev "$IFACE" up
+{% if _cifmw_vxlan_overlay_is_hub | bool and cifmw_vxlan_overlay_gateway | bool %}
+
+    # Router analogue: NAT the default network out of the underlay.
+    sysctl -qw net.ipv4.ip_forward=1
+    nft delete table ip cifmw_vxlan_overlay 2>/dev/null || true
+    nft -f - <<'EOF'
+table ip cifmw_vxlan_overlay {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        ip saddr {{ cifmw_vxlan_overlay_networking.networks.default.range }} ip daddr != {{ cifmw_vxlan_overlay_networking.networks.default.range }} oifname "{{ _cifmw_vxlan_overlay_underlay_dev }}" masquerade
+    }
+}
+EOF
+{% endif %}
+}
+
+stop() {
+    tunnels | while read -r name _vni _remote; do
+        ip link del "$name" 2>/dev/null || true
+    done
+{% if _cifmw_vxlan_overlay_is_hub | bool and cifmw_vxlan_overlay_gateway | bool %}
+    nft delete table ip cifmw_vxlan_overlay 2>/dev/null || true
+{% endif %}
+}
+
+{% if _ovs %}
+# Run by {{ cifmw_vxlan_overlay_ovs_unit }}.service each time openvswitch.service starts.
+# The first run (EDPM's edpm_ovs installing and starting OVS, before
+# os-net-config) swaps the Linux bridge for an OVS one: about a second
+# without ctlplane. Later runs only re-assert the ports.
+ovs() {
+    if [ -d "/sys/class/net/$BRIDGE/bridge" ]; then
+        tunnels | while read -r name _vni _remote; do
+            ip link set dev "$name" nomaster 2>/dev/null || true
+        done
+        ip link set dev "$PEER" nomaster 2>/dev/null || true
+        ip link del "$BRIDGE"
+    fi
+    local args=(-- --may-exist add-br "$BRIDGE" -- set bridge "$BRIDGE" fail_mode=standalone)
+    local name
+    for name in $(tunnels | awk '{ print $1 }') "$PEER"; do
+        args+=(-- --may-exist add-port "$BRIDGE" "$name")
+    done
+    args+=(-- --may-exist add-port "$BRIDGE" "$PATCH"
+           -- set interface "$PATCH" type=patch options:peer="$PATCH_PEER")
+    ovs-vsctl --timeout=30 "${args[@]}"
+    touch "$OVS_MARKER"
+    logger -t cifmw-vxlan-overlay "transport bridge $BRIDGE is an OVS bridge, $PATCH peers with $PATCH_PEER"
+}
+
+{% endif %}
+case "${1:-start}" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+{% if _ovs %}
+    ovs) ovs ;;
+{% endif %}
+    *) echo "Usage: $0 {start|stop|restart{{ '|ovs' if _ovs else '' }}}" >&2; exit 1 ;;
+esac
