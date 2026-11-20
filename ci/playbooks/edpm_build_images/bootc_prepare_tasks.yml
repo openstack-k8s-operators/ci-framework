@@ -1,0 +1,61 @@
+---
+- name: Require an explicit source image and artifact tag
+  ansible.builtin.assert:
+    that:
+      - cifmw_edpm_build_images_bootc_source_image | default('') | length > 0
+      - cifmw_edpm_build_images_tag | default('') | length > 0
+
+- name: Write bootc packaging inputs
+  ansible.builtin.copy:
+    dest: "{{ cifmw_edpm_build_images_ci_artifacts }}/bootc-input.yml"
+    mode: "0644"
+    content: >-
+      {{ {
+           'cifmw_basedir': cifmw_edpm_build_images_ci_artifacts | dirname,
+           'cifmw_edpm_build_images_bootc_source_image': cifmw_edpm_build_images_bootc_source_image,
+           'cifmw_edpm_build_images_bootc_source_tls_verify':
+             cifmw_edpm_build_images_bootc_source_tls_verify | default(true) | bool,
+           'cifmw_edpm_build_images_tag': cifmw_edpm_build_images_tag,
+           'cifmw_edpm_build_images_base_image':
+             cifmw_edpm_build_images_base_image | default('quay.io/centos/centos:stream9-minimal'),
+           'cifmw_rp_registry_ip': ansible_host | default(ansible_default_ipv4.address)
+         } | to_nice_yaml }}
+
+- name: Convert and publish the bootc disk without rebuilding the host image
+  ansible.builtin.command:
+    argv:
+      - ansible-playbook
+      - -i
+      - localhost,
+      - -c
+      - local
+      - ci/playbooks/edpm_build_images/bootc_package.yml
+      - -e
+      - '@group_vars/all.yml'
+      - -e
+      - "@{{ cifmw_edpm_build_images_ci_artifacts }}/bootc-input.yml"
+    chdir: "{{ cifmw_edpm_build_images_ci_repo }}"
+  environment:
+    ANSIBLE_CONFIG: "{{ cifmw_edpm_build_images_ci_repo }}/ansible.cfg"
+    ANSIBLE_ROLES_PATH: "{{ cifmw_edpm_build_images_ci_repo }}/roles"
+  changed_when: true
+
+- name: Read generated bootc image references
+  ansible.builtin.slurp:
+    src: "{{ cifmw_edpm_build_images_ci_artifacts }}/bootc-images.yml"
+  register: cifmw_edpm_build_images_ci_images
+
+- name: Read existing deployment parameters
+  ansible.builtin.slurp:
+    src: "{{ cifmw_edpm_build_images_ci_artifacts }}/parameters/zuul-params.yml"
+  register: cifmw_edpm_build_images_ci_parameters
+
+# Deployment runs nested Ansible using this parameter file.
+- name: Inject the packaged disk into the deployment parameters
+  ansible.builtin.copy:
+    dest: "{{ cifmw_edpm_build_images_ci_artifacts }}/parameters/zuul-params.yml"
+    mode: "0644"
+    content: >-
+      {{ (cifmw_edpm_build_images_ci_parameters.content | b64decode | from_yaml) |
+         combine(cifmw_edpm_build_images_ci_images.content | b64decode | from_yaml, recursive=true) |
+         to_nice_yaml }}
