@@ -39,6 +39,18 @@ None
   (default `/tmp/edpm_service_values_post_ceph.yaml`); this file will not
   be created unless `cifmw_ceph_client_service_values_post_ceph_path_src`
   is set
+* `cifmw_ceph_client_fsid_placeholder`: the placeholder token used for the
+  Ceph secret UUID (`rbd_secret_uuid`) in service-values overlays
+  (default `CHANGEME`)
+* `cifmw_ceph_client_fsid_substitute_paths`: list of service-values files in
+  which every `rbd_secret_uuid = <placeholder>` is replaced in place with
+  `cifmw_ceph_client_fsid` (default `[]`, no-op). Use this when the Cinder
+  backend configuration lives in a kustomize overlay that is merged *after*
+  this role runs -- for example the per-availability-zone Cinder backends of
+  the ShiftStack AZ scenario. Because the overlay is applied in a later
+  deployment stage, the single `..._post_ceph_path_*` substitution cannot
+  reach it; listing the overlay source here writes the real FSID into it
+  while the cluster FSID is known, so the later merge carries the real value.
 
 ## Examples
 
