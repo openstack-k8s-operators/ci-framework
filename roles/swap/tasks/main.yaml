@@ -1,0 +1,39 @@
+---
+# From software-factory/sf-infra project.
+- name: Configure swap as a file
+  become: true
+  block:
+    - name: Check if file already exist
+      ansible.builtin.stat:
+        path: "{{ swap_file }}"
+      register: _sw_file
+
+    - name: Create swap if not exists
+      when: not _sw_file.stat.exists
+      block:
+        # fallocate reserves the extents instantly and fails fast when the
+        # filesystem is too small, instead of writing gigabytes of zeros.
+        - name: Create swap file
+          ansible.builtin.command: |
+            fallocate -l {{ swap_size }}M {{ swap_file }}
+
+        - name: Change permissions to the swap file
+          ansible.builtin.file:
+            path: "{{ swap_file }}"
+            owner: root
+            group: root
+            mode: "0600"
+
+        - name: Make swap
+          ansible.builtin.command: "mkswap {{ swap_file }}"
+
+        - name: Enable swap
+          ansible.builtin.command: "swapon {{ swap_file }}"
+
+        - name: Add swap to the fstab
+          ansible.posix.mount:
+            fstype: swap
+            src: "{{ swap_file }}"
+            name: none
+            opts: sw
+            state: present
