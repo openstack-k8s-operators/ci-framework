@@ -1,0 +1,53 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Validate the transport inputs
+  ansible.builtin.import_tasks: validate.yaml
+
+- name: Write the NetworkManager configuration
+  become: true
+  block:
+    - name: Keep the overlay plumbing out of NetworkManager
+      ansible.builtin.template:
+        src: nm-unmanaged.conf.j2
+        dest: /etc/NetworkManager/conf.d/99-cifmw-vxlan-overlay.conf
+        mode: "0644"
+      register: cifmw_multi_node_vxlan_nm_config_result
+
+    # NetworkManager's 85-nm-unmanaged.rules marks veth devices not named
+    # eth* as unmanaged. An explicit 'nmcli connection up' overrides that,
+    # but autoconnect at boot does not, so the overlay interface comes back
+    # without its address after a reboot (and NNCP cannot use it).
+    - name: Let NetworkManager manage the overlay veth
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/86-cifmw-vxlan-overlay.rules
+        mode: "0644"
+        content: |
+          # Managed by Ansible (multi_node_vxlan). Overrides 85-nm-unmanaged.rules.
+          SUBSYSTEM=="net", ENV{INTERFACE}=="{{ cifmw_multi_node_vxlan_iface }}", ENV{NM_UNMANAGED}="0"
+      register: cifmw_multi_node_vxlan_udev_rule_result
+
+    - name: Reload the NetworkManager configuration
+      ansible.builtin.command:
+        cmd: nmcli general reload conf
+      when: cifmw_multi_node_vxlan_nm_config_result.changed
+      changed_when: true
+
+    - name: Reload udev rules
+      ansible.builtin.command:
+        cmd: udevadm control --reload
+      when: cifmw_multi_node_vxlan_udev_rule_result.changed
+      changed_when: true
