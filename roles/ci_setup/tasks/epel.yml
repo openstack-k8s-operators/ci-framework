@@ -20,6 +20,31 @@
     name: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_facts['distribution_major_version'] }}.noarch.rpm"
     disable_gpg_check: true
 
+- name: Use Fedora's direct EPEL repository
+  become: true
+  vars:
+    _cifmw_ci_setup_epel_baseurl: >-
+      https://dl.fedoraproject.org/pub/epel/{{
+      ansible_facts['distribution_major_version'] ~
+      ('${releasever_minor:+z}'
+      if ansible_facts['distribution_major_version'] | int >= 10 else '')
+      }}/Everything/$basearch/
+  community.general.ini_file:
+    path: /etc/yum.repos.d/epel.repo
+    section: epel
+    option: "{{ item.option }}"
+    value: "{{ item.value | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+    no_extra_spaces: true
+    mode: "0644"
+  loop:
+    - option: baseurl
+      value: "{{ _cifmw_ci_setup_epel_baseurl }}"
+    - option: metalink
+      state: absent
+    - option: mirrorlist
+      state: absent
+
 - name: Deactivate all of EPEL repositories
   become: true
   ansible.builtin.shell:  # noqa: command-instead-of-module
