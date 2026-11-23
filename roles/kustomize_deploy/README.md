@@ -45,10 +45,11 @@ with a message.
   file for OLM resources. Defaults to
   `cifmw_kustomize_deploy_kustomizations_dest_dir + olm.yml`
 - `cifmw_kustomize_deploy_skip_openstack_operator_catalog`: _(boolean)_ Skip
-  applying the generated `openstack-operator-index` CatalogSource and
-  `openstack-operator` Subscription from the generated OLM manifest, leaving
-  every other resource in the same kustomize output (cert-manager, MetalLB,
-  NMState, namespaces, OperatorGroup) untouched. Use this when the
+  applying the generated `openstack-operator-index` CatalogSource,
+  `openstack-operator` Subscription and `openstack` OperatorGroup from the
+  generated OLM manifest, leaving every other resource in the same kustomize
+  output (cert-manager, MetalLB, NMState, namespaces, other OperatorGroups)
+  untouched. Use this when the
   openstack-operator is installed out of band instead (e.g. via
   `operator-sdk run bundle` from a `pre_operator_install` hook). Defaults to
   `false`
