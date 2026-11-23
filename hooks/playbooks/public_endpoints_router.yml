@@ -1,0 +1,131 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# For public endpoints served by MetalLB LoadBalancer Services on the publicapi
+# network. Make the publicapi network reachable from controller-0 through the router VM
+# (router-0 of the reproducer scenario that adds it): enable IP forwarding on
+# the router and add a route to the publicapi subnet via it on this host. Run it as a
+# post_infra hook. The router VM only gets its ctlplane address from DHCP, so the
+# publicapi VLAN interface (the gateway of the subnet) is created here too.
+#
+# Parameters:
+#   cifmw_public_endpoints_router_address: ctlplane address of the router (192.168.122.8)
+#   cifmw_public_endpoints_router_user / _ssh_key: SSH user (zuul) and key (~/.ssh/id_cifw)
+#   cifmw_public_endpoints_subnet: the publicapi subnet (172.21.0.0/24)
+#   cifmw_public_endpoints_router_vlan_id / _vlan_address / _vlan_parent / _vlan_mtu:
+#       VLAN id (24), gateway address (172.21.0.1/24), parent interface (eth0) and
+#       MTU (1496, as the publicapi network of the scenario) of the router
+
+- name: Register the router
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add the router to the inventory
+      ansible.builtin.add_host:
+        name: public-endpoints-router
+        ansible_host: "{{ cifmw_public_endpoints_router_address | default('192.168.122.8') }}"
+        ansible_user: "{{ cifmw_public_endpoints_router_user | default('zuul') }}"
+        ansible_ssh_private_key_file: "{{ cifmw_public_endpoints_router_ssh_key | default('~/.ssh/id_cifw') }}"
+        ansible_ssh_common_args: -o StrictHostKeyChecking=accept-new
+
+- name: Enable IP forwarding on the router
+  hosts: public-endpoints-router
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Wait for the router to be reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+    - name: Check for the publicapi VLAN connection
+      register: _vlan_con
+      changed_when: false
+      failed_when: false
+      ansible.builtin.command: nmcli connection show publicapi
+
+    - name: Create the publicapi VLAN interface
+      when: _vlan_con.rc != 0
+      ansible.builtin.command: >-
+        nmcli connection add type vlan con-name publicapi
+        ifname {{ cifmw_public_endpoints_router_vlan_parent | default('eth0') }}.{{ _vlan_id }}
+        dev {{ cifmw_public_endpoints_router_vlan_parent | default('eth0') }}
+        id {{ _vlan_id }}
+        ipv4.method manual ipv4.addresses {{ cifmw_public_endpoints_router_vlan_address | default('172.21.0.1/24') }}
+        ethernet.mtu {{ cifmw_public_endpoints_router_vlan_mtu | default(1496) }}
+        ipv6.method disabled connection.autoconnect yes
+      vars:
+        _vlan_id: "{{ cifmw_public_endpoints_router_vlan_id | default(24) }}"
+      changed_when: true
+
+    - name: Enable IPv4 forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-router.conf
+        reload: true
+
+- name: Route the publicapi network through the router
+  hosts: localhost
+  gather_facts: false
+  become: true
+  vars:
+    _router: "{{ cifmw_public_endpoints_router_address | default('192.168.122.8') }}"
+    _subnet: "{{ cifmw_public_endpoints_subnet | default('172.21.0.0/24') }}"
+  tasks:
+    - name: Get the interface that reaches the router
+      register: _route_get
+      changed_when: false
+      ansible.builtin.command: ip -j route get {{ _router }}
+
+    - name: Store the interface that reaches the router
+      ansible.builtin.set_fact:
+        _router_dev: "{{ (_route_get.stdout | from_json)[0].dev }}"
+
+    - name: Get the NetworkManager connection of that interface
+      register: _nm_con
+      changed_when: false
+      ansible.builtin.command: nmcli -g GENERAL.CONNECTION device show {{ _router_dev }}
+
+    - name: Assert the interface is managed by NetworkManager
+      ansible.builtin.assert:
+        quiet: true
+        that: _nm_con.stdout | trim not in ['', '--']
+
+    - name: Get the static routes of the connection
+      register: _nm_routes
+      changed_when: false
+      ansible.builtin.command:
+        argv: [nmcli, -g, ipv4.routes, connection, show, "{{ _nm_con.stdout | trim }}"]
+
+    # Kept in the connection, so it survives a reboot or a NetworkManager re-apply.
+    # nmcli prints routes as 'dst,nh,mt' or '{ ip = dst, nh = nh, mt = mt }'.
+    - name: Persist the publicapi route in the connection
+      when: not (_nm_routes.stdout | regex_search(_route_regex))
+      vars:
+        _route_regex: "{{ _subnet | regex_escape }}\\s*,\\s*(nh\\s*=\\s*)?{{ _router | regex_escape }}(?!\\d)"
+      ansible.builtin.command:
+        argv: [nmcli, connection, modify, "{{ _nm_con.stdout | trim }}", +ipv4.routes, "{{ _subnet }} {{ _router }}"]
+      changed_when: true
+
+    - name: Get the live publicapi route
+      register: _live_route
+      changed_when: false
+      ansible.builtin.command: ip route show {{ _subnet }}
+
+    - name: Apply the connection to install the route
+      when: _router not in _live_route.stdout
+      ansible.builtin.command: nmcli device reapply {{ _router_dev }}
+      changed_when: true
