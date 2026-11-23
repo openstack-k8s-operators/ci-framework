@@ -1,0 +1,55 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Read the public endpoint hostnames and the MetalLB VIP from the architecture
+# overlay that defines them (spec.*.override.service.*endpointURL and the
+# metallb loadBalancerIPs annotation). Sets _public_endpoints_fqdns and
+# _public_endpoints_vips. Included by the public_endpoints_* hooks.
+#
+#   cifmw_public_endpoints_overlay: kustomization file holding the endpointURLs
+- name: Assert the overlay location is set
+  ansible.builtin.assert:
+    that: cifmw_public_endpoints_overlay is defined
+    fail_msg: Set cifmw_public_endpoints_overlay.
+
+- name: Resolve the overlay path
+  ansible.builtin.set_fact:
+    _public_endpoints_overlay: >-
+      {{ cifmw_public_endpoints_overlay }}
+
+- name: Check the overlay exists
+  ansible.builtin.stat:
+    path: "{{ _public_endpoints_overlay }}"
+  register: _overlay_stat
+
+- name: Assert the overlay is present
+  ansible.builtin.assert:
+    that: _overlay_stat.stat.exists
+    fail_msg: >-
+      Overlay not found at {{ _public_endpoints_overlay }}. Ensure cifmw_architecture_repo
+      points to a valid architecture checkout or set cifmw_public_endpoints_overlay.
+
+- name: Read the overlay
+  ansible.builtin.slurp:
+    src: "{{ _public_endpoints_overlay }}"
+  register: _overlay_content
+
+- name: Extract FQDNs and VIPs
+  vars:
+    _text: "{{ _overlay_content.content | b64decode }}"
+  ansible.builtin.set_fact:
+    _public_endpoints_fqdns: "{{ _text | regex_findall('endpointURL:\\s*https?://([^/:\\s]+)') | unique }}"
+    _public_endpoints_vips: "{{ _text | regex_findall('loadBalancerIPs:\\s*(\\S+)') | unique }}"

@@ -1,0 +1,85 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Register the hostnames of MetalLB-backed public endpoints in the hypervisor
+# dnsmasq, which the lab VMs, the OCP nodes (so in-cluster pods) and, through the
+# in-cluster DNSMasq forwarder, the EDPM nodes all resolve through.
+#
+# The names and the VIP are read from the architecture overlay that sets them
+# (spec.*.override.service.*endpointURL and the metallb loadBalancerIPs
+# annotation), so they are defined in one place. Run it as a pre_stage_run hook
+# of the control-plane stage. Set cifmw_public_endpoints_dns_state=absent to remove.
+# Records are matched by the whole line: remove them before changing the names or
+# the VIP of the overlay, otherwise the old host-record lines stay.
+#
+# Parameters:
+#   cifmw_public_endpoints_overlay: where the overlay is,
+#       see tasks/public_endpoints_overlay.yml
+#   cifmw_public_endpoints_dns_address: SSH address of the host running the cifmw dnsmasq.
+#       Needed when the hook runs on a VM (e.g. controller-0), where the "hypervisors"
+#       inventory group is that VM itself. Registers it as host public-endpoints-dns.
+#   cifmw_public_endpoints_dns_user / _ssh_key: SSH user (default zuul) and key
+#       (default ~/.ssh/id_cifw) for that address
+#   cifmw_public_endpoints_dns_host: inventory host/group running the cifmw dnsmasq
+#       (default public-endpoints-dns if an address is set, else hypervisors)
+#   cifmw_public_endpoints_dns_state: present (default) or absent
+
+- name: Collect public endpoint hostnames and VIP from the architecture overlay
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Read the public endpoints from the overlay
+      ansible.builtin.include_tasks: tasks/public_endpoints_overlay.yml
+
+    - name: Build the host records
+      ansible.builtin.set_fact:
+        _public_endpoints_dns_records:
+          - names: "{{ _public_endpoints_fqdns }}"
+            ips: "{{ _public_endpoints_vips }}"
+            state: "{{ cifmw_public_endpoints_dns_state | default('present') }}"
+
+    # NOTE: one shared VIP is assumed, upgrade to
+    # per-endpoint pairing if an overlay ever uses several.
+    - name: Assert there are names and exactly one VIP
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _public_endpoints_dns_records[0].names | length > 0
+          - _public_endpoints_dns_records[0].ips | length == 1
+
+    - name: Register the dnsmasq host reachable over SSH
+      when: cifmw_public_endpoints_dns_address is defined
+      ansible.builtin.add_host:
+        name: public-endpoints-dns
+        ansible_host: "{{ cifmw_public_endpoints_dns_address }}"
+        ansible_user: "{{ cifmw_public_endpoints_dns_user | default('zuul') }}"
+        ansible_ssh_private_key_file: "{{ cifmw_public_endpoints_dns_ssh_key | default('~/.ssh/id_cifw') }}"
+        ansible_ssh_common_args: -o StrictHostKeyChecking=accept-new
+
+- name: Register the records in the hypervisor dnsmasq
+  hosts: >-
+    {{
+      cifmw_public_endpoints_dns_host |
+      default('public-endpoints-dns' if cifmw_public_endpoints_dns_address is defined else 'hypervisors')
+    }}
+  gather_facts: false
+  tasks:
+    - name: Manage the public endpoint host records
+      vars:
+        cifmw_dnsmasq_host_record: "{{ hostvars['localhost']['_public_endpoints_dns_records'] }}"
+      ansible.builtin.include_role:
+        name: dnsmasq
+        tasks_from: manage_host_record.yml
