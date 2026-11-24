@@ -1,0 +1,88 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+
+# Checks for one public endpoint. Variables from public_endpoints_validate.yml:
+# _url, _res (Routes at results[0], Services at results[1]), _ca_file, _cr_fqdns.
+- name: Parse the endpoint
+  ansible.builtin.set_fact:
+    _host: "{{ _url | urlsplit('hostname') }}"
+    _port: "{{ _url | urlsplit('port') | default(443, true) }}"
+
+# A custom endpointURL names no Service, so it is matched by the address the client
+# resolves for it and its front port: the VIP and port pair is unique to one Service.
+# Any other endpoint is a Route host, or the default hostname of a LoadBalancer Service
+# (<service>.<namespace>.svc), which must be registered in the DNS the client uses.
+- name: Resolve the custom endpointURL host as the client does
+  when: _host in _cr_fqdns
+  ansible.builtin.command: getent ahostsv4 {{ _host }}
+  register: _getent
+  changed_when: false
+
+- name: Check what serves the endpoint
+  vars:
+    _routes: "{{ _res.results[0].resources | selectattr('spec.host', 'equalto', _host) | list }}"
+    _lb_port: >-
+      {{ _res.results[1].resources | selectattr('spec.type', 'equalto', 'LoadBalancer') |
+         selectattr('status.loadBalancer.ingress', 'defined') |
+         selectattr('spec.ports.0.port', 'equalto', _port | int) | list }}
+    _lb: >-
+      {{ (_lb_port | selectattr('status.loadBalancer.ingress.0.ip', 'equalto',
+                               _getent.stdout_lines[0].split()[0]) | list)
+         if _host in _cr_fqdns else
+         (_lb_port | selectattr('metadata.name', 'equalto', _host.split('.')[0]) | list) }}
+  block:
+    - name: Assert a custom endpointURL is served by a LoadBalancer without a Route
+      when: _host in _cr_fqdns
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _lb | length == 1
+          - _routes | length == 0
+        fail_msg: >-
+          {{ _url }} is a custom endpointURL of the control plane CR, so it must be a
+          LoadBalancer Service with the address {{ _host }} resolves to, on port {{ _port }},
+          and have no Route.
+          If the Service never became a LoadBalancer (endpointURL gotcha) or a Route
+          exists, the override did not apply.
+
+    - name: Assert any other endpoint is served by a Route or a LoadBalancer
+      when: _host not in _cr_fqdns
+      ansible.builtin.assert:
+        quiet: true
+        that: _routes | length + _lb | length == 1
+        fail_msg: >-
+          {{ _url }} is neither the host of a Route nor the default hostname of a
+          LoadBalancer Service with an address on port {{ _port }}.
+
+- name: Check the certificate served to this client
+  ansible.builtin.shell: >-
+    openssl s_client -connect {{ _host }}:{{ _port }} -servername {{ _host }}
+    -CAfile {{ _ca_file.dest }} -verify_hostname {{ _host }} -verify_return_error
+    </dev/null 2>&1
+  register: _tls
+  changed_when: false
+  retries: 3
+  delay: 5
+  until: "_tls.rc == 0 and 'Verify return code: 0 (ok)' in _tls.stdout"
+  failed_when: false
+
+- name: Assert the certificate matches the hostname and the CA bundle
+  ansible.builtin.assert:
+    quiet: true
+    that: "_tls.rc == 0 and 'Verify return code: 0 (ok)' in _tls.stdout"
+    fail_msg: >-
+      {{ _url }} TLS check from controller-0 failed (DNS, routing through the gateway, or the
+      served certificate). The internal certificate means the public vhost ServerName is missing;
+      a SAN without {{ _host }} or a chain not in combined-ca-bundle means the BYO certificate
+      is wrong. openssl: {{ _tls.stdout_lines | select('search', 'verify|Verif|error|errno') | list }}

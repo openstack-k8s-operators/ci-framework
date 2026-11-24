@@ -1,0 +1,125 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+
+# Validate the public endpoints of every enabled service from controller-0, which is
+# an off-subnet client: each check names the design gap it covers, so a failure is
+# diagnosable without reading the design. Services behind a MetalLB LoadBalancer
+# (custom endpointURL in the control plane CR) and behind a Route are both checked.
+# Run it as a pre_tests hook, before tempest:
+#
+#   pre_tests_10_public_endpoints_validate:
+#     type: playbook
+#     source: public_endpoints_validate.yml
+#
+# The endpoints are the public URLs of the Keystone catalog, plus Horizon and the
+# noVNC proxy when their resources exist (they are not in the catalog).
+#
+# Parameters:
+#   cifmw_public_endpoints_ns: namespace of the control plane (the namespace passed
+#       by run_hook, else openstack)
+
+- name: Validate the public endpoints
+  hosts: localhost
+  gather_facts: false
+  vars:
+    _ns: "{{ cifmw_public_endpoints_ns | default(namespace | default('openstack')) }}"
+    _oc: "oc --kubeconfig {{ cifmw_openshift_kubeconfig }} -n {{ _ns }}"
+  tasks:
+    - name: Get the public URLs of the catalog from the openstackclient pod
+      ansible.builtin.command: >-
+        {{ _oc }} exec openstackclient --
+        openstack endpoint list --interface public -f json
+      register: _catalog
+      changed_when: false
+
+    - name: Get the Routes, Services, Horizon and NoVNCProxy resources
+      register: _res
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: "{{ item.api }}"
+        kind: "{{ item.kind }}"
+        namespace: "{{ _ns }}"
+      loop:
+        - {api: route.openshift.io/v1, kind: Route}
+        - {api: v1, kind: Service}
+        - {api: horizon.openstack.org/v1beta1, kind: Horizon}
+        - {api: nova.openstack.org/v1beta1, kind: NovaNoVNCProxy}
+        - {api: core.openstack.org/v1beta1, kind: OpenStackControlPlane}
+      loop_control:
+        label: "{{ item.kind }}"
+
+    # The endpointURL fields sit at different depths per service, so match the JSON text.
+    - name: Get the custom endpointURLs of the control plane CR
+      ansible.builtin.set_fact:
+        _cr_fqdns: "{{ _res.results[4].resources[0] | to_json | regex_findall('\"endpointURL\": \"https?://([^/:\"]+)') | unique }}"
+
+    # Not in the catalog: take the URL from the endpointURL of the service's own CR (every
+    # cell for noVNC), else from the Route the control plane labels for that service.
+    - name: Find the URLs of the enabled services that are not in the catalog
+      vars:
+        _enabled:
+          - {kind: Horizon, label: horizon, cr: "{{ _res.results[2].resources }}"}
+          - {kind: NovaNoVNCProxy, label: nova-novncproxy, cr: "{{ _res.results[3].resources }}"}
+        _from_cr: "{{ item.cr | to_json | regex_findall('\"endpointURL\": \"(https?://[^\"]+)\"') }}"
+        _from_route: >-
+          {{ _res.results[0].resources | selectattr('metadata.labels', 'defined') |
+             selectattr('metadata.labels.osctlplane-service', 'defined') |
+             selectattr('metadata.labels.osctlplane-service', 'equalto', item.label) |
+             map(attribute='spec.host') | map('regex_replace', '^', 'https://') |
+             map('regex_replace', '$', '/') | list }}
+        _urls: "{{ (_from_cr + _from_route) | unique }}"
+      ansible.builtin.set_fact:
+        _extra_urls: "{{ _extra_urls | default([]) + _urls }}"
+        _missing: "{{ _missing | default([]) + ([item.kind] if item.cr | length > 0 and _urls | length == 0 else []) }}"
+      loop: "{{ _enabled }}"
+      loop_control:
+        label: "{{ item.kind }}"
+
+    - name: Assert every enabled Horizon and noVNC proxy has an endpoint
+      ansible.builtin.assert:
+        quiet: true
+        that: _missing | default([]) | length == 0
+        fail_msg: >-
+          {{ _missing }} is enabled, but no endpointURL in its CR and no Route labeled for it
+          gives its public URL.
+
+    - name: Collect the endpoints
+      ansible.builtin.set_fact:
+        _endpoints: >-
+          {{ ((_catalog.stdout | from_json | map(attribute='URL') | list) +
+              (_extra_urls | default([]))) | unique }}
+
+    - name: Get the CA bundle of the control plane
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Secret
+        namespace: "{{ _ns }}"
+        name: combined-ca-bundle
+      register: _ca
+
+    - name: Write the CA bundle
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      ansible.builtin.copy:
+        dest: "{{ cifmw_basedir | default(ansible_user_dir ~ '/ci-framework-data') }}/public-endpoints-ca.pem"
+        content: "{{ _ca.resources[0].data['tls-ca-bundle.pem'] | b64decode }}"
+        mode: "0600"
+      register: _ca_file
+
+    - name: Check each endpoint
+      ansible.builtin.include_tasks: tasks/public_endpoints_validate_endpoint.yml
+      loop: "{{ _endpoints }}"
+      loop_control:
+        loop_var: _url
+        label: "{{ _url }}"
