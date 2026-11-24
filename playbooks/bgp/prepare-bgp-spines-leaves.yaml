@@ -363,6 +363,20 @@
               --to-source {{ router_loopback_ip }}
           changed_when: true
 
+        # neutron-tempest-plugin runs its EVPN connectivity checks on the
+        # VTEP, inside the VNI's VRF: SSH and TCP checks go through
+        # "socat ... so-bindtodevice=evpnvrf-<vni>", because "ip vrf exec"
+        # needs root and fails under SELinux enforcing (and when the tempest
+        # host is the VTEP the checks use in-process bound sockets instead,
+        # so socat is not needed there).
+        - name: Install socat for the EVPN tempest connectivity checks
+          when:
+            - router_evpn_vtep | default(false)
+          become: true
+          ansible.builtin.package:
+            name: socat
+            state: present
+
     - name: Add route to RH intranet from router via HV when IPv6
       when: _ip_version == 6
       block:
