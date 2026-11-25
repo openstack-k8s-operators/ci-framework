@@ -59,6 +59,10 @@
       delegate_facts: true
       loop: "{{ _networking_mapper_instance_names }}"
 
+    # NOTE: only the gathered facts are dumped here. Templating the whole
+    # hostvars content would also resolve every user provided variable, and
+    # any of them pointing to an out-of-scope variable (role defaults are not
+    # visible here) makes this troubleshooting task kill the deployment.
     - name: Save instances refreshed facts for troubleshooting purposes
       ansible.builtin.copy:
         dest: >-
@@ -71,10 +75,13 @@
           }}
         content: >-
           {{
-            dict(hostvars) |
-            dict2items |
-            selectattr('key', 'in', _networking_mapper_instance_names) |
-            items2dict |
-            to_nice_yaml
+            dict(
+              _networking_mapper_instance_names |
+              zip(
+                _networking_mapper_instance_names |
+                map('extract', hostvars) |
+                map(attribute='ansible_facts', default={})
+              )
+            ) | to_nice_yaml
           }}
         mode: "0644"
