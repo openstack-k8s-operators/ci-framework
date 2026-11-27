@@ -1,0 +1,108 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Appends the Satellite global-registration command to the EDPM nodeset's
+# edpm_bootstrap_command instead of overwriting it, so it coexists with any
+# command set by other overlays (e.g. the catalog registry-mirror fallback).
+# This mirrors the append pattern used by roles/fdp_update_edpm/configure_ca_cert.yml.
+
+- name: Assert the registration command is provided
+  ansible.builtin.assert:
+    that:
+      - cifmw_edpm_satellite_register_command | default('') | trim | length > 0
+    fail_msg: >-
+      cifmw_edpm_satellite_register_command must be set to the Satellite
+      global-registration command.
+
+- name: Get current edpm_bootstrap_command from nodeset
+  kubernetes.core.k8s_info:
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ cifmw_edpm_satellite_register_nodeset_name }}"
+    namespace: "{{ cifmw_edpm_satellite_register_namespace }}"
+  register: _cifmw_edpm_satellite_register_nodeset
+
+- name: Fail when the target nodeset does not exist
+  ansible.builtin.fail:
+    msg: >-
+      NodeSet {{ cifmw_edpm_satellite_register_nodeset_name }} not found in
+      namespace {{ cifmw_edpm_satellite_register_namespace }}. This role must
+      run after the nodeset CR is applied (its post_stage hook).
+  when: _cifmw_edpm_satellite_register_nodeset.resources | length == 0
+
+# Guard against wrong hook placement: if the deployment has already run, the
+# bootstrap service has already consumed edpm_bootstrap_command, so appending
+# now has no effect. Fail loudly rather than patch a nodeset that already
+# deployed.
+- name: Fail when the nodeset has already been deployed
+  vars:
+    _conditions: >-
+      {{
+        _cifmw_edpm_satellite_register_nodeset.resources[0].status.conditions
+        | default([])
+      }}
+    _deployment_ready: >-
+      {{
+        _conditions
+        | selectattr('type', 'equalto', 'DeploymentReady')
+        | map(attribute='status') | first | default('False')
+      }}
+  ansible.builtin.fail:
+    msg: >-
+      NodeSet {{ cifmw_edpm_satellite_register_nodeset_name }} already has
+      DeploymentReady=True; the bootstrap service has already run, so appending
+      the Satellite registration now would have no effect. The hook must run on
+      the nodeset stage (post_stage), before the deployment stage.
+  when: _deployment_ready | bool
+
+- name: Record the existing bootstrap command
+  ansible.builtin.set_fact:
+    _cifmw_edpm_satellite_register_existing: >-
+      {{
+        _cifmw_edpm_satellite_register_nodeset.resources[0].spec.nodeTemplate.ansible.ansibleVars.edpm_bootstrap_command
+        | default('')
+      }}
+
+# Idempotency guard: the activation_keys query string is unique to the
+# registration curl, so its presence means we already appended.
+- name: Check whether the registration command is already present
+  ansible.builtin.set_fact:
+    _cifmw_edpm_satellite_register_present: >-
+      {{ 'register?activation_keys' in _cifmw_edpm_satellite_register_existing }}
+
+- name: Build bootstrap command with registration appended
+  ansible.builtin.set_fact:
+    _cifmw_edpm_satellite_register_bootstrap: |
+      {{ _cifmw_edpm_satellite_register_existing }}
+      {{ cifmw_edpm_satellite_register_command }}
+  when: not _cifmw_edpm_satellite_register_present
+
+- name: Patch nodeset with the appended bootstrap command
+  kubernetes.core.k8s:
+    state: patched
+    api_version: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    name: "{{ cifmw_edpm_satellite_register_nodeset_name }}"
+    namespace: "{{ cifmw_edpm_satellite_register_namespace }}"
+    definition:
+      spec:
+        nodeTemplate:
+          ansible:
+            ansibleVars:
+              edpm_bootstrap_command: "{{ _cifmw_edpm_satellite_register_bootstrap }}"
+  when:
+    - not _cifmw_edpm_satellite_register_present
+    - not cifmw_edpm_satellite_register_dry_run | bool
