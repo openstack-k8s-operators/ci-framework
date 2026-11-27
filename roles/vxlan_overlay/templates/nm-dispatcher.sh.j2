@@ -1,0 +1,110 @@
+#!/bin/bash
+# Managed by Ansible (cifmw_vxlan_overlay).
+#
+# Keep underlay traffic off the overlay routes when underlay addresses fall
+# inside an overlay network:
+#   - tunnel packets to each peer's underlay address
+#   - packets from this host's underlay address (replies to Ansible SSH) to
+#     addresses inside the overlay networks
+# Overlay traffic itself is sourced from overlay addresses and is unaffected.
+#
+# Run by NetworkManager-dispatcher ($1 interface, $2 action) and by the role
+# with no arguments. Idempotent and additive: existing correct rules are left
+# in place (no delete-then-add window), only missing ones are added and stale
+# ones removed. Every run is logged with tag cifmw-vxlan-overlay.
+# Self-contained on purpose (SELinux: dispatcher scripts should not execute
+# files elsewhere in /etc).
+set -u
+
+IFACE="${1:-manual}"
+ACTION="${2:-}"
+case "${ACTION:-up}" in
+    up|dhcp4-change|reapply) ;;
+    *) exit 0 ;;
+esac
+
+TABLE="{{ cifmw_vxlan_overlay_route_table }}"
+PRIO_REMOTE="{{ cifmw_vxlan_overlay_rule_priority | int }}"
+PRIO_SOURCE="{{ cifmw_vxlan_overlay_rule_priority | int + 1 }}"
+REMOTES="{{ _cifmw_vxlan_overlay_tunnels | map(attribute='remote') | join(' ') }}"
+OVERLAY_NETS="{{ cifmw_vxlan_overlay_networking.networks.values() | map(attribute='range') | join(' ') }}"
+
+log() { logger -t cifmw-vxlan-overlay "[$IFACE $ACTION] $*"; }
+
+# The underlay is whatever carries the default route (eth0, enp1s0, or br-ex
+# once OpenShift has moved the address there).
+read -r GW DEV < <(ip -4 route show default table main | awk '
+    /^default/ { for (i = 1; i <= NF; i++) { if ($i == "via") gw = $(i + 1); if ($i == "dev") dev = $(i + 1) }
+                 print gw, dev; exit }')
+if [ -z "${GW:-}" ] || [ -z "${DEV:-}" ]; then
+    log "no default route in main, nothing to do"
+    exit 0
+fi
+case "$DEV" in
+    {{ cifmw_vxlan_overlay_iface }}|{{ cifmw_vxlan_overlay_iface }}.*|{{ cifmw_vxlan_overlay_bridge }})
+        log "default route is on overlay device $DEV, refusing"
+        exit 0 ;;
+esac
+SRC=$(ip -4 -o addr show dev "$DEV" scope global | awk '{ split($4, a, "/"); print a[1]; exit }')
+if [ -z "$SRC" ]; then
+    log "no address on $DEV, nothing to do"
+    exit 0
+fi
+
+changes=()
+nchanges=0
+
+# Table route: replace is atomic, no window without a route.
+want_route="default via $GW dev $DEV"
+have_route=$(ip -4 route show table "$TABLE" default 2>/dev/null | awk '{ print $1, $2, $3, $4, $5; exit }')
+if [ "$have_route" != "$want_route" ]; then
+    if out=$(ip -4 route replace default via "$GW" dev "$DEV" table "$TABLE" 2>&1); then
+        nchanges=$((nchanges + 1)); changes+=("table $TABLE: '$have_route' -> '$want_route'")
+    else
+        log "ERROR route replace in table $TABLE failed: $out"
+    fi
+fi
+
+# Rules, as printed by 'ip rule show' after the "PRIO:<tab>" prefix.
+declare -A want=()
+for remote in $REMOTES; do
+    want["$PRIO_REMOTE|from all to $remote lookup $TABLE"]=1
+done
+for net in $OVERLAY_NETS; do
+    want["$PRIO_SOURCE|from $SRC to $net lookup $TABLE"]=1
+done
+
+declare -A have=()
+while IFS= read -r line; do
+    prio="${line%%:*}"
+    sel=$(printf '%s' "${line#*:}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    have["$prio|$sel"]=1
+done < <(ip -4 rule show | grep -E "^($PRIO_REMOTE|$PRIO_SOURCE):")
+
+for key in "${!want[@]}"; do
+    [ -n "${have[$key]:-}" ] && continue
+    prio="${key%%|*}"; sel="${key#*|}"
+    # shellcheck disable=SC2086
+    if out=$(ip -4 rule add priority "$prio" $sel 2>&1); then
+        nchanges=$((nchanges + 1)); changes+=("added $prio: $sel")
+    else
+        log "ERROR ip rule add priority $prio $sel: $out"
+    fi
+done
+for key in "${!have[@]}"; do
+    [ -n "${want[$key]:-}" ] && continue
+    prio="${key%%|*}"; sel="${key#*|}"
+    # shellcheck disable=SC2086
+    if out=$(ip -4 rule del priority "$prio" $sel 2>&1); then
+        nchanges=$((nchanges + 1)); changes+=("removed stale $prio: $sel")
+    else
+        log "ERROR ip rule del priority $prio $sel: $out"
+    fi
+done
+
+if [ "$nchanges" -gt 0 ]; then
+    log "via $GW dev $DEV src $SRC: ${changes[*]}"
+else
+    log "via $GW dev $DEV src $SRC: rules and table $TABLE already in place"
+fi
+exit 0

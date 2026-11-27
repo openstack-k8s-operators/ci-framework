@@ -1,0 +1,42 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Installed and applied before the tunnels come up, so the tunnel packets
+# never follow an overlay route.
+- name: Install the underlay routing dispatcher script
+  become: true
+  ansible.builtin.template:
+    src: nm-dispatcher.sh.j2
+    dest: /etc/NetworkManager/dispatcher.d/90-cifmw-vxlan-overlay
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Apply the underlay routing rules
+  become: true
+  ansible.builtin.command:
+    cmd: /bin/bash /etc/NetworkManager/dispatcher.d/90-cifmw-vxlan-overlay
+  changed_when: true
+
+- name: Check the underlay routing rules are in place
+  become: true
+  ansible.builtin.command:
+    cmd: ip -4 rule show priority {{ cifmw_vxlan_overlay_rule_priority }}
+  register: _cifmw_vxlan_overlay_rules
+  changed_when: false
+  failed_when: >-
+    _cifmw_vxlan_overlay_tunnels | map(attribute='remote')
+    | reject('in', _cifmw_vxlan_overlay_rules.stdout) | list | length > 0

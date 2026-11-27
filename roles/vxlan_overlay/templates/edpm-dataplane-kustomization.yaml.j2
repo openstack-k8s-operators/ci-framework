@@ -1,0 +1,65 @@
+# Managed by Ansible (cifmw_vxlan_overlay).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+patches:
+- target:
+    kind: OpenStackDataPlaneNodeSet
+    name: {{ cifmw_vxlan_overlay_edpm_kustomize_nodesets | to_json }}
+  patch: |-
+    apiVersion: dataplane.openstack.org/v1beta1
+    kind: OpenStackDataPlaneNodeSet
+    metadata:
+      name: unused
+    spec:
+      nodeTemplate:
+        ansible:
+          ansibleVars:
+            # EDPM bootstrap enables global bridge netfilter, which overrides
+            # the transport bridge's own bypass while it is a Linux bridge.
+            edpm_kernel_sysctl_extra_settings:
+              net.bridge.bridge-nf-call-iptables:
+                value: 0
+              net.bridge.bridge-nf-call-ip6tables:
+                value: 0
+              net.bridge.bridge-nf-call-arptables:
+                value: 0
+            # ci-framework fetch_compute_facts' RHEL 9 template, with br-ex
+            # reaching the overlay through a patch port instead of the veth.
+            edpm_network_config_template: |-
+              {%- raw %}
+              ---
+              {% set mtu_list = [ctlplane_mtu] %}
+              {% for network in nodeset_networks %}
+              {% set _ = mtu_list.append(lookup('vars', networks_lower[network] ~ '_mtu')) %}
+              {%- endfor %}
+              {% set min_viable_mtu = mtu_list | max %}
+              network_config:
+              - type: interface
+                name: nic1
+                use_dhcp: true
+                mtu: {{ min_viable_mtu }}
+              - type: ovs_bridge
+                name: {{ neutron_physical_bridge_name }}
+                mtu: {{ min_viable_mtu }}
+                use_dhcp: false
+                dns_servers: {{ ctlplane_dns_nameservers }}
+                domain: {{ dns_search_domains }}
+                addresses:
+                - ip_netmask: {{ ctlplane_ip }}/{{ ctlplane_cidr }}
+                routes: {{ ctlplane_host_routes }}
+                members:
+                - type: ovs_patch_port
+                  name: {% endraw %}{{ _cifmw_vxlan_overlay_patch_peer }}{% raw %}
+                  bridge_name: {{ neutron_physical_bridge_name }}
+                  peer: {% endraw %}{{ _cifmw_vxlan_overlay_patch_port }}{% raw %}
+              {% for network in nodeset_networks %}
+                - type: vlan
+                  mtu: {{ lookup('vars', networks_lower[network] ~ '_mtu') }}
+                  vlan_id: {{ lookup('vars', networks_lower[network] ~ '_vlan_id') }}
+                  addresses:
+                  - ip_netmask:
+                      {{ lookup('vars', networks_lower[network] ~ '_ip') }}/{{ lookup('vars', networks_lower[network] ~ '_cidr') }}
+                  routes: {{ lookup('vars', networks_lower[network] ~ '_host_routes') }}
+              {% endfor %}
+              {% endraw %}
