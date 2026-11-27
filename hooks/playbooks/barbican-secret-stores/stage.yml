@@ -1,0 +1,86 @@
+---
+# Stage Barbican secret-store client material to files (pre-adoption).
+#
+# Pre-cluster variant of enable.yml for adoption flows: resolves PINs,
+# bakes HSM client images, and writes the client-data Secret as a YAML
+# manifest under bss_stage_dir instead of applying it - the CRC cluster
+# does not exist yet at pre-run time.
+#
+# data-plane-adoption's barbican_adoption role hardcodes
+# /tmp/hsm-prep-working-dir/proteccio_data_secret.yml: it applies the
+# staged manifest once the cluster exists and creates the login secret
+# itself, so only the client-data manifest is staged. Set
+# bss_stage_dir: /tmp/hsm-prep-working-dir and DPA needs no changes.
+#
+# Only the prepare phase runs - no config rendering and no
+# kustomization, because adoption renders the RHOSO 18 side itself via
+# DPA's barbican_hsm_patch. Today only the Proteccio provider implements
+# staging; Luna and Fortanix prepare refuse bss_stage_dir.
+#
+# Usage (from an adoption pre-run):
+#   - import_playbook: >-
+#       {{ ci_framework_base_src_dir }}/hooks/playbooks/barbican-secret-stores/stage.yml
+#     vars:
+#       bss_stage_dir: /tmp/hsm-prep-working-dir
+#       cifmw_barbican_secret_stores:
+#         - id: proteccio
+#           type: pkcs11
+#           provider: proteccio
+#           ...  # same store schema as enable.yml; optional host
+#                # rewrites IPaddr= in the staged proteccio.rc
+#
+# The resolved partition PIN is published as _proteccio_password and
+# _bss_proteccio_prep.partition_password for callers writing DPA extra
+# vars (proteccio_login_password).
+
+- name: Stage Barbican secret-store client material
+  hosts: "{{ cifmw_target_hook_host | default('localhost') }}"
+  tasks:
+    - name: Require bss_stage_dir
+      ansible.builtin.assert:
+        that:
+          - bss_stage_dir is defined
+          - bss_stage_dir | length > 0
+        fail_msg: >-
+          bss_stage_dir must name the staging directory (use
+          /tmp/hsm-prep-working-dir for data-plane-adoption).
+
+    - name: Resolve store list
+      ansible.builtin.set_fact:
+        _bss_stores: "{{ cifmw_barbican_secret_stores | default([]) }}"
+
+    - name: Require a non-empty store list
+      ansible.builtin.assert:
+        that:
+          - _bss_stores | length > 0
+        fail_msg: >-
+          cifmw_barbican_secret_stores must list the stores to stage
+          (same schema as enable.yml).
+
+    - name: Init collectors
+      ansible.builtin.set_fact:
+        _bss_store_ids: []
+        _bss_kmip_count: 0
+        _bss_pkcs11_count: 0
+        _bss_client_data_paths: []
+
+    - name: Validate each store entry
+      ansible.builtin.include_tasks: validate_store.yml
+      loop: "{{ _bss_stores }}"
+      loop_control:
+        loop_var: store
+        label: "{{ store.id | default('?') }}"
+
+    - name: Assert unique store ids
+      ansible.builtin.assert:
+        that:
+          - _bss_store_ids | length == (_bss_store_ids | unique | list | length)
+        fail_msg: >-
+          Duplicate store id in cifmw_barbican_secret_stores: {{ _bss_store_ids }}
+
+    - name: Prepare and stage each store
+      ansible.builtin.include_tasks: prepare_store.yml
+      loop: "{{ _bss_stores }}"
+      loop_control:
+        loop_var: store
+        label: "{{ store.id }} ({{ store.type }}/{{ store.provider | default('software') }})"
