@@ -100,3 +100,238 @@
               - ansible_failed_result is defined
               - "'No bootc Containerfile found' in ansible_failed_result.msg"
             fail_msg: "Expected Containerfile detection to fail on empty repository"
+
+    - name: Create s2i build fixture directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ cifmw_edpm_build_images_test_base }}/s2i/bin"
+        - "{{ cifmw_edpm_build_images_test_base }}/logs/edpm_images"
+
+    - name: Install mock s2i build commands
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ cifmw_edpm_build_images_test_base }}/s2i/{{ item.dest }}"
+        mode: "0755"
+      loop:
+        - {src: build.sh, dest: build.sh}
+        - {src: git, dest: bin/git}
+        - {src: buildah, dest: bin/buildah}
+        - {src: podman, dest: bin/podman}
+
+    - name: Exercise the s2i bootc build and local image handoff
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_s2i.yml
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/s2i/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_become: false
+        cifmw_edpm_build_images_bootc_s2i_repo_path: "{{ cifmw_edpm_build_images_test_base }}/s2i"
+        cifmw_edpm_build_images_basedir: "{{ cifmw_edpm_build_images_test_base }}"
+        cifmw_edpm_build_images_tag: test-s2i
+        cifmw_edpm_build_images_bootc_base_image: quay.io/centos-bootc/centos-bootc:stream10
+        cifmw_edpm_build_images_bootc_user_packages: extra-package another-package
+
+    - name: Check mock s2i build and tag results
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: cifmw_edpm_build_images_test_s2i_results
+      loop:
+        - "{{ cifmw_edpm_build_images_test_base }}/logs/edpm_images/s2i-build-passed"
+        - "{{ cifmw_edpm_build_images_test_base }}/s2i/s2i-tag-passed"
+
+    - name: Assert s2i build and image handoff completed
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_s2i_results.results | rejectattr('stat.exists') | list | length == 0
+
+    - name: Exercise published bootc image import without rebuilding
+      ansible.builtin.include_role:
+        name: edpm_build_images
+        tasks_from: bootc_import.yml
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/s2i/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_become: false
+        cifmw_edpm_build_images_bootc_source_image: registry.test:5000/openstack/openstack-edpm-bootc:test-s2i
+        cifmw_edpm_build_images_bootc_source_tls_verify: false
+        cifmw_edpm_build_images_tag: test-s2i
+
+    - name: Check published image import results
+      ansible.builtin.stat:
+        path: "{{ cifmw_edpm_build_images_test_base }}/s2i/{{ item }}"
+      register: cifmw_edpm_build_images_test_import_results
+      loop:
+        - prebuilt-pull-passed
+        - prebuilt-tag-passed
+
+    - name: Assert the exact published image was imported and retagged
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_import_results.results | rejectattr('stat.exists') | list | length == 0
+
+    - name: Create isolated consumer orchestration fixtures
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_build_images_test_base }}/consumer/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - bin
+        - framework
+        - artifacts/parameters
+
+    - name: Install mock consumer orchestration commands
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/bin/{{ item }}"
+        mode: "0755"
+      loop:
+        - ansible-playbook
+
+    - name: Reject any SSH commands during controller-local packaging
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/bin/{{ item }}"
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          echo 'Controller-local packaging must not use SSH.' >&2
+          exit 1
+      loop:
+        - ssh
+        - ssh-keyscan
+
+    - name: Write existing deployment parameters to preserve
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts/parameters/zuul-params.yml"
+        mode: "0644"
+        content: |
+          unrelated_parameter: keep-me
+          cifmw_build_images_output:
+            images:
+              ironic-python-agent:
+                image: registry.test/ipa:original
+
+    - name: Exercise the generic consumer orchestration without builds or network access
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../../../../ci/playbooks/edpm_build_images/bootc_prepare_tasks.yml"
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/consumer/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_user_dir: "{{ cifmw_edpm_build_images_test_base }}/consumer"
+        cifmw_edpm_build_images_ci_repo: "{{ cifmw_edpm_build_images_test_base }}/consumer/framework"
+        cifmw_edpm_build_images_ci_artifacts: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts"
+        cifmw_edpm_build_images_bootc_source_image: registry.test:5000/openstack/openstack-edpm-bootc:test-s2i
+        cifmw_edpm_build_images_bootc_source_tls_verify: false
+        cifmw_edpm_build_images_tag: test-s2i
+        cifmw_edpm_build_images_base_image: quay.io/centos/centos:stream10-minimal
+
+    - name: Read prepared deployment parameters
+      ansible.builtin.slurp:
+        src: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts/parameters/zuul-params.yml"
+      register: cifmw_edpm_build_images_test_consumer_parameters
+
+    - name: Assert the disk handoff preserves other deployment inputs
+      vars:
+        cifmw_edpm_build_images_test_parameters: >-
+          {{ cifmw_edpm_build_images_test_consumer_parameters.content | b64decode | from_yaml }}
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_parameters.unrelated_parameter == 'keep-me'
+          - cifmw_edpm_build_images_test_parameters.cifmw_build_images_output.images['ironic-python-agent'].image == 'registry.test/ipa:original'
+          - >-
+            cifmw_edpm_build_images_test_parameters.cifmw_build_images_output.images['edpm-bootc-qcow2'].image ==
+            cifmw_edpm_build_images_test_parameters.content_provider_registry_ip ~ ':5001/edpm-bootc:test-s2i-qcow2'
+          - cifmw_edpm_build_images_test_parameters.content_provider_registry_available
+
+    - name: Create a controller-only workspace for nested registry configuration
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_build_images_test_base }}/consumer/src/github.com/openstack-k8s-operators/ci-framework"
+        state: directory
+        mode: "0755"
+
+    - name: Mark the controller-only workspace
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/src/github.com/openstack-k8s-operators/ci-framework/controller-only-context"
+        mode: "0644"
+        content: "controller\n"
+
+    - name: Write the existing deployment inventory with controller-local CRC access
+      ansible.builtin.copy:
+        dest: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts/zuul_inventory.yml"
+        mode: "0644"
+        content: |
+          all:
+            hosts:
+              localhost:
+                ansible_connection: local
+              crc:
+                ansible_connection: ssh
+                ansible_host: api.crc.testing
+                ansible_ssh_user: core
+                ansible_ssh_private_key_file: /controller-only/id_test
+
+    - name: Exercise the controller-launched registry configuration command
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../../../../ci/playbooks/edpm_baremetal_deployment/configure_registry_tasks.yml"
+        apply:
+          environment:
+            PATH: "{{ cifmw_edpm_build_images_test_base }}/consumer/bin:{{ ansible_env.PATH }}"
+      vars:
+        ansible_user_dir: "{{ cifmw_edpm_build_images_test_base }}/consumer"
+        cifmw_basedir: "{{ cifmw_edpm_build_images_test_base }}/consumer"
+
+    - name: Check nested registry configuration was launched from the controller
+      ansible.builtin.stat:
+        path: "{{ cifmw_edpm_build_images_test_base }}/consumer/artifacts/registry-config-called"
+      register: cifmw_edpm_build_images_test_registry_launch
+
+    - name: Assert controller-local inventory and parameters were used
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_build_images_test_registry_launch.stat.exists
+
+    - name: Exercise registry playbook validation without registry or SSH access
+      ansible.builtin.include_tasks: tasks/registry_validation.yml
+
+    - name: Assert registry configuration follows the existing deployment SSH setup
+      vars:
+        cifmw_edpm_build_images_test_deployment_tasks: >-
+          {{ (lookup('file', playbook_dir ~ '/../../../../ci/playbooks/edpm_baremetal_deployment/run.yml') | from_yaml)[0].tasks }}
+        cifmw_edpm_build_images_test_task_names: "{{ cifmw_edpm_build_images_test_deployment_tasks | map(attribute='name') | list }}"
+        cifmw_edpm_build_images_test_registry_task: >-
+          {{ cifmw_edpm_build_images_test_deployment_tasks |
+             selectattr('name', 'equalto', 'Configure CRC access to the controller-local consumer registry') | first }}
+        cifmw_edpm_build_images_test_packaging_plays: >-
+          {{ lookup('file', playbook_dir ~ '/../../../../ci/playbooks/edpm_build_images/bootc_package.yml') | from_yaml }}
+        cifmw_edpm_build_images_test_registry_launcher: >-
+          {{ lookup('file', playbook_dir ~ '/../../../../ci/playbooks/edpm_baremetal_deployment/configure_registry_tasks.yml') | from_yaml }}
+        cifmw_edpm_build_images_test_registry_plays: >-
+          {{ lookup('file', playbook_dir ~ '/../../../../ci/playbooks/edpm_baremetal_deployment/configure_registry.yml') | from_yaml }}
+      ansible.builtin.assert:
+        that:
+          - >-
+            cifmw_edpm_build_images_test_task_names.index('Ensure we know ssh hosts') <
+            cifmw_edpm_build_images_test_task_names.index('Configure CRC access to the controller-local consumer registry')
+          - >-
+            cifmw_edpm_build_images_test_task_names.index('Inject CRC in zuul_inventory') <
+            cifmw_edpm_build_images_test_task_names.index('Configure CRC access to the controller-local consumer registry')
+          - >-
+            cifmw_edpm_build_images_test_task_names.index('Configure CRC access to the controller-local consumer registry') <
+            cifmw_edpm_build_images_test_task_names.index('Perform Podified and EDPM deployment on compute nodes with virtual baremetal')
+          - cifmw_edpm_build_images_test_registry_task.when == 'cifmw_edpm_deploy_baremetal_configure_crc_registry | default(false) | bool'
+          - cifmw_edpm_build_images_test_registry_task['ansible.builtin.include_tasks'] == 'configure_registry_tasks.yml'
+          - >-
+            (cifmw_edpm_build_images_test_deployment_tasks | selectattr('name', 'equalto',
+              'Add crc node in local inventory') | first)['ansible.builtin.add_host'].ansible_connection == 'ssh'
+          - "'delegate_to' not in cifmw_edpm_build_images_test_registry_launcher[0]"
+          - cifmw_edpm_build_images_test_registry_launcher[0]['ansible.builtin.command'].argv[0] == 'ansible-playbook'
+          - "'-c' not in cifmw_edpm_build_images_test_registry_launcher[0]['ansible.builtin.command'].argv"
+          - cifmw_edpm_build_images_test_registry_plays | map(attribute='hosts') | list == ['localhost']
+          - cifmw_edpm_build_images_test_registry_plays[0].tasks[-1].vars.cifmw_crc_registry_config_host == 'crc'
+          - cifmw_edpm_build_images_test_packaging_plays | map(attribute='hosts') | list == ['localhost']
