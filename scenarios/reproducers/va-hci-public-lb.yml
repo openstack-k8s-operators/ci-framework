@@ -1,0 +1,81 @@
+---
+# va-hci plus a small router VM, to test the MetalLB public endpoints on the
+# publicapi network (VLAN 24) with an off-subnet client: controller-0 reaches the
+# VIP through router-0, which is the publicapi gateway (172.21.0.1). See
+# https://github.com/openstack-k8s-operators/dev-docs/blob/main/public_endpoint_loadbalancer.md#return-routing-for-clients-outside-the-public-network
+#
+# Only jobs that use this file get the router, other va-hci jobs are unchanged.
+#
+# Pass it together with va-hci.yml, after it:
+#   -e @scenarios/reproducers/va-hci.yml -e @scenarios/reproducers/va-hci-public-lb.yml
+# It has no cifmw_parent_scenario on purpose: as an extra var it would replace the
+# parent of va-hci.yml (va-hci-base.yml), and a parent loaded this way would lose to
+# any extra var file that sets cifmw_libvirt_manager_configuration.
+cifmw_architecture_scenario: hci-public-lb
+cifmw_public_endpoints_overlay: "{{ cifmw_architecture_repo }}/examples/va/hci-public-lb/overlay/kustomization.yaml"
+
+# The public Routes do not exist: point the roles that hardcode a Route URL to the
+# endpointURL hostnames of the overlay.
+cifmw_test_operator_horizontest_auth_url: https://keystone.public.openstack.lab:13000
+cifmw_test_operator_horizontest_dashboard_url: https://horizon.public.openstack.lab/
+cifmw_federation_keystone_url: https://keystone.public.openstack.lab:13000
+
+cifmw_libvirt_manager_configuration_patch_10_router:
+  vms:
+    router:
+      amount: 1
+      uefi: "{{ cifmw_use_uefi }}"
+      root_part_id: "{{ cifmw_root_partition_id }}"
+      image_url: "{{ cifmw_discovered_image_url | default('') }}"
+      sha256_image_name: "{{ cifmw_discovered_hash | default('') }}"
+      image_local_dir: "{{ cifmw_basedir }}/images/"
+      disk_file_name: "base-os.qcow2"
+      disksize: 20
+      memory: 1
+      cpus: 1
+      # osp_trunk stays first (eth0, the VLAN parent). ocpbm is the default gateway
+      # network, so it gives the router the default route to install packages.
+      nets:
+        - osp_trunk
+        - ocpbm
+
+# The router gets 192.168.122.8 on ctlplane and 172.21.0.1 on the publicapi VLAN.
+# The OCP nodes are on the VLAN too: their addresses, parent interface and the
+# MetalLB range reach the architecture overlay through the generated network-values.
+cifmw_networking_mapper_definition_patch_10_router:
+  networks:
+    publicapi:
+      network: "172.21.0.0/24"
+      vlan: 24
+      mtu: 1496
+      tools:
+        metallb:
+          ranges:
+            - start: 80
+              end: 90
+        netconfig:
+          ranges:
+            - start: 100
+              end: 250
+  group-templates:
+    ocps:
+      networks:
+        publicapi:
+          trunk-parent: ctlplane
+    routers:
+      networks:
+        ctlplane:
+          range:
+            start: 8
+            length: 1
+        publicapi:
+          range:
+            start: 1
+            length: 1
+          trunk-parent: ctlplane
+
+# Forward on the router and route publicapi through it from controller-0.
+# A single-hook parameter, so post_infra hooks set by the job are kept.
+post_infra_10_public_endpoints_router:
+  type: playbook
+  source: public_endpoints_router.yml

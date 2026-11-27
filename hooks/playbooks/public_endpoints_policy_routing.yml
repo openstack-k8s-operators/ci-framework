@@ -1,0 +1,128 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Replies from the public LoadBalancer Services on the publicapi pool must leave
+# through the publicapi gateway instead of the node default route. Needed when the
+# clients are off-subnet, reached through that gateway. This hook applies the policy
+# routing described in
+# https://github.com/openstack-k8s-operators/dev-docs/blob/main/public_endpoint_loadbalancer.md#return-routing-for-clients-outside-the-public-network
+#
+# The Service ClusterIPs are read from the cluster, so run it after the control plane
+# is deployed, and again once new public Services exist (for example as a
+# post_stage_run hook of the control-plane stage and after the post-ceph refresh).
+#
+# Parameters:
+#   cifmw_public_endpoints_pool: MetalLB pool of the public Services (publicapi)
+#   cifmw_public_endpoints_ns: namespace of the Services (the namespace passed by
+#       run_hook, else openstack)
+#   cifmw_public_endpoints_iface: VLAN interface on the nodes (publicapi)
+#   cifmw_public_endpoints_subnet: the publicapi subnet (172.21.0.0/24)
+#   cifmw_public_endpoints_gateway: the publicapi gateway (172.21.0.1)
+
+- name: Apply the public endpoints policy routing
+  hosts: localhost
+  gather_facts: false
+  vars:
+    _pool: "{{ cifmw_public_endpoints_pool | default('publicapi') }}"
+    _ns: "{{ cifmw_public_endpoints_ns | default(namespace | default('openstack')) }}"
+    _iface: "{{ cifmw_public_endpoints_iface | default('publicapi') }}"
+    _subnet: "{{ cifmw_public_endpoints_subnet | default('172.21.0.0/24') }}"
+    _gateway: "{{ cifmw_public_endpoints_gateway | default('172.21.0.1') }}"
+  tasks:
+    - name: Get the Services
+      register: _svcs
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: v1
+        kind: Service
+        namespace: "{{ _ns }}"
+
+    - name: Get the cluster network
+      register: _net
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: config.openshift.io/v1
+        kind: Network
+        name: cluster
+
+    - name: Collect the ClusterIPs of the public Services on the pool
+      vars:
+        _pool_key: metallb.universe.tf/address-pool
+      ansible.builtin.set_fact:
+        _cluster_ips_json: >-
+          {% set _ips = [] %}
+          {% for svc in _svcs.resources %}
+          {%   if svc.spec.type == 'LoadBalancer' and
+                  svc.metadata.annotations is defined and
+                  svc.metadata.annotations.get(_pool_key) == _pool %}
+          {%     set _ = _ips.append(svc.spec.clusterIP) %}
+          {%   endif %}
+          {% endfor %}
+          {{ _ips | unique | sort | to_json }}
+
+    - name: Parse the ClusterIPs
+      ansible.builtin.set_fact:
+        _cluster_ips: "{{ _cluster_ips_json | from_json }}"
+
+    - name: Assert there are Services on the pool
+      ansible.builtin.assert:
+        quiet: true
+        that: _cluster_ips | length > 0
+
+    # One priority for all ClusterIP rules, so a refresh does not reshuffle them.
+    # NOTE: nmstate keeps rules of deleted Services (harmless, same table 620),
+    # set them state: absent if stale rules ever matter.
+    - name: Apply the policy routing
+      vars:
+        # IPv4 entries only, dual-stack clusters list IPv6 CIDRs too.
+        _svc_cidr: "{{ _net.resources[0].status.serviceNetwork | reject('search', ':') | first }}"
+        _pod_cidr: >-
+          {{ _net.resources[0].status.clusterNetwork | map(attribute='cidr') | reject('search', ':') | first }}
+        _rules: >-
+          {% set _r = [
+            {'ip-from': _svc_cidr, 'ip-to': _subnet, 'route-table': 254, 'priority': 200},
+            {'ip-from': _svc_cidr, 'ip-to': _pod_cidr, 'route-table': 254, 'priority': 201}
+          ] %}
+          {% for ip in _cluster_ips %}
+          {%   set _ = _r.append({'ip-from': ip ~ '/32', 'route-table': 620, 'priority': 210}) %}
+          {% endfor %}
+          {{ _r | to_json }}
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        state: present
+        wait: true
+        wait_timeout: 300
+        wait_condition:
+          type: Available
+          status: "True"
+          reason: SuccessfullyConfigured
+        definition:
+          apiVersion: nmstate.io/v1
+          kind: NodeNetworkConfigurationPolicy
+          metadata:
+            name: openstack-public-api-policy-routing
+          spec:
+            nodeSelector:
+              node-role.kubernetes.io/worker: ""
+            desiredState:
+              routes:
+                config:
+                  - destination: 0.0.0.0/0
+                    next-hop-address: "{{ _gateway }}"
+                    next-hop-interface: "{{ _iface }}"
+                    table-id: 620
+              route-rules:
+                config: "{{ _rules | from_json }}"

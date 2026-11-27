@@ -1,0 +1,142 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# For public endpoints served by MetalLB LoadBalancer Services. Create one
+# bring-your-own (BYO) certificate covering every public endpoint hostname of the
+# architecture overlay (as SANs), so that path of
+# openstack-operator is exercised: the control plane CR references the secret
+# from each service through spec.<svc>.template.tls.api.public.secretName and its CA through
+# spec.tls.caBundleSecretName, and both are read at reconcile time, so they must
+# exist before the control-plane CR is applied (run as a pre_stage_run hook of
+# the control-plane stage).
+#
+# rootca-public does not exist yet at that point (the operator creates it), so a
+# small self-signed CA is minted with cert-manager instead.
+#
+# The hostnames are read from the overlay, see tasks/public_endpoints_overlay.yml
+# (cifmw_public_endpoints_overlay). The overlay must set the custom
+# spec.*.override.service.*endpointURL, a plain Routes overlay has none and fails.
+#
+# Parameters:
+#   cifmw_public_endpoints_ns: namespace of the control plane (default: the
+#       namespace passed by run_hook, else openstack)
+#   cifmw_public_endpoints_byo_secret: leaf certificate secret (tls.crt/tls.key)
+#   cifmw_public_endpoints_byo_ca_bundle_secret: secret holding the CA for caBundleSecretName
+
+- name: Create the bring-your-own public endpoint certificate
+  hosts: localhost
+  gather_facts: false
+  vars:
+    _ns: "{{ cifmw_public_endpoints_ns | default(namespace | default('openstack')) }}"
+    _secret: "{{ cifmw_public_endpoints_byo_secret | default('public-byo-cert') }}"
+    _ca_bundle: "{{ cifmw_public_endpoints_byo_ca_bundle_secret | default('byo-ca-bundle') }}"
+  tasks:
+    - name: Read the public endpoints from the overlay
+      ansible.builtin.include_tasks: tasks/public_endpoints_overlay.yml
+
+    - name: Assert there are hostnames
+      ansible.builtin.assert:
+        quiet: true
+        that: _public_endpoints_fqdns | length > 0
+
+    - name: Create the self-signed CA and the leaf certificate
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        state: present
+        definition:
+          - apiVersion: cert-manager.io/v1
+            kind: Issuer
+            metadata:
+              name: byo-selfsigned
+              namespace: "{{ _ns }}"
+            spec:
+              selfSigned: {}
+          - apiVersion: cert-manager.io/v1
+            kind: Certificate
+            metadata:
+              name: byo-ca
+              namespace: "{{ _ns }}"
+            spec:
+              isCA: true
+              commonName: byo-ca
+              secretName: byo-ca
+              issuerRef:
+                name: byo-selfsigned
+                kind: Issuer
+          - apiVersion: cert-manager.io/v1
+            kind: Issuer
+            metadata:
+              name: byo-ca
+              namespace: "{{ _ns }}"
+            spec:
+              ca:
+                secretName: byo-ca
+          - apiVersion: cert-manager.io/v1
+            kind: Certificate
+            metadata:
+              name: "{{ _secret }}"
+              namespace: "{{ _ns }}"
+            spec:
+              secretName: "{{ _secret }}"
+              dnsNames: "{{ _public_endpoints_fqdns }}"
+              issuerRef:
+                name: byo-ca
+                kind: Issuer
+
+    # Ready for the current generation, so a re-run with new hostnames does not
+    # continue with the previously issued secret.
+    - name: Wait for the leaf certificate to be issued
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_version: cert-manager.io/v1
+        kind: Certificate
+        namespace: "{{ _ns }}"
+        name: "{{ _secret }}"
+      register: _leaf
+      retries: 30
+      delay: 5
+      until: >-
+        _leaf.resources | length > 0 and
+        (_leaf.resources[0].status | default({})).conditions | default([]) |
+        selectattr('type', 'equalto', 'Ready') |
+        selectattr('status', 'equalto', 'True') |
+        selectattr('observedGeneration', 'defined') |
+        selectattr('observedGeneration', 'equalto', _leaf.resources[0].metadata.generation) |
+        list | length > 0
+
+    - name: Read the CA certificate
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        kind: Secret
+        namespace: "{{ _ns }}"
+        name: byo-ca
+      register: _ca
+
+    # openstack-operator merges every entry of this secret into combined-ca-bundle.
+    - name: Create the CA bundle secret for spec.tls.caBundleSecretName
+      no_log: "{{ cifmw_nolog | default(true) | bool }}"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _ca_bundle }}"
+            namespace: "{{ _ns }}"
+          data:
+            ca.crt: "{{ _ca.resources[0].data['ca.crt'] }}"
