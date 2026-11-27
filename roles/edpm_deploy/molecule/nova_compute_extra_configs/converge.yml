@@ -1,0 +1,205 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+- name: Converge
+  hosts: all
+  vars:
+    cifmw_basedir: "{{ ansible_user_dir }}/ci-framework-data"
+    cifmw_edpm_deploy_test_out: "{{ cifmw_basedir }}/artifacts/dataplane-cr.yaml"
+    cifmw_edpm_deploy_test_nodeset:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneNodeSet
+      metadata:
+        name: openstack-edpm
+        namespace: openstack
+      spec:
+        preProvisioned: true
+        services: [libvirt, nova, telemetry]
+        nodes:
+          edpm-compute-0:
+            hostName: compute-0
+            ansible: {ansibleHost: 192.168.122.100}
+          edpm-compute-1:
+            hostName: compute-1
+            ansible: {ansibleHost: 192.168.122.101}
+          edpm-compute-2:
+            hostName: compute-2
+            ansible: {ansibleHost: 192.168.122.102}
+          edpm-compute-3:
+            hostName: compute-3
+            ansible: {ansibleHost: 192.168.122.103}
+        nodeTemplate:
+          ansibleSSHPrivateKeySecret: dataplane-ansible-ssh-private-key-secret
+          ansible:
+            ansibleVars:
+              neutron_public_interface_name: ens7
+    cifmw_edpm_deploy_test_deployment:
+      apiVersion: dataplane.openstack.org/v1beta1
+      kind: OpenStackDataPlaneDeployment
+      metadata:
+        name: edpm-deployment
+        namespace: openstack
+      spec:
+        nodeSets: [openstack-edpm]
+    cifmw_edpm_deploy_test_docs:
+      - "{{ cifmw_edpm_deploy_test_nodeset }}"
+      - "{{ cifmw_edpm_deploy_test_deployment }}"
+    cifmw_edpm_deploy_test_configs:
+      first:
+        hosts: [compute-0, compute-1]
+        nova_compute_extra_config: "[compute]\ncpu_dedicated_set = 0,1\n"
+      second:
+        hosts: [compute-2]
+        nova_compute_extra_config: "[compute]\ncpu_dedicated_set = 2,3\n"
+      third:
+        hosts: [compute-3]
+        nova_compute_extra_config: "[compute]\ncpu_dedicated_set = 4,5\n"
+  tasks:
+    - name: Ensure the artifacts directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_edpm_deploy_test_out | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Supply rendered resources
+      ansible.builtin.set_fact:
+        cifmw_edpm_deploy_crs_kustomize_result:
+          result: "{{ cifmw_edpm_deploy_test_docs }}"
+          output_path: "{{ cifmw_edpm_deploy_test_out }}"
+
+    - name: Split four hosts into three configuration groups
+      vars:
+        cifmw_edpm_deploy_nova_compute_extra_configs: "{{ cifmw_edpm_deploy_test_configs }}"
+      ansible.builtin.include_role:
+        name: edpm_deploy
+        tasks_from: nova_compute_extra_configs.yml
+
+    - name: Read the generated manifests
+      ansible.builtin.slurp:
+        src: "{{ cifmw_edpm_deploy_test_out }}"
+      register: cifmw_edpm_deploy_test_output
+
+    - name: Parse the generated manifests
+      ansible.builtin.set_fact:
+        cifmw_edpm_deploy_test_split_docs: "{{ cifmw_edpm_deploy_test_output.content | b64decode | from_yaml_all | list }}"
+
+    - name: Verify all groups are deployed
+      vars:
+        cifmw_edpm_deploy_test_nodesets: >-
+          {{ cifmw_edpm_deploy_test_split_docs
+             | selectattr('kind', 'equalto', 'OpenStackDataPlaneNodeSet') | list }}
+        cifmw_edpm_deploy_test_deployed: >-
+          {{ cifmw_edpm_deploy_test_split_docs
+             | selectattr('kind', 'equalto', 'OpenStackDataPlaneDeployment') | first }}
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_deploy_test_nodesets | map(attribute='metadata.name') | sort == ['first', 'second', 'third']
+          - cifmw_edpm_deploy_test_deployed.spec.nodeSets | sort == ['first', 'second', 'third']
+          - cifmw_edpm_deploy_test_nodesets[0].spec.nodes['edpm-compute-0'].ansible.ansibleHost == '192.168.122.100'
+
+    - name: Verify each host group receives its own Nova configuration
+      vars:
+        cifmw_edpm_deploy_test_group: >-
+          {{ cifmw_edpm_deploy_test_split_docs | selectattr('metadata.name', 'equalto', item.key) | first }}
+        cifmw_edpm_deploy_test_service: >-
+          {{ cifmw_edpm_deploy_test_split_docs | selectattr('metadata.name', 'equalto', 'nova-' ~ item.key) | first }}
+        cifmw_edpm_deploy_test_configmap: >-
+          {{ cifmw_edpm_deploy_test_split_docs | selectattr('metadata.name', 'equalto', 'nova-extra-config-' ~ item.key) | first }}
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_deploy_test_group.spec.nodes.values() | map(attribute='hostName') | sort == item.value.hosts | sort
+          - cifmw_edpm_deploy_test_group.spec.nodeTemplate == cifmw_edpm_deploy_test_nodeset.spec.nodeTemplate
+          - cifmw_edpm_deploy_test_group.spec.services == ['libvirt', 'nova-' ~ item.key, 'telemetry']
+          - cifmw_edpm_deploy_test_service.spec.edpmServiceType == 'nova'
+          - >-
+            cifmw_edpm_deploy_test_service.spec.dataSources | selectattr('configMapRef', 'defined')
+            | map(attribute='configMapRef.name') | list == [cifmw_edpm_deploy_test_configmap.metadata.name]
+          - cifmw_edpm_deploy_test_configmap.data['25-nova-extra.conf'] == item.value.nova_compute_extra_config
+      loop: "{{ cifmw_edpm_deploy_test_configs | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Restore the source resources
+      ansible.builtin.set_fact:
+        cifmw_edpm_deploy_test_rejected: false
+        cifmw_edpm_deploy_crs_kustomize_result:
+          result: "{{ cifmw_edpm_deploy_test_docs }}"
+          output_path: "{{ cifmw_edpm_deploy_test_out }}"
+
+    - name: Attempt a host assignment with the right count but wrong membership
+      block:
+        - name: Split with a duplicate host replacing a missing host
+          vars:
+            cifmw_edpm_deploy_nova_compute_extra_configs:
+              first:
+                hosts: [compute-0, compute-1, compute-2, compute-2]
+                nova_compute_extra_config: ""
+          ansible.builtin.include_role:
+            name: edpm_deploy
+            tasks_from: nova_compute_extra_configs.yml
+      rescue:
+        - name: Verify the host assignment check failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_result.assertion == 'cifmw_edpm_deploy_mapped_hosts | sort == cifmw_edpm_deploy_rendered_hosts | sort'
+
+        - name: Record the expected rejection
+          ansible.builtin.set_fact:
+            cifmw_edpm_deploy_test_rejected: true
+
+    - name: Require rejection outside the rescued block
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_deploy_test_rejected
+
+    - name: Exercise the legacy configuration path
+      vars:
+        cifmw_edpm_deploy_dryrun: true
+        cifmw_edpm_deploy_prepare_run: false
+        cifmw_edpm_deploy_nova_compute_extra_configs: {}
+        cifmw_edpm_deploy_nova_compute_extra_config: "[libvirt]\ncpu_models = Nehalem\n"
+      ansible.builtin.include_role:
+        name: edpm_deploy
+
+    - name: Read the common config
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/nova-extra-config.conf"
+      register: cifmw_edpm_deploy_test_common
+
+    - name: Verify legacy configuration is preserved
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_deploy_test_common.content | b64decode == "[libvirt]\ncpu_models = Nehalem\n"
+
+    - name: Exercise the mapped configuration path with an inherited common config
+      vars:
+        cifmw_edpm_deploy_dryrun: true
+        cifmw_edpm_deploy_prepare_run: false
+        cifmw_edpm_deploy_nova_compute_extra_configs: "{{ cifmw_edpm_deploy_test_configs }}"
+        cifmw_edpm_deploy_nova_compute_extra_config: "[libvirt]\ncpu_models = Nehalem\n"
+      ansible.builtin.include_role:
+        name: edpm_deploy
+
+    - name: Read the unused common config
+      ansible.builtin.slurp:
+        src: "{{ cifmw_basedir }}/nova-extra-config.conf"
+      register: cifmw_edpm_deploy_test_common
+
+    - name: Verify the mapped configuration path ignores the common config
+      ansible.builtin.assert:
+        that:
+          - cifmw_edpm_deploy_test_common.content | b64decode == ''
