@@ -97,7 +97,9 @@ class ActionModule(ActionBase):
                 tmp=tmp,
             )
 
-            if "failed" not in page:
+            # ansible-core >= 2.19 always sets "failed" in the module result,
+            # so the key presence alone is not a failure indicator.
+            if not page.get("failed", False):
                 image_list = list(
                     filter(qcow2_image_pattern.match, page["content"].split("\n"))
                 )
