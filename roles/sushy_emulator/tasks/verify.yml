@@ -50,9 +50,13 @@
         return_content: true
         user: "{{ cifmw_sushy_emulator_redfish_username }}"
         password: "{{ cifmw_sushy_emulator_redfish_password }}"
-      retries: 5
-      delay: 5
+      # ansible-core 2.15 only honours retries/delay when until is set.
+      # Without it the container, which may still be starting, fails the
+      # whole run on the first connection attempt.
       register: _sushy_emulator_content
+      until: _sushy_emulator_content is succeeded
+      retries: 12
+      delay: 5
 
     - name: Verify connection to baremetal VMs via Sushy Emulator
       when:
@@ -62,9 +66,10 @@
         return_content: true
         user: "{{ cifmw_sushy_emulator_redfish_username }}"
         password: "{{ cifmw_sushy_emulator_redfish_password }}"
+      register: _sushy_emulator_content_system
+      until: _sushy_emulator_content_system is succeeded
       retries: 5
       delay: 5
-      register: _sushy_emulator_content_system
       loop: "{{ _cifmw_sushy_emulator_instances }}"
 
 - name: Verify baremetal VM power status
